@@ -3,6 +3,7 @@ package org.megamek.launcher.plan;
 import org.megamek.launcher.manifest.FileEntry;
 import org.megamek.launcher.manifest.Manifest;
 import org.megamek.launcher.manifest.ManifestException;
+import org.megamek.launcher.manifest.ManifestReader;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -33,6 +34,30 @@ public final class UpdatePlanner {
     public List<Decision> plan(Manifest baseline, Manifest target, Path installation,
                                Map<String, Set<String>> trustedPreviousOfficialHashes)
             throws IOException, ManifestException {
+        return planInternal(baseline, target, installation, trustedPreviousOfficialHashes, null,
+                List.of());
+    }
+
+    public List<Decision> planPreview(Manifest baseline, Manifest target, Path installation,
+                                      ManifestReader.PreviewPairValidation validation)
+            throws IOException, ManifestException {
+        return planInternal(baseline, target, installation, Map.of(), validation, List.of());
+    }
+
+    public List<Decision> planPreview(Manifest baseline, Manifest target, Path installation,
+                                      ManifestReader.PreviewPairValidation validation,
+                                      Map<String, Set<String>> trustedPreviousOfficialHashes,
+                                      List<String> stickyCasePrefixes)
+            throws IOException, ManifestException {
+        return planInternal(baseline, target, installation, trustedPreviousOfficialHashes,
+                validation, stickyCasePrefixes);
+    }
+
+    private List<Decision> planInternal(Manifest baseline, Manifest target, Path installation,
+                                        Map<String, Set<String>> trustedPreviousOfficialHashes,
+                                        ManifestReader.PreviewPairValidation previewValidation,
+                                        List<String> stickyCasePrefixes)
+            throws IOException, ManifestException {
         Path root = validateRoot(installation);
         Map<String, FileEntry> before = index(baseline);
         Map<String, FileEntry> after = index(target);
@@ -44,6 +69,21 @@ public final class UpdatePlanner {
 
         List<Decision> decisions = new ArrayList<>();
         for (String portablePath : paths) {
+            String sticky = affectedStickyPrefix(portablePath, stickyCasePrefixes);
+            if (sticky != null) {
+                decisions.add(new Decision(Action.SKIP, portablePath,
+                        "sticky case-only override prefix is preserved across updates: " + sticky));
+                continue;
+            }
+            ManifestReader.CaseOnlyRename rename = previewValidation == null ? null
+                    : affectedRename(portablePath, previewValidation.caseOnlyRenames());
+            if (rename != null) {
+                decisions.add(new Decision(Action.SKIP, portablePath,
+                        "case-only rename/capitalization; preserved; rename unsupported "
+                                + "(baseline prefix: " + rename.baselinePrefix()
+                                + "; target prefix: " + rename.targetPrefix() + ")"));
+                continue;
+            }
             FileEntry oldEntry = before.get(key(portablePath));
             FileEntry newEntry = after.get(key(portablePath));
             PathState state = inspect(root, portablePath);
@@ -51,6 +91,27 @@ public final class UpdatePlanner {
                     trustedPreviousOfficialHashes.getOrDefault(key(portablePath), Set.of())));
         }
         return List.copyOf(decisions);
+    }
+
+    private static String affectedStickyPrefix(String path, List<String> prefixes) {
+        String pathKey = key(path);
+        for (String prefix : prefixes) {
+            String prefixKey = key(prefix);
+            if (pathKey.equals(prefixKey) || pathKey.startsWith(prefixKey + "/")) return prefix;
+        }
+        return null;
+    }
+
+    private static ManifestReader.CaseOnlyRename affectedRename(
+            String path, List<ManifestReader.CaseOnlyRename> renames) {
+        String pathKey = key(path);
+        for (ManifestReader.CaseOnlyRename rename : renames) {
+            String prefixKey = key(rename.baselinePrefix());
+            if (pathKey.equals(prefixKey) || pathKey.startsWith(prefixKey + "/")) {
+                return rename;
+            }
+        }
+        return null;
     }
 
     private static Decision decide(String path, FileEntry oldEntry, FileEntry newEntry, PathState state,
@@ -156,9 +217,18 @@ public final class UpdatePlanner {
 
     private static String sha256(Path path) throws IOException {
         try {
+            BasicFileAttributes before = Files.readAttributes(
+                    path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             try (InputStream input = new DigestInputStream(Files.newInputStream(path), digest)) {
                 input.transferTo(OutputStreamSink.INSTANCE);
+            }
+            BasicFileAttributes after = Files.readAttributes(
+                    path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            if (!after.isRegularFile() || before.size() != after.size()
+                    || !before.lastModifiedTime().equals(after.lastModifiedTime())
+                    || before.fileKey() != null && !before.fileKey().equals(after.fileKey())) {
+                throw new IOException("managed file changed while preview was hashing: " + path);
             }
             return HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException impossible) {

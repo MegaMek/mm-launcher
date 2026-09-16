@@ -12,6 +12,10 @@ import org.megamek.launcher.release.JavaReleaseTransport;
 import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
 import org.megamek.launcher.release.ReleaseTransport;
+import org.megamek.launcher.update.UpdatePreviewService;
+import org.megamek.launcher.update.OwnershipReceipt;
+import org.megamek.launcher.update.CurrentUpdateState;
+import org.megamek.launcher.update.RealUpdateService;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -66,8 +70,13 @@ public class LauncherServices {
 
     public HomeState loadHome() throws IOException {
         RegistryData data = readRegistry();
-        if (data.defaultInstallationId() == null) return new HomeState(data, null, null, null);
+        if (data.defaultInstallationId() == null) {
+            return new HomeState(data, null, null, null, null, false);
+        }
         InstallationRecord record = store.resolve(data, null);
+        boolean pending = pending(record);
+        UpdatePreviewService.Eligibility eligibility =
+                new UpdatePreviewService(transport).eligibility(registry, record.id());
         try {
             Inspection current = inspector.inspect(Path.of(record.canonicalRoot()));
             if (!current.canonicalRoot().equals(record.canonicalRoot())
@@ -76,13 +85,14 @@ public class LauncherServices {
                 return new HomeState(data, record, null,
                         "The preferred copy no longer matches its registered build or program "
                                 + "layout. Use Manage installations to remove it, select another "
-                                + "copy, or register the current folder again.");
+                                + "copy, or recover an interrupted update.", eligibility, pending);
             }
-            return new HomeState(data, record, current, null);
+            return new HomeState(data, record, current, null, eligibility, pending);
         } catch (IOException | RuntimeException e) {
             return new HomeState(data, record, null,
                     "The preferred copy is unavailable: " + detail(e)
-                            + ". Use Manage installations to remove it or select another copy.");
+                            + ". Use recovery if an update was interrupted, or Manage "
+                            + "installations.", eligibility, pending);
         }
     }
 
@@ -146,6 +156,51 @@ public class LauncherServices {
                 name, progress);
     }
 
+    public UpdatePreviewService.Preview previewUpdate(InstallationRecord record, String tag,
+                                                       PrintStream progress)
+            throws IOException, InterruptedException,
+            org.megamek.launcher.manifest.ManifestException {
+        return new UpdatePreviewService(transport).preview(registry, record.id(), tag, progress);
+    }
+
+    public UpdatePreviewService.Preview previewUpdate(InstallationRecord record,
+                                                       OwnershipReceipt receipt, String tag,
+                                                       PrintStream progress)
+            throws IOException, InterruptedException,
+            org.megamek.launcher.manifest.ManifestException {
+        return new UpdatePreviewService(transport).preview(
+                registry, record, receipt, tag, progress);
+    }
+
+    public RealUpdateService.ApplyResult applyUpdate(InstallationRecord expectedRecord,
+                                                     CurrentUpdateState expectedState,
+                                                     String tag, long size, String digest,
+                                                     String confirmation, PrintStream progress)
+            throws IOException, InterruptedException,
+            org.megamek.launcher.manifest.ManifestException {
+        RealUpdateService service = new RealUpdateService(transport);
+        RealUpdateService.Snapshot snapshot = service.snapshot(registry, expectedRecord.id());
+        if (!snapshot.record().equals(expectedRecord)
+                || !snapshot.current().equals(expectedState)) {
+            throw new IOException("selected update source changed; preview and consent again");
+        }
+        return service.apply(snapshot, tag, size, digest, confirmation, progress);
+    }
+
+    public RealUpdateService.RecoveryResult recoverUpdate(InstallationRecord record,
+                                                           String confirmation)
+            throws IOException, org.megamek.launcher.manifest.ManifestException {
+        return new RealUpdateService(transport).recover(registry, record.id(), confirmation);
+    }
+
+    private boolean pending(InstallationRecord record) {
+        try {
+            return new RealUpdateService(transport).hasPending(Path.of(record.canonicalRoot()));
+        } catch (IOException | RuntimeException e) {
+            return true; // unreadable reserved state is a blocker, never success-shaped absence
+        }
+    }
+
     private void ensureRegistryParent() throws IOException {
         Path parent = registry.getParent();
         if (parent == null) throw new IOException("registry has no parent directory: " + registry);
@@ -189,6 +244,12 @@ public class LauncherServices {
     }
 
     public record HomeState(RegistryData registry, InstallationRecord preferred,
-                            Inspection currentInspection, String preferredError) {
+                            Inspection currentInspection, String preferredError,
+                            UpdatePreviewService.Eligibility previewEligibility,
+                            boolean pendingUpdate) {
+        public HomeState(RegistryData registry, InstallationRecord preferred,
+                         Inspection currentInspection, String preferredError) {
+            this(registry, preferred, currentInspection, preferredError, null, false);
+        }
     }
 }

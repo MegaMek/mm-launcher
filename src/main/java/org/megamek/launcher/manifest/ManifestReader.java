@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.text.Normalizer;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -51,17 +52,7 @@ public final class ManifestReader {
     }
 
     public void validatePair(Manifest baseline, Manifest target) throws ManifestException {
-        validateInMemory(baseline, "baseline");
-        validateInMemory(target, "target");
-        if (!baseline.product().equals(target.product())) {
-            throw new ManifestException("incompatible manifests: product differs");
-        }
-        if (!baseline.packageId().equals(target.packageId())) {
-            throw new ManifestException("incompatible manifests: packageId differs");
-        }
-        if (!baseline.protectedPaths().equals(target.protectedPaths())) {
-            throw new ManifestException("incompatible manifests: protectedPaths contract differs");
-        }
+        validatePairContract(baseline, target);
 
         Map<String, String> combined = new HashMap<>();
         addPaths(combined, baseline.files(), "baseline");
@@ -75,6 +66,70 @@ public final class ManifestReader {
             combined.putIfAbsent(key, entry.path());
         }
         validateParentConflicts(combined.values(), "combined manifests");
+    }
+
+    /**
+     * Validates a pair for read-only preview while reporting, rather than accepting, cross-release
+     * capitalization changes. All validation within either manifest and all pair contracts remain
+     * strict. The returned prefixes are the outermost affected prefixes, so callers can avoid
+     * probing every descendant of a directory capitalization change.
+     */
+    public PreviewPairValidation validatePreviewPair(Manifest baseline, Manifest target)
+            throws ManifestException {
+        validatePairContract(baseline, target);
+
+        List<String> combined = new ArrayList<>();
+        baseline.files().forEach(entry -> combined.add(entry.path()));
+        target.files().forEach(entry -> combined.add(entry.path()));
+        // A file in one release may never become a parent in the other release. Check this before
+        // identifying skippable prefixes so a structural conflict cannot hide beneath one.
+        validateParentConflicts(combined, "combined manifests");
+
+        Map<String, String> baselinePrefixes = indexPrefixes(baseline.files());
+        Map<String, String> targetPrefixes = indexPrefixes(target.files());
+        List<CaseOnlyRename> candidates = new ArrayList<>();
+        baselinePrefixes.keySet().stream()
+                .filter(targetPrefixes::containsKey)
+                .sorted()
+                .forEach(folded -> {
+                    String before = baselinePrefixes.get(folded);
+                    String after = targetPrefixes.get(folded);
+                    if (!before.equals(after)) {
+                        candidates.add(new CaseOnlyRename(before, after));
+                    }
+                });
+
+        List<CaseOnlyRename> outermost = new ArrayList<>();
+        for (CaseOnlyRename candidate : candidates) {
+            String candidateKey = key(candidate.baselinePrefix());
+            boolean belowExisting = outermost.stream().anyMatch(existing -> {
+                String existingKey = key(existing.baselinePrefix());
+                return candidateKey.startsWith(existingKey + "/");
+            });
+            if (!belowExisting) {
+                outermost.add(candidate);
+            }
+        }
+        outermost.sort(Comparator
+                .comparing((CaseOnlyRename rename) -> key(rename.baselinePrefix()))
+                .thenComparing(CaseOnlyRename::baselinePrefix)
+                .thenComparing(CaseOnlyRename::targetPrefix));
+        return new PreviewPairValidation(outermost);
+    }
+
+    private void validatePairContract(Manifest baseline, Manifest target)
+            throws ManifestException {
+        validateInMemory(baseline, "baseline");
+        validateInMemory(target, "target");
+        if (!baseline.product().equals(target.product())) {
+            throw new ManifestException("incompatible manifests: product differs");
+        }
+        if (!baseline.packageId().equals(target.packageId())) {
+            throw new ManifestException("incompatible manifests: packageId differs");
+        }
+        if (!baseline.protectedPaths().equals(target.protectedPaths())) {
+            throw new ManifestException("incompatible manifests: protectedPaths contract differs");
+        }
     }
 
     public void validateInMemory(Manifest manifest, String source) throws ManifestException {
@@ -123,6 +178,7 @@ public final class ManifestReader {
                 }
             }
         }
+        validatePrefixAliases(paths.values(), source);
         validateParentConflicts(paths.values(), source);
         for (String protectedPath : manifest.protectedPaths()) {
             for (String file : paths.values()) {
@@ -131,6 +187,43 @@ public final class ManifestReader {
                             + protectedPath + " and " + file);
                 }
             }
+        }
+    }
+
+    private static Map<String, String> indexPrefixes(List<FileEntry> entries) {
+        Map<String, String> result = new HashMap<>();
+        for (FileEntry entry : entries) {
+            String path = entry.path();
+            int end = path.indexOf('/');
+            while (end >= 0) {
+                String prefix = path.substring(0, end);
+                result.putIfAbsent(key(prefix), prefix);
+                end = path.indexOf('/', end + 1);
+            }
+            result.putIfAbsent(key(path), path);
+        }
+        return result;
+    }
+
+    private static void validatePrefixAliases(Iterable<String> paths, String source)
+            throws ManifestException {
+        Map<String, String> prefixes = new HashMap<>();
+        for (String path : sorted(paths)) {
+            int end = path.indexOf('/');
+            while (end >= 0) {
+                addPrefix(prefixes, path.substring(0, end), source);
+                end = path.indexOf('/', end + 1);
+            }
+            addPrefix(prefixes, path, source);
+        }
+    }
+
+    private static void addPrefix(Map<String, String> prefixes, String prefix, String source)
+            throws ManifestException {
+        String prior = prefixes.putIfAbsent(key(prefix), prefix);
+        if (prior != null && !prior.equals(prefix)) {
+            throw new ManifestException(source + ": duplicate or case-aliased path component: "
+                    + prior + " and " + prefix);
         }
     }
 
@@ -153,11 +246,8 @@ public final class ManifestReader {
     private static void validateParentConflicts(Iterable<String> paths, String source)
             throws ManifestException {
         Set<String> keys = new HashSet<>();
-        List<String> values = new ArrayList<>();
-        paths.forEach(path -> {
-            keys.add(key(path));
-            values.add(path);
-        });
+        List<String> values = sorted(paths);
+        values.forEach(path -> keys.add(key(path)));
         for (String path : values) {
             int slash = path.indexOf('/');
             while (slash >= 0) {
@@ -169,6 +259,14 @@ public final class ManifestReader {
                 slash = path.indexOf('/', slash + 1);
             }
         }
+    }
+
+    private static List<String> sorted(Iterable<String> paths) {
+        List<String> values = new ArrayList<>();
+        paths.forEach(values::add);
+        values.sort(Comparator.comparing(ManifestReader::key).thenComparing(
+                Comparator.naturalOrder()));
+        return values;
     }
 
     public static void validatePortablePath(String path, String kind, String source)
@@ -207,6 +305,15 @@ public final class ManifestReader {
     private static void requireText(String value, String field, String source) throws ManifestException {
         if (value == null || value.isBlank()) {
             throw new ManifestException(source + ": " + field + " must be non-blank");
+        }
+    }
+
+    public record CaseOnlyRename(String baselinePrefix, String targetPrefix) {
+    }
+
+    public record PreviewPairValidation(List<CaseOnlyRename> caseOnlyRenames) {
+        public PreviewPairValidation {
+            caseOnlyRenames = List.copyOf(caseOnlyRenames);
         }
     }
 }

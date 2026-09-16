@@ -1,0 +1,266 @@
+package org.megamek.launcher.launch;
+
+import com.fasterxml.jackson.core.StreamReadFeature;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import org.megamek.launcher.update.StrictPathSafety;
+
+import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.time.Instant;
+import java.util.HexFormat;
+
+/**
+ * Per-OS-user, per-canonical-root coordination shared by CLI/GUI processes and registries.
+ * State lives outside installations, so merely launching an imported copy does not modify it.
+ */
+public final class RootCoordinator {
+    public static final String CLOSE_ALL_CONFIRMATION = "CLOSE-ALL-SUITE-APPS-AND-APPLY";
+    public static final String UPDATE_NAMESPACE = ".mm-launcher-update";
+    private static final int SCHEMA = 1;
+    private final Path directory;
+    private final boolean persistent;
+    private final ObjectMapper mapper = JsonMapper.builder()
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build()
+            .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+            .enable(DeserializationFeature.FAIL_ON_NULL_CREATOR_PROPERTIES)
+            .enable(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES)
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+
+    public RootCoordinator() {
+        this(Path.of(System.getProperty("mm.launcher.coordination.dir",
+                Path.of(System.getProperty("user.home"), ".mm-launcher", "coordination-v1")
+                        .toString())), true);
+    }
+
+    public RootCoordinator(Path directory) {
+        this(directory, true);
+    }
+
+    private RootCoordinator(Path directory, boolean persistent) {
+        this.directory = directory.toAbsolutePath().normalize();
+        this.persistent = persistent;
+    }
+
+    /** Fake-process test seam: no cross-process claim is made for injected ProcessRunner tests. */
+    static RootCoordinator inMemory() {
+        return new RootCoordinator(Path.of(System.getProperty("java.io.tmpdir")), false);
+    }
+
+    public Lease acquire(Path root, boolean closeAllAcknowledged) throws IOException {
+        Path canonical = StrictPathSafety.requireDirectory(root, "coordinated application root");
+        if (!persistent) return new Lease(canonical, null, null, null, false);
+        ensureDirectory();
+        String key = hash(canonical.toString());
+        Path lockPath = directory.resolve(key + ".lock");
+        rejectUnexpected(lockPath, true);
+        FileChannel channel = FileChannel.open(lockPath, StandardOpenOption.CREATE,
+                StandardOpenOption.WRITE);
+        FileLock lock;
+        try {
+            lock = channel.tryLock();
+            if (lock == null) throw new IOException("another launch, update, or recovery is active");
+        } catch (OverlappingFileLockException e) {
+            channel.close();
+            throw new IOException("another launch, update, or recovery is active", e);
+        } catch (IOException e) {
+            channel.close();
+            throw e;
+        }
+        Lease lease = new Lease(canonical, channel, lock, directory.resolve(key + ".launch.json"),
+                true);
+        try {
+            lease.resolvePriorMarker(closeAllAcknowledged);
+            return lease;
+        } catch (IOException e) {
+            lease.close();
+            throw e;
+        }
+    }
+
+    public boolean pending(Path root) throws IOException {
+        Path canonical = StrictPathSafety.requireDirectory(root, "application root");
+        return Files.exists(canonical.resolve(UPDATE_NAMESPACE), LinkOption.NOFOLLOW_LINKS);
+    }
+
+    private void ensureDirectory() throws IOException {
+        Path parent = directory.getParent();
+        if (parent == null) throw new IOException("coordination directory has no parent");
+        ensureOwnedDirectory(parent);
+        if (Files.notExists(directory, LinkOption.NOFOLLOW_LINKS)) Files.createDirectory(directory);
+        StrictPathSafety.requireDirectory(directory, "coordination directory");
+    }
+
+    private static void ensureOwnedDirectory(Path path) throws IOException {
+        if (Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+            StrictPathSafety.requireDirectory(path, "coordination parent");
+            return;
+        }
+        Path parent = path.getParent();
+        if (parent == null) throw new IOException("coordination parent does not exist");
+        ensureOwnedDirectory(parent);
+        Files.createDirectory(path);
+        StrictPathSafety.requireDirectory(path, "coordination parent");
+    }
+
+    private static void rejectUnexpected(Path path, boolean allowMissing) throws IOException {
+        if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+            if (allowMissing) return;
+            throw new IOException("coordination state is absent: " + path);
+        }
+        StrictPathSafety.requireFile(path, "coordination state");
+    }
+
+    private static String hash(String value) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    public final class Lease implements AutoCloseable {
+        private final Path root;
+        private final FileChannel channel;
+        private final FileLock lock;
+        private final Path marker;
+        private final boolean writesMarkers;
+        private boolean markerOwned;
+
+        private Lease(Path root, FileChannel channel, FileLock lock, Path marker,
+                      boolean writesMarkers) {
+            this.root = root;
+            this.channel = channel;
+            this.lock = lock;
+            this.marker = marker;
+            this.writesMarkers = writesMarkers;
+        }
+
+        public void requireNoPendingUpdate() throws IOException {
+            Path namespace = root.resolve(UPDATE_NAMESPACE);
+            if (Files.exists(namespace, LinkOption.NOFOLLOW_LINKS)) {
+                throw new IOException("an interrupted update is pending; recover it before launch");
+            }
+        }
+
+        public void markLaunchStarting() throws IOException {
+            if (!writesMarkers) return;
+            writeMarker(new LaunchMarker(SCHEMA, root.toString(),
+                    ProcessIdentity.of(ProcessHandle.current()), "STARTING"));
+            markerOwned = true;
+        }
+
+        public void markChild(ProcessIdentity child) throws IOException {
+            if (!writesMarkers || child == null) return;
+            writeMarker(new LaunchMarker(SCHEMA, root.toString(), child, "RUNNING"));
+        }
+
+        public void clearLaunchMarker() throws IOException {
+            if (writesMarkers && markerOwned) {
+                Files.deleteIfExists(marker);
+                markerOwned = false;
+            }
+        }
+
+        private void resolvePriorMarker(boolean closeAllAcknowledged) throws IOException {
+            if (!writesMarkers || !Files.exists(marker, LinkOption.NOFOLLOW_LINKS)) return;
+            rejectUnexpected(marker, false);
+            final LaunchMarker prior;
+            try {
+                prior = mapper.readValue(Files.readAllBytes(marker), LaunchMarker.class);
+            } catch (IOException | RuntimeException e) {
+                if (!closeAllAcknowledged) {
+                    throw new IOException("unreadable launch marker blocks this root; close all "
+                            + "suite applications and use explicit recovery/unblock confirmation", e);
+                }
+                Files.delete(marker);
+                return;
+            }
+            if (prior.schemaVersion() != SCHEMA || !root.toString().equals(prior.canonicalRoot())
+                    || prior.process() == null || prior.process().pid() <= 0) {
+                if (!closeAllAcknowledged) {
+                    throw new IOException("unknown launch marker blocks this root; close all suite "
+                            + "applications and use explicit recovery/unblock confirmation");
+                }
+                Files.delete(marker);
+                return;
+            }
+            ProcessHandle process = ProcessHandle.of(prior.process().pid()).orElse(null);
+            if (process == null || !process.isAlive()) {
+                Files.delete(marker);
+                return;
+            }
+            String actualStart = process.info().startInstant().map(Instant::toString).orElse(null);
+            if (prior.process().startedAt() != null && actualStart != null
+                    && !prior.process().startedAt().equals(actualStart)) {
+                Files.delete(marker); // PID was reused; this is demonstrably not the tracked child.
+                return;
+            }
+            if (prior.process().startedAt() == null || actualStart == null) {
+                if (closeAllAcknowledged) {
+                    Files.delete(marker);
+                    return;
+                }
+                throw new IOException("tracked process identity cannot be verified; close all suite "
+                        + "applications, then use explicit recovery/unblock confirmation");
+            }
+            throw new IOException("a launcher-started suite application is still running (PID "
+                    + prior.process().pid() + "); close it before launch, update, or recovery");
+        }
+
+        private void writeMarker(LaunchMarker value) throws IOException {
+            Path staging = marker.resolveSibling(marker.getFileName() + ".new");
+            if (Files.exists(staging, LinkOption.NOFOLLOW_LINKS)) {
+                throw new IOException("interrupted launch-marker publication requires unblock");
+            }
+            byte[] bytes = mapper.writeValueAsBytes(value);
+            try (FileChannel output = FileChannel.open(staging, StandardOpenOption.CREATE_NEW,
+                    StandardOpenOption.WRITE)) {
+                output.write(ByteBuffer.wrap(bytes));
+                output.force(true);
+            }
+            try {
+                Files.move(staging, marker, StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.deleteIfExists(staging);
+                throw new IOException("atomic launch-marker publication is unsupported", e);
+            }
+        }
+
+        @Override
+        public void close() throws IOException {
+            if (!writesMarkers) return;
+            IOException failure = null;
+            try {
+                if (lock != null && lock.isValid()) lock.release();
+            } catch (IOException e) {
+                failure = e;
+            }
+            try {
+                if (channel != null) channel.close();
+            } catch (IOException e) {
+                if (failure == null) failure = e;
+                else failure.addSuppressed(e);
+            }
+            if (failure != null) throw failure;
+        }
+    }
+
+    private record LaunchMarker(int schemaVersion, String canonicalRoot,
+                                ProcessIdentity process, String phase) {
+    }
+}

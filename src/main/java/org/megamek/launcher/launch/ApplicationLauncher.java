@@ -15,14 +15,20 @@ import java.util.List;
 public final class ApplicationLauncher {
     private final ProcessRunner runner;
     private final JavaRuntime javaRuntime;
+    private final RootCoordinator coordinator;
 
     public ApplicationLauncher() {
-        this(new DirectProcessRunner());
+        this(new DirectProcessRunner(), new RootCoordinator());
     }
 
     public ApplicationLauncher(ProcessRunner runner) {
+        this(runner, RootCoordinator.inMemory());
+    }
+
+    public ApplicationLauncher(ProcessRunner runner, RootCoordinator coordinator) {
         this.runner = runner;
         this.javaRuntime = new JavaRuntime(runner);
+        this.coordinator = coordinator;
     }
 
     public List<String> command(InstallationRecord record, String productKey)
@@ -71,10 +77,37 @@ public final class ApplicationLauncher {
 
     public int launch(InstallationRecord record, String product)
             throws IOException, InterruptedException {
-        List<String> command = command(record, product);
-        ProcessRunner.Result result = runner.run(command, Path.of(record.canonicalRoot()),
-                Duration.ofDays(30), true);
-        if (result.timedOut()) throw new IOException("application exceeded launcher wait limit");
-        return result.exitCode();
+        Path root = Path.of(record.canonicalRoot());
+        try (RootCoordinator.Lease lease = coordinator.acquire(root, false)) {
+            lease.requireNoPendingUpdate();
+            List<String> command = command(record, product);
+            lease.markLaunchStarting();
+            try {
+                ProcessRunner.Result result = runner.runTracked(command, root,
+                        Duration.ofDays(30), true, identity -> {
+                            try {
+                                lease.markChild(identity);
+                            } catch (IOException e) {
+                                throw new LaunchMarkerFailure(e);
+                            }
+                        });
+                if (result.timedOut()) {
+                    throw new IOException("application exceeded launcher wait limit");
+                }
+                return result.exitCode();
+            } catch (LaunchMarkerFailure e) {
+                throw e.failure;
+            } finally {
+                lease.clearLaunchMarker();
+            }
+        }
+    }
+
+    private static final class LaunchMarkerFailure extends RuntimeException {
+        private final IOException failure;
+        private LaunchMarkerFailure(IOException failure) {
+            super(failure);
+            this.failure = failure;
+        }
     }
 }

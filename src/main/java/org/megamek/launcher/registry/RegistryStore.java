@@ -114,6 +114,47 @@ public final class RegistryStore {
         });
     }
 
+    /**
+     * Publishes only the statically observed build/product fields after a verified update.
+     * Name, Java, pin, registration time, default selection, and unrelated records are retained
+     * from the registry version held under the mutation lock.
+     */
+    public InstallationRecord refreshAfterUpdate(Path registry, InstallationRecord expected,
+                                                 String observedBuild, List<Product> products)
+            throws IOException {
+        InstallationRecord[] result = new InstallationRecord[1];
+        mutate(registry.toAbsolutePath().normalize(), current -> {
+            List<InstallationRecord> records = new ArrayList<>();
+            boolean found = false;
+            for (InstallationRecord record : current.installations()) {
+                if (!record.id().equals(expected.id())) {
+                    records.add(record);
+                    continue;
+                }
+                found = true;
+                if (!record.canonicalRoot().equals(expected.canonicalRoot())
+                        || !record.registeredAt().equals(expected.registeredAt())) {
+                    throw failure("selected update record identity changed");
+                }
+                boolean priorLayout = record.observedBuild().equals(expected.observedBuild())
+                        && record.products().equals(expected.products());
+                boolean targetLayout = record.observedBuild().equals(observedBuild)
+                        && record.products().equals(products);
+                if (!priorLayout && !targetLayout) {
+                    throw failure("selected update record program layout changed concurrently");
+                }
+                InstallationRecord updated = new InstallationRecord(record.id(), record.name(),
+                        record.canonicalRoot(), observedBuild, products, record.javaExecutable(),
+                        record.pin(), false, record.registeredAt());
+                records.add(updated);
+                result[0] = updated;
+            }
+            if (!found) throw failure("selected update record was removed");
+            return new RegistryData(SCHEMA, current.defaultInstallationId(), records);
+        });
+        return result[0];
+    }
+
     public InstallationRecord resolve(RegistryData data, String id) throws IOException {
         String selected = id == null ? data.defaultInstallationId() : id;
         if (selected == null) throw new IOException("registry has no default installation");

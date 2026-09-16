@@ -22,6 +22,10 @@ import org.megamek.launcher.sandbox.OverrideEntry;
 import org.megamek.launcher.sandbox.SandboxState;
 import org.megamek.launcher.sandbox.SandboxUpdater;
 import org.megamek.launcher.gui.GuiLauncher;
+import org.megamek.launcher.update.OwnershipPolicy;
+import org.megamek.launcher.update.UpdatePreviewService;
+import org.megamek.launcher.update.RealUpdateService;
+import org.megamek.launcher.launch.RootCoordinator;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -73,6 +77,10 @@ public final class Main {
                 case "launch" -> launch(options, out);
                 case "releases" -> releases(options, out, releaseTransport);
                 case "install-release" -> installRelease(options, out, releaseTransport);
+                case "preview-update" -> previewUpdate(options, out, releaseTransport);
+                case "apply-update" -> applyUpdate(options, out, releaseTransport);
+                case "recover-update" -> recoverUpdate(options, out, releaseTransport);
+                case "unblock-launch" -> unblockLaunch(options, out);
                 default -> throw new IllegalArgumentException("unknown command: " + command);
             };
         } catch (InterruptedException e) {
@@ -136,6 +144,99 @@ public final class Main {
                     + "detects transfer corruption but is not an independent signature.");
             return 0;
         }
+
+    private static int previewUpdate(Map<String, String> options, PrintStream out,
+                                     ReleaseTransport transport)
+            throws IOException, InterruptedException, ManifestException {
+        requireKeys(options, Set.of("--registry", "--tag"), Set.of("--id"));
+        UpdatePreviewService.Preview preview = new UpdatePreviewService(transport).preview(
+                path(options, "--registry"), options.get("--id"), options.get("--tag"), out);
+        out.printf("BASELINE id=%s repository=%s tag=%s asset=%s size=%d sha256=%s%n",
+                preview.record().id(), preview.baseline().repository(), preview.baseline().tag(),
+                preview.baseline().assetName(), preview.baseline().assetSize(),
+                preview.baseline().assetSha256());
+        out.printf("TARGET repository=%s tag=%s asset=%s size=%d digest=%s%n",
+                preview.baseline().repository(), preview.targetRelease().tag(),
+                preview.targetAsset().name(), preview.targetAsset().size(),
+                preview.targetAsset().digest());
+        out.printf("POLICY version=%d managedBaseline=%d managedTarget=%d%n",
+                preview.baseline().ownershipPolicyVersion(),
+                preview.baseline().officialManifest().files().size(),
+                preview.targetManifest().files().size());
+        out.println("PROTECTED " + String.join(", ", OwnershipPolicy.PROTECTED_PATHS));
+        out.printf("EXCLUDED-BASELINE count=%d%n",
+                preview.baseline().excludedOfficialPaths().size());
+        preview.baseline().excludedOfficialPaths().forEach(path ->
+                out.println("EXCLUDED-BASELINE-PATH " + path));
+        out.printf("EXCLUDED-TARGET count=%d%n", preview.targetExcludedPaths().size());
+        preview.targetExcludedPaths().forEach(path -> out.println("EXCLUDED-TARGET-PATH " + path));
+        out.printf("SUMMARY ADD=%d REPLACE=%d REMOVE=%d KEEP=%d SKIP=%d%n",
+                preview.counts().get(org.megamek.launcher.plan.Action.ADD),
+                preview.counts().get(org.megamek.launcher.plan.Action.REPLACE),
+                preview.counts().get(org.megamek.launcher.plan.Action.REMOVE),
+                preview.counts().get(org.megamek.launcher.plan.Action.KEEP),
+                preview.counts().get(org.megamek.launcher.plan.Action.SKIP));
+        preview.decisions().forEach(decision -> printDecision(out, decision));
+        out.println("READ-ONLY PREVIEW: no installed application, registry, or receipt files changed.");
+        out.println("POINT-IN-TIME ONLY: this plan is not authority to apply later.");
+        return 0;
+    }
+
+    private static int applyUpdate(Map<String, String> options, PrintStream out,
+                                   ReleaseTransport transport)
+            throws IOException, InterruptedException, ManifestException {
+        requireKeys(options, Set.of("--registry", "--from-tag", "--tag", "--size", "--digest",
+                "--confirm"), Set.of("--id"));
+        long size = positiveLong(options.get("--size"), "--size");
+        RealUpdateService.ApplyResult result = new RealUpdateService(transport).apply(
+                path(options, "--registry"), options.get("--id"), options.get("--from-tag"),
+                options.get("--tag"), size, options.get("--digest"), options.get("--confirm"), out);
+        out.printf("UPDATED id=%s build=%s tag=%s skipped=%d retainedOverrides=%d%n",
+                result.record().id(), result.record().observedBuild(), result.state().tag(),
+                result.skippedDecisions(), result.retainedOverrides());
+        result.decisions().forEach(decision -> printDecision(out, decision));
+        out.println(result.skippedDecisions() == 0
+                ? "UPDATE COMPLETE: verified managed program files now match the target."
+                : "UPDATE COMPLETE WITH PRESERVATION: skipped user data/custom collisions remain.");
+        return 0;
+    }
+
+    private static int recoverUpdate(Map<String, String> options, PrintStream out,
+                                     ReleaseTransport transport)
+            throws IOException, ManifestException {
+        requireKeys(options, Set.of("--registry", "--confirm"), Set.of("--id"));
+        RealUpdateService.RecoveryResult result = new RealUpdateService(transport).recover(
+                path(options, "--registry"), options.get("--id"), options.get("--confirm"));
+        out.println("RECOVERY: " + result.outcome());
+        return 0;
+    }
+
+    private static int unblockLaunch(Map<String, String> options, PrintStream out)
+            throws IOException {
+        requireKeys(options, Set.of("--registry", "--confirm"), Set.of("--id"));
+        if (!RealUpdateService.CONFIRM.equals(options.get("--confirm"))) {
+            throw new IOException("--confirm must be exactly " + RealUpdateService.CONFIRM);
+        }
+        RegistryStore store = new RegistryStore();
+        InstallationRecord record = store.resolve(store.read(path(options, "--registry")),
+                options.get("--id"));
+        try (RootCoordinator.Lease ignored = new RootCoordinator().acquire(
+                Path.of(record.canonicalRoot()), true)) {
+            out.println("COORDINATION CHECK COMPLETE: no live launcher-tracked application "
+                    + "was found. No process was killed.");
+        }
+        return 0;
+    }
+
+    private static long positiveLong(String value, String option) {
+        try {
+            long parsed = Long.parseLong(value);
+            if (parsed <= 0) throw new NumberFormatException();
+            return parsed;
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException(option + " must be a positive integer", e);
+        }
+    }
 
     private static int boundedInteger(String value, String option) {
             try {
@@ -379,6 +480,10 @@ public final class Main {
                   mm-launcher java-select --registry <json> --id <uuid> --java <java-home-or-executable>
                   mm-launcher launch --registry <json> [--id <uuid>] --product <megamek|mekhq|lab> [--dry-run true]
                   mm-launcher releases --application <megamek|mekhq|lab> [--page <1-1000>] [--per-page <1-50>]
-                  mm-launcher install-release --application <megamek|mekhq|lab> --tag <exact-tag> --destination <new-dir> --registry <json> --name <name>""";
+                  mm-launcher install-release --application <megamek|mekhq|lab> --tag <exact-tag> --destination <new-dir> --registry <json> --name <name>
+                  mm-launcher preview-update --registry <json> [--id <uuid>] --tag <exact-tag>
+                  mm-launcher apply-update --registry <json> [--id <uuid>] --from-tag <current-tag> --tag <exact-tag> --size <bytes> --digest <sha256:hex> --confirm CLOSE-ALL-SUITE-APPS-AND-APPLY
+                  mm-launcher recover-update --registry <json> [--id <uuid>] --confirm CLOSE-ALL-SUITE-APPS-AND-APPLY
+                  mm-launcher unblock-launch --registry <json> [--id <uuid>] --confirm CLOSE-ALL-SUITE-APPS-AND-APPLY""";
     }
 }

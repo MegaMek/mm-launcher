@@ -27,6 +27,7 @@ import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -57,6 +58,7 @@ class LauncherSwingSmokeTest {
             assertNotNull(java.util.Arrays.stream(dialogs)
                     .filter(dialog -> dialog.getTitle().equals("Manage installations"))
                     .findFirst().orElse(null));
+            openDownloadFromManage(holder[0]);
         } finally {
             SwingUtilities.invokeAndWait(() -> {
                 for (java.awt.Window window : holder[0].getOwnedWindows()) window.dispose();
@@ -108,6 +110,41 @@ class LauncherSwingSmokeTest {
             assertNotNull(owned(frame, "Manage installations"));
             assertEquals(1, services.readRegistry().installations().size(),
                     "opening Manage must not inspect or remove the broken entry");
+            openDownloadFromManage(frame);
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void registeredCopyCanDownloadFromManageWithoutRemovingExistingCopy() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        Path registry = temp.resolve("registered.json");
+        PagingServices services = new PagingServices(registry);
+        Path root = createSuite(temp.resolve("existing-copy"));
+        services.register("Main", root);
+        var before = services.readRegistry();
+        byte[] registryBytes = java.nio.file.Files.readAllBytes(registry);
+        var registryTime = java.nio.file.Files.getLastModifiedTime(registry);
+        Path jar = root.resolve("MegaMek.jar");
+        byte[] jarBytes = java.nio.file.Files.readAllBytes(jar);
+        var jarTime = java.nio.file.Files.getLastModifiedTime(jar);
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            assertNotNull(waitForButton(frame, "launch-megamek-button"));
+            JButton manage = waitForButton(frame, "manageInstallationsButton");
+            assertNotNull(manage);
+            SwingUtilities.invokeAndWait(manage::doClick);
+            JDialog download = openDownloadFromManage(frame);
+            assertTrue(services.pages.isEmpty(), "opening the picker must not fetch releases");
+            SwingUtilities.invokeAndWait(download::dispose);
+            assertEquals(before, services.readRegistry());
+            assertArrayEquals(registryBytes, java.nio.file.Files.readAllBytes(registry));
+            assertEquals(registryTime, java.nio.file.Files.getLastModifiedTime(registry));
+            assertArrayEquals(jarBytes, java.nio.file.Files.readAllBytes(jar));
+            assertEquals(jarTime, java.nio.file.Files.getLastModifiedTime(jar));
         } finally {
             dispose(frame);
         }
@@ -182,6 +219,21 @@ class LauncherSwingSmokeTest {
         } finally {
             dispose(frame);
         }
+    }
+
+    private static JDialog openDownloadFromManage(LauncherFrame frame) throws Exception {
+        JDialog manage = owned(frame, "Manage installations");
+        JButton download = onEdt(() -> find(manage, "manageDownloadMegaMekButton"));
+        assertNotNull(download);
+        SwingUtilities.invokeAndWait(download::doClick);
+        JDialog picker = owned(frame, "Download an official release");
+        assertFalse(onEdt(manage::isDisplayable));
+        assertTrue(onEdt(picker::isVisible));
+        JButton fetch = onEdt(() -> find(picker, "fetchReleasesButton"));
+        assertNotNull(fetch);
+        assertTrue(onEdt(fetch::isEnabled));
+        assertFalse(onEdt(() -> find(picker, "installReleaseButton").isEnabled()));
+        return picker;
     }
 
     private static JButton waitForButton(Container root, String name) throws Exception {

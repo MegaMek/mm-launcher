@@ -93,7 +93,7 @@ public final class ReleaseCatalog {
         if (!SHA256.matcher(asset.digest()).matches()) {
             return new Assessment(false, asset, "Published SHA-256 checksum is invalid");
         }
-        if (!ASSET_NAME.matcher(asset.name()).matches()) {
+        if (!isInstallAssetName(repository, asset.name())) {
             return new Assessment(false, asset, "Install asset name is unsupported");
         }
         if (asset.size() <= 0 || asset.size() > FreshInstaller.MAX_DOWNLOAD) {
@@ -105,6 +105,12 @@ public final class ReleaseCatalog {
             return new Assessment(false, asset, e.getMessage());
         }
         return new Assessment(true, asset, "Available");
+    }
+
+    /** Exact asset-name grammar shared by catalog selection and persisted provenance checks. */
+    public static boolean isInstallAssetName(OfficialRepository repository, String name) {
+        return name != null && ASSET_NAME.matcher(name).matches()
+                && name.startsWith(repository.assetPrefix()) && name.endsWith(".tar.gz");
     }
 
     private JsonNode requestJson(URI uri) throws IOException, InterruptedException {

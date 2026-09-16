@@ -6,6 +6,9 @@ import org.megamek.launcher.registry.InstallationRecord;
 import org.megamek.launcher.registry.RegistryData;
 import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
+import org.megamek.launcher.update.OwnershipPolicy;
+import org.megamek.launcher.update.UpdatePreviewService;
+import org.megamek.launcher.update.RealUpdateService;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -115,7 +118,7 @@ public final class LauncherFrame extends JFrame {
         title.setName("homeTitle");
         header.add(title);
         header.add(Box.createVerticalStrut(4));
-        status.setText("Launch-only prototype · no automatic updates");
+        status.setText("Explicit verified updates · no automatic updates or self-update");
         header.add(status);
         content.add(header, BorderLayout.NORTH);
 
@@ -150,6 +153,8 @@ public final class LauncherFrame extends JFrame {
         panel.add(details);
         panel.add(Box.createVerticalStrut(8));
         panel.add(new JLabel("Launching and Java selection are disabled for this copy."));
+        renderPreviewAction(panel);
+        renderRecoveryAction(panel);
     }
 
     private void renderLoadError(Throwable error) {
@@ -216,6 +221,42 @@ public final class LauncherFrame extends JFrame {
                 "selectJavaButton");
         java.addActionListener(event -> chooseJava(record));
         panel.add(java);
+        renderPreviewAction(panel);
+        renderRecoveryAction(panel);
+    }
+
+    private void renderPreviewAction(JPanel panel) {
+        if (state.preferred() == null || state.previewEligibility() == null) return;
+        panel.add(Box.createVerticalStrut(12));
+        JButton preview = button("Preview update", "previewUpdateButton");
+        preview.setEnabled(state.previewEligibility().available());
+        preview.setToolTipText(state.previewEligibility().reason());
+        preview.addActionListener(event -> previewUpdateDialog());
+        panel.add(preview);
+        if (state.previewEligibility().available()) {
+            JButton update = button("Update…", "applyUpdateButton");
+            update.setToolTipText("Separate explicit workflow; downloads and replans again "
+                    + "immediately before changing managed files.");
+            update.addActionListener(event -> updateDialog());
+            panel.add(Box.createVerticalStrut(5));
+            panel.add(update);
+        }
+        JLabel note = new JLabel(state.previewEligibility().available()
+                ? "Provenance verified · Preview remains read-only"
+                : "Preview unavailable: " + state.previewEligibility().reason());
+        note.setName("previewEligibilityNote");
+        panel.add(note);
+    }
+
+    private void renderRecoveryAction(JPanel panel) {
+        if (state == null || state.preferred() == null) return;
+        panel.add(Box.createVerticalStrut(5));
+        JButton recover = button(state.pendingUpdate()
+                        ? "Recover interrupted update…" : "Check update recovery…",
+                "recoverUpdateButton");
+        recover.setToolTipText("Recovery is available even when static inspection or launch fails.");
+        recover.addActionListener(event -> recoverUpdate());
+        panel.add(recover);
     }
 
     private void chooseExisting() {
@@ -262,10 +303,12 @@ public final class LauncherFrame extends JFrame {
         JButton preferred = button("Make preferred", "makePreferredButton");
         JButton remove = button("Remove record…", "removeRecordButton");
         JButton add = button("Use existing copy…", "manageAddExistingButton");
+        JButton download = button("Download MegaMek", "manageDownloadMegaMekButton");
         JPanel buttons = new JPanel();
         buttons.add(preferred);
         buttons.add(remove);
         buttons.add(add);
+        buttons.add(download);
         JDialog dialog = dialog("Manage installations", list, buttons, new Dimension(760, 360));
         preferred.addActionListener(event -> {
             InstallationRecord selected = list.getSelectedValue();
@@ -294,6 +337,10 @@ public final class LauncherFrame extends JFrame {
         add.addActionListener(event -> {
             dialog.dispose();
             chooseExisting();
+        });
+        download.addActionListener(event -> {
+            dialog.dispose();
+            downloadDialog();
         });
         dialog.setVisible(true);
     }
@@ -407,6 +454,7 @@ public final class LauncherFrame extends JFrame {
                             next.setEnabled(displayedPage[0] > 0
                                     && displayedMayHaveNext[0]);
                         }
+
                     });
         };
         fetch.addActionListener(event -> {
@@ -437,6 +485,233 @@ public final class LauncherFrame extends JFrame {
             if (choice == null || repository == null || !choice.assessment().eligible()) return;
             chooseInstallDestination(dialog, repository, choice);
         });
+        dialog.setVisible(true);
+    }
+
+    void previewUpdateDialog() {
+        openUpdatePicker(false);
+    }
+
+    private void updateDialog() {
+        openUpdatePicker(true);
+    }
+
+    private void openUpdatePicker(boolean applyWorkflow) {
+        if (state == null || state.preferred() == null || state.previewEligibility() == null
+                || !state.previewEligibility().available()) return;
+        final InstallationRecord sourceRecord = state.preferred();
+        final org.megamek.launcher.update.OwnershipReceipt sourceReceipt =
+                state.previewEligibility().receipt();
+        OfficialRepository repository;
+        try {
+            repository = OfficialRepository.parse(sourceReceipt.repository());
+        } catch (IOException e) {
+            showError("Opening update preview failed", e);
+            return;
+        }
+        DefaultListModel<ReleaseChoice> model = new DefaultListModel<>();
+        JList<ReleaseChoice> releases = new JList<>(model);
+        releases.setName("previewReleaseList");
+        JButton fetch = button("Fetch releases", "fetchPreviewReleasesButton");
+        JButton next = button("Next page", "nextPreviewReleasePageButton");
+        JButton inspect = button("Download and preview…", "runPreviewButton");
+        next.setEnabled(false);
+        inspect.setEnabled(false);
+        JLabel pageLabel = new JLabel("No network request until Fetch releases is selected.");
+        final int[] page = {0};
+        final boolean[] more = {false};
+        JPanel top = new JPanel();
+        top.add(new JLabel("Official source: " + repository.slug()));
+        top.add(fetch);
+        JPanel bottom = new JPanel();
+        bottom.add(pageLabel);
+        bottom.add(next);
+        bottom.add(inspect);
+        JPanel body = new JPanel(new BorderLayout(8, 8));
+        body.add(top, BorderLayout.NORTH);
+        body.add(new JScrollPane(releases), BorderLayout.CENTER);
+        body.add(bottom, BorderLayout.SOUTH);
+        JDialog dialog = dialog(applyWorkflow ? "Choose update" : "Preview update", body, null,
+                new Dimension(780, 460));
+        Consumer<Integer> load = requested -> {
+            next.setEnabled(false);
+            run("Fetching official releases", () -> services.releases(repository, requested),
+                    result -> {
+                        if (!dialog.isDisplayable()) return;
+                        model.clear();
+                        result.releases().forEach(release -> model.addElement(new ReleaseChoice(
+                                release, services.assess(repository, release))));
+                        page[0] = result.page();
+                        more[0] = result.mayHaveNextPage();
+                        next.setEnabled(more[0]);
+                        pageLabel.setText("Page " + page[0]
+                                + (more[0] ? " · more may exist" : " · last page"));
+                    }, error -> next.setEnabled(page[0] > 0 && more[0]));
+        };
+        fetch.addActionListener(event -> load.accept(1));
+        next.addActionListener(event -> load.accept(page[0] + 1));
+        releases.addListSelectionListener(event -> {
+            ReleaseChoice choice = releases.getSelectedValue();
+            inspect.setEnabled(choice != null && choice.assessment().eligible());
+            if (choice != null && !choice.assessment().eligible()) {
+                pageLabel.setText(choice.assessment().reason());
+            }
+        });
+        inspect.addActionListener(event -> {
+            ReleaseChoice choice = releases.getSelectedValue();
+            if (choice == null || !choice.assessment().eligible()) return;
+            ReleaseCatalog.Asset asset = choice.assessment().asset();
+            int answer = JOptionPane.showConfirmDialog(dialog,
+                    "Current verified source: " + sourceReceipt.tag() + " / "
+                            + sourceReceipt.assetName()
+                            + "\nTarget: " + choice.release().tag() + " / " + asset.name()
+                            + "\nDownload: " + NumberFormat.getIntegerInstance().format(asset.size())
+                            + " bytes (a full release package; time depends on your connection)"
+                            + "\n\nDownload, verify, and inspect in external temporary storage?"
+                            + "\nThis step is READ-ONLY: no installed files or metadata will change."
+                            + (applyWorkflow
+                            ? "\nA separate destructive Apply confirmation follows the report."
+                            : ""),
+                    "Confirm read-only preview download", JOptionPane.OK_CANCEL_OPTION,
+                    JOptionPane.WARNING_MESSAGE);
+            if (answer != JOptionPane.OK_OPTION) return;
+            dialog.dispose();
+            runUpdatePreview(sourceRecord, sourceReceipt, choice.release().tag(), applyWorkflow);
+        });
+        dialog.setVisible(true);
+    }
+
+    private void runUpdatePreview(InstallationRecord record,
+                                  org.megamek.launcher.update.OwnershipReceipt receipt,
+                                  String tag, boolean applyWorkflow) {
+        JTextArea progressLog = textArea("Preparing read-only preview for " + tag + "…\n");
+        progressLog.setName("previewProgressLog");
+        JDialog progress = dialog("Downloading update preview", new JScrollPane(progressLog), null,
+                new Dimension(720, 390));
+        progress.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+        progress.setVisible(true);
+        PrintStream stream = new PrintStream(new LogOutput(progressLog), true,
+                StandardCharsets.UTF_8);
+        run("Building read-only update preview",
+                () -> services.previewUpdate(record, receipt, tag, stream), result -> {
+                    progress.dispose();
+                    if (applyWorkflow) showApplyConsent(result);
+                    else showPreviewResult(result);
+                }, error -> {
+                    appendBounded(progressLog, "\nPREVIEW FAILED: " + errorDetail(error) + "\n");
+                    progress.setTitle("Update preview failed");
+                    progress.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+                }, stream::close);
+    }
+
+    private void showApplyConsent(UpdatePreviewService.Preview preview) {
+        if (preview.currentState() == null) {
+            showError("Update unavailable",
+                    new IOException("preview did not include current verified provenance"));
+            return;
+        }
+        long skipped = preview.counts().get(org.megamek.launcher.plan.Action.SKIP);
+        String message = "Current: " + preview.baseline().tag()
+                + "\nTarget: " + preview.targetRelease().tag()
+                + "\nFull package download AGAIN: "
+                + NumberFormat.getIntegerInstance().format(preview.targetAsset().size()) + " bytes"
+                + "\nSHA-256: " + preview.targetAsset().digest()
+                + "\nManaged changes: ADD "
+                + preview.counts().get(org.megamek.launcher.plan.Action.ADD)
+                + ", REPLACE " + preview.counts().get(org.megamek.launcher.plan.Action.REPLACE)
+                + ", REMOVE " + preview.counts().get(org.megamek.launcher.plan.Action.REMOVE)
+                + ", preserved SKIP " + skipped
+                + "\n\nApplying is destructive to unmodified managed package files. Verified "
+                + "backups and a recovery journal are created first. Protected, unknown, and "
+                + "modified data are retained."
+                + "\n\nCLOSE ALL MegaMek, MekHQ, and MegaMekLab windows now, including copies "
+                + "started manually. The launcher coordinates its own launches, but cannot "
+                + "guarantee detection of older or externally started applications."
+                + "\n\nApply this exact size and digest?";
+        int answer = JOptionPane.showConfirmDialog(this, message, "Authorize update Apply",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
+        if (answer != JOptionPane.OK_OPTION) {
+            status.setText("Update cancelled before any write");
+            return;
+        }
+        applyUpdate(preview);
+    }
+
+    private void applyUpdate(UpdatePreviewService.Preview preview) {
+        JTextArea log = textArea("Re-reading source, reacquiring the update gate, and "
+                + "re-downloading the exact consented package…\n");
+        log.setName("applyUpdateProgressLog");
+        JDialog progress = dialog("Applying verified update", new JScrollPane(log), null,
+                new Dimension(760, 420));
+        progress.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+        progress.setVisible(true);
+        PrintStream stream = new PrintStream(new LogOutput(log), true, StandardCharsets.UTF_8);
+        run("Applying verified update", () -> services.applyUpdate(preview.record(),
+                        preview.currentState(), preview.targetRelease().tag(),
+                        preview.targetAsset().size(), preview.targetAsset().digest(),
+                        RealUpdateService.CONFIRM, stream),
+                result -> {
+                    progress.dispose();
+                    String outcome = result.skippedDecisions() == 0
+                            ? "Update completed and the managed package is pristine."
+                            : "Update completed with " + result.skippedDecisions()
+                            + " skipped data/collision decisions preserved.";
+                    JOptionPane.showMessageDialog(this, outcome + "\nRetained override history: "
+                                    + result.retainedOverrides() + "\nBuild: "
+                                    + result.record().observedBuild(),
+                            "Update complete", JOptionPane.INFORMATION_MESSAGE);
+                    reload();
+                }, error -> {
+                    appendBounded(log, "\nAPPLY FAILED: " + errorDetail(error)
+                            + "\nNo unexpected file is overwritten by recovery. Use Check update "
+                            + "recovery after closing every suite application.\n");
+                    progress.setTitle("Update failed — recovery may be required");
+                    progress.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+                }, stream::close);
+    }
+
+    private void recoverUpdate() {
+        InstallationRecord record = state == null ? null : state.preferred();
+        if (record == null) return;
+        int answer = JOptionPane.showConfirmDialog(this,
+                "Close ALL MegaMek, MekHQ, and MegaMekLab applications, including ones started "
+                        + "outside this launcher.\n\nRecovery never kills a process and refuses a "
+                        + "verified live launcher-started child. It completes a fully applied "
+                        + "transaction or rolls back with verified backups; unexpected edits "
+                        + "remain untouched and block recovery.\n\nContinue?",
+                "Confirm update recovery", JOptionPane.OK_CANCEL_OPTION,
+                JOptionPane.WARNING_MESSAGE);
+        if (answer != JOptionPane.OK_OPTION) return;
+        run("Recovering update", () -> services.recoverUpdate(record, RealUpdateService.CONFIRM),
+                result -> {
+                    JOptionPane.showMessageDialog(this, result.outcome(), "Recovery complete",
+                            JOptionPane.INFORMATION_MESSAGE);
+                    reload();
+                });
+    }
+
+    private void showPreviewResult(UpdatePreviewService.Preview result) {
+        StringBuilder text = new StringBuilder();
+        text.append("READ-ONLY point-in-time preview; there is no Apply action.\n")
+                .append("Baseline: ").append(result.baseline().tag()).append(" / ")
+                .append(result.baseline().assetName()).append('\n')
+                .append("Target: ").append(result.targetRelease().tag()).append(" / ")
+                .append(result.targetAsset().name()).append('\n')
+                .append("Policy: ").append(result.baseline().ownershipPolicyVersion()).append('\n')
+                .append("Summary: ").append(result.counts()).append("\n\n")
+                .append("Protected paths:\n  ")
+                .append(String.join("\n  ", OwnershipPolicy.PROTECTED_PATHS))
+                .append("\n\nBaseline package paths excluded from ownership:\n  ")
+                .append(String.join("\n  ", result.baseline().excludedOfficialPaths()))
+                .append("\n\nTarget package paths excluded from ownership:\n  ")
+                .append(String.join("\n  ", result.targetExcludedPaths()))
+                .append("\n\nDecisions:\n");
+        result.decisions().forEach(decision -> text.append(decision.action()).append('\t')
+                .append(decision.path()).append("\t— ").append(decision.reason()).append('\n'));
+        JTextArea details = textArea(text.toString());
+        details.setName("updatePreviewResults");
+        JDialog dialog = dialog("Read-only update preview", new JScrollPane(details), null,
+                new Dimension(900, 620));
         dialog.setVisible(true);
     }
 
@@ -515,8 +790,9 @@ public final class LauncherFrame extends JFrame {
                         reload();
                     }, error -> {
                         appendBounded(log, "\nINSTALL FAILED: " + errorDetail(error)
-                                + "\nReview the details above; retry is available. A valid "
-                                + "extracted copy may be NOT REGISTERED.\n");
+                                + "\nReview the exact status above; retry is available. A published "
+                                + "copy is retained and may already be registered if only receipt "
+                                + "creation failed.\n");
                         progress.setTitle("Installation failed");
                         retry.setEnabled(true);
                     }, stream::close);

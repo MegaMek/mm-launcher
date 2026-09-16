@@ -48,6 +48,12 @@ Only after final static validation does normal `RegistryStore.register` run. Exi
 selection is preserved; the first record is the default for an empty registry. Every new record
 remains `updateEligible=false`, with no bundled Java and no automatic launch.
 
+Before publication, policy-version-1 hashes are made only from the pristine verified extracted
+package. After registration generates its UUID, a receipt bound to that UUID, canonical root,
+registration time, fixed repository/tag/asset identity, size, GitHub SHA-256, protected-path
+contract, complete managed manifest, and excluded-file inventory is created beside the registry
+in `<registry-name>.metadata/<uuid>.json`. Archives are not retained.
+
 ## Failure and recovery
 
 Ordinary pre-publication failures remove only this operation's staging tree. Abrupt process or
@@ -60,3 +66,8 @@ retained and the error explicitly says **NOT REGISTERED** and directs the user t
 registration flow. It is never deleted because a user may already have observed it. This is a
 bounded two-phase recovery story, not a distributed filesystem/registry transaction. The installer
 does not touch existing game copies, migrate saves, update installations, select Java, or launch.
+
+Receipt publication is a later bounded step. If it fails after registration, the valid
+installation and registry record are retained and the error says **REGISTERED** and
+**PREVIEW UNAVAILABLE**, never **NOT REGISTERED**. Removing a registry entry leaves its receipt;
+the stale UUID/root/time binding cannot authorize a later registration.

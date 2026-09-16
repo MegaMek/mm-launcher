@@ -14,6 +14,14 @@ public final class DirectProcessRunner implements ProcessRunner {
     @Override
     public Result run(List<String> command, Path workingDirectory, Duration timeout,
                       boolean inheritIo) throws IOException, InterruptedException {
+        return runTracked(command, workingDirectory, timeout, inheritIo, ignored -> {});
+    }
+
+    @Override
+    public Result runTracked(List<String> command, Path workingDirectory, Duration timeout,
+                             boolean inheritIo,
+                             java.util.function.Consumer<ProcessIdentity> started)
+            throws IOException, InterruptedException {
         ProcessBuilder builder = new ProcessBuilder(command).directory(workingDirectory.toFile());
         Process process;
         ByteArrayOutputStream captured = new ByteArrayOutputStream();
@@ -27,6 +35,7 @@ public final class DirectProcessRunner implements ProcessRunner {
             stdout = Thread.ofVirtual().start(() -> copyBounded(process.getInputStream(), captured));
             stderr = Thread.ofVirtual().start(() -> copyBounded(process.getErrorStream(), captured));
         }
+        started.accept(ProcessIdentity.of(process.toHandle()));
         boolean completed = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
         if (!completed) {
             process.destroyForcibly();

@@ -1,0 +1,95 @@
+# Real-package update preview contract
+
+## Scope and authority
+
+`preview-update --registry <json> [--id <uuid>] --tag <exact-tag>` is an observational,
+point-in-time comparison. It may download, verify, extract, and statically inspect one official
+release in launcher metadata staging. It never writes beneath an installed application root,
+changes its timestamps, updates the registry or receipt, locks an installation, converts saves, or
+applies a decision. Its result is not authority to apply later. Tags are exact labels, not
+semantic-version upgrade/downgrade recommendations.
+
+Registry schema remains 1 and every record remains `updateEligible=false`; that field is not
+preview eligibility. Preview eligibility comes only from a valid local ownership receipt.
+Imported and pre-receipt copies remain launchable/manageable but cannot preview, and provenance is
+not backfilled. Download one new official release with this launcher to obtain a receipt.
+
+## Receipt and trust model
+
+Receipts live in `<registry-file>.metadata/<installation-uuid>.json`, outside application roots.
+They bind schema and ownership-policy versions, exact installation UUID, canonical root,
+`registeredAt`, fixed repository, exact tag, asset name/size/SHA-256, complete official managed
+manifest, ordered protected paths, and a complete inventory of official package files excluded by
+policy. Archives are deleted after use.
+
+Parsing is stream-bounded and rejects malformed, duplicate, unknown, missing, null, trailing,
+aliased, unsafe-path, schema, policy, source, product/package, ownership-allowlist, inventory-count,
+and binding failures. Metadata, installation, and staging paths must have only real canonical
+ancestors and cannot overlap any registered installation. Receipt creation uses an OS lock,
+a uniquely owned staging file, and atomic create-new hard-link publication: an existing or
+concurrently appearing final receipt is never replaced, and another writer's staging object is
+never removed. The per-receipt lock file may remain as inert serialization state. Removing a
+registry record intentionally
+leaves an orphan receipt; a new registration gets another UUID/time and cannot match it.
+
+The receipt trusts launcher-local state derived from HTTPS plus GitHub's same-source digest. This
+detects transfer corruption but is not an independent signature. Hostile same-user modification of
+both registry and receipt is outside this model; structural and binding errors still fail closed.
+
+## Ownership policy version 1
+
+Archive membership alone never establishes ownership. The allowlist manages root suite launch
+binaries named `MegaMek`, `MekHQ`, or `MegaMekLab` with `.jar`, `.exe`, or `.sh`; ordinary files
+below `lib/`, `docs/`, and `licenses/`; and ordinary official files below `data/` except protected
+descendants.
+
+The stable ordered protected contract is `campaigns`, `saves`, `userdata`, `custom`, `mmconf`,
+`logs`, `backups`, and `data/campaigns`, `data/saves`, `data/userdata`, `data/custom`,
+`data/logs`, and `data/backups`. These stay protected even when an official package ships a
+byte-identical sample campaign, save, or configuration. Root `.l4j.ini`, configuration
+`.properties`, defaults, and every unknown root location are excluded unless a future policy
+explicitly assesses them. Excluded package paths are reported so the manifest never implies that
+the launcher manages the whole archive.
+
+Both manifests use the fixed repository-derived product/package identity and identical
+policy/protected contract. Safe extraction and manifest validation reject links, reparse points,
+case/Unicode aliases, traversal, unsafe names, path-parent conflicts, excessive counts/sizes, and
+unsupported archive types.
+
+## Planning and failures
+
+Only the union of baseline and target managed paths is inventoried; unknown local additions remain
+untouched. A missing target is `ADD`; a target match is `KEEP`; an untouched changed baseline is
+`REPLACE`; an untouched obsolete baseline is `REMOVE`; modified official files, modified obsolete
+files, unknown target-name collisions, and non-regular collisions are `SKIP`. Modified official
+data is therefore preserved. Hashing checks identity, size, and modification time again to reject
+observable concurrent changes.
+
+Case/Unicode aliases inside one package remain unsafe and fail validation. The legacy manifest
+plan command and all sandbox apply/recovery paths also retain strict pair validation: a
+capitalization-only difference between releases is ambiguous there and fails closed. Read-only
+real-package preview handles that one cross-release condition differently. It identifies the
+outermost component whose spelling changed only by capitalization, does not inspect, traverse, or
+hash that prefix, and reports every affected baseline and target managed-file spelling as `SKIP`.
+Each reason identifies both baseline and target prefix spellings and states that the existing
+content is preserved because rename is unsupported. Thus a directory change such as `data/Icons`
+to `data/icons` also skips uniquely named added and removed descendants instead of presenting them
+as `ADD`/`REMOVE`.
+
+`SKIP` counts are decision-row counts: a capitalization group contributes one row for each
+distinct affected managed-file spelling in the two manifests. No affected path is silently
+discarded. Same-name file/parent conflicts across releases are structural errors even beneath a
+case-changed prefix, and unrelated local case aliases, links, or reparse points still fail closed.
+Preview does not normalize or rename an installed file. Rename/apply support is deferred to a
+future explicitly designed Apply contract; this point-in-time report grants no later write
+authority.
+
+Before network access, preview validates receipt/policy/source binding, canonical root, metadata
+separation, and absence of disposable `.mm-launcher` sandbox state. It does not require the local
+launch JAR or observed build to remain byte-identical. The target comes from the same fixed
+repository using the installer's digest, size, redirect, timeout, extraction, and cleanup rules,
+and must contain the expected product. Only operation-created `.preview-<uuid>` staging is removed. A crash can leave that explicitly
+named staging directory or a uniquely named receipt staging file; publication itself is
+create-new/no-clobber, but directory durability across a power loss is not claimed. No broader
+cleanup or transaction across application publication, registration, and receipt creation is
+claimed. A missing GitHub digest is unsupported.

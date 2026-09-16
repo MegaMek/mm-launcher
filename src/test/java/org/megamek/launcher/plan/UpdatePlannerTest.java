@@ -83,6 +83,58 @@ class UpdatePlannerTest {
         assertTrue(error.getMessage().contains("link/reparse escape refused"));
     }
 
+    @Test
+    void previewSkipsWholeCaseChangedPrefixBeforeInspectingLocalAliases() throws Exception {
+        Files.createDirectory(installation.resolve("DATA"));
+        FileEntry oldIcon = file("data/Icons/old.png", "old");
+        FileEntry obsolete = file("lib/obsolete.txt", "obsolete");
+        FileEntry newIcon = file("data/icons/new.png", "new");
+        FileEntry added = file("docs/added.txt", "added");
+        Manifest baseline = manifest("1", List.of(oldIcon, obsolete));
+        Manifest target = manifest("2", List.of(newIcon, added));
+        ManifestReader.PreviewPairValidation validation =
+                new ManifestReader().validatePreviewPair(baseline, target);
+
+        List<Decision> decisions = new UpdatePlanner().planPreview(
+                baseline, target, installation, validation);
+
+        assertEquals(List.of(
+                new Decision(Action.SKIP, "data/icons/new.png",
+                        "case-only rename/capitalization; preserved; rename unsupported "
+                                + "(baseline prefix: data/Icons; target prefix: data/icons)"),
+                new Decision(Action.SKIP, "data/Icons/old.png",
+                        "case-only rename/capitalization; preserved; rename unsupported "
+                                + "(baseline prefix: data/Icons; target prefix: data/icons)"),
+                new Decision(Action.ADD, "docs/added.txt", "target managed file is missing"),
+                new Decision(Action.KEEP, "lib/obsolete.txt",
+                        "obsolete managed file is already absent")
+        ), decisions);
+
+        Manifest reversedBaseline = manifest("1", List.of(obsolete, oldIcon));
+        Manifest reversedTarget = manifest("2", List.of(added, newIcon));
+        assertEquals(decisions, new UpdatePlanner().planPreview(
+                reversedBaseline, reversedTarget, installation,
+                new ManifestReader().validatePreviewPair(reversedBaseline, reversedTarget)));
+    }
+
+    @Test
+    void previewKeepsUnrelatedLocalCaseAliasGuardStrict() throws Exception {
+        Files.createDirectory(installation.resolve("LIB"));
+        Files.writeString(installation.resolve("LIB/expected.txt"), "local");
+        Manifest baseline = manifest("1", List.of(file("data/Icons/old.png", "old")));
+        Manifest target = manifest("2", List.of(
+                file("data/icons/new.png", "new"),
+                file("lib/expected.txt", "target")));
+        ManifestReader.PreviewPairValidation validation =
+                new ManifestReader().validatePreviewPair(baseline, target);
+
+        ManifestException error = assertThrows(ManifestException.class,
+                () -> new UpdatePlanner().planPreview(
+                        baseline, target, installation, validation));
+        assertTrue(error.getMessage().contains("local case alias collision"));
+        assertTrue(error.getMessage().contains("expected lib"));
+    }
+
     private void write(String path, String contents) throws IOException {
         Path destination = installation.resolve(path);
         Files.createDirectories(destination.getParent());
