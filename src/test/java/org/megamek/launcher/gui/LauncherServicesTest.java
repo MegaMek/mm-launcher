@@ -1,0 +1,218 @@
+package org.megamek.launcher.gui;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import org.megamek.launcher.launch.ApplicationLauncher;
+import org.megamek.launcher.launch.JavaRuntime;
+import org.megamek.launcher.launch.ProcessRunner;
+import org.megamek.launcher.onboarding.InstallationInspector;
+import org.megamek.launcher.registry.InstallationRecord;
+import org.megamek.launcher.registry.RegistryStore;
+import org.megamek.launcher.release.OfficialRepository;
+import org.megamek.launcher.release.ReleaseCatalog;
+import org.megamek.launcher.release.ReleaseTransport;
+
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.jar.Attributes;
+import java.util.jar.JarOutputStream;
+import java.util.jar.Manifest;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class LauncherServicesTest {
+    @TempDir Path temp;
+
+    @Test
+    void firstRunIsEmptyButExistingCorruptRegistryIsNotReset() throws Exception {
+        Path registry = temp.resolve("registry.json");
+        LauncherServices services = services(registry, new RecordingRunner());
+        assertTrue(services.readRegistry().installations().isEmpty());
+        assertFalse(Files.exists(registry));
+
+        Files.writeString(registry, "{broken");
+        assertThrows(IOException.class, services::readRegistry);
+        assertEquals("{broken", Files.readString(registry));
+    }
+
+    @Test
+    void registryBelowNonDirectoryIsNotMistakenForFirstRun() throws Exception {
+        Path parentFile = Files.writeString(temp.resolve("not-a-directory"), "fixture");
+        LauncherServices services = services(parentFile.resolve("registry.json"),
+                new RecordingRunner());
+
+        IOException error = assertThrows(IOException.class, services::readRegistry);
+        assertTrue(error.getMessage().contains("non-directory"));
+    }
+
+    @Test
+    void homePreservesValidPreferredAndReportsMissingOrChangedPreferred() throws Exception {
+        LauncherServices services = services(temp.resolve("registry.json"), new RecordingRunner());
+        Path root = suite("preferred");
+        services.register("Preferred", root);
+
+        LauncherServices.HomeState valid = services.loadHome();
+        assertEquals("Preferred", valid.preferred().name());
+        assertEquals(null, valid.preferredError());
+
+        Files.delete(root.resolve("MegaMek.jar"));
+        LauncherServices.HomeState missing = services.loadHome();
+        assertEquals("Preferred", missing.preferred().name());
+        assertTrue(missing.preferredError().contains("unavailable"));
+
+        writeJar(root.resolve("MegaMek.jar"), "megamek.MegaMek");
+        writeJar(root.resolve("MekHQ.jar"), "mekhq.MekHQ");
+        LauncherServices.HomeState changed = services.loadHome();
+        assertEquals("Preferred", changed.preferred().name());
+        assertTrue(changed.preferredError().contains("no longer matches"));
+    }
+
+    @Test
+    void inspectionDoesNotExecuteAndRegistrationRequiresSeparateCall() throws Exception {
+        Path root = suite("copy");
+        Path registry = temp.resolve("registry.json");
+        RecordingRunner runner = new RecordingRunner();
+        LauncherServices services = services(registry, runner);
+
+        assertEquals("unknown", services.inspect(root).observedBuild());
+        assertFalse(Files.exists(registry));
+        assertTrue(runner.commands.isEmpty());
+
+        services.register("Existing copy", root);
+        assertEquals(1, services.readRegistry().installations().size());
+        assertTrue(runner.commands.isEmpty());
+    }
+
+    @Test
+    void multipleNamedRecordsPreserveDefaultAndRemovalPreservesFiles() throws Exception {
+        LauncherServices services = services(temp.resolve("registry.json"), new RecordingRunner());
+        Path firstRoot = suite("first");
+        Path secondRoot = suite("second");
+        InstallationRecord first = services.register("First", firstRoot);
+        InstallationRecord second = services.register("Second", secondRoot);
+        assertEquals(first.id(), services.readRegistry().defaultInstallationId());
+
+        services.select(second);
+        assertEquals(second.id(), services.readRegistry().defaultInstallationId());
+        services.remove(second);
+        assertEquals(first.id(), services.readRegistry().defaultInstallationId());
+        assertTrue(Files.isRegularFile(secondRoot.resolve("MegaMek.jar")));
+    }
+
+    @Test
+    void missingChecksumUsesSharedEligibilityAndCannotSelectAsset() throws Exception {
+        ReleaseCatalog.Asset asset = new ReleaseCatalog.Asset("MekHQ-v0.50.02.tar.gz", 42,
+                null, URI.create("https://github.com/MegaMek/mekhq/releases/download/"
+                + "v0.50.02/MekHQ-v0.50.02.tar.gz"));
+        ReleaseCatalog.Release release = new ReleaseCatalog.Release("v0.50.02", "0.50.02",
+                false, false, URI.create("https://github.com/MegaMek/mekhq/releases/tag/v0.50.02"),
+                List.of(asset));
+        ReleaseCatalog catalog = new ReleaseCatalog(new UnusedTransport());
+
+        ReleaseCatalog.Assessment assessment = catalog.assess(OfficialRepository.MEKHQ, release);
+        assertFalse(assessment.eligible());
+        assertEquals("No SHA-256 checksum published", assessment.reason());
+        assertTrue(assertThrows(IOException.class,
+                () -> catalog.selectInstallAsset(OfficialRepository.MEKHQ, release))
+                .getMessage().contains("No SHA-256 checksum published"));
+    }
+
+    @Test
+    void javaRefusalAndPreviewDoNotStartGameUntilLaunch() throws Exception {
+        Path root = suite("launch");
+        Path registry = temp.resolve("registry.json");
+        RecordingRunner runner = new RecordingRunner();
+        LauncherServices services = services(registry, runner);
+        InstallationRecord initialRecord = services.register("Launch", root);
+        Path containedJava = Files.writeString(root.resolve("java.exe"), "fixture");
+        assertThrows(IOException.class, () -> services.selectJava(initialRecord, containedJava));
+        assertTrue(runner.commands.isEmpty());
+
+        Path externalJava = Files.writeString(temp.resolve("java.exe"), "fixture");
+        assertEquals(21, services.selectJava(initialRecord, externalJava));
+        InstallationRecord record = services.readRegistry().installations().getFirst();
+        int afterSelection = runner.commands.size();
+        List<String> preview = services.preview(record, "megamek");
+        assertTrue(preview.contains("megamek.MegaMek"));
+        assertEquals(afterSelection + 1, runner.commands.size());
+        assertFalse(runner.inheritIO.getLast());
+
+        assertEquals(0, services.launch(record, "megamek"));
+        assertTrue(runner.inheritIO.getLast());
+    }
+
+    @Test
+    void backgroundSeamRunsOffEdtAndBusyGateCanResetAfterError() throws Exception {
+        BusyGate gate = new BusyGate();
+        assertTrue(gate.tryEnter());
+        assertFalse(gate.tryEnter());
+        gate.leave(); // the SwingWorker done/error path owns this same unconditional reset
+        assertTrue(gate.tryEnter());
+        gate.leave();
+
+        CountDownLatch finished = new CountDownLatch(1);
+        boolean[] wasEdt = {true};
+        javax.swing.SwingWorker<Void, Void> worker = new javax.swing.SwingWorker<>() {
+            @Override protected Void doInBackground() {
+                wasEdt[0] = javax.swing.SwingUtilities.isEventDispatchThread();
+                return null;
+            }
+            @Override protected void done() { finished.countDown(); }
+        };
+        worker.execute();
+        assertTrue(finished.await(5, TimeUnit.SECONDS));
+        assertFalse(wasEdt[0]);
+    }
+
+    private LauncherServices services(Path registry, RecordingRunner runner) {
+        return new LauncherServices(registry, new RegistryStore(), new InstallationInspector(),
+                new UnusedTransport(), new JavaRuntime(runner), new ApplicationLauncher(runner));
+    }
+
+    private Path suite(String name) throws Exception {
+        Path root = Files.createDirectory(temp.resolve(name));
+        Files.createDirectories(root.resolve("data"));
+        Files.createDirectories(root.resolve("mmconf"));
+        Files.createDirectories(root.resolve("lib"));
+        writeJar(root.resolve("MegaMek.jar"), "megamek.MegaMek");
+        return root;
+    }
+
+    private static void writeJar(Path path, String mainClass) throws Exception {
+        Manifest manifest = new Manifest();
+        manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        manifest.getMainAttributes().put(Attributes.Name.MAIN_CLASS, mainClass);
+        try (JarOutputStream jar = new JarOutputStream(Files.newOutputStream(path), manifest)) {
+            // Static inspection needs only the manifest for this minimal fixture.
+        }
+    }
+
+    private static final class RecordingRunner implements ProcessRunner {
+        final java.util.ArrayList<List<String>> commands = new java.util.ArrayList<>();
+        final java.util.ArrayList<Boolean> inheritIO = new java.util.ArrayList<>();
+
+        @Override public Result run(List<String> command, Path workingDirectory, Duration timeout,
+                                    boolean inherit) {
+            commands.add(List.copyOf(command));
+            inheritIO.add(inherit);
+            return new Result(0, inherit ? "" : "openjdk version \"21.0.4\"", false);
+        }
+    }
+
+    private static final class UnusedTransport implements ReleaseTransport {
+        @Override public Response get(URI uri, String accept) {
+            throw new AssertionError("network was not expected");
+        }
+    }
+}

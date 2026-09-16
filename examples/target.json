@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "product": "MegaMek",
+  "packageId": "standalone",
+  "releaseId": "example-2",
+  "protectedPaths": ["saves", "campaigns", "userdata", "custom"],
+  "files": [
+    {
+      "path": "app.txt",
+      "sha256": "73d9ddab7cd35ff1da5b8cd1dda18ff6d3cdfa69624257b0282d9811ede2ebb5"
+    },
+    {
+      "path": "local.txt",
+      "sha256": "0f15384d18789b1ebf3043dc7b6bc27273c8576373fbeb6f3e15854b588141c0"
+    },
+    {
+      "path": "missing.txt",
+      "sha256": "0f15384d18789b1ebf3043dc7b6bc27273c8576373fbeb6f3e15854b588141c0"
+    }
+  ]
+}
