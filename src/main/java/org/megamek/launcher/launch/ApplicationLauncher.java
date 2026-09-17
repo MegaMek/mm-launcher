@@ -82,32 +82,30 @@ public final class ApplicationLauncher {
             lease.requireNoPendingUpdate();
             List<String> command = command(record, product);
             lease.markLaunchStarting();
+            boolean childCompleted = false;
             try {
+                java.util.concurrent.atomic.AtomicReference<IOException> markerFailure =
+                        new java.util.concurrent.atomic.AtomicReference<>();
                 ProcessRunner.Result result = runner.runTracked(command, root,
-                        Duration.ofDays(30), true, identity -> {
+                        Duration.ofMillis(Long.MAX_VALUE), true, identity -> {
                             try {
                                 lease.markChild(identity);
                             } catch (IOException e) {
-                                throw new LaunchMarkerFailure(e);
+                                markerFailure.compareAndSet(null, e);
                             }
                         });
+                childCompleted = true;
+                if (markerFailure.get() != null) throw markerFailure.get();
                 if (result.timedOut()) {
                     throw new IOException("application exceeded launcher wait limit");
                 }
                 return result.exitCode();
-            } catch (LaunchMarkerFailure e) {
-                throw e.failure;
             } finally {
-                lease.clearLaunchMarker();
+                // Any runner failure after STARTING is ambiguous: ProcessBuilder.start may have
+                // returned just before callback publication failed or the launcher was
+                // interrupted. Keep STARTING/RUNNING unless the child wait completed.
+                if (childCompleted) lease.clearLaunchMarker();
             }
-        }
-    }
-
-    private static final class LaunchMarkerFailure extends RuntimeException {
-        private final IOException failure;
-        private LaunchMarkerFailure(IOException failure) {
-            super(failure);
-            this.failure = failure;
         }
     }
 }

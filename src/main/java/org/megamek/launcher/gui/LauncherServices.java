@@ -1,5 +1,9 @@
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.channel.ChannelPreference;
+import org.megamek.launcher.channel.ChannelPreferenceStore;
+import org.megamek.launcher.channel.ChannelUpdateChecker;
+import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.launch.ApplicationLauncher;
 import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.onboarding.Inspection;
@@ -71,12 +75,14 @@ public class LauncherServices {
     public HomeState loadHome() throws IOException {
         RegistryData data = readRegistry();
         if (data.defaultInstallationId() == null) {
-            return new HomeState(data, null, null, null, null, false);
+            return new HomeState(data, null, null, null, null, false, null);
         }
         InstallationRecord record = store.resolve(data, null);
         boolean pending = pending(record);
         UpdatePreviewService.Eligibility eligibility =
                 new UpdatePreviewService(transport).eligibility(registry, record.id());
+        ChannelPreferenceStore.ReadResult channel =
+                new ChannelPreferenceStore().read(registry, data, record);
         try {
             Inspection current = inspector.inspect(Path.of(record.canonicalRoot()));
             if (!current.canonicalRoot().equals(record.canonicalRoot())
@@ -85,14 +91,15 @@ public class LauncherServices {
                 return new HomeState(data, record, null,
                         "The preferred copy no longer matches its registered build or program "
                                 + "layout. Use Manage installations to remove it, select another "
-                                + "copy, or recover an interrupted update.", eligibility, pending);
+                                + "copy, or recover an interrupted update.", eligibility, pending,
+                        channel);
             }
-            return new HomeState(data, record, current, null, eligibility, pending);
+            return new HomeState(data, record, current, null, eligibility, pending, channel);
         } catch (IOException | RuntimeException e) {
             return new HomeState(data, record, null,
                     "The preferred copy is unavailable: " + detail(e)
                             + ". Use recovery if an update was interrupted, or Manage "
-                            + "installations.", eligibility, pending);
+                            + "installations.", eligibility, pending, channel);
         }
     }
 
@@ -156,6 +163,50 @@ public class LauncherServices {
                 name, progress);
     }
 
+    public FreshInstaller.Result install(OfficialRepository repository, String tag,
+                                         Path destination, String name, FollowChannel channel,
+                                         PrintStream progress)
+            throws IOException, InterruptedException {
+        if (channel == null) throw new IOException("choose a channel for the new installation");
+        FreshInstaller.Result result = install(repository, tag, destination, name, progress);
+        try {
+            new ChannelPreferenceStore().set(registry, result.record(), channel, false);
+        } catch (IOException error) {
+            throw new IOException("installation is valid and REGISTERED at "
+                    + result.destination() + " but the CHANNEL SETTING WAS NOT PERSISTED: "
+                    + detail(error) + ". Keep using the retained copy and choose its channel "
+                    + "again.", error);
+        }
+        return result;
+    }
+
+    public ChannelPreference setChannel(InstallationRecord record, FollowChannel channel,
+                                        boolean checkOnOpen) throws IOException {
+        return new ChannelPreferenceStore().set(registry, record, channel, checkOnOpen);
+    }
+
+    public ChannelUpdateChecker.Result checkUpdates(InstallationRecord expected)
+            throws IOException, InterruptedException {
+        ChannelUpdateChecker.Result result =
+                new ChannelUpdateChecker(registry, transport).check(expected.id());
+        if (!result.record().equals(expected)) {
+            throw new IOException("selected installation changed while checking for updates");
+        }
+        return result;
+    }
+
+    public UpdatePreviewService.Preview previewRecommended(
+            InstallationRecord record, OwnershipReceipt receipt,
+            ChannelUpdateChecker.Result expected, PrintStream progress)
+            throws IOException, InterruptedException,
+            org.megamek.launcher.manifest.ManifestException {
+        ChannelUpdateChecker.Recommendation recommendation =
+                requireCurrentRecommendation(record, expected);
+        return new UpdatePreviewService(transport).preview(registry, record, receipt,
+                recommendation.targetTag(), recommendation.assetName(),
+                recommendation.assetSize(), recommendation.assetDigest(), progress);
+    }
+
     public UpdatePreviewService.Preview previewUpdate(InstallationRecord record, String tag,
                                                        PrintStream progress)
             throws IOException, InterruptedException,
@@ -185,6 +236,46 @@ public class LauncherServices {
             throw new IOException("selected update source changed; preview and consent again");
         }
         return service.apply(snapshot, tag, size, digest, confirmation, progress);
+    }
+
+    public RealUpdateService.ApplyResult applyRecommended(
+            InstallationRecord expectedRecord, CurrentUpdateState expectedState,
+            ChannelUpdateChecker.Result expected, String confirmation, PrintStream progress)
+            throws IOException, InterruptedException,
+            org.megamek.launcher.manifest.ManifestException {
+        ChannelUpdateChecker.Recommendation recommendation =
+                requireCurrentRecommendation(expectedRecord, expected);
+        RealUpdateService service = new RealUpdateService(transport);
+        RealUpdateService.Snapshot snapshot = service.snapshot(registry, expectedRecord.id());
+        if (!snapshot.record().equals(expectedRecord)
+                || !snapshot.current().equals(expectedState)) {
+            throw new IOException("selected recommended-update source changed; check, preview, "
+                    + "and consent again");
+        }
+        return service.apply(snapshot, recommendation.targetTag(), recommendation.assetName(),
+                recommendation.assetSize(), recommendation.assetDigest(), confirmation, progress);
+    }
+
+    private ChannelUpdateChecker.Recommendation requireCurrentRecommendation(
+            InstallationRecord record, ChannelUpdateChecker.Result expected)
+            throws IOException, InterruptedException {
+        if (expected == null || !expected.updateAvailable()
+                || !expected.record().equals(record)) {
+            throw new IOException("recommended update is missing or belongs to another installation");
+        }
+        ChannelUpdateChecker.Recommendation captured = expected.recommendation();
+        if (!captured.installationId().equals(record.id())
+                || !captured.canonicalRoot().equals(record.canonicalRoot())
+                || !captured.registeredAt().equals(record.registeredAt())) {
+            throw new IOException("recommended update installation binding is stale");
+        }
+        ChannelUpdateChecker.Result fresh =
+                new ChannelUpdateChecker(registry, transport).check(record.id());
+        if (!fresh.updateAvailable() || !fresh.recommendation().equals(captured)) {
+            throw new IOException("channel source, preference, or target metadata changed; "
+                    + "check again and consent to the new result");
+        }
+        return captured;
     }
 
     public RealUpdateService.RecoveryResult recoverUpdate(InstallationRecord record,
@@ -246,10 +337,19 @@ public class LauncherServices {
     public record HomeState(RegistryData registry, InstallationRecord preferred,
                             Inspection currentInspection, String preferredError,
                             UpdatePreviewService.Eligibility previewEligibility,
-                            boolean pendingUpdate) {
+                            boolean pendingUpdate,
+                            ChannelPreferenceStore.ReadResult channelPreference) {
+        public HomeState(RegistryData registry, InstallationRecord preferred,
+                         Inspection currentInspection, String preferredError,
+                         UpdatePreviewService.Eligibility previewEligibility,
+                         boolean pendingUpdate) {
+            this(registry, preferred, currentInspection, preferredError, previewEligibility,
+                    pendingUpdate, null);
+        }
+
         public HomeState(RegistryData registry, InstallationRecord preferred,
                          Inspection currentInspection, String preferredError) {
-            this(registry, preferred, currentInspection, preferredError, null, false);
+            this(registry, preferred, currentInspection, preferredError, null, false, null);
         }
     }
 }

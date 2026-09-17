@@ -51,9 +51,10 @@ public final class VerifiedPackageFetcher {
             throws IOException, InterruptedException {
         ReleaseCatalog.Release release = catalog.exact(repository, tag);
         ReleaseCatalog.Asset asset = catalog.selectInstallAsset(repository, release);
-        if (expected != null && (asset.size() != expected.size()
+        if (expected != null && (expected.name() != null && !asset.name().equals(expected.name())
+                || asset.size() != expected.size()
                 || !asset.digest().equalsIgnoreCase(expected.digest()))) {
-            throw new IOException("target asset size or digest changed since explicit consent; "
+            throw new IOException("target asset name, size, or digest changed since explicit consent; "
                     + "preview and consent again");
         }
         Path staging = createOwnedStaging(safeParent, stagingPrefix);
@@ -191,6 +192,9 @@ public final class VerifiedPackageFetcher {
         }
     }
 
-    public record ExpectedAsset(long size, String digest) {
+    public record ExpectedAsset(String name, long size, String digest) {
+        public ExpectedAsset(long size, String digest) {
+            this(null, size, digest);
+        }
     }
 }

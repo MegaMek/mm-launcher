@@ -1,5 +1,9 @@
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.channel.ChannelPreference;
+import org.megamek.launcher.channel.ChannelPreferenceStore;
+import org.megamek.launcher.channel.ChannelUpdateChecker;
+import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.onboarding.Inspection;
 import org.megamek.launcher.onboarding.Product;
 import org.megamek.launcher.registry.InstallationRecord;
@@ -15,6 +19,7 @@ import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.DefaultListModel;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
@@ -47,8 +52,10 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.text.NumberFormat;
 import java.util.List;
+import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.function.Consumer;
 
@@ -59,7 +66,12 @@ public final class LauncherFrame extends JFrame {
     private final Map<Component, Boolean> enabledBeforeWork = new IdentityHashMap<>();
     private final JPanel content = new JPanel(new BorderLayout(12, 12));
     private final JLabel status = new JLabel("Loading installations…");
+    private final Set<String> checkedOnOpen = new HashSet<>();
     private LauncherServices.HomeState state;
+    private ChannelUpdateChecker.Result channelCheck;
+    private String channelCheckError;
+    private SwingWorker<ChannelUpdateChecker.Result, Void> channelWorker;
+    private long homeGeneration;
 
     public LauncherFrame(LauncherServices services) {
         super("MegaMek Launcher");
@@ -92,6 +104,10 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void reload() {
+        homeGeneration++;
+        cancelChannelWorker();
+        channelCheck = null;
+        channelCheckError = null;
         status.setText("Loading installations…");
         run("Loading installations", () -> {
             try {
@@ -103,6 +119,7 @@ public final class LauncherFrame extends JFrame {
             if (loaded.error() == null) {
                 state = loaded.state();
                 renderHome();
+                maybeCheckOnOpen();
             } else {
                 renderLoadError(loaded.error());
             }
@@ -153,6 +170,7 @@ public final class LauncherFrame extends JFrame {
         panel.add(details);
         panel.add(Box.createVerticalStrut(8));
         panel.add(new JLabel("Launching and Java selection are disabled for this copy."));
+        renderChannelActions(panel);
         renderPreviewAction(panel);
         renderRecoveryAction(panel);
     }
@@ -221,6 +239,7 @@ public final class LauncherFrame extends JFrame {
                 "selectJavaButton");
         java.addActionListener(event -> chooseJava(record));
         panel.add(java);
+        renderChannelActions(panel);
         renderPreviewAction(panel);
         renderRecoveryAction(panel);
     }
@@ -242,14 +261,236 @@ public final class LauncherFrame extends JFrame {
             panel.add(update);
         }
         JLabel note = new JLabel(state.previewEligibility().available()
-                ? "Provenance verified · Preview remains read-only"
+                ? "Receipt verified; current provenance verified · Preview remains read-only"
                 : "Preview unavailable: " + state.previewEligibility().reason());
         note.setName("previewEligibilityNote");
         panel.add(note);
     }
 
+    private void renderChannelActions(JPanel panel) {
+        if (state == null || state.preferred() == null || state.previewEligibility() == null
+                || state.previewEligibility().receipt() == null) return;
+        panel.add(Box.createVerticalStrut(12));
+        ChannelPreferenceStore.ReadResult selected = state.channelPreference();
+        String following;
+        if (selected == null || selected.status() == ChannelPreferenceStore.Status.UNKNOWN) {
+            following = "Unknown — choose a channel before checking";
+        } else if (selected.status() == ChannelPreferenceStore.Status.UNAVAILABLE) {
+            following = "Unavailable — " + selected.reason();
+        } else {
+            following = selected.preference().channel().toString()
+                    + (selected.preference().checkOnOpen() ? " · check on open enabled"
+                    : " · manual checks only");
+        }
+        JLabel label = new JLabel("Following channel: " + following);
+        label.setName("followingChannelLabel");
+        panel.add(label);
+        JButton choose = button(selected != null
+                        && selected.status() == ChannelPreferenceStore.Status.CONFIGURED
+                        ? "Change channel…" : "Choose channel…",
+                "chooseChannelButton");
+        choose.setEnabled(selected == null
+                || selected.status() != ChannelPreferenceStore.Status.UNAVAILABLE);
+        if (selected != null) choose.setToolTipText(selected.reason());
+        choose.addActionListener(event -> chooseChannel());
+        panel.add(choose);
+
+        if (selected != null && selected.status() == ChannelPreferenceStore.Status.CONFIGURED) {
+            JButton check = button(channelWorker == null ? "Check for updates" : "Checking…",
+                    "checkUpdatesButton");
+            check.setEnabled(channelWorker == null);
+            check.addActionListener(event -> startChannelCheck(false));
+            panel.add(check);
+        }
+        if (channelCheck != null) {
+            ChannelUpdateChecker.Recommendation recommendation = channelCheck.recommendation();
+            String target = recommendation == null ? "unavailable" : recommendation.targetTag();
+            JLabel result = new JLabel("Installed " + value(channelCheck.currentTag())
+                    + " · followed target " + target + " · "
+                    + channelCheck.status().name().toLowerCase(java.util.Locale.ROOT)
+                    + " — " + channelCheck.reason());
+            result.setName("channelCheckResult");
+            result.setToolTipText(recommendation == null ? channelCheck.reason()
+                    : "Notes: " + recommendation.notesUrl() + " · "
+                    + NumberFormat.getIntegerInstance().format(recommendation.assetSize())
+                    + " bytes");
+            panel.add(result);
+            if (recommendation != null) {
+                panel.add(new JLabel("Release notes: " + recommendation.notesUrl()
+                        + " · Download "
+                        + NumberFormat.getIntegerInstance().format(recommendation.assetSize())
+                        + " bytes"));
+            }
+            if (channelCheck.updateAvailable()) {
+                JButton recommended = button("Preview recommended update…",
+                        "recommendedUpdateButton");
+                recommended.addActionListener(event -> recommendedUpdate(channelCheck));
+                panel.add(recommended);
+            }
+        } else if (channelCheckError != null) {
+            JLabel result = new JLabel("Unable to check for updates: " + channelCheckError);
+            result.setName("channelCheckResult");
+            panel.add(result);
+        }
+    }
+
+    private void chooseChannel() {
+        if (state == null || state.preferred() == null) return;
+        InstallationRecord record = state.preferred();
+        ChannelPreference existing = state.channelPreference() == null
+                ? null : state.channelPreference().preference();
+        JComboBox<FollowChannel> channels = new JComboBox<>(FollowChannel.values());
+        channels.setName("channelChoiceCombo");
+        channels.setSelectedItem(existing == null ? null : existing.channel());
+        JCheckBox checkOnOpen = new JCheckBox(
+                "Check this copy on open (uses the network in the background)",
+                existing != null && existing.checkOnOpen());
+        checkOnOpen.setName("checkOnOpenCheckbox");
+        JPanel choices = new JPanel();
+        choices.setLayout(new BoxLayout(choices, BoxLayout.Y_AXIS));
+        choices.add(new JLabel("Follow an official release label:"));
+        choices.add(channels);
+        choices.add(checkOnOpen);
+        choices.add(new JLabel("Changing this setting never applies or downgrades a release."));
+        int answer = JOptionPane.showConfirmDialog(this, choices,
+                existing == null ? "Choose update channel" : "Change update channel",
+                JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
+        if (answer != JOptionPane.OK_OPTION) return;
+        FollowChannel selected = (FollowChannel) channels.getSelectedItem();
+        if (selected == null) {
+            JOptionPane.showMessageDialog(this, "Choose Milestone or Development.",
+                    "Channel required", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        run("Saving channel setting",
+                () -> services.setChannel(record, selected, checkOnOpen.isSelected()),
+                ignored -> reload());
+    }
+
+    private void maybeCheckOnOpen() {
+        if (state == null || state.preferred() == null || state.channelPreference() == null
+                || state.channelPreference().status() != ChannelPreferenceStore.Status.CONFIGURED
+                || !state.channelPreference().preference().checkOnOpen()
+                || state.previewEligibility() == null
+                || !state.previewEligibility().available()) return;
+        ChannelPreference preference = state.channelPreference().preference();
+        String key = preference.installationId() + "|" + preference.registeredAt()
+                + "|" + preference.channel();
+        if (checkedOnOpen.add(key)) startChannelCheck(true);
+    }
+
+    private void startChannelCheck(boolean automatic) {
+        if (channelWorker != null || state == null || state.preferred() == null
+                || state.channelPreference() == null
+                || state.channelPreference().status() != ChannelPreferenceStore.Status.CONFIGURED) {
+            return;
+        }
+        final long generation = homeGeneration;
+        final InstallationRecord record = state.preferred();
+        final ChannelPreference preference = state.channelPreference().preference();
+        status.setText(automatic ? "Checking followed channel in background…"
+                : "Checking followed channel…");
+        channelCheckError = null;
+        channelWorker = new SwingWorker<>() {
+            @Override
+            protected ChannelUpdateChecker.Result doInBackground() throws Exception {
+                return services.checkUpdates(record);
+            }
+
+            @Override
+            protected void done() {
+                if (channelWorker != this) return;
+                channelWorker = null;
+                if (isCancelled() || !isDisplayable() || generation != homeGeneration
+                        || state == null || state.preferred() == null
+                        || !state.preferred().equals(record)
+                        || state.channelPreference() == null
+                        || !preference.equals(state.channelPreference().preference())) return;
+                try {
+                    channelCheck = get();
+                    channelCheckError = null;
+                    status.setText("Update check complete");
+                } catch (java.util.concurrent.CancellationException ignored) {
+                    return;
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    return;
+                } catch (java.util.concurrent.ExecutionException error) {
+                    channelCheck = null;
+                    channelCheckError = errorDetail(error.getCause());
+                    status.setText("Unable to check for updates");
+                }
+                if (gate.isBusy()) return;
+                renderHome();
+            }
+        };
+        channelWorker.execute();
+        renderHome();
+    }
+
+    private void cancelChannelWorker() {
+        if (channelWorker != null) {
+            channelWorker.cancel(true);
+            channelWorker = null;
+        }
+    }
+
+    private void recommendedUpdate(ChannelUpdateChecker.Result checked) {
+        if (checked == null || !checked.updateAvailable() || state == null
+                || state.preferred() == null || state.previewEligibility() == null
+                || !state.previewEligibility().available()) return;
+        ChannelUpdateChecker.Recommendation recommendation = checked.recommendation();
+        int answer = JOptionPane.showConfirmDialog(this,
+                "Installed verified tag: " + checked.currentTag()
+                        + "\nFollowing: " + checked.preference().channel()
+                        + "\nExact target: " + recommendation.targetTag()
+                        + "\nAsset: " + recommendation.assetName()
+                        + "\nDownload: "
+                        + NumberFormat.getIntegerInstance().format(recommendation.assetSize())
+                        + " bytes"
+                        + "\nRelease notes: " + recommendation.notesUrl()
+                        + "\n\nDownload this exact name, size, and digest for a read-only preview?"
+                        + "\nA separate Apply confirmation follows.",
+                "Confirm recommended preview download", JOptionPane.OK_CANCEL_OPTION,
+                JOptionPane.WARNING_MESSAGE);
+        if (answer != JOptionPane.OK_OPTION) return;
+        runRecommendedPreview(state.preferred(), state.previewEligibility().receipt(), checked);
+    }
+
+    private void runRecommendedPreview(InstallationRecord record,
+                                       org.megamek.launcher.update.OwnershipReceipt receipt,
+                                       ChannelUpdateChecker.Result checked) {
+        String tag = checked.recommendation().targetTag();
+        JTextArea progressLog = textArea("Verifying followed channel and preparing read-only "
+                + "preview for " + tag + "…\n");
+        progressLog.setName("recommendedPreviewProgressLog");
+        JDialog progress = dialog("Downloading recommended update preview",
+                new JScrollPane(progressLog), null, new Dimension(720, 390));
+        progress.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+        progress.setVisible(true);
+        PrintStream stream = new PrintStream(new LogOutput(progressLog), true,
+                StandardCharsets.UTF_8);
+        run("Building recommended update preview",
+                () -> services.previewRecommended(record, receipt, checked, stream), result -> {
+                    progress.dispose();
+                    showApplyConsent(result, checked);
+                }, error -> {
+                    appendBounded(progressLog, "\nRECOMMENDED PREVIEW FAILED: "
+                            + errorDetail(error) + "\nNo installed files were changed. Check "
+                            + "again and consent to any changed target.\n");
+                    progress.setTitle("Recommended update preview failed");
+                    progress.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+                }, stream::close);
+    }
+
+    private static String value(String value) {
+        return value == null ? "unavailable" : value;
+    }
+
     private void renderRecoveryAction(JPanel panel) {
         if (state == null || state.preferred() == null) return;
+        if (!state.pendingUpdate() && (state.previewEligibility() == null
+                || state.previewEligibility().receipt() == null)) return;
         panel.add(Box.createVerticalStrut(5));
         JButton recover = button(state.pendingUpdate()
                         ? "Recover interrupted update…" : "Check update recovery…",
@@ -403,6 +644,9 @@ public final class LauncherFrame extends JFrame {
         JComboBox<OfficialRepository> product = new JComboBox<>(new OfficialRepository[]{
                 OfficialRepository.MEKHQ, OfficialRepository.MEGAMEK, OfficialRepository.LAB});
         product.setName("downloadProductCombo");
+        JComboBox<FollowChannel> channel = new JComboBox<>(FollowChannel.values());
+        channel.setName("downloadChannelCombo");
+        channel.setSelectedItem(null);
         DefaultListModel<ReleaseChoice> model = new DefaultListModel<>();
         JList<ReleaseChoice> releases = new JList<>(model);
         releases.setName("releaseList");
@@ -420,6 +664,8 @@ public final class LauncherFrame extends JFrame {
         JPanel top = new JPanel();
         top.add(new JLabel("Product:"));
         top.add(product);
+        top.add(new JLabel("Follow:"));
+        top.add(channel);
         top.add(fetch);
         JPanel bottom = new JPanel();
         bottom.add(pageLabel);
@@ -474,16 +720,24 @@ public final class LauncherFrame extends JFrame {
         });
         releases.addListSelectionListener(event -> {
             ReleaseChoice choice = releases.getSelectedValue();
-            install.setEnabled(choice != null && choice.assessment().eligible());
+            install.setEnabled(choice != null && choice.assessment().eligible()
+                    && channel.getSelectedItem() != null);
             if (choice != null && !choice.assessment().eligible()) {
                 pageLabel.setText(choice.assessment().reason());
             }
         });
+        channel.addActionListener(event -> {
+            ReleaseChoice choice = releases.getSelectedValue();
+            install.setEnabled(choice != null && choice.assessment().eligible()
+                    && channel.getSelectedItem() != null);
+        });
         install.addActionListener(event -> {
             ReleaseChoice choice = releases.getSelectedValue();
             OfficialRepository repository = loadedRepository[0];
-            if (choice == null || repository == null || !choice.assessment().eligible()) return;
-            chooseInstallDestination(dialog, repository, choice);
+            FollowChannel followed = (FollowChannel) channel.getSelectedItem();
+            if (choice == null || repository == null || followed == null
+                    || !choice.assessment().eligible()) return;
+            chooseInstallDestination(dialog, repository, choice, followed);
         });
         dialog.setVisible(true);
     }
@@ -502,6 +756,8 @@ public final class LauncherFrame extends JFrame {
         final InstallationRecord sourceRecord = state.preferred();
         final org.megamek.launcher.update.OwnershipReceipt sourceReceipt =
                 state.previewEligibility().receipt();
+        final org.megamek.launcher.update.CurrentUpdateState sourceCurrent =
+                state.previewEligibility().current();
         OfficialRepository repository;
         try {
             repository = OfficialRepository.parse(sourceReceipt.repository());
@@ -562,8 +818,10 @@ public final class LauncherFrame extends JFrame {
             if (choice == null || !choice.assessment().eligible()) return;
             ReleaseCatalog.Asset asset = choice.assessment().asset();
             int answer = JOptionPane.showConfirmDialog(dialog,
-                    "Current verified source: " + sourceReceipt.tag() + " / "
-                            + sourceReceipt.assetName()
+                    "Current verified source: "
+                            + (sourceCurrent == null ? sourceReceipt.tag() : sourceCurrent.tag())
+                            + " / " + (sourceCurrent == null ? sourceReceipt.assetName()
+                            : sourceCurrent.assetName())
                             + "\nTarget: " + choice.release().tag() + " / " + asset.name()
                             + "\nDownload: " + NumberFormat.getIntegerInstance().format(asset.size())
                             + " bytes (a full release package; time depends on your connection)"
@@ -605,6 +863,11 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void showApplyConsent(UpdatePreviewService.Preview preview) {
+        showApplyConsent(preview, null);
+    }
+
+    private void showApplyConsent(UpdatePreviewService.Preview preview,
+                                  ChannelUpdateChecker.Result recommended) {
         if (preview.currentState() == null) {
             showError("Update unavailable",
                     new IOException("preview did not include current verified provenance"));
@@ -634,10 +897,15 @@ public final class LauncherFrame extends JFrame {
             status.setText("Update cancelled before any write");
             return;
         }
-        applyUpdate(preview);
+        applyUpdate(preview, recommended);
     }
 
     private void applyUpdate(UpdatePreviewService.Preview preview) {
+        applyUpdate(preview, null);
+    }
+
+    private void applyUpdate(UpdatePreviewService.Preview preview,
+                             ChannelUpdateChecker.Result recommended) {
         JTextArea log = textArea("Re-reading source, reacquiring the update gate, and "
                 + "re-downloading the exact consented package…\n");
         log.setName("applyUpdateProgressLog");
@@ -646,10 +914,12 @@ public final class LauncherFrame extends JFrame {
         progress.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         progress.setVisible(true);
         PrintStream stream = new PrintStream(new LogOutput(log), true, StandardCharsets.UTF_8);
-        run("Applying verified update", () -> services.applyUpdate(preview.record(),
-                        preview.currentState(), preview.targetRelease().tag(),
-                        preview.targetAsset().size(), preview.targetAsset().digest(),
-                        RealUpdateService.CONFIRM, stream),
+        run("Applying verified update", () -> recommended == null
+                        ? services.applyUpdate(preview.record(), preview.currentState(),
+                        preview.targetRelease().tag(), preview.targetAsset().size(),
+                        preview.targetAsset().digest(), RealUpdateService.CONFIRM, stream)
+                        : services.applyRecommended(preview.record(), preview.currentState(),
+                        recommended, RealUpdateService.CONFIRM, stream),
                 result -> {
                     progress.dispose();
                     String outcome = result.skippedDecisions() == 0
@@ -716,7 +986,7 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void chooseInstallDestination(JDialog owner, OfficialRepository repository,
-                                          ReleaseChoice choice) {
+                                          ReleaseChoice choice, FollowChannel channel) {
         JFileChooser chooser = folders("Choose an existing writable parent folder");
         if (chooser.showOpenDialog(owner) != JFileChooser.APPROVE_OPTION) return;
         Path safeFolder = null;
@@ -740,6 +1010,7 @@ public final class LauncherFrame extends JFrame {
         ReleaseCatalog.Asset asset = choice.assessment().asset();
         int answer = JOptionPane.showConfirmDialog(owner,
                 "Release: " + choice.release().title() + " (" + choice.release().tag() + ")"
+                        + "\nFollowing channel: " + channel
                         + "\nAsset: " + asset.name()
                         + "\nDownload: " + NumberFormat.getIntegerInstance().format(asset.size())
                         + " bytes\nDestination: " + destination
@@ -748,10 +1019,15 @@ public final class LauncherFrame extends JFrame {
                 JOptionPane.WARNING_MESSAGE);
         if (answer != JOptionPane.OK_OPTION) return;
         owner.dispose();
-        install(repository, choice.release().tag(), destination, name);
+        install(repository, choice.release().tag(), destination, name, channel);
     }
 
     void install(OfficialRepository repository, String tag, Path destination, String name) {
+        install(repository, tag, destination, name, null);
+    }
+
+    void install(OfficialRepository repository, String tag, Path destination, String name,
+                 FollowChannel channel) {
         JTextArea log = textArea("Preparing exact release " + tag + "…\n");
         log.setName("installProgressLog");
         JDialog progress = dialog("Downloading and installing", new JScrollPane(log), null,
@@ -779,8 +1055,10 @@ public final class LauncherFrame extends JFrame {
         attempt[0] = () -> {
             PrintStream stream = new PrintStream(new LogOutput(log), true, StandardCharsets.UTF_8);
             retry.setEnabled(false);
-            run("Downloading and installing", () -> services.install(repository, tag, destination,
-                    name, stream), result -> {
+            run("Downloading and installing", () -> channel == null
+                    ? services.install(repository, tag, destination, name, stream)
+                    : services.install(repository, tag, destination, name, channel, stream),
+                    result -> {
                         appendBounded(log, "\nInstalled and registered at "
                                 + result.destination() + "\n");
                         JOptionPane.showMessageDialog(progress,
@@ -978,6 +1256,13 @@ public final class LauncherFrame extends JFrame {
         int excess = area.getDocument().getLength() - LOG_LIMIT;
         if (excess > 0) area.replaceRange("", 0, excess);
         area.setCaretPosition(area.getDocument().getLength());
+    }
+
+    @Override
+    public void dispose() {
+        homeGeneration++;
+        cancelChannelWorker();
+        super.dispose();
     }
 
     private record ReleaseChoice(ReleaseCatalog.Release release,

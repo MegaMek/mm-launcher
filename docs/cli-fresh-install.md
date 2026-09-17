@@ -1,8 +1,10 @@
 # MM Launcher command-line prototype
 
-The current review downloads one explicitly selected official release into a **new** folder,
-validates it, and registers it for later launch. There is no GUI, automatic launch, bundled Java,
-or update eligibility yet. The launcher never modifies an existing game installation.
+This walkthrough downloads one explicitly selected official release into a **new** folder,
+validates it, and registers it for later launch. There is no automatic launch, bundled Java, or
+implicit update authority. The `install-release` command itself never modifies an existing game
+installation; explicit receipt-backed updates use the separate
+[real-update contract](real-update-contract.md).
 
 ## 1. Build and choose local state
 
@@ -35,7 +37,7 @@ if (Test-Path -LiteralPath $destination) {
 }
 $name = Read-Host "Name to show in the launcher registry"
 & $cli install-release --application mekhq --tag $tag --destination $destination `
-    --registry $registry --name $name
+    --registry $registry --name $name --channel milestone
 if ($LASTEXITCODE -ne 0) {
     throw "Install failed. Read the error carefully; it says if a valid folder was retained but not registered."
 }
@@ -50,6 +52,28 @@ signature. Nothing downloaded is executed.
 To install MegaMek or MegaMekLab independently, use `--application megamek` or
 `--application lab` consistently in both commands. A new registration becomes default only if the
 registry was empty.
+
+`--channel milestone|development` is optional for legacy CLI compatibility. If omitted, the new
+copy remains explicitly unknown until `channel-set`; the exact manually selected tag is never used
+to infer intent. Nightly is not supported.
+
+## 2a. Choose a channel and perform a metadata-only check
+
+For a receipt-backed copy:
+
+```powershell
+$installationId = Read-Host "Installation UUID printed by install-release (without id=)"
+& $cli channel-set --registry $registry --id $installationId `
+    --channel milestone --check-on-open false
+& $cli check-updates --registry $registry --id $installationId
+```
+
+`channel-set` changes only a strictly bound external sidecar. `check-updates` reports `currentTag`,
+`channel`, `target`, `status`, `reason`, notes, size, and digest where available. It reads the fixed
+official website YAML and exact release API metadata; it downloads zero package bytes. An
+unconfigured, malformed, offline, or otherwise unavailable check is never reported as current.
+If the installed verified package is newer than the channel target, no recommended downgrade is
+offered.
 
 ## 3. Select external Java and preview
 
@@ -81,10 +105,42 @@ if ($LASTEXITCODE -ne 0) { throw "Launch failed or exited with code $LASTEXITCOD
 The program can then write its normal settings, logs, and saves. For a folder you already
 extracted, follow the [existing-copy registration walkthrough](existing-copy-contract.md).
 
+## 5. Preview and explicitly update a receipt-backed copy
+
+Only a copy installed by this launcher's `install-release` flow has update provenance. Preview is
+read-only and prints the exact target size/digest:
+
+```powershell
+& $cli preview-update --registry $registry --id $installationId --tag $targetTag
+```
+
+Review all decisions. Then close every MegaMek, MekHQ, and MegaMekLab process, including manually
+started ones. Copy the current baseline tag and exact target size/digest from the report; Apply
+rechecks those values, redownloads, and replans:
+
+```powershell
+& $cli apply-update --registry $registry --id $installationId `
+    --from-tag $currentTag --tag $targetTag --size $exactBytes `
+    --digest $exactSha256 `
+    --confirm CLOSE-ALL-SUITE-APPS-AND-APPLY
+```
+
+If Apply is interrupted or reports pending recovery, keep all suite applications closed and run:
+
+```powershell
+& $cli recover-update --registry $registry --id $installationId `
+    --confirm CLOSE-ALL-SUITE-APPS-AND-APPLY
+```
+
+The launcher coordinates its own current launches but cannot universally detect applications
+started by old launchers or external commands. It never kills them. See the
+[real-update contract](real-update-contract.md) before a first trial.
+
 ## Technical reference
 
 - [Release transport, archive, fresh-install, and recovery contract](fresh-install-contract.md)
 - [Existing-copy detection, registry, and launch contract](existing-copy-contract.md)
 - [Manifest and updater sandbox contract](manifest-contract.md)
+- [Explicit real-package update and recovery contract](real-update-contract.md)
 - [Older planner and disposable-update experiments](prototype-experiments.md)
 - [Overall proposal and delivery plan](../plan.md)

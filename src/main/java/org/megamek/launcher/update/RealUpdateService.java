@@ -19,9 +19,7 @@ import org.megamek.launcher.registry.RegistryData;
 import org.megamek.launcher.registry.RegistryStore;
 import org.megamek.launcher.release.FreshInstaller;
 import org.megamek.launcher.release.OfficialRepository;
-import org.megamek.launcher.release.ReleaseCatalog;
 import org.megamek.launcher.release.ReleaseTransport;
-import org.megamek.launcher.release.SafeTarExtractor;
 import org.megamek.launcher.release.VerifiedPackageFetcher;
 import org.megamek.launcher.sandbox.OverrideEntry;
 
@@ -73,7 +71,6 @@ public final class RealUpdateService {
     private final ObjectMapper mapper = JsonMapper.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build()
             .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
-            .enable(DeserializationFeature.FAIL_ON_NULL_CREATOR_PROPERTIES)
             .enable(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
@@ -117,6 +114,14 @@ public final class RealUpdateService {
     public ApplyResult apply(Snapshot expected, String targetTag, long expectedSize,
                              String expectedDigest, String confirmation, PrintStream progress)
             throws IOException, InterruptedException, ManifestException {
+        return apply(expected, targetTag, null, expectedSize, expectedDigest, confirmation,
+                progress);
+    }
+
+    public ApplyResult apply(Snapshot expected, String targetTag, String expectedAssetName,
+                             long expectedSize, String expectedDigest, String confirmation,
+                             PrintStream progress)
+            throws IOException, InterruptedException, ManifestException {
         Objects.requireNonNull(expected, "expected snapshot");
         validateAuthorization(expected.current().tag(), targetTag, expectedSize, expectedDigest,
                 confirmation);
@@ -134,7 +139,7 @@ public final class RealUpdateService {
                          new VerifiedPackageFetcher(transport).fetch(repository, targetTag,
                                  receipts.metadataDirectory(current.registry()), ".apply-download-",
                                  progress, new VerifiedPackageFetcher.ExpectedAsset(
-                                         expectedSize, expectedDigest))) {
+                                         expectedAssetName, expectedSize, expectedDigest))) {
                 Inspection targetInspection = new InstallationInspector().inspect(
                         workspace.extracted());
                 if (targetInspection.products().stream().noneMatch(
@@ -189,7 +194,8 @@ public final class RealUpdateService {
                             Inspection installed = inspectTarget(root, journal);
                             registries.refreshAfterUpdate(registryPath, journal.expectedRecord(),
                                     installed.observedBuild(), installed.products());
-                            RealUpdateFiles.deleteOwnedTree(transaction);
+                            validateNamespaceEntries(namespace, transaction, pendingFile, false);
+                            deleteValidatedTransaction(transaction, journal);
                             Path transactions = namespace.resolve("transactions");
                             if (RealUpdateFiles.emptyDirectory(transactions)) {
                                 Files.delete(transactions);
@@ -200,12 +206,8 @@ public final class RealUpdateService {
                         }
                     }
                 }
-                if (RealUpdateFiles.emptyDirectory(namespace)) {
-                    Files.delete(namespace);
-                    return new RecoveryResult("removed empty pre-transaction namespace", null);
-                }
-                throw new IOException("update namespace has no valid pending identity; "
-                        + "unknown artifacts were retained");
+                pruneEmptyNamespace(namespace);
+                return new RecoveryResult("removed empty transaction namespace", null);
             }
             PendingUpdate pending = read(pendingFile, PendingUpdate.class, "pending update");
             validatePending(pending, registryPath, record, root);
@@ -226,6 +228,7 @@ public final class RealUpdateService {
             OwnershipReceipt receipt = receipts.read(registryPath, data, record);
             validateJournal(journal, registryPath, record, receipt, root);
             clearJournalStaging(journalFile, journal);
+            validateTransactionTree(transaction, journal);
             states.clearInterruptedStaging(registryPath, record.id(), journal.previousState(),
                     journal.nextState());
             CurrentUpdateState currentState = states.read(registryPath,
@@ -242,7 +245,7 @@ public final class RealUpdateService {
                 InstallationRecord refreshed = registries.refreshAfterUpdate(registryPath,
                         journal.expectedRecord(), installed.observedBuild(), installed.products());
                 writeJournal(journalFile, withPhase(journal, "COMMITTED"));
-                cleanupCommitted(namespace, transaction, pendingFile);
+                cleanupCommitted(namespace, transaction, pendingFile, journal);
                 return new RecoveryResult("completed verified post-mutation commit", refreshed);
             }
             if (!currentState.equals(journal.previousState())
@@ -255,7 +258,7 @@ public final class RealUpdateService {
             } else {
                 states.rollbackPublication(registryPath, record.id(), false, journal.nextState());
             }
-            cleanupCommitted(namespace, transaction, pendingFile);
+            cleanupCommitted(namespace, transaction, pendingFile, journal);
             return new RecoveryResult("rolled back interrupted update; external edits were not "
                     + "overwritten", record);
         }
@@ -297,6 +300,7 @@ public final class RealUpdateService {
                 operations);
         failureHook.hit("AFTER_STAGING");
         verifyArtifacts(snapshot.root(), transaction, operations);
+        verifyAtomicStorage(transaction);
         failureHook.hit("BEFORE_APP_MUTATION");
         applyOperations(snapshot.root(), transaction, operations);
         failureHook.hit("AFTER_APP_MUTATION");
@@ -312,7 +316,7 @@ public final class RealUpdateService {
                 snapshot.record(), installed.observedBuild(), installed.products());
         failureHook.hit("AFTER_REGISTRY_COMMIT");
         writeJournal(journalFile, withPhase(journal, "COMMITTED"));
-        cleanupCommitted(namespace, transaction, pendingFile);
+        cleanupCommitted(namespace, transaction, pendingFile, journal);
         long skipped = decisions.stream().filter(item -> item.action() == Action.SKIP).count();
         return new ApplyResult(refreshed, next, decisions, skipped,
                 next.overrides().size() + next.caseOverrides().size());
@@ -329,7 +333,7 @@ public final class RealUpdateService {
                 snapshot.record().id(), snapshot.root().toString(), snapshot.registry().toString(),
                 snapshot.record().registeredAt());
         writeAtomic(pending, value);
-        Path transactions = Files.createDirectory(namespace.resolve("transactions"));
+        Files.createDirectory(namespace.resolve("transactions"));
         return namespace;
     }
 
@@ -389,6 +393,13 @@ public final class RealUpdateService {
             if (!Objects.equals(current, operation.beforeHash())) {
                 throw new ManifestException("application changed after planning: "
                         + operation.path());
+            }
+            if (operation.beforeHash() != null) {
+                Path backup = internal(transaction, "backups", operation.path());
+                if (!operation.beforeHash().equals(RealUpdateFiles.hash(backup))) {
+                    throw new ManifestException("verified backup changed before mutation: "
+                            + operation.path());
+                }
             }
             createApplicationParents(root, operation.path());
             if (operation.afterHash() == null) {
@@ -484,6 +495,11 @@ public final class RealUpdateService {
                                  InstallationRecord record, OwnershipReceipt receipt, Path root)
             throws IOException, ManifestException {
         if (journal == null || journal.schemaVersion() != JOURNAL_SCHEMA
+                || journal.transactionId() == null || journal.canonicalRoot() == null
+                || journal.canonicalRegistry() == null || journal.installationId() == null
+                || journal.registeredAt() == null || journal.phase() == null
+                || journal.previousState() == null || journal.nextState() == null
+                || journal.expectedRecord() == null || journal.targetObservedBuild() == null
                 || !uuid(journal.transactionId())
                 || !root.toString().equals(journal.canonicalRoot())
                 || !registry.toString().equals(journal.canonicalRegistry())
@@ -495,7 +511,7 @@ public final class RealUpdateService {
                 || !journal.expectedRecord().id().equals(record.id())
                 || !journal.expectedRecord().canonicalRoot().equals(record.canonicalRoot())
                 || !journal.expectedRecord().registeredAt().equals(record.registeredAt())
-                || !journal.nextState().lastTransactionId().equals(journal.transactionId())) {
+                || !journal.transactionId().equals(journal.nextState().lastTransactionId())) {
             throw new IOException("real update journal identity or schema is invalid");
         }
         states.validate(journal.previousState(), journal.expectedRecord(), receipt);
@@ -639,7 +655,6 @@ public final class RealUpdateService {
     private void preflight(Path root, List<Decision> decisions) throws IOException {
         if (!Files.isWritable(root)) throw new IOException("application root is not writable");
         FileStore rootStore = Files.getFileStore(root);
-        Set<Path> parents = new HashSet<>();
         for (Decision decision : decisions) {
             if (decision.action() != Action.ADD && decision.action() != Action.REPLACE
                     && decision.action() != Action.REMOVE) continue;
@@ -648,6 +663,7 @@ public final class RealUpdateService {
             while (parent != null && !Files.exists(parent, LinkOption.NOFOLLOW_LINKS)) {
                 parent = parent.getParent();
             }
+
             if (parent == null || !Files.isDirectory(parent, LinkOption.NOFOLLOW_LINKS)
                     || !Files.isWritable(parent)) {
                 throw new IOException("update destination parent is not writable for "
@@ -656,7 +672,26 @@ public final class RealUpdateService {
             if (!Files.getFileStore(parent).equals(rootStore)) {
                 throw new IOException("update destination is not on the application volume");
             }
-            parents.add(parent);
+        }
+    }
+
+    private static void verifyAtomicStorage(Path transaction) throws IOException {
+        Path source = transaction.resolve("atomic-probe-a");
+        Path destination = transaction.resolve("atomic-probe-b");
+        try {
+            try (FileChannel channel = FileChannel.open(source, StandardOpenOption.CREATE_NEW,
+                    StandardOpenOption.WRITE)) {
+                channel.write(ByteBuffer.wrap(new byte[]{1}));
+                channel.force(true);
+            }
+            try {
+                Files.move(source, destination, StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                throw new IOException("atomic same-volume update storage is unsupported", e);
+            }
+        } finally {
+            Files.deleteIfExists(source);
+            Files.deleteIfExists(destination);
         }
     }
 
@@ -780,7 +815,10 @@ public final class RealUpdateService {
 
     private static void createInternalParents(Path base, String path) throws IOException {
         Path parent = base.resolve(path.replace('/', java.io.File.separatorChar)).getParent();
-        if (parent != null) Files.createDirectories(parent);
+        if (parent != null) {
+            Files.createDirectories(parent);
+            StrictPathSafety.requireDirectory(parent, "transaction artifact parent");
+        }
     }
 
     private static Path internal(Path transaction, String area, String path) {
@@ -789,6 +827,7 @@ public final class RealUpdateService {
 
     private void cleanupPreparing(Path namespace, Path transaction, Path pending)
             throws IOException {
+        validateNamespaceEntries(namespace, transaction, pending, true);
         if (Files.exists(transaction, LinkOption.NOFOLLOW_LINKS)) {
             RealUpdateFiles.deleteOwnedTree(transaction);
         }
@@ -799,15 +838,123 @@ public final class RealUpdateService {
         if (RealUpdateFiles.emptyDirectory(namespace)) Files.delete(namespace);
     }
 
-    private void cleanupCommitted(Path namespace, Path transaction, Path pending)
-            throws IOException {
-        // Removing the blocker is the commit point. A later crash can leave only a transaction
-        // directory whose id is retained in current provenance; no application rollback is needed.
+    private void cleanupCommitted(Path namespace, Path transaction, Path pending,
+                                  RealUpdateJournal journal) throws IOException {
+        // Validate and remove only the exact allowlisted transaction tree first. If interrupted
+        // after that, the still-present blocker has no journal and recovery can safely remove it
+        // because application/provenance/registry are already coherent.
+        validateNamespaceEntries(namespace, transaction, pending, true);
+        deleteValidatedTransaction(transaction, journal);
         Files.delete(pending);
-        RealUpdateFiles.deleteOwnedTree(transaction);
+        failureHook.hit("AFTER_PENDING_DELETE");
         Path transactions = namespace.resolve("transactions");
         if (RealUpdateFiles.emptyDirectory(transactions)) Files.delete(transactions);
         if (RealUpdateFiles.emptyDirectory(namespace)) Files.delete(namespace);
+    }
+
+    /**
+     * Removes only the two known empty containers left when cleanup was interrupted after the
+     * pending identity disappeared. Unknown siblings, transactions, and linked/reparse objects
+     * are retained and fail recovery.
+     */
+    private static void pruneEmptyNamespace(Path namespace) throws IOException {
+        Path transactions = namespace.resolve("transactions");
+        List<Path> namespaceEntries;
+        try (var entries = Files.list(namespace)) {
+            namespaceEntries = entries.toList();
+        }
+        if (namespaceEntries.isEmpty()) {
+            Files.delete(namespace);
+            return;
+        }
+        if (namespaceEntries.size() != 1 || !namespaceEntries.getFirst().equals(transactions)) {
+            throw new IOException("update namespace has no valid pending identity; unknown "
+                    + "artifacts were retained");
+        }
+        StrictPathSafety.requireDirectory(transactions, "update transactions directory");
+        if (!RealUpdateFiles.emptyDirectory(transactions)) {
+            throw new IOException("update namespace has no valid pending identity; unknown "
+                    + "transactions were retained");
+        }
+        Files.delete(transactions);
+        if (!RealUpdateFiles.emptyDirectory(namespace)) {
+            throw new IOException("unknown update namespace artifacts appeared during cleanup");
+        }
+        Files.delete(namespace);
+    }
+
+    private static void validateNamespaceEntries(Path namespace, Path transaction, Path pending,
+                                                 boolean pendingExpected) throws IOException {
+        Path transactions = namespace.resolve("transactions");
+        try (var entries = Files.list(namespace)) {
+            for (Path entry : entries.toList()) {
+                if (!entry.equals(transactions) && !(pendingExpected && entry.equals(pending))) {
+                    throw new IOException("unknown update namespace artifact retained: " + entry);
+                }
+            }
+        }
+        if (Files.exists(transactions, LinkOption.NOFOLLOW_LINKS)) {
+            StrictPathSafety.requireDirectory(transactions, "update transactions directory");
+            try (var entries = Files.list(transactions)) {
+                for (Path entry : entries.toList()) {
+                    if (!entry.equals(transaction)) {
+                        throw new IOException("unknown update transaction retained: " + entry);
+                    }
+                }
+            }
+        }
+    }
+
+    private static void deleteValidatedTransaction(Path transaction, RealUpdateJournal journal)
+            throws IOException {
+        validateTransactionTree(transaction, journal);
+        RealUpdateFiles.deleteOwnedTree(transaction);
+    }
+
+    private static void validateTransactionTree(Path transaction, RealUpdateJournal journal)
+            throws IOException {
+        Set<Path> directories = new HashSet<>();
+        Set<Path> files = new HashSet<>();
+        directories.add(transaction);
+        files.add(transaction.resolve("journal.json"));
+        files.add(transaction.resolve("atomic-probe-a"));
+        files.add(transaction.resolve("atomic-probe-b"));
+        for (String area : List.of("staged", "backups", "rollback")) {
+            directories.add(transaction.resolve(area));
+        }
+        for (RealUpdateJournal.Operation operation : journal.operations()) {
+            if (operation.afterHash() != null) {
+                allowArtifact(transaction.resolve("staged"), operation.path(), directories, files);
+            }
+            if (operation.beforeHash() != null) {
+                allowArtifact(transaction.resolve("backups"), operation.path(), directories, files);
+                allowArtifact(transaction.resolve("rollback"), operation.path(), directories, files);
+            }
+        }
+        try (var walk = Files.walk(transaction)) {
+            for (Path path : walk.toList()) {
+                var attrs = Files.readAttributes(path,
+                        java.nio.file.attribute.BasicFileAttributes.class,
+                        LinkOption.NOFOLLOW_LINKS);
+                if (attrs.isSymbolicLink() || attrs.isOther()) {
+                    throw new IOException("unknown transaction link/type retained: " + path);
+                }
+                if (attrs.isDirectory() ? !directories.contains(path) : !files.contains(path)) {
+                    throw new IOException("unknown transaction artifact retained: " + path);
+                }
+            }
+        }
+    }
+
+    private static void allowArtifact(Path base, String portable, Set<Path> directories,
+                                      Set<Path> files) {
+        Path file = base.resolve(portable.replace('/', java.io.File.separatorChar));
+        files.add(file);
+        for (Path parent = file.getParent(); parent != null && parent.startsWith(base);
+             parent = parent.getParent()) {
+            directories.add(parent);
+            if (parent.equals(base)) break;
+        }
     }
 
     private static Path transaction(Path namespace, String id) throws IOException {
@@ -818,6 +965,9 @@ public final class RealUpdateService {
     private void validatePending(PendingUpdate pending, Path registry, InstallationRecord record,
                                  Path root) throws IOException {
         if (pending == null || pending.schemaVersion() != JOURNAL_SCHEMA
+                || pending.transactionId() == null || pending.installationId() == null
+                || pending.canonicalRoot() == null || pending.canonicalRegistry() == null
+                || pending.registeredAt() == null
                 || !uuid(pending.transactionId())
                 || !pending.installationId().equals(record.id())
                 || !pending.canonicalRoot().equals(root.toString())

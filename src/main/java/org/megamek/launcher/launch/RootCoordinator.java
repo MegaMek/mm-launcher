@@ -17,6 +17,8 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.NoSuchFileException;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
@@ -32,31 +34,37 @@ public final class RootCoordinator {
     private static final int SCHEMA = 1;
     private final Path directory;
     private final boolean persistent;
+    private final PathProbe pathProbe;
     private final ObjectMapper mapper = JsonMapper.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build()
             .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
-            .enable(DeserializationFeature.FAIL_ON_NULL_CREATOR_PROPERTIES)
             .enable(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
     public RootCoordinator() {
         this(Path.of(System.getProperty("mm.launcher.coordination.dir",
                 Path.of(System.getProperty("user.home"), ".mm-launcher", "coordination-v1")
-                        .toString())), true);
+                        .toString())), true, RootCoordinator::readAttributesNoFollow);
     }
 
     public RootCoordinator(Path directory) {
-        this(directory, true);
+        this(directory, true, RootCoordinator::readAttributesNoFollow);
     }
 
-    private RootCoordinator(Path directory, boolean persistent) {
+    RootCoordinator(Path directory, PathProbe pathProbe) {
+        this(directory, true, pathProbe);
+    }
+
+    private RootCoordinator(Path directory, boolean persistent, PathProbe pathProbe) {
         this.directory = directory.toAbsolutePath().normalize();
         this.persistent = persistent;
+        this.pathProbe = pathProbe;
     }
 
     /** Fake-process test seam: no cross-process claim is made for injected ProcessRunner tests. */
     static RootCoordinator inMemory() {
-        return new RootCoordinator(Path.of(System.getProperty("java.io.tmpdir")), false);
+        return new RootCoordinator(Path.of(System.getProperty("java.io.tmpdir")), false,
+                RootCoordinator::readAttributesNoFollow);
     }
 
     public Lease acquire(Path root, boolean closeAllAcknowledged) throws IOException {
@@ -92,7 +100,10 @@ public final class RootCoordinator {
 
     public boolean pending(Path root) throws IOException {
         Path canonical = StrictPathSafety.requireDirectory(root, "application root");
-        return Files.exists(canonical.resolve(UPDATE_NAMESPACE), LinkOption.NOFOLLOW_LINKS);
+        Path namespace = canonical.resolve(UPDATE_NAMESPACE);
+        if (!existsNoFollow(namespace)) return false;
+        StrictPathSafety.requireDirectory(namespace, "real update namespace");
+        return true;
     }
 
     private void ensureDirectory() throws IOException {
@@ -115,12 +126,29 @@ public final class RootCoordinator {
         StrictPathSafety.requireDirectory(path, "coordination parent");
     }
 
-    private static void rejectUnexpected(Path path, boolean allowMissing) throws IOException {
-        if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) {
+    private void rejectUnexpected(Path path, boolean allowMissing) throws IOException {
+        if (!existsNoFollow(path)) {
             if (allowMissing) return;
             throw new IOException("coordination state is absent: " + path);
         }
         StrictPathSafety.requireFile(path, "coordination state");
+    }
+
+    /**
+     * Returns false only for a positively identified missing entry. Access, I/O, and malformed
+     * path failures remain blockers instead of being converted to success-shaped absence.
+     */
+    private boolean existsNoFollow(Path path) throws IOException {
+        try {
+            pathProbe.read(path);
+            return true;
+        } catch (NoSuchFileException e) {
+            return false;
+        }
+    }
+
+    private static BasicFileAttributes readAttributesNoFollow(Path path) throws IOException {
+        return Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
     }
 
     private static String hash(String value) {
@@ -151,7 +179,8 @@ public final class RootCoordinator {
 
         public void requireNoPendingUpdate() throws IOException {
             Path namespace = root.resolve(UPDATE_NAMESPACE);
-            if (Files.exists(namespace, LinkOption.NOFOLLOW_LINKS)) {
+            if (existsNoFollow(namespace)) {
+                StrictPathSafety.requireDirectory(namespace, "real update namespace");
                 throw new IOException("an interrupted update is pending; recover it before launch");
             }
         }
@@ -176,7 +205,17 @@ public final class RootCoordinator {
         }
 
         private void resolvePriorMarker(boolean closeAllAcknowledged) throws IOException {
-            if (!writesMarkers || !Files.exists(marker, LinkOption.NOFOLLOW_LINKS)) return;
+            if (!writesMarkers) return;
+            Path staging = marker.resolveSibling(marker.getFileName() + ".new");
+            if (existsNoFollow(staging)) {
+                rejectUnexpected(staging, false);
+                if (!closeAllAcknowledged) {
+                    throw new IOException("interrupted launch-marker publication requires "
+                            + "explicit close-all recovery/unblock confirmation");
+                }
+                Files.delete(staging);
+            }
+            if (!existsNoFollow(marker)) return;
             rejectUnexpected(marker, false);
             final LaunchMarker prior;
             try {
@@ -190,10 +229,24 @@ public final class RootCoordinator {
                 return;
             }
             if (prior.schemaVersion() != SCHEMA || !root.toString().equals(prior.canonicalRoot())
-                    || prior.process() == null || prior.process().pid() <= 0) {
+                    || prior.process() == null || prior.process().pid() <= 0
+                    || prior.phase() == null
+                    || !java.util.Set.of("STARTING", "RUNNING").contains(prior.phase())) {
                 if (!closeAllAcknowledged) {
                     throw new IOException("unknown launch marker blocks this root; close all suite "
                             + "applications and use explicit recovery/unblock confirmation");
+                }
+                Files.delete(marker);
+                return;
+            }
+            // STARTING records this launcher, not a child identity. Once publication can have
+            // raced a launcher crash, neither a dead/reused parent PID nor the absence of a
+            // visible child proves that no suite process was started.
+            if ("STARTING".equals(prior.phase())) {
+                if (!closeAllAcknowledged) {
+                    throw new IOException("an interrupted launch start has unknown child state; "
+                            + "close all suite applications and use explicit recovery/unblock "
+                            + "confirmation");
                 }
                 Files.delete(marker);
                 return;
@@ -223,7 +276,8 @@ public final class RootCoordinator {
 
         private void writeMarker(LaunchMarker value) throws IOException {
             Path staging = marker.resolveSibling(marker.getFileName() + ".new");
-            if (Files.exists(staging, LinkOption.NOFOLLOW_LINKS)) {
+            if (existsNoFollow(staging)) {
+                rejectUnexpected(staging, false);
                 throw new IOException("interrupted launch-marker publication requires unblock");
             }
             byte[] bytes = mapper.writeValueAsBytes(value);
@@ -262,5 +316,10 @@ public final class RootCoordinator {
 
     private record LaunchMarker(int schemaVersion, String canonicalRoot,
                                 ProcessIdentity process, String phase) {
+    }
+
+    @FunctionalInterface
+    interface PathProbe {
+        BasicFileAttributes read(Path path) throws IOException;
     }
 }

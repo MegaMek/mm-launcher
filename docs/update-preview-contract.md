@@ -9,8 +9,9 @@ changes its timestamps, updates the registry or receipt, locks an installation, 
 applies a decision. Its result is not authority to apply later. Tags are exact labels, not
 semantic-version upgrade/downgrade recommendations.
 
-Registry schema remains 1 and every record remains `updateEligible=false`; that field is not
-preview eligibility. Preview eligibility comes only from a valid local ownership receipt.
+Registry schema remains 1 and every record remains `updateEligible=false`; that legacy guard is not
+preview or Apply eligibility. Eligibility comes from a valid immutable local ownership receipt and,
+after the first successful update, coherent latest current provenance.
 Imported and pre-receipt copies remain launchable/manageable but cannot preview, and provenance is
 not backfilled. Download one new official release with this launcher to obtain a receipt.
 
@@ -80,9 +81,9 @@ as `ADD`/`REMOVE`.
 distinct affected managed-file spelling in the two manifests. No affected path is silently
 discarded. Same-name file/parent conflicts across releases are structural errors even beneath a
 case-changed prefix, and unrelated local case aliases, links, or reparse points still fail closed.
-Preview does not normalize or rename an installed file. Rename/apply support is deferred to a
-future explicitly designed Apply contract; this point-in-time report grants no later write
-authority.
+Preview does not normalize or rename an installed file. Case-only rename execution remains deferred. The separate real Apply contract persists affected
+data prefixes as sticky `SKIP` overrides and refuses the whole Apply for affected runtime prefixes;
+this point-in-time preview still grants no later write authority.
 
 Before network access, preview validates receipt/policy/source binding, canonical root, metadata
 separation, and absence of disposable `.mm-launcher` sandbox state. It does not require the local
@@ -91,5 +92,6 @@ repository using the installer's digest, size, redirect, timeout, extraction, an
 and must contain the expected product. Only operation-created `.preview-<uuid>` staging is removed. A crash can leave that explicitly
 named staging directory or a uniquely named receipt staging file; publication itself is
 create-new/no-clobber, but directory durability across a power loss is not claimed. No broader
-cleanup or transaction across application publication, registration, and receipt creation is
-claimed. A missing GitHub digest is unsupported.
+cleanup or transaction is claimed by **preview**. Real Apply is a separate re-fetch/replan service
+documented in [real-update-contract.md](real-update-contract.md). A missing GitHub digest is
+unsupported.

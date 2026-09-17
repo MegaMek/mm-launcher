@@ -34,7 +34,6 @@ final class CurrentStateStore {
     private final ObjectMapper mapper = JsonMapper.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build()
             .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
-            .enable(DeserializationFeature.FAIL_ON_NULL_CREATOR_PROPERTIES)
             .enable(DeserializationFeature.FAIL_ON_MISSING_CREATOR_PROPERTIES)
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
 
@@ -145,7 +144,12 @@ final class CurrentStateStore {
                   OwnershipReceipt original) throws IOException, ManifestException {
         if (state == null || state.schemaVersion() != SCHEMA
                 || state.ownershipPolicyVersion() != OwnershipPolicy.VERSION
-                || state.overrides() == null || state.caseOverrides() == null) {
+                || state.installationId() == null || state.canonicalRoot() == null
+                || state.registeredAt() == null || state.repository() == null
+                || state.tag() == null || state.assetName() == null
+                || state.assetSha256() == null || state.officialManifest() == null
+                || state.excludedOfficialPaths() == null || state.overrides() == null
+                || state.caseOverrides() == null) {
             throw new IOException("unsupported or incomplete current provenance schema");
         }
         if (!state.installationId().equals(original.installationId())
@@ -157,7 +161,8 @@ final class CurrentStateStore {
         receipts.validate(state.asReceipt(), record);
         Set<String> aliases = new HashSet<>();
         for (OverrideEntry override : state.overrides()) {
-            if (override == null || override.kind() == null || override.officialHashes() == null) {
+            if (override == null || override.path() == null || override.kind() == null
+                    || override.officialHashes() == null) {
                 throw new IOException("invalid override history");
             }
             ManifestReader.validatePortablePath(override.path(), "override path",
@@ -173,7 +178,8 @@ final class CurrentStateStore {
         }
         Set<String> caseKeys = new HashSet<>();
         for (CaseOverride item : state.caseOverrides()) {
-            if (item == null || item.officialSpellings() == null) {
+            if (item == null || item.foldedPrefix() == null || item.localPrefix() == null
+                    || item.officialSpellings() == null) {
                 throw new IOException("invalid case-prefix override history");
             }
             ManifestReader.validatePortablePath(item.localPrefix(), "case override prefix",
@@ -184,6 +190,7 @@ final class CurrentStateStore {
                 throw new IOException("invalid case-prefix override binding");
             }
             for (String spelling : item.officialSpellings()) {
+                if (spelling == null) throw new IOException("null case override spelling");
                 ManifestReader.validatePortablePath(spelling, "case override spelling",
                         "current provenance");
                 if (!key(spelling).equals(folded)) {

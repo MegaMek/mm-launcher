@@ -70,7 +70,7 @@ public final class UpdatePreviewService {
         CurrentUpdateState current = currentStateStore.read(
                 registryPath, data, record, receipt);
         return previewValidated(registryPath, data, record, receipt, current, root, targetTag,
-                progress);
+                progress, null);
     }
 
     public Preview preview(Path registry, InstallationRecord expectedRecord,
@@ -90,20 +90,43 @@ public final class UpdatePreviewService {
         CurrentUpdateState state = currentStateStore.read(
                 registryPath, data, current, receipt);
         return previewValidated(registryPath, data, current, receipt, state, root, targetTag,
-                progress);
+                progress, null);
+    }
+
+    public Preview preview(Path registry, InstallationRecord expectedRecord,
+                           OwnershipReceipt expectedReceipt, String targetTag,
+                           String expectedAssetName, long expectedSize, String expectedDigest,
+                           PrintStream progress)
+            throws IOException, InterruptedException, ManifestException {
+        Path registryPath = registry.toAbsolutePath().normalize();
+        RegistryData data = registryStore.read(registryPath);
+        InstallationRecord current = registryStore.resolve(data, expectedRecord.id());
+        if (!current.equals(expectedRecord)) {
+            throw new IOException("selected recommended-update source changed after consent");
+        }
+        Path root = validateLocalBoundary(current, registryPath, data);
+        OwnershipReceipt receipt = receiptStore.read(registryPath, data, current);
+        if (!receipt.equals(expectedReceipt)) {
+            throw new IOException("recommended-update provenance changed after consent");
+        }
+        CurrentUpdateState state = currentStateStore.read(registryPath, data, current, receipt);
+        return previewValidated(registryPath, data, current, receipt, state, root, targetTag,
+                progress, new VerifiedPackageFetcher.ExpectedAsset(expectedAssetName,
+                        expectedSize, expectedDigest));
     }
 
     private Preview previewValidated(Path registryPath, RegistryData data,
                                      InstallationRecord record, OwnershipReceipt receipt,
                                      CurrentUpdateState current, Path root, String targetTag,
-                                     PrintStream progress)
+                                     PrintStream progress,
+                                     VerifiedPackageFetcher.ExpectedAsset expected)
             throws IOException, InterruptedException, ManifestException {
         OfficialRepository repository = OfficialRepository.parse(current.repository());
         Path workspaceParent = receiptStore.metadataDirectory(registryPath);
 
         try (VerifiedPackageFetcher.Workspace workspace =
                      new VerifiedPackageFetcher(transport).fetch(repository, targetTag,
-                             workspaceParent, ".preview-", progress)) {
+                                      workspaceParent, ".preview-", progress, expected)) {
             if (new InstallationInspector().inspect(workspace.extracted()).products().stream()
                     .noneMatch(product -> product.key().equals(repository.requiredProduct()))) {
                 throw new IOException("target package does not contain receipt application "

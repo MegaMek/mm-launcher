@@ -22,7 +22,9 @@ public final class JavaReleaseTransport implements ReleaseTransport {
 
     @Override
     public Response get(URI uri, String accept) throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder(uri).timeout(Duration.ofMinutes(30))
+        Duration requestTimeout = "application/octet-stream".equals(accept)
+                ? Duration.ofMinutes(30) : Duration.ofSeconds(45);
+        HttpRequest request = HttpRequest.newBuilder(uri).timeout(requestTimeout)
                 .header("Accept", accept).header("User-Agent", "mm-launcher-prototype")
                 .header("X-GitHub-Api-Version", "2022-11-28").GET().build();
         HttpResponse<java.io.InputStream> response =

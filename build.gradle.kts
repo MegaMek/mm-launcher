@@ -17,6 +17,7 @@ java {
 
 dependencies {
     implementation("com.fasterxml.jackson.core:jackson-databind:2.18.3")
+    implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.18.3")
     implementation("org.apache.commons:commons-compress:1.28.0")
 
     testImplementation(platform("org.junit:junit-bom:5.11.4"))

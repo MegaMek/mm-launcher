@@ -11,6 +11,7 @@ import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseTransport;
 import org.megamek.launcher.update.OwnershipPolicy;
 import org.megamek.launcher.update.ReceiptStore;
+import org.megamek.launcher.launch.RootCoordinator;
 
 import javax.swing.JButton;
 import javax.swing.JLabel;
@@ -77,6 +78,25 @@ class UpdatePreviewSwingTest {
             assertTrue(findButton(frame, "launch-megamek-button") == null);
             assertNotNull(findButton(frame, "manageInstallationsButton"));
             assertTrue(fixture.network.requests.isEmpty(), "startup must not check releases");
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void recoveryRemainsReachableWhenPendingRootCannotBeInspected() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        Fixture fixture = fixture("pending-damaged", true);
+        Files.createDirectory(fixture.root.resolve(RootCoordinator.UPDATE_NAMESPACE));
+        Files.delete(fixture.root.resolve("MegaMek.jar"));
+        LauncherFrame frame = show(fixture);
+        try {
+            JButton recover = waitForButton(frame, "recoverUpdateButton");
+            assertNotNull(recover);
+            assertTrue(recover.isEnabled());
+            assertNotNull(findButton(frame, "manageInstallationsButton"));
+            assertTrue(fixture.network.requests.isEmpty());
         } finally {
             dispose(frame);
         }
