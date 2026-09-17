@@ -1,0 +1,11 @@
+Third-party dependency material
+===============================
+
+The lib directory contains the unmodified runtime dependency JARs resolved by
+the Gradle build. License, notice, and dependency files embedded by those
+artifacts remain available inside each JAR under META-INF. Copies of embedded
+META-INF/LICENSE*, META-INF/NOTICE*, and META-INF/DEPENDENCIES* files are also
+provided under third-party-licenses/<jar-name>/ for convenient review.
+
+This notice describes dependency material only. It does not assert a license
+for MM Launcher's own source or grant trademark rights.

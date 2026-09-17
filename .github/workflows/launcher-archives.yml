@@ -1,0 +1,118 @@
+name: Launcher archives
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/launcher-archives.yml"
+      - "build.gradle.kts"
+      - "gradle/**"
+      - "gradlew"
+      - "gradlew.bat"
+      - "src/**"
+  pull_request:
+    paths:
+      - ".github/workflows/launcher-archives.yml"
+      - "build.gradle.kts"
+      - "gradle/**"
+      - "gradlew"
+      - "gradlew.bat"
+      - "src/**"
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-package:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            id: windows-x64
+            os: windows-2025
+            archive: build/distributions/MM-Launcher-*-Windows-x64.zip
+          - name: Linux x64
+            id: linux-x64
+            os: ubuntu-24.04
+            archive: build/distributions/MM-Launcher-*-Linux-x64.tar.gz
+          - name: macOS Intel
+            id: macos-intel
+            os: macos-15-intel
+            archive: build/distributions/MM-Launcher-*-macOS.zip
+          - name: macOS Apple Silicon
+            id: macos-apple-silicon
+            os: macos-15
+            archive: build/distributions/MM-Launcher-*-macOS.zip
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Test on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\gradlew.bat test
+
+      - name: Test on Linux with a display
+        if: runner.os == 'Linux'
+        shell: bash
+        run: xvfb-run -a ./gradlew test
+
+      - name: Test on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: ./gradlew test
+
+      - name: Build and smoke-test Windows archive
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: >-
+          .\gradlew.bat "-PbuildIdentifier=${{ github.sha }}"
+          windowsArchiveChecksum verifyWindowsArchive
+
+      - name: Build and smoke-test Linux archive
+        if: runner.os == 'Linux'
+        shell: bash
+        run: >-
+          ./gradlew "-PbuildIdentifier=${{ github.sha }}"
+          linuxArchiveChecksum verifyLinuxArchive
+
+      - name: Build and smoke-test macOS archive
+        if: runner.os == 'macOS'
+        shell: bash
+        run: >-
+          ./gradlew "-PbuildIdentifier=${{ github.sha }}"
+          macArchiveChecksum verifyMacArchive
+
+      - name: Upload native archive and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: MM-Launcher-${{ matrix.id }}
+          path: |
+            ${{ matrix.archive }}
+            ${{ matrix.archive }}.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: MM-Launcher-test-reports-${{ matrix.id }}
+          path: build/test-results/**/*.xml
+          if-no-files-found: warn
+          retention-days: 14

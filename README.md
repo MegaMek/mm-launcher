@@ -1,6 +1,47 @@
 # MegaMek graphical launcher
 
-Requires Java 21. From the launcher checkout, build and run in PowerShell:
+## Portable archive prototype
+
+MM Launcher is distributed as three separate portable downloads, not an installer and not one
+combined archive. Install an external **64-bit Java 21 or newer** runtime, download the archive for
+your OS, extract it, and use its one desktop entry point:
+
+- Windows: `MM Launcher.exe` in
+  `MM-Launcher-0.1.0-SNAPSHOT-Windows-x64.zip`
+- macOS: `MM Launcher.app` in
+  `MM-Launcher-0.1.0-SNAPSHOT-macOS.zip`
+- Linux: `./mm-launcher` in
+  `MM-Launcher-0.1.0-SNAPSHOT-Linux-x64.tar.gz`
+
+The macOS and Windows prototypes are unsigned, and the macOS app is not notarized. Do not bypass
+Gatekeeper or other OS security controls. Signing, notarization, and a public source-license
+decision remain release prerequisites. No Java runtime is bundled or downloaded by a launcher.
+
+The support goal is all three OSes. The Windows x64 package and native startup smoke are validated
+locally on Windows. Native CI is prepared for Windows x64, Linux x64, macOS Intel, and macOS Apple
+Silicon, but those CI runs remain pending and user-owned; this Windows checkpoint does not certify
+native macOS or Linux execution.
+
+Build one package and its checksum with `windowsArchiveChecksum`, `macArchiveChecksum`, or
+`linuxArchiveChecksum`. Build all three locally with:
+
+```powershell
+& 'C:\repos\megamek\mm-launcher\gradlew.bat' `
+  -p 'C:\repos\megamek\mm-launcher' buildAllArchives verifyArchives
+```
+
+Outputs are under `build/distributions/`. `verifyArchives` checks all archive contents and runs a
+native entry-point smoke only when the archive matches the current host. `--version` and
+`--startup-check` are side-effect-free packaged diagnostics. The desktop launchers also accept
+`--registry <absolute-path>` as an isolated test/development override.
+
+See the [archive distribution contract](docs/archive-distribution-contract.md) for layouts,
+program-files/user-data separation, native runner coverage, and release limitations.
+
+## Developer CLI and graphical review
+
+The existing `application`/`installDist` entry point remains the CLI. Requires Java 21. From the
+launcher checkout, build and run the graphical subcommand in PowerShell:
 
 ```powershell
 Set-Location C:\repos\megamek\mm-launcher
