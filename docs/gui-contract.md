@@ -9,19 +9,38 @@ and is never reset. Its immediate launcher-owned parent is created only when the
 a mutation and its parent is already a real directory.
 
 The empty first-launch screen uses the supplied artwork, a responsive dark action panel, and
-suite-inspired vector buttons. Its single primary action is **Download & install** for the fixed
-current Milestone MekHQ all-three-program suite. **Advanced Options** opens Installations; logs are in
-Settings. `GuiScale` keeps custom metrics in logical coordinates while Java
-handles per-monitor device DPI. See [first-launch presentation](first-launch-ui.md). Artwork
-loading failures are reported without disabling onboarding or treating a registry error as empty.
+suite-inspired vector buttons. Its joined split control keeps **Download & install** as the large
+primary action for the fixed current Milestone MekHQ all-three-program suite. A distinct arrow
+opens exactly **Latest Development** and **Choose another version or application…**. The former
+uses the same verified normal-install workflow for the fixed Development MekHQ target; the latter
+directly opens the existing full release picker without fetching until its current Fetch action.
+The visible, regular secondary **Use existing installation** action imports MegaMek, MekHQ, or
+MegaMekLab. There is no separate advanced action on first Home. Import entry points share
+static inspection, exact current-launcher Java validation, confirmation, and atomic registration.
+The first locked import supplies Main only when no Main exists; later/concurrent imports do not
+replace it. Imported Home launch buttons reflect only actually detected products. Imported records
+are launch-only and have no receipt/channel provenance. Logs are in Settings. `GuiScale` keeps
+custom metrics in logical coordinates while Java handles per-monitor device DPI. See
+[first-launch presentation](first-launch-ui.md). Artwork loading failures are reported without
+disabling onboarding or treating a registry error as empty.
 
-The normal action resolves `OfficialYamlChannelCatalog.target(MILESTONE, MEKHQ)` only. Planning is
-metadata-only and binds the full release/asset identity, proposed per-user `installations/Main`
-destination, registry snapshot, and validated launcher Java. Its confirmation has no release or
-channel picker. A second metadata resolution plus the installer's expected-asset check rejects any
-feed/tag/name/URL/size/digest drift before binary transfer. Bounded real parents are created only
-after consent; the target itself must remain wholly absent. Successful setup persists exact
-external Java, Milestone with check-on-open true, and Main selection, then returns the latest
+The first-launch caption starts as **Latest Milestone**. A separate background metadata-only
+request resolves the fixed Milestone MekHQ target and validates its asset before adding the
+version in parentheses. It never requests package bytes, disables onboarding, or writes state.
+Offline or stale results leave the generic caption; page changes, reload, and disposal cancel or
+discard the display-only result.
+
+The normal planner accepts only explicit Milestone or Development and always targets MekHQ. The
+default overload and primary segment resolve
+`OfficialYamlChannelCatalog.target(MILESTONE, MEKHQ)`; the quick menu route resolves
+`target(DEVELOPMENT, MEKHQ)`. Planning is metadata-only and binds the requested channel, full
+release/asset identity and source, proposed per-user `installations/Main` destination, registry
+snapshot, Settings revision/default, and validated launcher Java. Its confirmation has no release
+or channel picker and explicitly names the bound channel. A second same-channel metadata
+resolution plus the installer's expected-asset check rejects feed/tag/name/URL/size/digest drift
+before binary transfer. Bounded real parents are created only after consent; the target itself
+must remain wholly absent. Successful setup persists exact external Java, the exact planned
+channel with the captured check-on-open setting, and Main selection, then returns the latest
 record. Any post-publication setup failure retains the valid/registered copy and points to
 Installations repair rather than offering a download over that path.
 
@@ -50,6 +69,14 @@ pooled worker. Accepted cancellation closes only the operation-owned pending res
 local loops, performs exact temporary cleanup off the EDT, and reports **Cancelled** without
 claiming rollback or 100% completion. Window close requests cancellation only while safe; after
 cutoff it explains why the window must remain. Game processes are never killed.
+
+Existing-copy preparation performs no write. It statically inspects the chosen root and directly
+runs only the exact canonical `<java.home>/bin/java[.exe] -version` for the JVM running MM Launcher;
+it does not consult another record, `JAVA_HOME`, or `PATH`. Confirmation precedes registry parent
+creation and mutation. Registration revalidates Java before finalization, then RegistryStore
+re-inspects and compares the canonical root/layout while holding the registry lock and writes one
+record with Java in one atomic replacement. Duplicate/overlap and changed/moved layouts fail
+without a new record. No process is run under the registry lock.
 
 A receipt-backed Home shows a concise channel/check status. Existing records are Unknown until the user
 chooses Milestone or Development; no tag, release title, prerelease flag, parity, or ordering is

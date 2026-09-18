@@ -36,16 +36,30 @@ The expected root directories are `data`, `mmconf`, and `lib`; directory names a
 source trees are not detection evidence. Conflicting version evidence fails rather than inventing
 a release identity.
 
-The Java candidate list contains only the launcher's `java.home` and `JAVA_HOME`. Discovery does
-not run either candidate. Explicit selection resolves a home or executable, rejects
-installation-contained Java, and directly executes `<java> -version` without a shell, with bounded
-output and timeout. Java 21 or newer is required by this prototype.
+The optional Java candidate list used by the later **Choose Java** action contains only the
+launcher's `java.home` and `JAVA_HOME`. Existing-copy import does not use that list: it resolves
+only the exact runtime which started MM Launcher from `java.home`, using `java.exe` on Windows and
+`java` elsewhere. It rejects links/reparse points, missing/nonregular executables, and Java
+canonically contained by the selected application root, then directly executes only
+`<current-java> -version` without a shell, with bounded output and timeout. Java 21 or newer is a
+registration prerequisite; failure leaves no null-Java imported record.
 
 Before preview or launch, the launcher re-inspects the canonical root and requires the observed
 build and selected product metadata to equal the registered evidence. It then constructs a fixed
 classpath/main-class invocation and supported memory/open/disable-grab options. Preview validates
 Java and layout but does not start the game. Actual launch is the only application execution and
 is foreground/waiting; direct process-start errors and the child's exit code are returned.
+
+The GUI's visible first-launch and Installations import actions use one flow. Before confirmation,
+static inspection and current-Java validation are read-only. Confirmation names the detected build,
+actual programs, canonical root, Java feature, and no-move behavior. Immediately before one atomic
+registry mutation, current Java is revalidated; under the registry lock RegistryStore re-inspects
+the root, compares the captured canonical inspection, rechecks validated Java file identity and
+external placement, and applies duplicate/overlap rules. It never holds that lock while executing
+a process. First registration becomes Main only if locked current state has no Main. Existing or
+concurrently added Main wins, and all existing record fields are retained. Imported records have
+no ownership receipt, channel sidecar, or provenance and remain launch-only; Home shows only their
+actually detected programs.
 
 The existing-copy commands themselves perform no network, download, or archive extraction. The
 separate `releases` and `install-release` flow is bounded by

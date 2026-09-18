@@ -22,18 +22,27 @@ import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JList;
+import javax.swing.JMenuItem;
+import javax.swing.JPopupMenu;
+import javax.swing.JComponent;
+import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.JTextArea;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.GraphicsEnvironment;
 import java.awt.Rectangle;
+import java.awt.event.ActionEvent;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.io.PrintStream;
 import java.net.URI;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.CountDownLatch;
 import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -46,7 +55,7 @@ class SimpleHomeSwingTest {
     @TempDir Path temp;
 
     @Test
-    void firstHomeHasOnePrimaryCtaAdvancedPagesAndExactNormalConfirmation()
+    void firstHomeSplitRoutesExplicitChoicesWithoutOpeningNetworkOrChangingDefault()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
@@ -55,47 +64,74 @@ class SimpleHomeSwingTest {
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             JButton primary = waitButton(frame, "downloadAndInstallButton");
-            JButton more = waitButton(frame, "moreOptionsButton");
+            JButton options = waitButton(frame, "downloadOptionsButton");
+            FirstLaunchSplitButton split = waitFor(
+                    () -> find(frame, "firstLaunchSplitButton"));
             assertNotNull(primary);
-            assertNotNull(more);
-            assertNull(find(frame, "useExistingCopyButton"));
+            assertNotNull(options);
+            assertNotNull(find(frame, "useExistingCopyButton"));
             assertNull(find(frame, "downloadProductCombo"));
 
-            SwingUtilities.invokeAndWait(more::doClick);
-            assertNotNull(waitButton(frame, "manageAddExistingButton"));
-            assertNotNull(waitButton(frame, "manageDownloadMegaMekButton"));
-            assertNotNull(waitButton(frame, "chooseChannelButton"));
-            SwingUtilities.invokeAndWait(() -> {
-                frame.setSize(900, 600);
-                frame.validate();
-                Rectangle visible = new Rectangle(frame.getContentPane().getSize());
-                for (String name : List.of("makePreferredButton", "removeRecordButton",
-                        "manageAddExistingButton", "manageDownloadMegaMekButton",
-                        "selectJavaButton", "chooseChannelButton", "checkUpdatesButton",
-                        "previewUpdateButton", "applyUpdateButton", "recoverUpdateButton",
-                        "showInstallationLocationButton")) {
-                    JButton action = find(frame, name);
-                    Rectangle bounds = SwingUtilities.convertRectangle(action.getParent(),
-                            action.getBounds(), frame.getContentPane());
-                    assertTrue(bounds.width > 0 && bounds.height > 0);
-                    assertTrue(visible.contains(bounds), name + " must remain reachable");
-                    int text = action.getFontMetrics(action.getFont()).stringWidth(action.getText());
-                    assertTrue(text + action.getInsets().left + action.getInsets().right <= bounds.width,
-                            name + " text must not be clipped");
-                }
-            });
-            JButton settings = waitButton(frame, "settingsButton");
-            SwingUtilities.invokeAndWait(settings::doClick);
-            assertNotNull(waitButton(frame, "viewOperationLogsButton"));
-            JButton saveSettings = waitButton(frame, "saveSettingsButton");
-            waitUntil(saveSettings::isEnabled);
-            JButton home = waitButton(frame, "homeButton");
-            SwingUtilities.invokeAndWait(home::doClick);
+            invokeKeyBinding(primary, KeyStroke.getKeyStroke(
+                    KeyEvent.VK_DOWN, InputEvent.ALT_DOWN_MASK));
+            waitUntil(() -> split.popupMenu().isVisible());
+            JPopupMenu popup = split.popupMenu();
+            assertEquals(2, popup.getComponentCount());
+            assertEquals("Latest Development",
+                    ((JMenuItem) popup.getComponent(0)).getText());
+            assertEquals("Choose another version or application…",
+                    ((JMenuItem) popup.getComponent(1)).getText());
+            assertEquals(0, services.plans.get());
+            assertEquals(0, services.releaseFetches.get());
+            invokePopupEscape(popup);
+            waitUntil(() -> !popup.isVisible());
 
-            primary = waitButton(frame, "downloadAndInstallButton");
-            SwingUtilities.invokeAndWait(primary::doClick);
-            JDialog confirmation = waitDialog(frame, "Confirm Download & install");
+            SwingUtilities.invokeAndWait(() -> {
+                options.doClick();
+            });
+            invokeMenuSelection((JMenuItem) popup.getComponent(0));
+            JDialog development = waitDialog(frame, "Confirm Download & install");
+            assertEquals(FollowChannel.DEVELOPMENT, services.lastPlannedChannel);
             assertEquals(1, services.plans.get());
+            assertEquals(0, services.installs.get());
+            JTextArea developmentDetails =
+                    find(development, "normalInstallConfirmationDetails");
+            assertTrue(developmentDetails.getText()
+                    .contains("Current official Development MekHQ suite"));
+            SwingUtilities.invokeAndWait(
+                    () -> ((JButton) find(development,
+                            "cancelNormalInstallButton")).doClick());
+            waitUntil(() -> !development.isDisplayable());
+            waitUntil(() -> {
+                JLabel label = find(frame, "releaseChannelLabel");
+                return label != null
+                        && "Latest Milestone (1.2.3)".equals(label.getText());
+            });
+            assertFalse(Files.exists(temp.resolve("registry.json")));
+
+            SwingUtilities.invokeAndWait(() -> {
+                options.doClick();
+                ((JMenuItem) popup.getComponent(1)).doClick();
+            });
+            JDialog picker = waitDialog(frame, "Download an official release");
+            assertEquals(0, services.releaseFetches.get(),
+                    "the full picker must wait for its Fetch action");
+            assertFalse(services.installed);
+            assertNull(services.installedChannel);
+            SwingUtilities.invokeAndWait(picker::dispose);
+
+            services.planStarted = new CountDownLatch(1);
+            services.releasePlan = new CountDownLatch(1);
+            SwingUtilities.invokeAndWait(primary::doClick);
+            assertTrue(services.planStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            assertFalse(onEdt(primary::isEnabled));
+            assertFalse(onEdt(options::isEnabled));
+            services.releasePlan.countDown();
+            JDialog confirmation = waitDialog(frame, "Confirm Download & install");
+            assertEquals(FollowChannel.MILESTONE, services.lastPlannedChannel);
+            assertEquals(2, services.plans.get());
+            assertTrue(onEdt(primary::isEnabled));
+            assertTrue(onEdt(options::isEnabled));
             assertNull(find(confirmation, "downloadProductCombo"));
             assertNull(find(confirmation, "downloadChannelCombo"));
             JTextArea details = find(confirmation, "normalInstallConfirmationDetails");
@@ -115,7 +151,79 @@ class SimpleHomeSwingTest {
             assertNotNull(waitButton(frame, "launch-mekhq-button"));
             assertNotNull(waitButton(frame, "launch-lab-button"));
             assertEquals(1, services.installs.get());
+            assertEquals(FollowChannel.MILESTONE, services.installedChannel);
             assertFalse(services.launched);
+
+            JButton installations = waitButton(frame, "manageInstallationsButton");
+            SwingUtilities.invokeAndWait(installations::doClick);
+            assertNotNull(waitButton(frame, "manageAddExistingButton"));
+            assertNotNull(waitButton(frame, "manageDownloadMegaMekButton"));
+            assertNotNull(waitButton(frame, "chooseChannelButton"));
+            SwingUtilities.invokeAndWait(() -> {
+                frame.setSize(900, 600);
+                frame.validate();
+                Rectangle visible = new Rectangle(frame.getContentPane().getSize());
+                for (String name : List.of("makePreferredButton", "removeRecordButton",
+                        "manageAddExistingButton", "manageDownloadMegaMekButton",
+                        "selectJavaButton", "chooseChannelButton", "checkUpdatesButton",
+                        "previewUpdateButton", "applyUpdateButton", "recoverUpdateButton",
+                        "showInstallationLocationButton")) {
+                    JButton action = find(frame, name);
+                    Rectangle bounds = SwingUtilities.convertRectangle(action.getParent(),
+                            action.getBounds(), frame.getContentPane());
+                    assertTrue(bounds.width > 0 && bounds.height > 0);
+                    assertTrue(visible.contains(bounds), name + " must remain reachable");
+                    int text = action.getFontMetrics(action.getFont())
+                            .stringWidth(action.getText());
+                    assertTrue(text + action.getInsets().left + action.getInsets().right
+                            <= bounds.width, name + " text must not be clipped");
+                }
+            });
+            JButton settings = waitButton(frame, "settingsButton");
+            SwingUtilities.invokeAndWait(settings::doClick);
+            assertNotNull(waitButton(frame, "viewOperationLogsButton"));
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void latestDevelopmentCompletesThroughSharedInstallerAndManagedHomeShowsDevelopment()
+            throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        FakeServices services = new FakeServices(temp.resolve("development.json"));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            JButton options = waitButton(frame, "downloadOptionsButton");
+            FirstLaunchSplitButton split = waitFor(
+                    () -> find(frame, "firstLaunchSplitButton"));
+            SwingUtilities.invokeAndWait(options::doClick);
+            waitUntil(() -> split.popupMenu().isVisible());
+            invokeMenuSelection((JMenuItem) split.popupMenu().getComponent(0));
+
+            JDialog confirmation = waitDialog(frame, "Confirm Download & install");
+            JTextArea quote = find(confirmation, "normalInstallConfirmationDetails");
+            assertTrue(quote.getText().contains("Development MekHQ suite"));
+            assertEquals(0, services.installs.get(),
+                    "confirmation must precede the shared install backend");
+            SwingUtilities.invokeAndWait(
+                    () -> ((JButton) find(confirmation,
+                            "confirmNormalInstallButton")).doClick());
+            JDialog complete = waitDialog(frame, "Install complete");
+            click(complete, "OK");
+
+            JLabel channel = waitFor(() -> {
+                JLabel current = find(frame, "releaseChannelLabel");
+                return current != null && "Development".equals(current.getText())
+                        ? current : null;
+            });
+            assertEquals("Development", channel.getText());
+            assertEquals(FollowChannel.DEVELOPMENT, services.lastPlannedChannel);
+            assertEquals(FollowChannel.DEVELOPMENT, services.installedChannel);
+            assertEquals(1, services.plans.get());
+            assertEquals(1, services.installs.get());
         } finally {
             dispose(frame);
         }
@@ -160,10 +268,15 @@ class SimpleHomeSwingTest {
         private final List<InstallationRecord> records;
         private final AtomicInteger plans = new AtomicInteger();
         private final AtomicInteger installs = new AtomicInteger();
+        private final AtomicInteger releaseFetches = new AtomicInteger();
         private volatile boolean installed;
         private volatile boolean pending;
         private volatile boolean launched;
         private volatile InstallationRecord main;
+        private volatile FollowChannel lastPlannedChannel;
+        private volatile FollowChannel installedChannel;
+        private volatile CountDownLatch planStarted;
+        private volatile CountDownLatch releasePlan;
 
         private FakeServices(Path registry) {
             super(registry);
@@ -194,19 +307,30 @@ class SimpleHomeSwingTest {
             main = first;
         }
 
+        @Override public String latestMilestoneVersion() {
+            return "1.2.3";
+        }
+
         @Override
         public Path normalInstallDestination() {
             return destination;
         }
 
         @Override
-        public NormalInstallService.Plan prepareNormalInstall(Path target, Path java) {
+        public NormalInstallService.Plan prepareNormalInstall(FollowChannel channel, Path target,
+                                                              Path java)
+                throws InterruptedException {
             plans.incrementAndGet();
+            lastPlannedChannel = channel;
+            CountDownLatch started = planStarted;
+            CountDownLatch releasePlanning = releasePlan;
+            if (started != null) started.countDown();
+            if (releasePlanning != null) releasePlanning.await();
             RegistryData empty = new RegistryData(RegistryStore.SCHEMA, null, List.of());
             return new NormalInstallService.Plan(
                     new NormalInstallService.RegistrySnapshot(false, empty), target,
                     List.of(), Path.of(System.getProperty("java.home"), "bin", "java.exe"),
-                    21, FollowChannel.MILESTONE, OfficialRepository.MEKHQ, "1.2.3",
+                    21, channel, OfficialRepository.MEKHQ, "1.2.3",
                     release, asset,
                     "https://raw.githubusercontent.com/MegaMek/megamek.github.io/main/"
                             + "_data/current_releases.yml",
@@ -222,6 +346,7 @@ class SimpleHomeSwingTest {
             context.phase(OperationPhase.DOWNLOAD, "fixture download");
             installs.incrementAndGet();
             installed = true;
+            installedChannel = plan.channel();
             main = first;
             return new NormalInstallService.Result(first, release, asset, destination, null);
         }
@@ -237,7 +362,7 @@ class SimpleHomeSwingTest {
                     current.observedBuild(), "fixture");
             ChannelPreference preference = new ChannelPreference(1, current.id(),
                     current.canonicalRoot(), current.registeredAt(),
-                    FollowChannel.MILESTONE, true);
+                    installedChannel == null ? FollowChannel.MILESTONE : installedChannel, true);
             return new HomeState(new RegistryData(1, current.id(), records), current,
                     inspection, null,
                     new UpdatePreviewService.Eligibility(current, false,
@@ -251,6 +376,12 @@ class SimpleHomeSwingTest {
         @Override
         public void select(InstallationRecord selected) {
             main = selected;
+        }
+
+        @Override
+        public ReleaseCatalog.Page releases(OfficialRepository repository, int page) {
+            releaseFetches.incrementAndGet();
+            return new ReleaseCatalog.Page(page, 10, List.of(), false);
         }
 
         @Override
@@ -322,6 +453,36 @@ class SimpleHomeSwingTest {
             Thread.sleep(20);
         }
         throw new AssertionError("timed out waiting for Swing state");
+    }
+
+    private static void invokeKeyBinding(JButton button, KeyStroke stroke) throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            Object key = button.getInputMap(JComponent.WHEN_FOCUSED).get(stroke);
+            assertNotNull(key);
+            assertNotNull(button.getActionMap().get(key));
+            button.getActionMap().get(key).actionPerformed(
+                    new ActionEvent(button, ActionEvent.ACTION_PERFORMED, key.toString()));
+        });
+    }
+
+    private static void invokePopupEscape(JPopupMenu popup) throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            KeyStroke escape = KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0);
+            Object key = popup.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).get(escape);
+            assertNotNull(key);
+            assertNotNull(popup.getActionMap().get(key));
+            popup.getActionMap().get(key).actionPerformed(
+                    new ActionEvent(popup, ActionEvent.ACTION_PERFORMED, key.toString()));
+        });
+    }
+
+    private static void invokeMenuSelection(JMenuItem item) throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            javax.swing.Action action = item.getActionMap().get("doClick");
+            assertNotNull(action);
+            action.actionPerformed(new ActionEvent(
+                    item, ActionEvent.ACTION_PERFORMED, "keyboard-select"));
+        });
     }
 
     @SuppressWarnings("unchecked")

@@ -44,39 +44,31 @@ class LauncherSwingSmokeTest {
     @TempDir Path temp;
 
     @Test
-    void showsEmptyHomeNavigatesManageAndCloses() throws Exception {
+    void showsAccessibleEmptyHomeSplitAndCloses() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing smoke requires a display");
         LauncherFrame[] holder = new LauncherFrame[1];
         SwingUtilities.invokeAndWait(() -> {
             holder[0] = new LauncherFrame(
-                    new LauncherServices(temp.resolve("registry.json")));
+                    new LauncherServices(temp.resolve("registry.json")) {
+                        @Override public String latestMilestoneVersion() {
+                            return "0.51.0";
+                        }
+                    });
             holder[0].showWindow();
         });
         try {
             assertNotNull(waitForButton(holder[0], "downloadAndInstallButton"));
-            JButton more = waitForButton(holder[0], "moreOptionsButton");
-            assertNotNull(more);
-            assertEquals(null, find(holder[0], "useExistingCopyButton"),
-                    "first Home has no competing import primary action");
-            SwingUtilities.invokeAndWait(more::doClick);
-            assertNotNull(waitForButton(holder[0], "manageAddExistingButton"));
-            assertNotNull(waitForButton(holder[0], "manageDownloadMegaMekButton"));
-            JButton settings = waitForButton(holder[0], "settingsButton");
-            SwingUtilities.invokeAndWait(settings::doClick);
-            JButton saveSettings = waitForButton(holder[0], "saveSettingsButton");
-            waitFor(saveSettings::isEnabled);
-            JButton logs = waitForButton(holder[0], "viewOperationLogsButton");
-            assertNotNull(logs);
-            SwingUtilities.invokeAndWait(logs::doClick);
-            JDialog logViewer = owned(holder[0], "Local operation logs");
-            JTextArea logText = findText(logViewer, "operationLogViewer");
-            waitFor(() -> logText.getText().contains("No local operation logs"));
-            assertNotNull(find(logViewer, "copyOperationLogButton"));
-            SwingUtilities.invokeAndWait(logViewer::dispose);
-            JButton installations = waitForButton(holder[0], "installationsButton");
-            SwingUtilities.invokeAndWait(installations::doClick);
-            openDownloadFromManage(holder[0]);
+            JButton options = waitForButton(holder[0], "downloadOptionsButton");
+            assertNotNull(options);
+            JButton existing = waitForButton(holder[0], "useExistingCopyButton");
+            assertNotNull(existing, "first Home exposes the secondary import action");
+            assertEquals("Use existing installation", existing.getText());
+            FirstLaunchSplitButton split = (FirstLaunchSplitButton) options.getParent();
+            SwingUtilities.invokeAndWait(options::doClick);
+            waitFor(() -> split.popupMenu().isVisible());
+            assertEquals(2, split.popupMenu().getComponentCount());
+            SwingUtilities.invokeAndWait(split::closePopup);
         } finally {
             SwingUtilities.invokeAndWait(() -> {
                 for (java.awt.Window window : holder[0].getOwnedWindows()) window.dispose();

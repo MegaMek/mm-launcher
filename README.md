@@ -46,14 +46,25 @@ program-files/user-data separation, native runner coverage, and release limitati
 
 ## Developer CLI and graphical review
 
-With no registered copy, the artwork-led Home has one primary **Download & install** action. It
-clearly offers the current official **Milestone MekHQ suite**, which contains MegaMek, MekHQ, and
-MegaMekLab. The screen presents **Download & install** followed by its **Milestone** caption,
-without repeating installer details. The smaller **Advanced Options** button opens the Installations
-page for importing an existing portable copy
-or adding an advanced exact release; Settings contains diagnostics. There is no simple/advanced
-mode toggle. The layout adapts to narrow windows and Java's per-monitor HiDPI scaling. See the
-[first-launch presentation notes](docs/first-launch-ui.md).
+With no registered copy, the artwork-led Home has an accessible split **Download & install**
+control. Its large primary segment remains a one-click route to confirmation for the current
+official **Milestone MekHQ suite**, which contains MegaMek, MekHQ, and MegaMekLab. The separate
+arrow opens exactly **Latest Development** and
+**Choose another version or application…**. Development uses the same verified normal-install
+flow but binds the website's `dev` MekHQ target and persists Development. The other item opens the
+existing full product/exact-release/channel picker; opening either menu or picker makes no release
+request until an explicit planning or **Fetch releases** action. The caption remains
+**Latest Milestone**, with a background metadata-only check adding the validated Milestone version
+when available. A visible secondary **Use existing installation** action, captioned **MegaMek,
+MekHQ, or MegaMekLab**, imports a portable copy without moving it. Installations and Settings
+remain available after setup and on managed/recovery pages. Import uses static JAR metadata only,
+then automatically
+validates and stores the exact external Java 21+ runtime which started MM Launcher. The first
+successful import becomes Main only if no Main exists when registration is locked; later or
+concurrent imports never replace an existing Main. Imported copies are launch-only, create no
+receipt/channel provenance, and Home shows launch actions only for products actually detected.
+There is no simple/advanced mode toggle. The layout adapts to narrow windows and Java's per-monitor
+HiDPI scaling. See the [first-launch presentation notes](docs/first-launch-ui.md).
 
 The existing `application`/`installDist` entry point remains the CLI. Requires Java 21. From the
 launcher checkout, build and run the graphical subcommand in PowerShell:
@@ -65,14 +76,16 @@ if ($LASTEXITCODE -ne 0) { throw "Build failed with exit code $LASTEXITCODE." }
 .\build\install\mm-launcher\bin\mm-launcher.bat gui
 ```
 
-Review Home, Installations, Settings, **Download & install**, **Import existing copy…**,
-**Add exact release…**, Preview, Update, recovery, Java selection, and launch confirmation.
-The normal first install resolves only the fixed website `stable` value for the MekHQ repository.
+Review Home, Installations, Settings, the split **Download & install** control,
+**Import existing copy…**, **Add exact release…**, Preview, Update, recovery, Java selection, and
+launch confirmation. The primary normal first install resolves only the fixed website `stable`
+value for the MekHQ repository; **Latest Development** resolves only its fixed `dev` value.
 Before package transfer it shows an immutable quote containing repository, tag, asset name/URL,
-size, digest, proposed per-user destination, and validated external Java. **Change location** and
-**Choose Java** produce a fresh quote. Confirmation is required before any package byte or
-destination/state write. Metadata drift, an appeared destination, or registry/Main drift rejects
-the attempt for fresh consent; it never falls back to Development, a different tag, or “latest.”
+size, digest, selected channel, proposed per-user destination, and validated external Java.
+**Change location** and **Choose Java** produce a fresh quote for that same channel. Confirmation
+is required before any package byte or destination/state write. Metadata drift, an appeared
+destination, or registry/Main drift rejects the attempt for fresh consent; neither choice falls
+back to the other channel, a different tag, or “latest.”
 
 The Installations page's advanced exact-release flow retains the explicit independent
 **Milestone** or **Development** choice. Its exact selected release does not imply a channel.

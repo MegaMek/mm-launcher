@@ -4,11 +4,13 @@ import org.megamek.launcher.channel.ChannelPreference;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.ChannelUpdateChecker;
 import org.megamek.launcher.channel.FollowChannel;
+import org.megamek.launcher.channel.OfficialYamlChannelCatalog;
 import org.megamek.launcher.diagnostics.OperationLogStore;
 import org.megamek.launcher.diagnostics.SanitizedErrors;
 import org.megamek.launcher.launch.ApplicationLauncher;
 import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.launch.RootCoordinator;
+import org.megamek.launcher.onboarding.ExistingImportService;
 import org.megamek.launcher.onboarding.Inspection;
 import org.megamek.launcher.onboarding.InstallationInspector;
 import org.megamek.launcher.onboarding.NormalInstallService;
@@ -56,6 +58,7 @@ public class LauncherServices {
     private final PreparedUpdateService preparedUpdates;
     private final OperationLogStore operationLogs;
     private final NormalInstallService normalInstalls;
+    private final ExistingImportService existingImports;
     private final LauncherSettingsStore settings;
 
     public LauncherServices(Path registry) {
@@ -91,10 +94,17 @@ public class LauncherServices {
                     return new NormalInstallService.CheckConfiguration(
                             current.settings().checkNewInstallsOnOpen(), current.revision());
                 });
+        this.existingImports = new ExistingImportService(this.registry, store, inspector,
+                javaRuntime);
     }
 
     public Path registry() {
         return registry;
+    }
+
+    public String latestMilestoneVersion() throws IOException, InterruptedException {
+        return new OfficialYamlChannelCatalog(transport)
+                .target(FollowChannel.MILESTONE, OfficialRepository.MEKHQ).version();
     }
 
     public LoggedOperation beginOperation(OperationType type,
@@ -121,7 +131,13 @@ public class LauncherServices {
 
     public NormalInstallService.Plan prepareNormalInstall(Path destination, Path selectedJava)
             throws IOException, InterruptedException {
-        return normalInstalls.prepare(destination, selectedJava);
+        return prepareNormalInstall(FollowChannel.MILESTONE, destination, selectedJava);
+    }
+
+    public NormalInstallService.Plan prepareNormalInstall(FollowChannel channel, Path destination,
+                                                          Path selectedJava)
+            throws IOException, InterruptedException {
+        return normalInstalls.prepare(channel, destination, selectedJava);
     }
 
     public NormalInstallService.Result installNormal(NormalInstallService.Plan plan,
@@ -215,6 +231,18 @@ public class LauncherServices {
     public InstallationRecord register(String name, Path root) throws IOException {
         ensureRegistryParent();
         return store.register(registry, name, root, null);
+    }
+
+    public ExistingImportService.Plan prepareExistingImport(Path root, OperationContext context)
+            throws IOException, InterruptedException {
+        return existingImports.prepare(root, context);
+    }
+
+    public ExistingImportService.Result importExisting(ExistingImportService.Plan plan,
+                                                       String name,
+                                                       OperationContext context)
+            throws IOException, InterruptedException {
+        return existingImports.register(plan, name, context);
     }
 
     public void select(InstallationRecord record) throws IOException {

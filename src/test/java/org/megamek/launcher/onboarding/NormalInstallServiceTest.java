@@ -93,6 +93,84 @@ class NormalInstallServiceTest {
     }
 
     @Test
+    void developmentPlanUsesExactDevTargetAndPersistsDevelopmentAfterOneTransfer()
+            throws Exception {
+        Fixture fixture = fixture("1.2.3");
+
+        NormalInstallService.Plan plan = fixture.launcherServices.prepareNormalInstall(
+                FollowChannel.DEVELOPMENT, fixture.destination, null);
+
+        assertEquals(FollowChannel.DEVELOPMENT, plan.channel());
+        assertEquals("9.9.9", plan.version());
+        assertEquals("v9.9.9", plan.release().tag());
+        assertEquals("MekHQ-9.9.9.tar.gz", plan.asset().name());
+        assertEquals(0, fixture.transport.binaryRequests);
+        assertFalse(Files.exists(fixture.destination, LinkOption.NOFOLLOW_LINKS));
+        assertFalse(Files.exists(fixture.registry, LinkOption.NOFOLLOW_LINKS));
+
+        NormalInstallService.Result result = fixture.launcherServices.installNormal(
+                plan, quiet(), OperationContext.none(OperationType.FRESH_INSTALL));
+
+        assertEquals(1, fixture.transport.binaryRequests);
+        RegistryData data = fixture.registries.read(fixture.registry);
+        InstallationRecord main = fixture.registries.resolve(data, null);
+        assertEquals(result.record(), main);
+        assertEquals("Main", main.name());
+        assertEquals("9.9.9", main.observedBuild());
+        assertEquals(FollowChannel.DEVELOPMENT,
+                new ChannelPreferenceStore().read(fixture.registry, data, main)
+                        .preference().channel());
+        assertTrue(new ChannelPreferenceStore().read(fixture.registry, data, main)
+                .preference().checkOnOpen());
+    }
+
+    @Test
+    void nullChannelAndDevelopmentFeedDriftFailBeforePackageOrStateWrite()
+            throws Exception {
+        Fixture invalid = fixture("1.2.3");
+        IOException missing = assertThrows(IOException.class,
+                () -> invalid.service.prepare(null, invalid.destination, null));
+        assertTrue(missing.getMessage().contains("Milestone or Development"));
+        assertEquals(0, invalid.transport.yamlRequests);
+        assertEquals(0, invalid.transport.apiRequests);
+        assertEquals(0, invalid.transport.binaryRequests);
+        assertFalse(Files.exists(invalid.registry, LinkOption.NOFOLLOW_LINKS));
+
+        Fixture drift = fixture("2.3.4");
+        NormalInstallService.Plan plan = drift.service.prepare(
+                FollowChannel.DEVELOPMENT, drift.destination, null);
+        drift.transport.developmentVersion = "9.9.8";
+        IOException changed = assertThrows(IOException.class,
+                () -> drift.service.install(plan, quiet(),
+                        OperationContext.none(OperationType.FRESH_INSTALL)));
+        assertTrue(changed.getMessage().contains("metadata changed"));
+        assertEquals(0, drift.transport.binaryRequests);
+        assertFalse(Files.exists(drift.destination, LinkOption.NOFOLLOW_LINKS));
+        assertFalse(Files.exists(drift.registry, LinkOption.NOFOLLOW_LINKS));
+    }
+
+    @Test
+    void javaDriftIsRejectedBySharedRevalidationBeforeEitherChannelTransfers()
+            throws Exception {
+        for (FollowChannel channel : FollowChannel.values()) {
+            FakeJava changedJava = new FakeJava(2);
+            Fixture fixture = fixture("3.4." + (channel.ordinal() + 1), changedJava);
+            NormalInstallService.Plan plan =
+                    fixture.service.prepare(channel, fixture.destination, null);
+
+            IOException changed = assertThrows(IOException.class,
+                    () -> fixture.service.install(plan, quiet(),
+                            OperationContext.none(OperationType.FRESH_INSTALL)));
+
+            assertTrue(changed.getMessage().toLowerCase(java.util.Locale.ROOT)
+                    .contains("java"));
+            assertEquals(0, fixture.transport.binaryRequests);
+            assertFalse(Files.exists(fixture.destination, LinkOption.NOFOLLOW_LINKS));
+            assertFalse(Files.exists(fixture.registry, LinkOption.NOFOLLOW_LINKS));
+        }
+    }
+
+    @Test
     void cancelBeforeTransferCreatesNoDestinationRegistryOrBinaryRequest() throws Exception {
         Fixture fixture = fixture("1.2.3");
         NormalInstallService.Plan plan = fixture.service.prepare(fixture.destination, null);
@@ -359,7 +437,10 @@ class NormalInstallServiceTest {
                 + Integer.toUnsignedString(System.identityHashCode(java))));
         Path registry = state.resolve("registry.json");
         byte[] archive = suiteArchive(version);
-        FixtureTransport transport = new FixtureTransport(version, archive);
+        String developmentVersion = "9.9.9";
+        byte[] developmentArchive = suiteArchive(developmentVersion);
+        FixtureTransport transport = new FixtureTransport(version, archive,
+                developmentVersion, developmentArchive);
         RegistryStore registries = new RegistryStore();
         JavaRuntime runtime = new JavaRuntime(java);
         NormalInstallService service = new NormalInstallService(registry, transport, runtime);
@@ -465,17 +546,23 @@ class NormalInstallServiceTest {
     private static final class FixtureTransport implements ReleaseTransport {
         private String version;
         private final byte[] archive;
+        private String developmentVersion;
+        private final byte[] developmentArchive;
         private int binaryRequests;
         private final String assetName;
         private int apiRequests;
+        private int yamlRequests;
         private boolean malformedFeed;
         private boolean driftOnThirdApi;
         private Runnable onBinary = () -> {
         };
 
-        private FixtureTransport(String version, byte[] archive) {
+        private FixtureTransport(String version, byte[] archive,
+                                 String developmentVersion, byte[] developmentArchive) {
             this.version = version;
             this.archive = archive;
+            this.developmentVersion = developmentVersion;
+            this.developmentArchive = developmentArchive;
             this.assetName = "MekHQ-" + version + ".tar.gz";
         }
 
@@ -483,13 +570,16 @@ class NormalInstallServiceTest {
         public Response get(URI uri, String accept) throws IOException {
             try {
                 if (uri.getHost().equals("raw.githubusercontent.com")) {
+                    yamlRequests++;
                     String yaml = malformedFeed ? "stable: [unsafe]\ndev: 9.9.9\n"
-                            : "stable: " + version + "\ndev: 9.9.9\n";
+                            : "stable: " + version + "\ndev: "
+                            + developmentVersion + "\n";
                     return response(yaml.getBytes(StandardCharsets.UTF_8), "text/yaml");
                 }
                 if (uri.getHost().equals("api.github.com")) {
                     apiRequests++;
-                    return response(releaseJson(
+                    String requested = requestedVersion(uri);
+                    return response(releaseJson(requested, archiveFor(requested),
                                     driftOnThirdApi && apiRequests >= 3)
                                     .getBytes(StandardCharsets.UTF_8),
                             "application/json");
@@ -497,7 +587,8 @@ class NormalInstallServiceTest {
                 if (uri.getHost().equals("github.com")) {
                     binaryRequests++;
                     onBinary.run();
-                    return response(archive, "application/octet-stream");
+                    return response(archiveFor(requestedVersion(uri)),
+                            "application/octet-stream");
                 }
                 throw new IOException("unexpected fixture URI: " + uri);
             } catch (Exception error) {
@@ -506,17 +597,32 @@ class NormalInstallServiceTest {
             }
         }
 
-        private String releaseJson(boolean drift) throws Exception {
-            String currentName = "MekHQ-" + version + ".tar.gz";
+        private byte[] archiveFor(String requested) {
+            return requested.equals(developmentVersion) ? developmentArchive : archive;
+        }
+
+        private static String requestedVersion(URI uri) throws IOException {
+            String path = uri.getPath();
+            int marker = path.lastIndexOf("/v");
+            if (marker < 0) throw new IOException("fixture URI has no release tag: " + uri);
+            int start = marker + 2;
+            int slash = path.indexOf('/', start);
+            return slash < 0 ? path.substring(start) : path.substring(start, slash);
+        }
+
+        private String releaseJson(String requested, byte[] requestedArchive, boolean drift)
+                throws Exception {
+            String currentName = "MekHQ-" + requested + ".tar.gz";
             return """
                     {"tag_name":"v%s","name":"Milestone %s","draft":false,
                     "prerelease":false,
                     "html_url":"https://github.com/MegaMek/mekhq/releases/tag/v%s",
                     "assets":[{"name":"%s","size":%d,"digest":"sha256:%s",
                     "browser_download_url":"https://github.com/MegaMek/mekhq/releases/download/v%s/%s"}]}
-                    """.formatted(version, version, version, currentName,
-                    archive.length + (drift ? 1 : 0),
-                    drift ? "0".repeat(64) : sha(archive), version, currentName);
+                    """.formatted(requested, requested, requested, currentName,
+                    requestedArchive.length + (drift ? 1 : 0),
+                    drift ? "0".repeat(64) : sha(requestedArchive),
+                    requested, currentName);
         }
 
         private static Response response(byte[] bytes, String type) {

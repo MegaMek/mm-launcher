@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -35,6 +36,7 @@ public final class InstallationInspector {
 
     public Inspection inspect(Path requested) throws IOException {
         Path root = SafePath.directory(requested, "application root");
+        Inspection.RootIdentity rootIdentity = rootIdentity(root);
         for (String required : List.of("data", "mmconf", "lib")) {
             Path directory = root.resolve(required);
             if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) {
@@ -80,7 +82,18 @@ public final class InstallationInspector {
         String confidence = ignoredMissingTransitive.isEmpty()
                 ? "recognized-packaging"
                 : "recognized-packaging-optional-transitive-missing";
-        return new Inspection(root.toString(), products, build, confidence);
+        Inspection.RootIdentity finalIdentity = rootIdentity(root);
+        if (!rootIdentity.equals(finalIdentity)) {
+            throw new IOException("application root changed during static inspection");
+        }
+        return new Inspection(root.toString(), products, build, confidence, rootIdentity);
+    }
+
+    private static Inspection.RootIdentity rootIdentity(Path root) throws IOException {
+        BasicFileAttributes attributes = Files.readAttributes(root, BasicFileAttributes.class,
+                LinkOption.NOFOLLOW_LINKS);
+        return new Inspection.RootIdentity(attributes.fileKey(),
+                attributes.creationTime().toMillis(), attributes.lastModifiedTime().toMillis());
     }
 
     private JarInfo inspectJar(Path root, String relative, Set<Path> seen, int depth,

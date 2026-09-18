@@ -66,9 +66,12 @@ uploaded, opened in a browser, attached to an issue/project, or used to change c
 An unsafe/corrupt registry prevents log creation and reports that logging failure without changing
 the original **Unable to check** result.
 
-Normal new GUI installs explicitly persist Milestone. Normal and advanced new GUI installs use one
-launcher Settings check-on-open default: it is true while initially absent, and a user's explicit
-false is preserved for later new copies. The normal quote captures and displays On or Off; a
+The main first-run action explicitly persists Milestone. Its split-menu **Latest Development**
+route explicitly persists Development while sharing the same verified normal installer. Merely
+opening the menu or full picker changes no channel, Main selection, or preference. Normal and
+advanced new GUI installs use one launcher Settings check-on-open default: it is true while
+initially absent, and a user's explicit false is preserved for later new copies. The normal quote
+captures and displays its exact channel and On or Off; a
 changed, corrupt, or unavailable settings configuration blocks transfer and publication until a
 fresh quote is accepted. This is not a migration: every existing explicit false remains false, and
 absent/corrupt/unknown legacy channels remain Unknown or Unavailable with no inferred choice. The

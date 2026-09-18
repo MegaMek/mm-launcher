@@ -3,21 +3,49 @@
 The artwork-led screen is used only when there is no preferred installation and no registry or
 inspection error. An unreadable registry is still an error, not a new-user reset.
 
-There is one primary **Download & install** action with plain-language Milestone/all-three-program
-copy. The primary button sits immediately below the title, with a single channel caption beneath
-it: Milestone on first launch and the selected main copy's configured channel on managed Home.
-Installer explanations remain in the actual confirmation, not repeated on Home.
-The compact beveled **Advanced Options** button navigates to Installations, where import and exact-release download remain
-available; local logs are in Settings. There is no competing existing-copy primary action and no
-simple/advanced mode toggle. Merely displaying Home performs no network request, registration,
-Java validation, channel choice, or filesystem write.
+There is one joined, accessible split **Download & install** control. Its large primary segment is
+the plain-language Milestone/all-three-program action. The distinct arrow segment opens exactly
+**Latest Development** and **Choose another version or application…**; it is not a Unicode arrow
+embedded in the primary button. Both segments are keyboard-focusable push buttons. Enter/Space
+activates the focused segment, and Alt+Down, F4, the menu key, or Shift+F10 opens the standard
+popup; Escape closes it. The split control sits immediately below the title, with a single channel
+caption beneath it: **Latest Milestone** at first, extended to **Latest Milestone (version)** only
+after a background metadata-only check validates the fixed official target and its installable
+MekHQ asset. Failure leaves the generic caption, and selecting Download retries through the normal
+consent flow. The selected main copy's configured channel appears on managed Home. Installer
+explanations remain in the actual confirmation, not repeated on Home.
 
-Selecting **Download & install** performs only fixed official channel/release metadata requests and
-validates the Java running the launcher. It then shows one compact immutable confirmation with the
-exact repository, tag, asset name/URL, size, digest, destination, and Java. Package transfer and
-parent/destination creation begin only after explicit Install. Change-location or Java selection
-builds a fresh quote. Offline/invalid-Java feedback offers retry/setup without a Development or
-latest-release fallback.
+A regular, non-primary **Use existing installation** button is visibly next, captioned
+**MegaMek, MekHQ, or MegaMekLab**. It opens only a user-directed folder chooser. Static inspection
+and validation of the exact Java 21+ runtime running MM Launcher occur off the EDT before the
+confirmation. The first-run screen has no separate advanced button. The split menu's full-picker
+item directly opens the existing product/exact-release/channel dialog without navigating or
+changing a default; it performs no network request until **Fetch releases**. Installations keeps
+the same import and exact-release tools on managed/recovery pages, and local logs remain in
+Settings. There is no simple/advanced mode toggle. Merely displaying Home
+performs only the optional Milestone metadata lookup; it performs no package request,
+registration, Java validation, channel choice, or filesystem write. Leaving or reloading Home
+cancels or discards that display-only result.
+
+The import confirmation names the detected build, actual products, canonical folder, and detected
+Java feature, and states that files will not move. Only confirmation permits an atomic launch-only
+record with that exact external Java. The first import becomes Main only when the locked registry
+still has no Main; a concurrent or existing Main wins. Home then exposes only the launch buttons
+for products the static inspector actually found. Imported copies receive no ownership receipt or
+channel setting and remain update-ineligible.
+
+Selecting the main **Download & install** segment performs only fixed official Milestone
+channel/release metadata requests and validates the Java running the launcher. Selecting
+**Latest Development** uses the same planner, confirmation, verified transfer, cancellation,
+atomic registration, Java, destination, Main-selection, and Settings-default path, but binds
+`target(DEVELOPMENT, MEKHQ)` and persists Development. Each shows one compact immutable
+confirmation with its explicit channel, exact repository, tag, asset name/URL, size, digest,
+destination, and Java. Package transfer and parent/destination creation begin only after explicit
+Install. Change-location or Java selection builds a fresh quote for the same channel.
+Offline/invalid-Java feedback offers retry/setup without cross-channel or latest-release fallback.
+Opening the menu does not cancel the Milestone caption lookup. A Development selection may cancel
+that display-only lookup while obtaining its own exact quote; cancelling resumes the Milestone
+caption without displaying a Development version there.
 
 ## Artwork and controls
 
@@ -34,8 +62,9 @@ space. The PNG is still a finite-resolution bitmap; a high-DPI display does not 
 detail.
 
 Buttons are vector-painted, suite-inspired beveled controls rather than copies of game textures,
-fonts, or the full skin framework. Standard JButton actions, keyboard interaction, mnemonics and
-accessible names/descriptions are retained. Focus is visibly outlined.
+fonts, or the full skin framework. The split segments share one painted plate and separator, so
+there are no doubled borders or opposing bevel cuts. Standard JButton actions, keyboard
+interaction, mnemonics and accessible names/descriptions are retained. Focus is visibly outlined.
 
 ## Scaling and responsive layout
 

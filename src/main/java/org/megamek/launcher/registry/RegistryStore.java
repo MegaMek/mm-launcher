@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.onboarding.Inspection;
 import org.megamek.launcher.onboarding.InstallationInspector;
 import org.megamek.launcher.onboarding.Product;
@@ -25,7 +26,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import java.util.function.UnaryOperator;
 
 public final class RegistryStore {
     public static final int SCHEMA = 1;
@@ -53,10 +53,7 @@ public final class RegistryStore {
 
     public InstallationRecord register(Path registry, String name, Path root, String pin)
             throws IOException {
-        if (name == null || name.isBlank() || name.length() > 120
-                || name.chars().anyMatch(Character::isISOControl)) {
-            throw new IOException("installation name must be 1-120 printable characters");
-        }
+        validateName(name);
         Inspection inspection = new InstallationInspector().inspect(root);
         Path file = registry.toAbsolutePath().normalize();
         rejectRegistryPlacement(file, Path.of(inspection.canonicalRoot()));
@@ -79,6 +76,60 @@ public final class RegistryStore {
             return new RegistryData(SCHEMA, defaultId, records);
         });
         return record;
+    }
+
+    /**
+     * Atomically registers a user-confirmed static inspection with the already validated Java
+     * which is running MM Launcher. The selected root is inspected again while the registry lock
+     * is held; no caller-provided layout is persisted without that final comparison.
+     */
+    public ImportedRegistration registerImported(Path registry, String name,
+                                                 Inspection confirmed,
+                                                 JavaRuntime.CurrentJava validatedJava)
+            throws IOException {
+        validateName(name);
+        if (confirmed == null || validatedJava == null) {
+            throw new IOException("confirmed inspection and launcher Java are required");
+        }
+        if (confirmed.rootIdentity() == null) {
+            throw new IOException("confirmed inspection has no canonical root identity");
+        }
+        Path file = registry.toAbsolutePath().normalize();
+        Path expectedRoot;
+        try {
+            expectedRoot = Path.of(confirmed.canonicalRoot()).toAbsolutePath().normalize();
+        } catch (RuntimeException error) {
+            throw new IOException("confirmed application root is invalid", error);
+        }
+        rejectRegistryPlacement(file, expectedRoot);
+
+        ImportedRegistration[] result = new ImportedRegistration[1];
+        mutate(file, current -> {
+            Inspection observed = new InstallationInspector().inspect(expectedRoot);
+            if (!observed.equals(confirmed)) {
+                throw new IOException("selected application layout changed after confirmation; "
+                        + "inspect it again");
+            }
+            Path root = Path.of(observed.canonicalRoot());
+            Path java = validatedJava.requireUnchanged();
+            if (java.startsWith(root)) {
+                throw new IOException("launcher Java must be external to the imported "
+                        + "application folder");
+            }
+            rejectRegistryPlacement(file, root);
+
+            List<InstallationRecord> records = new ArrayList<>(current.installations());
+            rejectDuplicateOrOverlap(records, root);
+            InstallationRecord record = new InstallationRecord(UUID.randomUUID().toString(),
+                    name, observed.canonicalRoot(), observed.observedBuild(), observed.products(),
+                    java.toString(), null, false, Instant.now().toString());
+            records.add(record);
+            boolean becameMain = current.defaultInstallationId() == null;
+            String defaultId = becameMain ? record.id() : current.defaultInstallationId();
+            result[0] = new ImportedRegistration(record, becameMain);
+            return new RegistryData(SCHEMA, defaultId, records);
+        });
+        return result[0];
     }
 
     public void select(Path registry, String id) throws IOException {
@@ -161,7 +212,7 @@ public final class RegistryStore {
         return find(data, selected);
     }
 
-    private void mutate(Path file, UnaryOperator<RegistryData> operation) throws IOException {
+    private void mutate(Path file, RegistryMutation operation) throws IOException {
         if (Files.exists(file, LinkOption.NOFOLLOW_LINKS)) read(file); // fail before side effects
         Path parent = file.getParent();
         if (parent == null || !Files.isDirectory(parent, LinkOption.NOFOLLOW_LINKS)) {
@@ -274,6 +325,27 @@ public final class RegistryStore {
         }
     }
 
+    private static void validateName(String name) throws IOException {
+        if (name == null || name.isBlank() || name.length() > 120
+                || name.chars().anyMatch(Character::isISOControl)) {
+            throw new IOException("installation name must be 1-120 printable characters");
+        }
+    }
+
+    private static void rejectDuplicateOrOverlap(List<InstallationRecord> records, Path candidate)
+            throws IOException {
+        for (InstallationRecord existing : records) {
+            Path prior = Path.of(existing.canonicalRoot());
+            if (candidate.equals(prior)) {
+                throw new IOException("installation path is already registered");
+            }
+            if (candidate.startsWith(prior) || prior.startsWith(candidate)) {
+                throw new IOException("installation roots overlap: " + candidate + " and "
+                        + prior);
+            }
+        }
+    }
+
     private static void rejectRegistryPlacement(Path registry, Path root) throws IOException {
         Path file = registry.toAbsolutePath().normalize();
         if (file.startsWith(root) || root.startsWith(file)) {
@@ -306,6 +378,14 @@ public final class RegistryStore {
 
     private static MutationFailure failure(String message) {
         return new MutationFailure(message);
+    }
+
+    public record ImportedRegistration(InstallationRecord record, boolean becameMain) {
+    }
+
+    @FunctionalInterface
+    private interface RegistryMutation {
+        RegistryData apply(RegistryData current) throws IOException;
     }
 
     private static final class MutationFailure extends RuntimeException {

@@ -61,9 +61,11 @@ as cancellation and publication is not rolled back.
 
 Only after final static validation does `RegistryStore.register` run. Existing default selection
 is preserved by registration; the first record is the default for an empty registry. The normal
-GUI setup then revalidates and stores the exact external Java from its quote, persists Milestone
-with the quoted Settings check default, rechecks that no unrelated registry/default drift occurred,
-and explicitly selects the new Main. Normal and advanced GUI installs initially use true, but
+GUI setup then revalidates and stores the exact external Java from its quote, persists the exact
+planned Milestone or Development channel with the quoted Settings check default, rechecks that no
+unrelated registry/default drift occurred, and explicitly selects the new Main. The primary
+first-run route defaults to Milestone; the split menu's Development route is explicit and cannot
+silently alter the primary default. Normal and advanced GUI installs initially use true, but
 preserve a user's later false default for each new copy. The normal quote displays that choice and
 re-reads the exact settings configuration before transfer or parent creation; change, corruption,
 or an unknown result requires a fresh quote. Existing per-copy settings are never rewritten.

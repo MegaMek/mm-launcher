@@ -5,6 +5,7 @@ import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.ChannelUpdateChecker;
 import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.diagnostics.SanitizedErrors;
+import org.megamek.launcher.onboarding.ExistingImportService;
 import org.megamek.launcher.onboarding.Inspection;
 import org.megamek.launcher.onboarding.NormalInstallService;
 import org.megamek.launcher.onboarding.Product;
@@ -75,6 +76,7 @@ public final class LauncherFrame extends JFrame {
     private static final int LOG_LIMIT = 64_000;
     private static final String NORMAL_FOLDER = "Main";
     private final LauncherServices services;
+    private final ExistingImportPrompts existingImportPrompts;
     private final BusyGate gate = new BusyGate();
     private final Map<Component, Boolean> enabledBeforeWork = new IdentityHashMap<>();
     private final JPanel content = new JPanel(new BorderLayout(12, 12));
@@ -85,6 +87,7 @@ public final class LauncherFrame extends JFrame {
     private ChannelUpdateChecker.Result channelCheck;
     private String channelCheckError;
     private SwingWorker<ChannelUpdateChecker.Result, Void> channelWorker;
+    private SwingWorker<String, Void> firstLaunchMilestoneWorker;
     private SwingWorker<Map<String, InstallationCheck>, Void> otherChecksWorker;
     private SwingWorker<InstallationCheck, Void> installationCheckWorker;
     private final Map<String, InstallationCheck> installationChecks = new HashMap<>();
@@ -92,6 +95,8 @@ public final class LauncherFrame extends JFrame {
     private final GuiScale guiScale = GuiScale.DEFAULT;
     private java.awt.image.BufferedImage firstLaunchArtwork;
     private Throwable firstLaunchArtworkError;
+    private FirstLaunchSplitButton firstLaunchSplitButton;
+    private FirstLaunchPanel firstLaunchPanel;
     private boolean homeSizeInitialized;
     private long homeGeneration;
     private Page page = Page.HOME;
@@ -101,8 +106,13 @@ public final class LauncherFrame extends JFrame {
     private boolean settingsLoading;
 
     public LauncherFrame(LauncherServices services) {
+        this(services, new SwingExistingImportPrompts());
+    }
+
+    LauncherFrame(LauncherServices services, ExistingImportPrompts existingImportPrompts) {
         super("MegaMek Launcher");
         this.services = services;
+        this.existingImportPrompts = existingImportPrompts;
         status.addPropertyChangeListener("text", event ->
                 status.setVisible(status.getText() != null && !status.getText().isBlank()));
         setName("launcherFrame");
@@ -149,6 +159,8 @@ public final class LauncherFrame extends JFrame {
 
     private void reload() {
         homeGeneration++;
+        disposeFirstLaunchSplitButton();
+        cancelFirstLaunchMilestoneWorker();
         cancelChannelWorker();
         channelCheck = null;
         channelCheckError = null;
@@ -189,6 +201,7 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void renderHome() {
+        disposeFirstLaunchSplitButton();
         content.removeAll();
         if (state.preferred() == null && state.preferredError() == null) {
             renderFirstLaunch();
@@ -244,6 +257,10 @@ public final class LauncherFrame extends JFrame {
 
     private void navigateTo(Page next) {
         if (gate.isBusy()) return;
+        if (next != Page.HOME) {
+            disposeFirstLaunchSplitButton();
+            cancelFirstLaunchMilestoneWorker();
+        }
         page = next;
         if (next == Page.SETTINGS) {
             launcherSettings = null;
@@ -336,27 +353,41 @@ public final class LauncherFrame extends JFrame {
 
     private void renderFirstLaunch() {
         content.setBorder(BorderFactory.createEmptyBorder());
-        JButton download = new FirstLaunchButton("Download & install",
-                "downloadAndInstallButton",
-                true, guiScale);
-        download.setMnemonic(java.awt.event.KeyEvent.VK_D);
-        download.getAccessibleContext().setAccessibleDescription(
-                "Review and install the current official Milestone MekHQ suite containing "
-                        + "MegaMek, MekHQ, and MegaMekLab.");
-        download.addActionListener(event -> prepareNormalInstall(null, null));
-        JButton more = new FirstLaunchButton("Advanced Options", "moreOptionsButton",
-                false, guiScale, FirstLaunchButton.Size.SMALL);
-        more.setMnemonic(java.awt.event.KeyEvent.VK_A);
-        more.getAccessibleContext().setAccessibleDescription(
-                "Open Installations to import a copy, download an exact release, or change "
-                        + "launcher settings.");
-        more.addActionListener(event -> navigateTo(Page.INSTALLATIONS));
+        final long generation = homeGeneration;
+        final LauncherServices.HomeState capturedHome = state;
+        final FirstLaunchSplitButton[] source = new FirstLaunchSplitButton[1];
+        FirstLaunchSplitButton download = new FirstLaunchSplitButton(guiScale,
+                () -> {
+                    if (!isCurrentFirstLaunch(generation, capturedHome, source[0])) return;
+                    cancelFirstLaunchMilestoneWorker();
+                    prepareNormalInstall(FollowChannel.MILESTONE, null, null);
+                },
+                () -> {
+                    if (!isCurrentFirstLaunch(generation, capturedHome, source[0])) return;
+                    cancelFirstLaunchMilestoneWorker();
+                    prepareNormalInstall(FollowChannel.DEVELOPMENT, null, null);
+                },
+                () -> {
+                    if (!isCurrentFirstLaunch(generation, capturedHome, source[0])) return;
+                    downloadDialog();
+                });
+        source[0] = download;
+        firstLaunchSplitButton = download;
+        JButton useExisting = new FirstLaunchButton("Use existing installation",
+                "useExistingCopyButton", false, guiScale);
+        useExisting.setMnemonic(java.awt.event.KeyEvent.VK_U);
+        useExisting.getAccessibleContext().setAccessibleDescription(
+                "Choose and statically inspect an existing MegaMek, MekHQ, or MegaMekLab "
+                        + "installation without moving its files.");
+        useExisting.addActionListener(event -> chooseExisting(true));
         status.setText(firstLaunchArtworkError == null
                 ? ""
                 : "Artwork unavailable; diagnostics are available in Settings.");
         FirstLaunchPanel firstLaunch = new FirstLaunchPanel(firstLaunchArtwork, guiScale,
-                download, more, homeChannelText(), status);
+                download, useExisting, "Latest Milestone", status);
+        firstLaunchPanel = firstLaunch;
         content.add(firstLaunch, BorderLayout.CENTER);
+        startFirstLaunchMilestoneCheck(firstLaunch);
         if (!homeSizeInitialized) {
             homeSizeInitialized = true;
             Dimension preferred = firstLaunch.getPreferredSize();
@@ -364,6 +395,67 @@ public final class LauncherFrame extends JFrame {
             fitWindowToScreen(new Dimension(preferred.width + frameInsets.left + frameInsets.right,
                     preferred.height + frameInsets.top + frameInsets.bottom));
         }
+    }
+
+    private void startFirstLaunchMilestoneCheck(FirstLaunchPanel panel) {
+        if (firstLaunchMilestoneWorker != null) return;
+        final long generation = homeGeneration;
+        firstLaunchMilestoneWorker = new SwingWorker<>() {
+            @Override
+            protected String doInBackground() throws Exception {
+                return services.latestMilestoneVersion();
+            }
+
+            @Override
+            protected void done() {
+                if (firstLaunchMilestoneWorker != this) return;
+                firstLaunchMilestoneWorker = null;
+                if (isCancelled() || !isDisplayable() || generation != homeGeneration
+                        || page != Page.HOME || state == null || state.preferred() != null
+                        || panel != firstLaunchPanel || panel.getParent() != content) {
+                    return;
+                }
+                try {
+                    panel.setReleaseChannel("Latest Milestone (" + get() + ")",
+                            "Validated from the official Milestone release metadata.");
+                } catch (java.util.concurrent.ExecutionException error) {
+                    panel.setReleaseChannel("Latest Milestone",
+                            "Current version unavailable. Download & install will retry.");
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    panel.setReleaseChannel("Latest Milestone",
+                            "Current version check was interrupted.");
+                }
+            }
+        };
+        firstLaunchMilestoneWorker.execute();
+    }
+
+    private boolean isCurrentFirstLaunch(long generation, LauncherServices.HomeState capturedHome,
+                                         FirstLaunchSplitButton source) {
+        return isDisplayable() && generation == homeGeneration && page == Page.HOME
+                && state == capturedHome && state != null && state.preferred() == null
+                && source != null && source == firstLaunchSplitButton;
+    }
+
+    private void disposeFirstLaunchSplitButton() {
+        if (firstLaunchSplitButton != null) {
+            firstLaunchSplitButton.disposePopup();
+            firstLaunchSplitButton = null;
+        }
+        firstLaunchPanel = null;
+    }
+
+    private void resumeFirstLaunchMilestoneCaption() {
+        if (!isDisplayable() || page != Page.HOME || state == null
+                || state.preferred() != null || firstLaunchPanel == null
+                || firstLaunchSplitButton == null) {
+            return;
+        }
+        status.setText("");
+        firstLaunchPanel.setReleaseChannel("Latest Milestone",
+                "Checking the current official Milestone release metadata.");
+        startFirstLaunchMilestoneCheck(firstLaunchPanel);
     }
 
     private void fitWindowToScreen(Dimension requested) {
@@ -614,6 +706,13 @@ public final class LauncherFrame extends JFrame {
         }
     }
 
+    private void cancelFirstLaunchMilestoneWorker() {
+        if (firstLaunchMilestoneWorker != null) {
+            firstLaunchMilestoneWorker.cancel(true);
+            firstLaunchMilestoneWorker = null;
+        }
+    }
+
     private void startInstallationCheck(InstallationRecord record) {
         if (installationCheckWorker != null) return;
         final long generation = homeGeneration;
@@ -664,6 +763,9 @@ public final class LauncherFrame extends JFrame {
         final long generation = homeGeneration;
         final RegistryData captured = state.registry();
         final String mainId = captured.defaultInstallationId();
+        if (captured.installations().stream().noneMatch(record -> !record.id().equals(mainId))) {
+            return;
+        }
         otherChecksWorker = new SwingWorker<>() {
             @Override
             protected Map<String, InstallationCheck> doInBackground() {
@@ -766,27 +868,75 @@ public final class LauncherFrame extends JFrame {
         panel.add(recover);
     }
 
-    private void chooseExisting() {
-        JFileChooser chooser = folders("Choose an extracted MegaMek or MekHQ folder");
-        if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
-        Path selected = chooser.getSelectedFile().toPath();
-        String name = JOptionPane.showInputDialog(this, "Name for this copy:",
-                selected.getFileName() == null ? "MegaMek" : selected.getFileName().toString());
-        if (name == null) return;
-        run("Inspecting existing copy", () -> services.inspect(selected), inspection -> {
-            String products = inspection.products().stream().map(Product::key)
-                    .map(LauncherFrame::displayProduct).sorted().toList().toString();
-            int answer = JOptionPane.showConfirmDialog(this,
-                    "Detected build: " + inspection.observedBuild() + "\nPrograms: " + products
-                            + "\nFolder: " + inspection.canonicalRoot()
-                            + "\n\nRegister this copy? No JAR has been executed.",
-                    "Confirm existing copy", JOptionPane.OK_CANCEL_OPTION,
-                    JOptionPane.QUESTION_MESSAGE);
-            if (answer == JOptionPane.OK_OPTION) {
-                run("Registering existing copy", () -> services.register(name, selected),
-                        ignored -> reload());
-            }
-        });
+    private void chooseExisting(boolean firstLaunchEntry) {
+        Path selected = existingImportPrompts.chooseFolder(this);
+        if (selected == null) return;
+        OperationProgressDialog preparation = new OperationProgressDialog(this,
+                "Inspecting existing installation", "existingImportProgressLog",
+                this::showOperationLogs);
+        preparation.append("Inspecting package metadata and validating launcher Java...\n");
+        preparation.setVisible(true);
+        runOperation("Inspecting existing installation", OperationType.IMPORT_EXISTING,
+                List.of(selected), preparation,
+                context -> services.prepareExistingImport(selected, context),
+                plan -> {
+                    preparation.dispose();
+                    String defaultName = selected.getFileName() == null
+                            ? "MegaMek" : selected.getFileName().toString();
+                    String name = existingImportPrompts.chooseName(this, defaultName);
+                    if (name == null) {
+                        status.setText("Existing installation was not imported");
+                        return;
+                    }
+                    String details = existingImportConfirmation(plan, name);
+                    if (!existingImportPrompts.confirm(this, details)) {
+                        status.setText("Existing installation was not imported");
+                        return;
+                    }
+                    registerExisting(plan, name, firstLaunchEntry);
+                }, error -> preparation.setTitle("Inspection failed"), () -> {}, false);
+    }
+
+    private void registerExisting(ExistingImportService.Plan plan, String name,
+                                  boolean firstLaunchEntry) {
+        OperationProgressDialog progress = new OperationProgressDialog(this,
+                "Importing existing installation", "existingImportProgressLog",
+                this::showOperationLogs);
+        progress.append("Revalidating and registering the confirmed launch-only copy...\n");
+        progress.setVisible(true);
+        runOperation("Importing existing installation", OperationType.IMPORT_EXISTING,
+                List.of(Path.of(plan.inspection().canonicalRoot())), progress,
+                context -> services.importExisting(plan, name, context),
+                result -> {
+                    progress.append("\nRegistered successfully. Nothing was launched or moved.\n");
+                    progress.dispose();
+                    selectedInstallationId = result.record().id();
+                    String message = result.becameMain()
+                            ? "Imported “" + result.record().name()
+                            + "” and made it Main. Nothing was launched."
+                            : "Imported “" + result.record().name()
+                            + "”. The existing Main installation was not changed.";
+                    existingImportPrompts.completed(this, message);
+                    page = firstLaunchEntry && result.becameMain()
+                            ? Page.HOME : Page.INSTALLATIONS;
+                    reload();
+                }, error -> {
+                    progress.append("\nIMPORT DID NOT COMPLETE: " + errorDetail(error) + "\n");
+                    progress.setTitle("Import failed");
+                }, () -> {});
+    }
+
+    static String existingImportConfirmation(ExistingImportService.Plan plan, String name) {
+        String programs = plan.inspection().products().stream().map(Product::key)
+                .map(LauncherFrame::displayProduct).sorted()
+                .collect(java.util.stream.Collectors.joining(", "));
+        return "Name: " + name
+                + "\nDetected build: " + plan.inspection().observedBuild()
+                + "\nPrograms: " + programs
+                + "\nFolder: " + plan.inspection().canonicalRoot()
+                + "\nLauncher Java: Java " + plan.javaFeature() + " detected"
+                + "\n\nRegister this copy for launch-only use? Existing files will stay "
+                + "where they are and will not be moved. No game JAR has been executed.";
     }
 
     private void renderInstallationsPage() {
@@ -935,7 +1085,7 @@ public final class LauncherFrame extends JFrame {
                 reload();
             });
         });
-        add.addActionListener(event -> chooseExisting());
+        add.addActionListener(event -> chooseExisting(false));
         download.addActionListener(event -> downloadDialog());
         java.addActionListener(event -> {
             InstallationRecord selected = list.getSelectedValue();
@@ -1103,22 +1253,25 @@ public final class LauncherFrame extends JFrame {
         });
     }
 
-    private void prepareNormalInstall(Path destination, Path selectedJava) {
+    private void prepareNormalInstall(FollowChannel channel, Path destination,
+                                      Path selectedJava) {
         final Path target;
         try {
             target = destination == null ? services.normalInstallDestination() : destination;
         } catch (IOException error) {
             showError("Preparing Download & install failed", error);
+            resumeFirstLaunchMilestoneCaption();
             return;
         }
-        run("Checking the current official Milestone",
-                () -> services.prepareNormalInstall(target, selectedJava),
+        run("Checking the current official " + channel,
+                () -> services.prepareNormalInstall(channel, target, selectedJava),
                 this::showNormalInstallConfirmation,
-                error -> normalPlanFailure(target, selectedJava, error), () -> {
+                error -> normalPlanFailure(channel, target, selectedJava, error), () -> {
                 }, false);
     }
 
-    private void normalPlanFailure(Path target, Path selectedJava, Throwable error) {
+    private void normalPlanFailure(FollowChannel channel, Path target, Path selectedJava,
+                                   Throwable error) {
         String detail = errorDetail(error);
         boolean javaProblem = detail.toLowerCase(java.util.Locale.ROOT).contains("java");
         Object[] choices = javaProblem
@@ -1127,7 +1280,7 @@ public final class LauncherFrame extends JFrame {
         int answer = JOptionPane.showOptionDialog(this,
                 (javaProblem
                         ? "A compatible external Java 21 or newer could not be verified."
-                        : "The current official Milestone could not be checked.")
+                        : "The current official " + channel + " could not be checked.")
                         + "\n\n" + detail
                         + "\n\nNo package was downloaded and no destination was created.",
                 javaProblem ? "Java setup required" : "Could not prepare download",
@@ -1138,15 +1291,19 @@ public final class LauncherFrame extends JFrame {
             chooser.setDialogTitle("Choose Java home or Java executable");
             chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
             if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-                prepareNormalInstall(target, chooser.getSelectedFile().toPath());
+                prepareNormalInstall(channel, target, chooser.getSelectedFile().toPath());
+            } else {
+                resumeFirstLaunchMilestoneCaption();
             }
         } else if (answer == (javaProblem ? 1 : 0)) {
-            prepareNormalInstall(target, selectedJava);
+            prepareNormalInstall(channel, target, selectedJava);
+        } else {
+            resumeFirstLaunchMilestoneCaption();
         }
     }
 
     private void showNormalInstallConfirmation(NormalInstallService.Plan plan) {
-        String details = "Current official Milestone MekHQ suite\n"
+        String details = "Current official " + plan.channel() + " MekHQ suite\n"
                 + "Includes: MegaMek, MekHQ, and MegaMekLab\n\n"
                 + "Repository: " + plan.repository().slug() + "\n"
                 + "Release: " + plan.release().tag() + "\n"
@@ -1174,6 +1331,12 @@ public final class LauncherFrame extends JFrame {
         actions.add(cancel);
         JDialog dialog = dialog("Confirm Download & install",
                 new JScrollPane(quote), actions, new Dimension(720, 470));
+        boolean[] continuing = {false};
+        dialog.addWindowListener(new WindowAdapter() {
+            @Override public void windowClosed(WindowEvent event) {
+                if (!continuing[0]) resumeFirstLaunchMilestoneCaption();
+            }
+        });
         change.addActionListener(event -> {
             JFileChooser chooser = folders("Choose an existing writable parent folder");
             if (chooser.showOpenDialog(dialog) != JFileChooser.APPROVE_OPTION) return;
@@ -1189,18 +1352,22 @@ public final class LauncherFrame extends JFrame {
                 return;
             }
             Path changed = chooser.getSelectedFile().toPath().resolve(folder);
+            continuing[0] = true;
             dialog.dispose();
-            prepareNormalInstall(changed, plan.javaExecutable());
+            prepareNormalInstall(plan.channel(), changed, plan.javaExecutable());
         });
         changeJava.addActionListener(event -> {
             JFileChooser chooser = new JFileChooser();
             chooser.setDialogTitle("Choose Java home or Java executable");
             chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
             if (chooser.showOpenDialog(dialog) != JFileChooser.APPROVE_OPTION) return;
+            continuing[0] = true;
             dialog.dispose();
-            prepareNormalInstall(plan.destination(), chooser.getSelectedFile().toPath());
+            prepareNormalInstall(plan.channel(), plan.destination(),
+                    chooser.getSelectedFile().toPath());
         });
         install.addActionListener(event -> {
+            continuing[0] = true;
             dialog.dispose();
             runNormalInstall(plan);
         });
@@ -1213,7 +1380,8 @@ public final class LauncherFrame extends JFrame {
         OperationProgressDialog progress = new OperationProgressDialog(this,
                 "Downloading and installing", "normalInstallProgressLog",
                 this::showOperationLogs);
-        progress.append("Installing the confirmed official Milestone MekHQ suite...\n");
+        progress.append("Installing the confirmed official " + plan.channel()
+                + " MekHQ suite...\n");
         JButton repair = button("Open Installations", "repairNormalInstallButton");
         repair.setEnabled(false);
         progress.addActionButton(repair);
@@ -1780,15 +1948,26 @@ public final class LauncherFrame extends JFrame {
                                   OperationProgressDialog progress,
                                   OperationCallable<T> operation, Consumer<T> success,
                                   Consumer<Throwable> failure, Runnable completion) {
+        runOperation(description, type, potentialInstallationRoots, progress, operation, success,
+                failure, completion, true);
+    }
+
+    private <T> void runOperation(String description, OperationType type,
+                                  List<Path> potentialInstallationRoots,
+                                  OperationProgressDialog progress,
+                                  OperationCallable<T> operation, Consumer<T> success,
+                                  Consumer<Throwable> failure, Runnable completion,
+                                  boolean persistLog) {
         if (!gate.tryEnter()) {
             progress.dispose();
             JOptionPane.showMessageDialog(this, "Another operation is already running.",
                     "Please wait", JOptionPane.INFORMATION_MESSAGE);
             return;
         }
-        LauncherServices.LoggedOperation logged = services.beginOperation(
-                type, progress, potentialInstallationRoots);
-        OperationContext context = logged.context();
+        LauncherServices.LoggedOperation logged = persistLog ? services.beginOperation(
+                type, progress, potentialInstallationRoots) : null;
+        OperationContext context = logged == null
+                ? new OperationContext(type, progress) : logged.context();
         progress.bind(context);
         if (!activeOperation.compareAndSet(null, context)) {
             gate.leave();
@@ -1823,11 +2002,16 @@ public final class LauncherFrame extends JFrame {
                 }
                 OperationOutcome outcome = problem == null ? OperationOutcome.SUCCEEDED
                         : cancelled ? OperationOutcome.CANCELLED : OperationOutcome.FAILED;
-                String warning = logged.finish(outcome,
-                        outcome == OperationOutcome.SUCCEEDED ? "Operation completed"
-                                : outcome == OperationOutcome.CANCELLED
-                                ? "Cancelled before finalization" : "Operation failed",
-                        problem);
+                String detail = outcome == OperationOutcome.SUCCEEDED ? "Operation completed"
+                        : outcome == OperationOutcome.CANCELLED
+                        ? "Cancelled before finalization" : "Operation failed";
+                String warning;
+                if (logged == null) {
+                    context.finish(outcome, detail);
+                    warning = null;
+                } else {
+                    warning = logged.finish(outcome, detail, problem);
+                }
                 Thread.interrupted();
                 return new OperationExecution<>(value, problem, cancelled, warning);
             }
@@ -1856,7 +2040,7 @@ public final class LauncherFrame extends JFrame {
                 if (result.cancelled()) {
                     progress.setTitle("Cancelled");
                     progress.append("\nCANCELLED before installation finalization. "
-                            + "Owned temporary files were discarded.\n");
+                            + "Any operation-owned temporary files were discarded.\n");
                     status.setText("Cancelled - no finalization was started");
                     return;
                 }
@@ -2129,6 +2313,43 @@ public final class LauncherFrame extends JFrame {
         return SanitizedErrors.display(error);
     }
 
+    interface ExistingImportPrompts {
+        Path chooseFolder(Component parent);
+
+        String chooseName(Component parent, String defaultName);
+
+        boolean confirm(Component parent, String details);
+
+        void completed(Component parent, String message);
+    }
+
+    private static final class SwingExistingImportPrompts implements ExistingImportPrompts {
+        @Override
+        public Path chooseFolder(Component parent) {
+            JFileChooser chooser = folders("Choose an extracted MegaMek or MekHQ folder");
+            return chooser.showOpenDialog(parent) == JFileChooser.APPROVE_OPTION
+                    ? chooser.getSelectedFile().toPath() : null;
+        }
+
+        @Override
+        public String chooseName(Component parent, String defaultName) {
+            return JOptionPane.showInputDialog(parent, "Name for this copy:", defaultName);
+        }
+
+        @Override
+        public boolean confirm(Component parent, String details) {
+            return JOptionPane.showConfirmDialog(parent, details,
+                    "Confirm existing installation", JOptionPane.OK_CANCEL_OPTION,
+                    JOptionPane.QUESTION_MESSAGE) == JOptionPane.OK_OPTION;
+        }
+
+        @Override
+        public void completed(Component parent, String message) {
+            JOptionPane.showMessageDialog(parent, message, "Import complete",
+                    JOptionPane.INFORMATION_MESSAGE);
+        }
+    }
+
     static void appendBounded(JTextArea area, String text) {
         if (!area.isDisplayable()) return;
         area.append(text);
@@ -2140,6 +2361,8 @@ public final class LauncherFrame extends JFrame {
     @Override
     public void dispose() {
         homeGeneration++;
+        disposeFirstLaunchSplitButton();
+        cancelFirstLaunchMilestoneWorker();
         cancelChannelWorker();
         OperationContext operation = activeOperation.get();
         if (operation != null && !operation.finalizationStarted()) {

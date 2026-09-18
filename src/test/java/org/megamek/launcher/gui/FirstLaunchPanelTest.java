@@ -7,9 +7,11 @@ import org.junit.jupiter.api.io.TempDir;
 import javax.imageio.ImageIO;
 import javax.swing.JButton;
 import javax.swing.JLabel;
+import javax.swing.JMenuItem;
 import javax.swing.JScrollPane;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
+import javax.accessibility.AccessibleRole;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Graphics2D;
@@ -22,6 +24,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.jar.Attributes;
 import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
@@ -63,15 +68,39 @@ class FirstLaunchPanelTest {
                     assertActionsWithinPanel(panel);
                     saveReviewImage("compact-" + width + ".png", rendered);
                 }
-                for (String action : List.of("downloadAndInstallButton", "moreOptionsButton")) {
-                    find(panel, action).doClick();
-                }
-                assertEquals(List.of("downloadAndInstallButton", "moreOptionsButton"), actions);
+                FirstLaunchSplitButton split = (FirstLaunchSplitButton)
+                        findComponent(panel, "firstLaunchSplitButton");
+                find(panel, "downloadAndInstallButton").doClick();
+                ((JMenuItem) split.popupMenu().getComponent(0)).doClick();
+                ((JMenuItem) split.popupMenu().getComponent(1)).doClick();
+                find(panel, "useExistingCopyButton").doClick();
+                assertEquals(List.of("downloadAndInstallButton",
+                        "latestDevelopmentMenuItem", "chooseAnotherVersionMenuItem",
+                        "useExistingCopyButton"), actions);
                 assertTrue(find(panel, "downloadAndInstallButton").isFocusable());
-                assertTrue(find(panel, "moreOptionsButton").isFocusable());
-                assertEquals("Advanced Options", find(panel, "moreOptionsButton").getText());
-                assertTrue(find(panel, "moreOptionsButton").getPreferredSize().height
-                        < find(panel, "downloadAndInstallButton").getPreferredSize().height);
+                assertTrue(find(panel, "downloadOptionsButton").isFocusable());
+                assertTrue(find(panel, "useExistingCopyButton").isFocusable());
+                assertEquals("Use existing installation",
+                        find(panel, "useExistingCopyButton").getText());
+                assertEquals("Choose another version or application",
+                        find(panel, "downloadOptionsButton").getAccessibleContext()
+                                .getAccessibleName());
+                assertEquals(AccessibleRole.PUSH_BUTTON,
+                        find(panel, "downloadAndInstallButton").getAccessibleContext()
+                                .getAccessibleRole());
+                assertEquals(AccessibleRole.PUSH_BUTTON,
+                        find(panel, "downloadOptionsButton").getAccessibleContext()
+                                .getAccessibleRole());
+                assertNotNull(find(panel, "downloadAndInstallButton").getAccessibleContext()
+                        .getAccessibleDescription());
+                assertNotNull(find(panel, "downloadOptionsButton").getAccessibleContext()
+                        .getAccessibleDescription());
+                split.setEnabled(false);
+                assertFalse(find(panel, "downloadAndInstallButton").isEnabled());
+                assertFalse(find(panel, "downloadOptionsButton").isEnabled());
+                split.setEnabled(true);
+                assertTrue(find(panel, "downloadAndInstallButton").isEnabled());
+                assertTrue(find(panel, "downloadOptionsButton").isEnabled());
 
                 FirstLaunchPanel zoomed = panel(artwork, new GuiScale(1.5f), new ArrayList<>());
                 render(zoomed, 1312, 700, 1);
@@ -88,21 +117,28 @@ class FirstLaunchPanelTest {
     void channelCaptionIsSeparateAndRedundantCopyIsAbsent() throws Exception {
         BufferedImage artwork = FirstLaunchPanel.loadArtwork();
         onEdt(() -> {
-            JButton download = new FirstLaunchButton("Download & install",
-                    "downloadAndInstallButton", true, GuiScale.DEFAULT);
-            JButton advanced = new FirstLaunchButton("Advanced Options", "moreOptionsButton",
-                    false, GuiScale.DEFAULT, FirstLaunchButton.Size.SMALL);
+            FirstLaunchSplitButton download = new FirstLaunchSplitButton(GuiScale.DEFAULT,
+                    () -> {}, () -> {}, () -> {});
+            JButton existing = new FirstLaunchButton("Use existing installation",
+                    "useExistingCopyButton", false, GuiScale.DEFAULT);
             JLabel status = new JLabel("");
             FirstLaunchPanel panel = new FirstLaunchPanel(artwork, GuiScale.DEFAULT,
-                    download, advanced, "Development", status);
+                    download, existing, "Latest Milestone", status);
             render(panel, 1312, 560, 1);
             JLabel channel = (JLabel) findComponent(panel, "releaseChannelLabel");
-            assertEquals("Development", channel.getText());
+            JLabel existingCaption = (JLabel) findComponent(panel, "existingCopyCaption");
+            assertEquals("Latest Milestone", channel.getText());
+            panel.setReleaseChannel("Latest Milestone (0.51.0)", "Validated");
+            assertEquals("Latest Milestone (0.51.0)", channel.getText());
+            assertEquals("MegaMek, MekHQ, or MegaMekLab", existingCaption.getText());
             Rectangle buttonBounds = SwingUtilities.convertRectangle(download.getParent(),
                     download.getBounds(), panel);
             Rectangle captionBounds = SwingUtilities.convertRectangle(channel.getParent(),
                     channel.getBounds(), panel);
             assertTrue(captionBounds.y >= buttonBounds.y + buttonBounds.height);
+            Rectangle existingBounds = SwingUtilities.convertRectangle(existing.getParent(),
+                    existing.getBounds(), panel);
+            assertTrue(existingBounds.y > captionBounds.y);
             assertFalse(status.isVisible());
             List<String> labels = new ArrayList<>();
             collectLabels(panel, labels);
@@ -119,12 +155,19 @@ class FirstLaunchPanelTest {
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         Path registry = temp.resolve("registry.json");
-        LauncherServices services = new LauncherServices(registry);
+        LauncherServices services = new LauncherServices(registry) {
+            @Override public String latestMilestoneVersion() throws InterruptedException {
+                Thread.sleep(150);
+                return "0.51.0";
+            }
+        };
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             onEdt(() -> { frame.showWindow(); return null; });
             waitFor(() -> findComponent(frame, "firstLaunchPanel") != null);
-            assertEquals("Milestone", onEdt(() ->
+            waitFor(() -> "Latest Milestone (0.51.0)".equals(
+                    ((JLabel) findComponent(frame, "releaseChannelLabel")).getText()));
+            assertEquals("Latest Milestone (0.51.0)", onEdt(() ->
                     ((JLabel) findComponent(frame, "releaseChannelLabel")).getText()));
             onEdt(() -> {
                 assertTrue(GuiScale.usableBounds(frame.getGraphicsConfiguration()).contains(frame.getBounds()));
@@ -169,16 +212,98 @@ class FirstLaunchPanelTest {
         }
     }
 
-    private static FirstLaunchPanel panel(BufferedImage image, GuiScale scale, List<String> actions) {
-        JButton download = new FirstLaunchButton("Download & install",
-                "downloadAndInstallButton",
-                true, scale);
-        JButton more = new FirstLaunchButton("Advanced Options", "moreOptionsButton",
-                false, scale, FirstLaunchButton.Size.SMALL);
-        for (JButton button : List.of(download, more)) {
-            button.addActionListener(event -> actions.add(button.getName()));
+    @Test
+    void milestoneLookupContinuesWhileDownloadMenuIsOpened() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
+        CountDownLatch started = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicBoolean interrupted = new AtomicBoolean();
+        LauncherServices services = new LauncherServices(temp.resolve("metadata.json")) {
+            @Override public String latestMilestoneVersion() throws InterruptedException {
+                started.countDown();
+                try {
+                    release.await();
+                    return "9.9.9";
+                } catch (InterruptedException error) {
+                    interrupted.set(true);
+                    throw error;
+                }
+            }
+        };
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            onEdt(() -> { frame.showWindow(); return null; });
+            waitFor(() -> findComponent(frame, "firstLaunchPanel") != null);
+            assertTrue(started.await(5, TimeUnit.SECONDS));
+            assertEquals("Latest Milestone", onEdt(() ->
+                    ((JLabel) findComponent(frame, "releaseChannelLabel")).getText()));
+            assertTrue(onEdt(() -> find(frame, "downloadAndInstallButton").isEnabled()));
+            assertTrue(onEdt(() -> find(frame, "useExistingCopyButton").isEnabled()));
+            onEdt(() -> {
+                find(frame, "downloadOptionsButton").doClick();
+                return null;
+            });
+            FirstLaunchSplitButton split = (FirstLaunchSplitButton) onEdt(
+                    () -> findComponent(frame, "firstLaunchSplitButton"));
+            assertTrue(onEdt(() -> split.popupMenu().isVisible()));
+            assertFalse(interrupted.get());
+            release.countDown();
+            waitFor(() -> "Latest Milestone (9.9.9)".equals(
+                    ((JLabel) findComponent(frame, "releaseChannelLabel")).getText()));
+            assertFalse(interrupted.get());
+            onEdt(() -> {
+                split.closePopup();
+                return null;
+            });
+        } finally {
+            release.countDown();
+            onEdt(() -> {
+                for (var window : frame.getOwnedWindows()) window.dispose();
+                frame.dispose();
+                return null;
+            });
         }
-        return new FirstLaunchPanel(image, scale, download, more, "Milestone", new JLabel(""));
+    }
+
+    @Test
+    void unavailableMilestoneVersionKeepsGenericCaptionAndOnboarding() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
+        LauncherServices services = new LauncherServices(temp.resolve("offline.json")) {
+            @Override public String latestMilestoneVersion() throws java.io.IOException {
+                throw new java.io.IOException("fixture offline");
+            }
+        };
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            onEdt(() -> { frame.showWindow(); return null; });
+            waitFor(() -> {
+                JLabel label = (JLabel) findComponent(frame, "releaseChannelLabel");
+                return label != null && label.getToolTipText() != null;
+            });
+            JLabel label = (JLabel) onEdt(() -> findComponent(frame, "releaseChannelLabel"));
+            assertEquals("Latest Milestone", label.getText());
+            assertTrue(label.getToolTipText().contains("unavailable"));
+            assertTrue(onEdt(() -> find(frame, "downloadAndInstallButton").isEnabled()));
+            assertFalse(Files.exists(temp.resolve("offline.json")));
+        } finally {
+            onEdt(() -> {
+                for (var window : frame.getOwnedWindows()) window.dispose();
+                frame.dispose();
+                return null;
+            });
+        }
+    }
+
+    private static FirstLaunchPanel panel(BufferedImage image, GuiScale scale, List<String> actions) {
+        FirstLaunchSplitButton download = new FirstLaunchSplitButton(scale,
+                () -> actions.add("downloadAndInstallButton"),
+                () -> actions.add("latestDevelopmentMenuItem"),
+                () -> actions.add("chooseAnotherVersionMenuItem"));
+        JButton existing = new FirstLaunchButton("Use existing installation",
+                "useExistingCopyButton", false, scale);
+        existing.addActionListener(event -> actions.add(existing.getName()));
+        return new FirstLaunchPanel(image, scale, download, existing, "Latest Milestone",
+                new JLabel(""));
     }
 
     private static void collectLabels(Container root, List<String> labels) {
@@ -206,16 +331,21 @@ class FirstLaunchPanelTest {
     }
 
     private static void assertActionsWithinPanel(FirstLaunchPanel panel) {
-        for (String name : List.of("downloadAndInstallButton", "moreOptionsButton")) {
+        for (String name : List.of("downloadAndInstallButton", "downloadOptionsButton",
+                "useExistingCopyButton")) {
             JButton button = find(panel, name);
             assertNotNull(button, name);
             Rectangle bounds = SwingUtilities.convertRectangle(button.getParent(),
                     button.getBounds(), panel);
             assertTrue(bounds.width > 0 && bounds.height > 0, name + " must have space");
             assertTrue(new Rectangle(panel.getSize()).contains(bounds), name + ": " + bounds);
-            int textWidth = button.getFontMetrics(button.getFont()).stringWidth(button.getText());
-            assertTrue(textWidth + button.getInsets().left + button.getInsets().right <= bounds.width,
-                    name + " text must not be clipped");
+            if (button.getText() != null && !button.getText().isEmpty()) {
+                int textWidth = button.getFontMetrics(button.getFont())
+                        .stringWidth(button.getText());
+                assertTrue(textWidth + button.getInsets().left + button.getInsets().right
+                                <= bounds.width,
+                        name + " text must not be clipped");
+            }
         }
     }
 

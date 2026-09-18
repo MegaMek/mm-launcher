@@ -102,6 +102,16 @@ public final class NormalInstallService {
      */
     public Plan prepare(Path requestedDestination, Path selectedJava)
             throws IOException, InterruptedException {
+        return prepare(FollowChannel.MILESTONE, requestedDestination, selectedJava);
+    }
+
+    /**
+     * Resolves one of the two explicit official MekHQ channels. The channel is validated before
+     * Java validation, metadata access, or any possible filesystem mutation.
+     */
+    public Plan prepare(FollowChannel requestedChannel, Path requestedDestination,
+                        Path selectedJava) throws IOException, InterruptedException {
+        FollowChannel channel = requireAllowedChannel(requestedChannel);
         Path destination = requestedDestination.toAbsolutePath().normalize();
         RegistrySnapshot snapshot = snapshot();
         List<Path> missingParents = validateProposedDestination(destination, snapshot.data());
@@ -112,9 +122,8 @@ public final class NormalInstallService {
         }
         Path workingDirectory = nearestExistingDirectory(destination);
         int javaFeature = javaRuntime.validate(executable, workingDirectory);
-        ChannelCatalog.Target target =
-                channels.target(FollowChannel.MILESTONE, OfficialRepository.MEKHQ);
-        requireTarget(target);
+        ChannelCatalog.Target target = channels.target(channel, OfficialRepository.MEKHQ);
+        requireTarget(target, channel);
         CheckConfiguration checkConfiguration = checkConfiguration();
         return new Plan(snapshot, destination, List.copyOf(missingParents), executable,
                 javaFeature, target.channel(), target.repository(), target.version(),
@@ -129,6 +138,10 @@ public final class NormalInstallService {
             throws IOException, InterruptedException {
         if (plan == null) throw new IOException("a confirmed normal-install plan is required");
         if (context == null) throw new IOException("operation context is required");
+        FollowChannel channel = requireAllowedChannel(plan.channel());
+        if (plan.repository() != OfficialRepository.MEKHQ) {
+            throw new IOException("normal install plan must target the official MekHQ repository");
+        }
         context.checkpoint();
         RegistrySnapshot now = snapshot();
         if (!plan.registrySnapshot().equals(now)) {
@@ -147,9 +160,8 @@ public final class NormalInstallService {
                 nearestExistingDirectory(plan.destination())) != plan.javaFeature()) {
             throw new IOException("selected Java changed; review a fresh install confirmation");
         }
-        ChannelCatalog.Target fresh =
-                channels.target(FollowChannel.MILESTONE, OfficialRepository.MEKHQ);
-        requireTarget(fresh);
+        ChannelCatalog.Target fresh = channels.target(channel, OfficialRepository.MEKHQ);
+        requireTarget(fresh, channel);
         if (!sameQuote(plan, fresh)) {
             throw new IOException("official release or asset metadata changed; review and consent "
                     + "to a fresh install confirmation");
@@ -191,7 +203,7 @@ public final class NormalInstallService {
             }
             registries.selectJava(registry, configured.id(), java.toString());
             configured = resolve(configured.id());
-            preferences.set(registry, configured, FollowChannel.MILESTONE,
+            preferences.set(registry, configured, plan.channel(),
                     plan.checkConfiguration().checkOnOpen());
             requireExpectedPostInstall(plan, configured.id());
             registries.select(registry, configured.id());
@@ -200,7 +212,8 @@ public final class NormalInstallService {
                     installed.destination(), installed.ownershipReceipt());
         } catch (IOException | InterruptedException error) {
             throw new PublishedInstallationException(installed.destination(), configured.id(),
-                    "The downloaded copy is valid and registered, but Java, Milestone update "
+                    "The downloaded copy is valid and registered, but Java, "
+                            + plan.channel() + " update "
                             + "checks, or Main selection still needs repair in Installations. "
                             + "Do not download over the retained copy. " + detail(error), error);
         }
@@ -335,14 +348,24 @@ public final class NormalInstallService {
         }
     }
 
-    private static void requireTarget(ChannelCatalog.Target target) throws IOException {
-        if (target == null || target.channel() != FollowChannel.MILESTONE
+    private static FollowChannel requireAllowedChannel(FollowChannel channel)
+            throws IOException {
+        if (channel != FollowChannel.MILESTONE && channel != FollowChannel.DEVELOPMENT) {
+            throw new IOException("normal install channel must be Milestone or Development");
+        }
+        return channel;
+    }
+
+    private static void requireTarget(ChannelCatalog.Target target, FollowChannel requested)
+            throws IOException {
+        if (target == null || target.channel() != requested
                 || target.repository() != OfficialRepository.MEKHQ
                 || target.release() == null || target.asset() == null
                 || !target.release().tag().equals("v" + target.version())
                 || !target.release().assets().contains(target.asset())
                 || target.source() == null || target.source().isBlank()) {
-            throw new IOException("official Milestone MekHQ target is incomplete or mismatched");
+            throw new IOException("official " + requested
+                    + " MekHQ target is incomplete or mismatched");
         }
     }
 
@@ -392,6 +415,22 @@ public final class NormalInstallService {
                        String source, CheckConfiguration checkConfiguration) {
         public Plan {
             missingParents = List.copyOf(missingParents);
+            if (channel != FollowChannel.MILESTONE
+                    && channel != FollowChannel.DEVELOPMENT) {
+                throw new IllegalArgumentException(
+                        "normal install channel must be Milestone or Development");
+            }
+            if (repository != OfficialRepository.MEKHQ) {
+                throw new IllegalArgumentException(
+                        "normal install repository must be the official MekHQ repository");
+            }
+            if (version == null || version.isBlank() || release == null || asset == null
+                    || !release.tag().equals("v" + version)
+                    || !release.assets().contains(asset)
+                    || source == null || source.isBlank()) {
+                throw new IllegalArgumentException(
+                        "normal install release target is incomplete or mismatched");
+            }
             if (checkConfiguration == null) {
                 throw new IllegalArgumentException("check configuration is required");
             }

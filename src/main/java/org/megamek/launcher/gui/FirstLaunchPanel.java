@@ -33,11 +33,12 @@ final class FirstLaunchPanel extends JPanel {
     private final ArtworkPanel artwork;
     private final ContentPanel controls;
     private final JScrollPane scroller;
+    private final JLabel releaseChannelLabel;
     private final Box.Filler actionsGap;
     private boolean compact;
 
-    FirstLaunchPanel(BufferedImage image, GuiScale scale, JButton download, JButton moreOptions,
-                     String releaseChannel, JLabel status) {
+    FirstLaunchPanel(BufferedImage image, GuiScale scale, FirstLaunchSplitButton download,
+                     JButton useExisting, String releaseChannel, JLabel status) {
         this.scale = scale;
         setName("firstLaunchPanel");
         setLayout(null);
@@ -63,14 +64,28 @@ final class FirstLaunchPanel extends JPanel {
         primaryAction.setOpaque(false);
         primaryAction.setAlignmentX(LEFT_ALIGNMENT);
         primaryAction.add(download, BorderLayout.CENTER);
-        JLabel channel = label(releaseChannel, scale.font(base, Font.PLAIN, 14), MUTED);
-        channel.setName("releaseChannelLabel");
-        channel.setHorizontalAlignment(SwingConstants.CENTER);
-        primaryAction.add(channel, BorderLayout.SOUTH);
+        releaseChannelLabel = label(releaseChannel, scale.font(base, Font.PLAIN, 14), MUTED);
+        releaseChannelLabel.setName("releaseChannelLabel");
+        releaseChannelLabel.setHorizontalAlignment(SwingConstants.CENTER);
+        primaryAction.add(releaseChannelLabel, BorderLayout.SOUTH);
         primaryAction.setMaximumSize(new Dimension(Integer.MAX_VALUE,
                 primaryAction.getPreferredSize().height));
         controls.add(primaryAction);
-        controls.add(Box.createVerticalStrut(scale.scaleForGUI(17)));
+        controls.add(Box.createVerticalStrut(scale.scaleForGUI(14)));
+
+        JPanel existingAction = new JPanel(new BorderLayout(0, scale.scaleForGUI(5)));
+        existingAction.setOpaque(false);
+        existingAction.setAlignmentX(LEFT_ALIGNMENT);
+        existingAction.add(useExisting, BorderLayout.CENTER);
+        JLabel existingCaption = label("MegaMek, MekHQ, or MegaMekLab",
+                scale.font(base, Font.PLAIN, 12), MUTED);
+        existingCaption.setName("existingCopyCaption");
+        existingCaption.setHorizontalAlignment(SwingConstants.CENTER);
+        existingAction.add(existingCaption, BorderLayout.SOUTH);
+        existingAction.setMaximumSize(new Dimension(Integer.MAX_VALUE,
+                existingAction.getPreferredSize().height));
+        controls.add(existingAction);
+        controls.add(Box.createVerticalStrut(scale.scaleForGUI(12)));
         status.setForeground(MUTED);
         status.setFont(scale.font(base, Font.PLAIN, 11));
         status.setAlignmentX(LEFT_ALIGNMENT);
@@ -78,10 +93,6 @@ final class FirstLaunchPanel extends JPanel {
         status.setVisible(status.getText() != null && !status.getText().isBlank());
         controls.add(status);
         controls.add(Box.createVerticalGlue());
-        controls.add(Box.createVerticalStrut(scale.scaleForGUI(17)));
-        moreOptions.setAlignmentX(LEFT_ALIGNMENT);
-        moreOptions.setMaximumSize(moreOptions.getPreferredSize());
-        controls.add(moreOptions);
 
         scroller = new JScrollPane(controls, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
                 JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
@@ -89,6 +100,13 @@ final class FirstLaunchPanel extends JPanel {
         scroller.getViewport().setBackground(PANEL);
         scroller.getVerticalScrollBar().setUnitIncrement(scale.scaleForGUI(18));
         add(scroller);
+    }
+
+    void setReleaseChannel(String text, String detail) {
+        releaseChannelLabel.setText(text);
+        releaseChannelLabel.setToolTipText(detail);
+        releaseChannelLabel.getAccessibleContext().setAccessibleDescription(
+                detail == null ? text : text + ". " + detail);
     }
 
     static BufferedImage loadArtwork() throws IOException {
