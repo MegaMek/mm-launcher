@@ -1,7 +1,12 @@
 package org.megamek.launcher.update;
 
+import org.megamek.launcher.channel.ChannelUpdateChecker;
 import org.megamek.launcher.manifest.ManifestException;
+import org.megamek.launcher.manifest.Manifest;
 import org.megamek.launcher.manifest.ManifestReader;
+import org.megamek.launcher.operation.OperationContext;
+import org.megamek.launcher.operation.OperationPhase;
+import org.megamek.launcher.operation.OperationType;
 import org.megamek.launcher.onboarding.InstallationInspector;
 import org.megamek.launcher.plan.Action;
 import org.megamek.launcher.plan.Decision;
@@ -70,7 +75,7 @@ public final class UpdatePreviewService {
         CurrentUpdateState current = currentStateStore.read(
                 registryPath, data, record, receipt);
         return previewValidated(registryPath, data, record, receipt, current, root, targetTag,
-                progress, null);
+                progress, null, OperationContext.none(OperationType.UPDATE_PREVIEW));
     }
 
     public Preview preview(Path registry, InstallationRecord expectedRecord,
@@ -90,7 +95,32 @@ public final class UpdatePreviewService {
         CurrentUpdateState state = currentStateStore.read(
                 registryPath, data, current, receipt);
         return previewValidated(registryPath, data, current, receipt, state, root, targetTag,
-                progress, null);
+                progress, null, OperationContext.none(OperationType.UPDATE_PREVIEW));
+    }
+
+    public Preview preview(Path registry, InstallationRecord expectedRecord,
+                           OwnershipReceipt expectedReceipt, String targetTag,
+                           PrintStream progress, OperationContext context)
+            throws IOException, InterruptedException, ManifestException {
+        try (OperationContext.WorkerRegistration ignored = context.activate()) {
+            context.phase(OperationPhase.METADATA,
+                    "Validating the selected installation and provenance");
+            Path registryPath = registry.toAbsolutePath().normalize();
+            RegistryData data = registryStore.read(registryPath);
+            InstallationRecord current = registryStore.resolve(data, expectedRecord.id());
+            if (!current.equals(expectedRecord)) {
+                throw new IOException("selected preview source changed after the dialog opened");
+            }
+            Path root = validateLocalBoundary(current, registryPath, data);
+            OwnershipReceipt receipt = receiptStore.read(registryPath, data, current);
+            if (!receipt.equals(expectedReceipt)) {
+                throw new IOException("selected preview provenance changed after the dialog opened");
+            }
+            CurrentUpdateState state = currentStateStore.read(
+                    registryPath, data, current, receipt);
+            return previewValidated(registryPath, data, current, receipt, state, root, targetTag,
+                    progress, null, context);
+        }
     }
 
     public Preview preview(Path registry, InstallationRecord expectedRecord,
@@ -112,28 +142,105 @@ public final class UpdatePreviewService {
         CurrentUpdateState state = currentStateStore.read(registryPath, data, current, receipt);
         return previewValidated(registryPath, data, current, receipt, state, root, targetTag,
                 progress, new VerifiedPackageFetcher.ExpectedAsset(expectedAssetName,
-                        expectedSize, expectedDigest));
+                        expectedSize, expectedDigest),
+                OperationContext.none(OperationType.UPDATE_PREVIEW));
     }
 
     private Preview previewValidated(Path registryPath, RegistryData data,
                                      InstallationRecord record, OwnershipReceipt receipt,
                                      CurrentUpdateState current, Path root, String targetTag,
                                      PrintStream progress,
-                                     VerifiedPackageFetcher.ExpectedAsset expected)
+                                     VerifiedPackageFetcher.ExpectedAsset expected,
+                                     OperationContext context)
+            throws IOException, InterruptedException, ManifestException {
+        PreparedMaterial material = prepareMaterial(registryPath, record, current, root, targetTag,
+                progress, expected, context);
+        try (VerifiedPackageFetcher.Workspace workspace = material.workspace()) {
+            return material.preview();
+        } finally {
+            context.cleanupPhase("Removing the read-only preview workspace");
+        }
+    }
+
+    PreparedUpdate prepare(Path registry, InstallationRecord expectedRecord,
+                           OwnershipReceipt expectedReceipt,
+                           CurrentUpdateState expectedCurrent, String targetTag,
+                           VerifiedPackageFetcher.ExpectedAsset expected,
+                           ChannelUpdateChecker.Recommendation recommendation,
+                           Object owner, PrintStream progress)
+            throws IOException, InterruptedException, ManifestException {
+        return prepare(registry, expectedRecord, expectedReceipt, expectedCurrent, targetTag,
+                expected, recommendation, owner, progress,
+                OperationContext.none(OperationType.UPDATE_APPLY));
+    }
+
+    PreparedUpdate prepare(Path registry, InstallationRecord expectedRecord,
+                           OwnershipReceipt expectedReceipt,
+                           CurrentUpdateState expectedCurrent, String targetTag,
+                           VerifiedPackageFetcher.ExpectedAsset expected,
+                           ChannelUpdateChecker.Recommendation recommendation,
+                           Object owner, PrintStream progress, OperationContext context)
+            throws IOException, InterruptedException, ManifestException {
+        try (OperationContext.WorkerRegistration ignored = context.activate()) {
+            context.phase(OperationPhase.METADATA,
+                    "Validating selected update source and provenance");
+            Path registryPath = registry.toAbsolutePath().normalize();
+            RegistryData data = registryStore.read(registryPath);
+            InstallationRecord currentRecord = registryStore.resolve(data, expectedRecord.id());
+            if (!currentRecord.equals(expectedRecord)) {
+                throw new IOException("selected update source changed after download consent");
+            }
+            Path root = validateLocalBoundary(currentRecord, registryPath, data);
+            OwnershipReceipt receipt = receiptStore.read(registryPath, data, currentRecord);
+            if (!receipt.equals(expectedReceipt)) {
+                throw new IOException("selected update provenance changed after download consent");
+            }
+            CurrentUpdateState current =
+                    currentStateStore.read(registryPath, data, currentRecord, receipt);
+            if (!current.equals(expectedCurrent)) {
+                throw new IOException("selected update source changed after download consent");
+            }
+            PreparedMaterial material = prepareMaterial(
+                    registryPath, currentRecord, current, root, targetTag, progress, expected,
+                    context);
+            OwnershipReceipt trustedReceipt = copyReceipt(receipt);
+            CurrentUpdateState trustedCurrent = copyCurrent(current);
+            OwnershipPolicy.Build trustedTarget = copyBuild(material.target());
+            Preview publicPreview = copyPreview(material.preview());
+            RealUpdateService.Snapshot source = new RealUpdateService.Snapshot(
+                    registryPath, currentRecord, trustedReceipt, trustedCurrent, root);
+            PreparedUpdate prepared = new PreparedUpdate(owner, source, publicPreview,
+                    material.workspace(), trustedTarget, material.inspection(), material.pair(),
+                    recommendation);
+            context.phase(OperationPhase.AWAIT_CONSENT,
+                    "Package verified; waiting for Apply confirmation");
+            return prepared;
+        }
+    }
+
+    private PreparedMaterial prepareMaterial(Path registryPath, InstallationRecord record,
+                                             CurrentUpdateState current, Path root,
+                                             String targetTag, PrintStream progress,
+                                             VerifiedPackageFetcher.ExpectedAsset expected,
+                                             OperationContext context)
             throws IOException, InterruptedException, ManifestException {
         OfficialRepository repository = OfficialRepository.parse(current.repository());
         Path workspaceParent = receiptStore.metadataDirectory(registryPath);
-
-        try (VerifiedPackageFetcher.Workspace workspace =
-                     new VerifiedPackageFetcher(transport).fetch(repository, targetTag,
-                                      workspaceParent, ".preview-", progress, expected)) {
-            if (new InstallationInspector().inspect(workspace.extracted()).products().stream()
+        VerifiedPackageFetcher.Workspace workspace = new VerifiedPackageFetcher(transport).fetch(
+                repository, targetTag, workspaceParent, ".preview-", progress, expected, context);
+        try {
+            context.phase(OperationPhase.PLAN,
+                    "Inspecting package contents and planning local changes");
+            InstallationInspector inspector = new InstallationInspector();
+            var targetInspection = inspector.inspect(workspace.extracted());
+            if (targetInspection.products().stream()
                     .noneMatch(product -> product.key().equals(repository.requiredProduct()))) {
                 throw new IOException("target package does not contain receipt application "
                         + repository.requiredProduct());
             }
             OwnershipPolicy.Build target = new OwnershipPolicy().build(
-                    workspace.extracted(), repository, workspace.release().tag());
+                    workspace.extracted(), repository, workspace.release().tag(), context,
+                    OperationPhase.PLAN);
             ManifestReader reader = new ManifestReader();
             ManifestReader.PreviewPairValidation validation =
                     reader.validatePreviewPair(current.officialManifest(), target.manifest());
@@ -142,17 +249,28 @@ public final class UpdatePreviewService {
                 trusted.put(CurrentStateStore.key(override.path()),
                         Set.copyOf(override.officialHashes()));
             }
+            context.phase(OperationPhase.PLAN,
+                    "Comparing local managed files with the verified package");
             List<Decision> decisions = new UpdatePlanner().planPreview(
                     current.officialManifest(), target.manifest(), root, validation,
                     Map.copyOf(trusted),
-                    current.caseOverrides().stream().map(CaseOverride::foldedPrefix).toList());
+                    current.caseOverrides().stream().map(CaseOverride::foldedPrefix).toList(),
+                    context, OperationPhase.PLAN);
             EnumMap<Action, Long> counts = new EnumMap<>(Action.class);
             for (Action action : Action.values()) counts.put(action, 0L);
             decisions.forEach(decision ->
                     counts.put(decision.action(), counts.get(decision.action()) + 1));
-            return new Preview(record, current.asReceipt(), workspace.release(), workspace.asset(),
-                    target.manifest(), target.excludedPaths(), decisions, Map.copyOf(counts),
-                    current);
+            Preview preview = new Preview(record, current.asReceipt(), workspace.release(),
+                    workspace.asset(), target.manifest(), target.excludedPaths(), decisions,
+                    Map.copyOf(counts), current);
+            return new PreparedMaterial(workspace, target, targetInspection, validation, preview);
+        } catch (IOException | ManifestException | RuntimeException error) {
+            try {
+                workspace.close();
+            } catch (IOException cleanup) {
+                error.addSuppressed(cleanup);
+            }
+            throw error;
         }
     }
 
@@ -178,6 +296,51 @@ public final class UpdatePreviewService {
         return root;
     }
 
+    private static Preview copyPreview(Preview preview) {
+        return new Preview(preview.record(), copyReceipt(preview.baseline()),
+                preview.targetRelease(), preview.targetAsset(),
+                copyManifest(preview.targetManifest()), List.copyOf(preview.targetExcludedPaths()),
+                List.copyOf(preview.decisions()), Map.copyOf(preview.counts()),
+                copyCurrent(preview.currentState()));
+    }
+
+    private static OwnershipPolicy.Build copyBuild(OwnershipPolicy.Build build) {
+        return new OwnershipPolicy.Build(copyManifest(build.manifest()),
+                List.copyOf(build.excludedPaths()));
+    }
+
+    private static OwnershipReceipt copyReceipt(OwnershipReceipt receipt) {
+        return new OwnershipReceipt(receipt.schemaVersion(), receipt.ownershipPolicyVersion(),
+                receipt.installationId(), receipt.canonicalRoot(), receipt.registeredAt(),
+                receipt.repository(), receipt.tag(), receipt.assetName(), receipt.assetSize(),
+                receipt.assetSha256(), copyManifest(receipt.officialManifest()),
+                List.copyOf(receipt.excludedOfficialPaths()));
+    }
+
+    private static CurrentUpdateState copyCurrent(CurrentUpdateState current) {
+        List<OverrideEntry> overrides = current.overrides().stream()
+                .map(item -> new OverrideEntry(item.path(), item.kind(),
+                        List.copyOf(item.officialHashes())))
+                .toList();
+        List<CaseOverride> cases = current.caseOverrides().stream()
+                .map(item -> new CaseOverride(item.foldedPrefix(), item.localPrefix(),
+                        item.officialSpellings()))
+                .toList();
+        return new CurrentUpdateState(current.schemaVersion(),
+                current.ownershipPolicyVersion(), current.installationId(),
+                current.canonicalRoot(), current.registeredAt(), current.repository(),
+                current.tag(), current.assetName(), current.assetSize(),
+                current.assetSha256(), copyManifest(current.officialManifest()),
+                List.copyOf(current.excludedOfficialPaths()), overrides, cases,
+                current.lastTransactionId());
+    }
+
+    private static Manifest copyManifest(Manifest manifest) {
+        return new Manifest(manifest.schemaVersion(), manifest.product(), manifest.packageId(),
+                manifest.releaseId(), List.copyOf(manifest.protectedPaths()),
+                List.copyOf(manifest.files()));
+    }
+
     public record Eligibility(InstallationRecord record, boolean available, String reason,
                               OwnershipReceipt receipt, CurrentUpdateState current) {
     }
@@ -195,5 +358,12 @@ public final class UpdatePreviewService {
             this(record, baseline, targetRelease, targetAsset, targetManifest,
                     targetExcludedPaths, decisions, counts, null);
         }
+    }
+
+    private record PreparedMaterial(VerifiedPackageFetcher.Workspace workspace,
+                                    OwnershipPolicy.Build target,
+                                    org.megamek.launcher.onboarding.Inspection inspection,
+                                    ManifestReader.PreviewPairValidation pair,
+                                    Preview preview) {
     }
 }

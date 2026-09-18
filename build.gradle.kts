@@ -1,7 +1,7 @@
+import java.io.File
 import java.security.MessageDigest
 import javax.inject.Inject
 import org.gradle.api.DefaultTask
-import org.gradle.api.Task
 import org.gradle.api.file.ArchiveOperations
 import org.gradle.api.file.ConfigurableFileCollection
 import org.gradle.api.file.DirectoryProperty
@@ -20,13 +20,13 @@ import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.Sync
 import org.gradle.api.tasks.TaskAction
-import org.gradle.api.tasks.TaskProvider
 import org.gradle.api.tasks.bundling.AbstractArchiveTask
 import org.gradle.api.tasks.bundling.Compression
 import org.gradle.api.tasks.bundling.Tar
 import org.gradle.api.tasks.bundling.Zip
 import org.gradle.api.tasks.testing.Test
 import org.gradle.jvm.tasks.Jar
+import org.gradle.process.CommandLineArgumentProvider
 import org.apache.tools.ant.filters.FixCrLfFilter
 import org.apache.tools.ant.filters.ReplaceTokens
 
@@ -96,6 +96,70 @@ abstract class Sha256File : DefaultTask() {
     }
 }
 
+abstract class ValidateProvidedArchiveInputs : DefaultTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val archiveFile: RegularFileProperty
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val checksumFile: RegularFileProperty
+
+    @get:Input
+    abstract val expectedArchiveName: Property<String>
+
+    @TaskAction
+    fun validate() {
+        val archive = archiveFile.get().asFile
+        val checksum = checksumFile.get().asFile
+        val expectedName = expectedArchiveName.get()
+        check(archive.name == expectedName) {
+            "Provided archive must be named $expectedName; found ${archive.name}."
+        }
+        check(checksum.name == "$expectedName.sha256") {
+            "Provided checksum must be named $expectedName.sha256; found ${checksum.name}."
+        }
+
+        val checksumLine = checksum.readText(Charsets.US_ASCII).trim()
+        val match = Regex("^([0-9a-f]{64})  ([^/\\\\]+)$").matchEntire(checksumLine)
+        check(match != null) {
+            "Provided checksum must use exact sha256sum format."
+        }
+        check(match.groupValues[2] == expectedName) {
+            "Provided checksum names ${match.groupValues[2]}, not $expectedName."
+        }
+
+        val digest = MessageDigest.getInstance("SHA-256")
+        archive.inputStream().buffered().use { input ->
+            val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        val actual = digest.digest().joinToString("") { "%02x".format(it) }
+        check(actual == match.groupValues[1]) {
+            "Provided archive SHA-256 does not match its checksum."
+        }
+    }
+}
+
+abstract class ProvidedArchiveJvmArguments : CommandLineArgumentProvider {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val archiveFile: RegularFileProperty
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val checksumFile: RegularFileProperty
+
+    override fun asArguments(): Iterable<String> = listOf(
+        "-Darchive.path=${archiveFile.get().asFile.absolutePath}",
+        "-Darchive.checksum=${checksumFile.get().asFile.absolutePath}"
+    )
+}
+
 abstract class VerifyDistributionConfiguration : DefaultTask() {
     @get:Input
     abstract val genericArchiveTasksEnabled: MapProperty<String, Boolean>
@@ -113,13 +177,22 @@ abstract class VerifyDistributionConfiguration : DefaultTask() {
     abstract val expectedAggregateDependencies: SetProperty<String>
 
     @get:Input
-    abstract val configuredArchiveNames: SetProperty<String>
+    abstract val configuredArchiveName: Property<String>
 
     @get:Input
-    abstract val expectedArchiveNames: SetProperty<String>
+    abstract val expectedArchiveName: Property<String>
 
     @get:Input
-    abstract val configuredChecksumNames: SetProperty<String>
+    abstract val configuredChecksumName: Property<String>
+
+    @get:Input
+    abstract val providedVerificationDependencies: SetProperty<String>
+
+    @get:Input
+    abstract val expectedProvidedVerificationDependencies: SetProperty<String>
+
+    @get:Input
+    abstract val legacyTaskNamesPresent: SetProperty<String>
 
     @get:InputFiles
     @get:PathSensitive(PathSensitivity.RELATIVE)
@@ -140,17 +213,28 @@ abstract class VerifyDistributionConfiguration : DefaultTask() {
             "The Gradle application entry point must remain org.megamek.launcher.Main."
         }
         check(aggregateDependencies.get() == expectedAggregateDependencies.get()) {
-            "buildAllArchives must depend only on the three OS-specific checksum tasks; " +
+            "buildArchive must depend only on the canonical checksum task; " +
                 "found ${aggregateDependencies.get().sorted()}."
         }
-        check(configuredArchiveNames.get() == expectedArchiveNames.get()) {
-            "The configured OS archive outputs changed: ${configuredArchiveNames.get().sorted()}."
+        check(configuredArchiveName.get() == expectedArchiveName.get()) {
+            "The configured all-platform archive output changed: " +
+                "${configuredArchiveName.get()}."
         }
 
-        val expectedChecksumNames = expectedArchiveNames.get().map { "$it.sha256" }.toSet()
-        check(configuredChecksumNames.get() == expectedChecksumNames) {
-            "The configured OS checksum outputs changed: " +
-                "${configuredChecksumNames.get().sorted()}."
+        val expectedChecksumName = "${expectedArchiveName.get()}.sha256"
+        check(configuredChecksumName.get() == expectedChecksumName) {
+            "The configured checksum output changed: ${configuredChecksumName.get()}."
+        }
+        check(
+            providedVerificationDependencies.get() ==
+                expectedProvidedVerificationDependencies.get()
+        ) {
+            "verifyProvidedArchive must remain read-only and independent of packaging tasks; " +
+                "found ${providedVerificationDependencies.get().sorted()}."
+        }
+        check(legacyTaskNamesPresent.get().isEmpty()) {
+            "Legacy per-OS archive tasks must not be registered: " +
+                legacyTaskNamesPresent.get().sorted()
         }
 
         val existingGenericOutputs = genericOutputs.files.filter { it.exists() }
@@ -329,51 +413,34 @@ val stageCommonPayload = tasks.register<Sync>("stageCommonPayload") {
     }
 }
 
-val windowsStageDirectory = layout.buildDirectory.dir("packaging/stage/windows/MM Launcher")
-val linuxStageDirectory = layout.buildDirectory.dir("packaging/stage/linux/MM Launcher")
-val macStageDirectory = layout.buildDirectory.dir("packaging/stage/mac/MM Launcher.app")
+val archiveStageDirectory =
+    layout.buildDirectory.dir("packaging/stage/all-platform/MM Launcher")
 
-val stageWindowsArchive = tasks.register<Sync>("stageWindowsArchive") {
+val stageArchive = tasks.register<Sync>("stageArchive") {
     group = "distribution"
-    description = "Stages the Windows archive root and Launch4j desktop executable."
+    description = "Stages the one fixed-root all-platform portable distribution."
     dependsOn(stageCommonPayload, tasks.named("createExe"))
-    into(windowsStageDirectory)
-    duplicatesStrategy = DuplicatesStrategy.FAIL
-    from(commonPayloadDirectory)
-    from(layout.buildDirectory.file("launch4j/MM Launcher.exe"))
-}
-
-val stageLinuxArchive = tasks.register<Sync>("stageLinuxArchive") {
-    group = "distribution"
-    description = "Stages the Linux archive root and executable launcher."
-    dependsOn(stageCommonPayload)
-    into(linuxStageDirectory)
-    duplicatesStrategy = DuplicatesStrategy.FAIL
-    from(commonPayloadDirectory)
-    from("src/distribution/linux/mm-launcher")
-    filter<FixCrLfFilter>(
-        "eol" to FixCrLfFilter.CrLf.newInstance("lf"),
-        "fixlast" to true
-    )
-    filesMatching("mm-launcher") {
-        permissions {
-            unix("rwxr-xr-x")
-        }
-    }
-}
-
-val stageMacArchive = tasks.register<Sync>("stageMacArchive") {
-    group = "distribution"
-    description = "Stages the macOS application bundle."
-    dependsOn(stageCommonPayload)
-    into(macStageDirectory)
+    into(archiveStageDirectory)
     duplicatesStrategy = DuplicatesStrategy.FAIL
 
+    // The app bundle owns the one shared runtime payload. Keeping the payload
+    // here lets the macOS app remain independently runnable while the sibling
+    // Windows and Linux entry points resolve exactly the same JARs.
     from(commonPayloadDirectory) {
-        into("Contents/app")
+        exclude("lib/**")
+    }
+    from(commonPayloadDirectory.map { it.dir("lib") }) {
+        into("MM Launcher.app/Contents/app/lib")
+    }
+    from(layout.buildDirectory.file("launch4j/MM Launcher.exe"))
+    from("src/distribution/linux/mm-launcher") {
+        filter<FixCrLfFilter>(
+            "eol" to FixCrLfFilter.CrLf.newInstance("lf"),
+            "fixlast" to true
+        )
     }
     from("src/distribution/macos/Info.plist") {
-        into("Contents")
+        into("MM Launcher.app/Contents")
         filter<ReplaceTokens>(
             "tokens" to mapOf(
                 "BUNDLE_VERSION" to macBundleVersion
@@ -381,13 +448,16 @@ val stageMacArchive = tasks.register<Sync>("stageMacArchive") {
         )
     }
     from("src/distribution/macos/MM Launcher") {
-        into("Contents/MacOS")
+        into("MM Launcher.app/Contents/MacOS")
         filter<FixCrLfFilter>(
             "eol" to FixCrLfFilter.CrLf.newInstance("lf"),
             "fixlast" to true
         )
     }
-    filesMatching("Contents/MacOS/MM Launcher") {
+    filesMatching(listOf(
+        "mm-launcher",
+        "MM Launcher.app/Contents/MacOS/MM Launcher"
+    )) {
         permissions {
             unix("rwxr-xr-x")
         }
@@ -395,87 +465,50 @@ val stageMacArchive = tasks.register<Sync>("stageMacArchive") {
 }
 
 val distributionsDirectory = layout.buildDirectory.dir("distributions")
+val releaseArchiveFileName = "MM-Launcher-${project.version}.tar.gz"
 
-val windowsArchive = tasks.register<Zip>("windowsArchive") {
+val releaseArchive = tasks.register<Tar>("releaseArchive") {
     group = "distribution"
-    description = "Builds the versioned Windows x64 ZIP distribution."
-    dependsOn(stageWindowsArchive)
+    description = "Builds the one versioned all-platform tar.gz distribution."
+    dependsOn(stageArchive)
     destinationDirectory.set(distributionsDirectory)
-    archiveFileName.set("MM-Launcher-${project.version}-Windows-x64.zip")
-    from(windowsStageDirectory.map { it.asFile.parentFile })
-    eachFile {
-        permissions {
-            unix("rw-r--r--")
-        }
-    }
-}
-
-val macArchive = tasks.register<Zip>("macArchive") {
-    group = "distribution"
-    description = "Builds the architecture-neutral external-Java macOS app ZIP."
-    dependsOn(stageMacArchive)
-    destinationDirectory.set(distributionsDirectory)
-    archiveFileName.set("MM-Launcher-${project.version}-macOS.zip")
-    from(macStageDirectory.map { it.asFile.parentFile })
-    eachFile {
-        permissions {
-            unix(if (path == "MM Launcher.app/Contents/MacOS/MM Launcher")
-                "rwxr-xr-x" else "rw-r--r--")
-        }
-    }
-}
-
-val linuxArchive = tasks.register<Tar>("linuxArchive") {
-    group = "distribution"
-    description = "Builds the versioned Linux x64 tar.gz distribution."
-    dependsOn(stageLinuxArchive)
-    destinationDirectory.set(distributionsDirectory)
-    archiveFileName.set("MM-Launcher-${project.version}-Linux-x64.tar.gz")
+    archiveFileName.set(releaseArchiveFileName)
     compression = Compression.GZIP
-    from(linuxStageDirectory.map { it.asFile.parentFile })
+    from(archiveStageDirectory.map { it.asFile.parentFile })
     eachFile {
         permissions {
-            unix(if (path == "MM Launcher/mm-launcher") "rwxr-xr-x" else "rw-r--r--")
+            unix(
+                if (isDirectory || path == "MM Launcher/mm-launcher"
+                    || path == "MM Launcher/MM Launcher.app/Contents/MacOS/MM Launcher"
+                ) {
+                    "rwxr-xr-x"
+                } else {
+                    "rw-r--r--"
+                }
+            )
         }
     }
 }
 
-fun registerChecksum(
-    taskName: String,
-    archive: TaskProvider<out AbstractArchiveTask>,
-    archiveFileName: String
-): TaskProvider<Sha256File> = tasks.register<Sha256File>(taskName) {
+val archiveChecksum = tasks.register<Sha256File>("archiveChecksum") {
     group = "distribution"
-    description = "Writes the SHA-256 checksum for ${archive.name}."
-    dependsOn(archive)
-    this.archiveFile.set(distributionsDirectory.map { it.file(archiveFileName) })
-    checksumFile.set(distributionsDirectory.map { it.file("$archiveFileName.sha256") })
+    description = "Writes the exact SHA-256 checksum for the all-platform archive."
+    dependsOn(releaseArchive)
+    archiveFile.set(releaseArchive.flatMap { it.archiveFile })
+    checksumFile.set(distributionsDirectory.map { it.file("$releaseArchiveFileName.sha256") })
 }
 
-val windowsArchiveChecksum = registerChecksum(
-    "windowsArchiveChecksum", windowsArchive,
-    "MM-Launcher-${project.version}-Windows-x64.zip"
-)
-val macArchiveChecksum = registerChecksum(
-    "macArchiveChecksum", macArchive,
-    "MM-Launcher-${project.version}-macOS.zip"
-)
-val linuxArchiveChecksum = registerChecksum(
-    "linuxArchiveChecksum", linuxArchive,
-    "MM-Launcher-${project.version}-Linux-x64.tar.gz"
-)
-
-val buildAllArchives = tasks.register("buildAllArchives") {
+val buildArchive = tasks.register("buildArchive") {
     group = "distribution"
-    description = "Builds all three separate OS archives and their exact SHA-256 files."
-    dependsOn(windowsArchiveChecksum, macArchiveChecksum, linuxArchiveChecksum)
+    description = "Builds the all-platform archive and its exact SHA-256 file."
+    dependsOn(archiveChecksum)
 }
 
 val verifyDistributionConfiguration = tasks.register<VerifyDistributionConfiguration>(
     "verifyDistributionConfiguration"
 ) {
     group = "verification"
-    description = "Checks that only separate OS archives are configured as release outputs."
+    description = "Checks the single-archive and read-only verification task model."
     mustRunAfter(tasks.named("assemble"))
 
     genericArchiveTasksEnabled.set(
@@ -487,7 +520,7 @@ val verifyDistributionConfiguration = tasks.register<VerifyDistributionConfigura
     installDistEnabled.set(tasks.named("installDist").get().enabled)
     applicationMainClass.set(application.mainClass)
 
-    val aggregateTask = buildAllArchives.get()
+    val aggregateTask = buildArchive.get()
     aggregateDependencies.set(
         aggregateTask.taskDependencies
             .getDependencies(aggregateTask)
@@ -495,34 +528,12 @@ val verifyDistributionConfiguration = tasks.register<VerifyDistributionConfigura
             .toSet()
     )
     expectedAggregateDependencies.set(
-        setOf(
-            windowsArchiveChecksum.name,
-            macArchiveChecksum.name,
-            linuxArchiveChecksum.name
-        )
+        setOf(archiveChecksum.name)
     )
 
-    expectedArchiveNames.set(
-        setOf(
-            "MM-Launcher-${project.version}-Windows-x64.zip",
-            "MM-Launcher-${project.version}-macOS.zip",
-            "MM-Launcher-${project.version}-Linux-x64.tar.gz"
-        )
-    )
-    configuredArchiveNames.set(
-        setOf(
-            windowsArchive.get().archiveFile.get().asFile.name,
-            macArchive.get().archiveFile.get().asFile.name,
-            linuxArchive.get().archiveFile.get().asFile.name
-        )
-    )
-    configuredChecksumNames.set(
-        setOf(
-            windowsArchiveChecksum.get().checksumFile.get().asFile.name,
-            macArchiveChecksum.get().checksumFile.get().asFile.name,
-            linuxArchiveChecksum.get().checksumFile.get().asFile.name
-        )
-    )
+    expectedArchiveName.set(releaseArchiveFileName)
+    configuredArchiveName.set(releaseArchive.get().archiveFile.get().asFile.name)
+    configuredChecksumName.set(archiveChecksum.get().checksumFile.get().asFile.name)
     genericOutputs.from(
         genericDistZip.get().archiveFile.get().asFile,
         genericDistTar.get().archiveFile.get().asFile
@@ -533,15 +544,26 @@ tasks.named("check") {
     dependsOn(verifyDistributionConfiguration)
 }
 
-fun registerArchiveVerification(
-    taskName: String,
-    kind: String,
-    archiveFileName: String,
-    checksum: TaskProvider<Sha256File>
-): TaskProvider<Test> = tasks.register<Test>(taskName) {
+val expectedRuntimeJars = buildList {
+    add(tasks.named<Jar>("jar").get().archiveFile.get().asFile.name)
+    addAll(runtimeClasspath.get().files.map { it.name })
+}.sorted()
+
+val defaultVerificationPlatform = System.getProperty("os.name", "")
+    .lowercase()
+    .let { os ->
+        when {
+            os.contains("win") -> "windows"
+            os.contains("mac") -> "mac"
+            os.contains("linux") -> "linux"
+            else -> "unsupported"
+        }
+    }
+val verificationPlatform = providers.gradleProperty("verificationPlatform")
+    .orElse(defaultVerificationPlatform)
+
+fun Test.configureArchiveVerification() {
     group = "verification"
-    description = "Checks the $kind archive contract and runs its native smoke test on $kind."
-    dependsOn(checksum, tasks.named("testClasses"), verifyDistributionConfiguration)
     shouldRunAfter(tasks.named("test"))
     testClassesDirs = sourceSets["test"].output.classesDirs
     classpath = sourceSets["test"].runtimeClasspath
@@ -551,37 +573,91 @@ fun registerArchiveVerification(
     filter {
         includeTestsMatching("org.megamek.launcher.distribution.ArchiveDistributionTest")
     }
-    systemProperty("archive.kind", kind)
+    systemProperty("archive.expectedName", releaseArchiveFileName)
+    systemProperty("archive.expectedJars", expectedRuntimeJars.joinToString("|"))
+    systemProperty("archive.expectedBuildIdentifier", buildIdentifier)
+    systemProperty("archive.platform", verificationPlatform.get())
+}
+
+val verifyArchive = tasks.register<Test>("verifyArchive") {
+    description = "Checks the built archive and runs the current host's native entry point."
+    dependsOn(archiveChecksum, tasks.named("testClasses"), verifyDistributionConfiguration)
+    configureArchiveVerification()
     systemProperty(
         "archive.path",
-        distributionsDirectory.get().file(archiveFileName).asFile.absolutePath
+        distributionsDirectory.get().file(releaseArchiveFileName).asFile.absolutePath
     )
     systemProperty(
         "archive.checksum",
-        distributionsDirectory.get().file("$archiveFileName.sha256").asFile.absolutePath
+        distributionsDirectory.get().file("$releaseArchiveFileName.sha256").asFile.absolutePath
     )
-    val expectedJars = buildList {
-        add(tasks.named<Jar>("jar").get().archiveFile.get().asFile.name)
-        addAll(runtimeClasspath.get().files.map { it.name })
-    }.sorted()
-    systemProperty("archive.expectedJars", expectedJars.joinToString("|"))
 }
 
-val verifyWindowsArchive = registerArchiveVerification(
-    "verifyWindowsArchive", "windows",
-    "MM-Launcher-${project.version}-Windows-x64.zip", windowsArchiveChecksum
-)
-val verifyMacArchive = registerArchiveVerification(
-    "verifyMacArchive", "mac",
-    "MM-Launcher-${project.version}-macOS.zip", macArchiveChecksum
-)
-val verifyLinuxArchive = registerArchiveVerification(
-    "verifyLinuxArchive", "linux",
-    "MM-Launcher-${project.version}-Linux-x64.tar.gz", linuxArchiveChecksum
-)
+val providedArchive = providers.gradleProperty("providedArchive")
+val providedChecksum = providers.gradleProperty("providedChecksum")
+val providedArchiveFile = layout.file(providedArchive.map { File(it) })
+val providedChecksumFile = layout.file(providedChecksum.map { File(it) })
 
-tasks.register("verifyArchives") {
+val validateProvidedArchiveInputs = tasks.register<ValidateProvidedArchiveInputs>(
+    "validateProvidedArchiveInputs"
+) {
     group = "verification"
-    description = "Checks every archive; native execution runs only for the current host OS."
-    dependsOn(verifyWindowsArchive, verifyMacArchive, verifyLinuxArchive)
+    description = "Validates the exact supplied archive/checksum names and SHA-256."
+    archiveFile.set(providedArchiveFile)
+    checksumFile.set(providedChecksumFile)
+    expectedArchiveName.set(releaseArchiveFileName)
+}
+
+val verifyProvidedArchive = tasks.register<Test>("verifyProvidedArchive") {
+    description = "Read-only verification of an explicitly supplied archive and checksum."
+    dependsOn(
+        tasks.named("testClasses"),
+        verifyDistributionConfiguration,
+        validateProvidedArchiveInputs
+    )
+    configureArchiveVerification()
+    outputs.upToDateWhen { false }
+    jvmArgumentProviders.add(
+        objects.newInstance<ProvidedArchiveJvmArguments>().apply {
+            archiveFile.set(providedArchiveFile)
+            checksumFile.set(providedChecksumFile)
+        }
+    )
+}
+
+verifyDistributionConfiguration.configure {
+    val providedTask = verifyProvidedArchive.get()
+    providedVerificationDependencies.set(
+        providedTask.taskDependencies
+            .getDependencies(providedTask)
+            .map { it.name }
+            .toSet()
+    )
+    expectedProvidedVerificationDependencies.set(
+        setOf(
+            "classes",
+            "compileJava",
+            "compileTestJava",
+            "testClasses",
+            validateProvidedArchiveInputs.name,
+            verifyDistributionConfiguration.name
+        )
+    )
+    val legacyNames = setOf(
+        "stageWindowsArchive",
+        "stageLinuxArchive",
+        "stageMacArchive",
+        "windowsArchive",
+        "macArchive",
+        "linuxArchive",
+        "windowsArchiveChecksum",
+        "macArchiveChecksum",
+        "linuxArchiveChecksum",
+        "buildAllArchives",
+        "verifyWindowsArchive",
+        "verifyMacArchive",
+        "verifyLinuxArchive",
+        "verifyArchives"
+    )
+    legacyTaskNamesPresent.set(tasks.names.intersect(legacyNames))
 }

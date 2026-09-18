@@ -3,6 +3,10 @@ package org.megamek.launcher.release;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
+import org.megamek.launcher.operation.OperationContext;
+import org.megamek.launcher.operation.OperationPhase;
+import org.megamek.launcher.operation.OperationType;
+import org.megamek.launcher.operation.ProgressUnit;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -27,6 +31,18 @@ public final class SafeTarExtractor {
             "(?i)^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\\..*)?$");
 
     public Path extract(Path archive, Path extractionDirectory) throws IOException {
+        try {
+            return extract(archive, extractionDirectory,
+                    OperationContext.none(OperationType.UPDATE_PREVIEW),
+                    OperationPhase.EXTRACT);
+        } catch (InterruptedException impossible) {
+            Thread.currentThread().interrupt();
+            throw new IOException("archive extraction was interrupted", impossible);
+        }
+    }
+
+    public Path extract(Path archive, Path extractionDirectory, OperationContext context,
+                        OperationPhase phase) throws IOException, InterruptedException {
         Files.createDirectory(extractionDirectory);
         String root = null;
         int entries = 0;
@@ -37,7 +53,8 @@ public final class SafeTarExtractor {
              TarArchiveInputStream tar = new TarArchiveInputStream(gzip)) {
             TarArchiveEntry entry;
             while ((entry = tar.getNextTarEntry()) != null) {
-                if (++entries > MAX_ENTRIES) throw new IOException("archive entry count exceeds limit");
+                 context.checkpoint();
+                 if (++entries > MAX_ENTRIES) throw new IOException("archive entry count exceeds limit");
                 String name = normalizeName(entry.getName());
                 if (name == null) continue; // conventional "." or "./"
                 String first = name.contains("/") ? name.substring(0, name.indexOf('/')) : name;
@@ -85,6 +102,7 @@ public final class SafeTarExtractor {
                         byte[] buffer = new byte[64 * 1024];
                         long remaining = size;
                         while (remaining > 0) {
+                            context.checkpoint();
                             int count = tar.read(buffer, 0, (int) Math.min(buffer.length, remaining));
                             if (count < 0) throw new IOException("truncated tar entry: " + name);
                             if (count == 0) continue;
@@ -93,6 +111,8 @@ public final class SafeTarExtractor {
                         }
                     }
                 }
+                context.progress(phase, entries, -1, ProgressUnit.FILES,
+                        "Extracted " + entries + " archive entries");
             }
         }
         if (root == null) throw new IOException("archive is empty");

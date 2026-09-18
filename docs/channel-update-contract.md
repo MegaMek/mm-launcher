@@ -47,13 +47,36 @@ never “up to date.”
 
 Changing channel only changes what is watched. Recommended Update captures installation binding,
 preference, fixed source, repository, target tag, asset name, size, digest, and notes URL. Preview
-and Apply revalidate the captured source and metadata; a change requires new consent. The route
-still uses the existing read-only full-package preview and separate explicit Apply confirmation.
-The advanced exact-release path remains available without changing the preference.
+and Apply revalidate the captured source and metadata; a change requires a new attempt and consent.
+The route downloads its exact full package once, retains it only for that active attempt, shows the
+read-only report, then uses a separate explicit Apply confirmation. Under the captured root gate,
+Apply refreshes the channel/preference/target metadata and re-verifies/re-extracts the retained
+archive; it never silently downloads a second package or retargets. The advanced exact-release path
+remains available without changing the preference.
 
-GUI startup has no network by default. A per-copy check-on-open preference is off until explicitly
-enabled. Opt-in checks run independently off the event-dispatch thread, do not disable healthy
-Launch/Manage actions, are cancelled on disposal, and discard results after home, record,
-preference, or package changes. There is no automatic Apply, automatic downgrade, launcher
-self-update, Nightly support, component download, game launch, or website/game CI change in this
-contract.
+Channel metadata checks remain outside the package-operation gate and retain their existing
+startup/manual behavior. A package download started from a recommendation uses the shared typed
+progress/cancellation dialog and the same atomic transaction cutoff as manual Update while
+preserving the one-full-package-body attempt. A late cancellation cannot interrupt the transaction
+or retarget the recommendation.
+
+Check failures are eligible for asynchronous sanitized local error logging in
+`<registry-name>.launcher-logs/`; showing a failure never waits for disk I/O. No check or log is
+uploaded, opened in a browser, attached to an issue/project, or used to change channel metadata.
+An unsafe/corrupt registry prevents log creation and reports that logging failure without changing
+the original **Unable to check** result.
+
+Normal new GUI installs explicitly persist Milestone. Normal and advanced new GUI installs use one
+launcher Settings check-on-open default: it is true while initially absent, and a user's explicit
+false is preserved for later new copies. The normal quote captures and displays On or Off; a
+changed, corrupt, or unavailable settings configuration blocks transfer and publication until a
+fresh quote is accepted. This is not a migration: every existing explicit false remains false, and
+absent/corrupt/unknown legacy channels remain Unknown or Unavailable with no inferred choice. The
+CLI remains false when its legacy option is omitted.
+
+Eligible opt-in checks run serially and independently off the event-dispatch thread, do not disable
+healthy launch or page navigation, are cancelled on disposal/mutation, and discard results after
+Main, record, preference, or package changes. Off, unknown, corrupt, and launch-only copies are not
+reported as checked. Manual Installations checks may inspect the selected copy regardless of its
+on-open switch. There is no automatic Apply, automatic downgrade, launcher self-update, Nightly
+support, component download, game launch, or website/game CI change in this contract.

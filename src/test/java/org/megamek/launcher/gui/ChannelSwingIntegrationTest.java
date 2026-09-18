@@ -49,6 +49,8 @@ class ChannelSwingIntegrationTest {
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
+            JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
+            SwingUtilities.invokeAndWait(installations::doClick);
             JButton choose = waitFor(() -> find(frame, "chooseChannelButton"));
             SwingUtilities.invokeLater(choose::doClick);
             JDialog choice = waitForDialog("Choose update channel");
@@ -63,14 +65,18 @@ class ChannelSwingIntegrationTest {
             JButton check = waitFor(() -> find(frame, "checkUpdatesButton"));
             SwingUtilities.invokeLater(check::doClick);
             assertTrue(services.started.await(5, TimeUnit.SECONDS));
+            JButton home = waitFor(() -> find(frame, "homeButton"));
+            SwingUtilities.invokeAndWait(home::doClick);
             assertTrue(onEdt(() -> find(frame, "launch-megamek-button").isEnabled()));
             assertTrue(onEdt(() -> find(frame, "manageInstallationsButton").isEnabled()));
-            assertFalse(onEdt(() -> find(frame, "checkUpdatesButton").isEnabled()));
             services.release.countDown();
-            waitFor(() -> findNamed(frame, "channelCheckResult"));
+            waitUntil(() -> services.checks.get() == 1);
             assertEquals(1, services.checks.get());
 
-            SwingUtilities.invokeAndWait(frame::downloadDialog);
+            SwingUtilities.invokeAndWait(
+                    () -> find(frame, "manageInstallationsButton").doClick());
+            JButton addRelease = waitFor(() -> find(frame, "manageDownloadMegaMekButton"));
+            SwingUtilities.invokeAndWait(addRelease::doClick);
             JDialog download = waitForDialog("Download an official release");
             JComboBox<?> freshChannel = findCombo(download, "downloadChannelCombo");
             assertNotNull(freshChannel);
@@ -268,6 +274,22 @@ class ChannelSwingIntegrationTest {
                     ChannelPreferenceStore.Status.CONFIGURED, selected, "Configured");
             saved.incrementAndGet();
             return selected;
+        }
+
+        @Override
+        public ChannelPreferenceStore.ReadResult channelPreference(InstallationRecord expected) {
+            return preference;
+        }
+
+        @Override
+        public boolean isCheckBindingCurrent(InstallationRecord expected,
+                                             ChannelPreference selected) {
+            return record.equals(expected) && preference.preference().equals(selected);
+        }
+
+        @Override
+        public HomeState loadInstallation(String id) {
+            return loadHome();
         }
 
         @Override

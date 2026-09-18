@@ -2,6 +2,8 @@ package org.megamek.launcher.update;
 
 import org.megamek.launcher.manifest.ManifestException;
 import org.megamek.launcher.manifest.ManifestReader;
+import org.megamek.launcher.operation.OperationContext;
+import org.megamek.launcher.operation.OperationType;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -56,6 +58,16 @@ final class RealUpdateFiles {
     }
 
     static String hash(Path file) throws IOException, ManifestException {
+        try {
+            return hash(file, OperationContext.none(OperationType.UPDATE_APPLY));
+        } catch (InterruptedException impossible) {
+            Thread.currentThread().interrupt();
+            throw new IOException("update file hash was interrupted", impossible);
+        }
+    }
+
+    static String hash(Path file, OperationContext context)
+            throws IOException, ManifestException, InterruptedException {
         BasicFileAttributes before = Files.readAttributes(file, BasicFileAttributes.class,
                 LinkOption.NOFOLLOW_LINKS);
         if (!before.isRegularFile() || before.isSymbolicLink() || before.isOther()) {
@@ -64,7 +76,12 @@ final class RealUpdateFiles {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             try (InputStream input = new DigestInputStream(Files.newInputStream(file), digest)) {
-                input.transferTo(java.io.OutputStream.nullOutputStream());
+                byte[] buffer = new byte[128 * 1024];
+                while (true) {
+                    context.checkpoint();
+                    int read = input.read(buffer);
+                    if (read < 0) break;
+                }
             }
             BasicFileAttributes after = Files.readAttributes(file, BasicFileAttributes.class,
                     LinkOption.NOFOLLOW_LINKS);

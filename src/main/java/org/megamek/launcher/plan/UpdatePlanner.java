@@ -4,6 +4,10 @@ import org.megamek.launcher.manifest.FileEntry;
 import org.megamek.launcher.manifest.Manifest;
 import org.megamek.launcher.manifest.ManifestException;
 import org.megamek.launcher.manifest.ManifestReader;
+import org.megamek.launcher.operation.OperationContext;
+import org.megamek.launcher.operation.OperationPhase;
+import org.megamek.launcher.operation.OperationType;
+import org.megamek.launcher.operation.ProgressUnit;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -28,20 +32,22 @@ import java.util.Set;
 public final class UpdatePlanner {
     public List<Decision> plan(Manifest baseline, Manifest target, Path installation)
             throws IOException, ManifestException {
-        return plan(baseline, target, installation, Map.of());
+        return planWithoutCancellation(baseline, target, installation, Map.of(), null,
+                List.of());
     }
 
     public List<Decision> plan(Manifest baseline, Manifest target, Path installation,
                                Map<String, Set<String>> trustedPreviousOfficialHashes)
             throws IOException, ManifestException {
-        return planInternal(baseline, target, installation, trustedPreviousOfficialHashes, null,
-                List.of());
+        return planWithoutCancellation(baseline, target, installation,
+                trustedPreviousOfficialHashes, null, List.of());
     }
 
     public List<Decision> planPreview(Manifest baseline, Manifest target, Path installation,
                                       ManifestReader.PreviewPairValidation validation)
             throws IOException, ManifestException {
-        return planInternal(baseline, target, installation, Map.of(), validation, List.of());
+        return planWithoutCancellation(baseline, target, installation, Map.of(), validation,
+                List.of());
     }
 
     public List<Decision> planPreview(Manifest baseline, Manifest target, Path installation,
@@ -49,15 +55,41 @@ public final class UpdatePlanner {
                                       Map<String, Set<String>> trustedPreviousOfficialHashes,
                                       List<String> stickyCasePrefixes)
             throws IOException, ManifestException {
+        return planWithoutCancellation(baseline, target, installation,
+                trustedPreviousOfficialHashes, validation, stickyCasePrefixes);
+    }
+
+    public List<Decision> planPreview(Manifest baseline, Manifest target, Path installation,
+                                      ManifestReader.PreviewPairValidation validation,
+                                      Map<String, Set<String>> trustedPreviousOfficialHashes,
+                                      List<String> stickyCasePrefixes, OperationContext context,
+                                      OperationPhase phase)
+            throws IOException, ManifestException, InterruptedException {
         return planInternal(baseline, target, installation, trustedPreviousOfficialHashes,
-                validation, stickyCasePrefixes);
+                validation, stickyCasePrefixes, context, phase);
+    }
+
+    private List<Decision> planWithoutCancellation(
+            Manifest baseline, Manifest target, Path installation,
+            Map<String, Set<String>> trustedPreviousOfficialHashes,
+            ManifestReader.PreviewPairValidation previewValidation,
+            List<String> stickyCasePrefixes) throws IOException, ManifestException {
+        try {
+            return planInternal(baseline, target, installation, trustedPreviousOfficialHashes,
+                    previewValidation, stickyCasePrefixes,
+                    OperationContext.none(OperationType.UPDATE_PREVIEW), OperationPhase.PLAN);
+        } catch (InterruptedException impossible) {
+            Thread.currentThread().interrupt();
+            throw new IOException("update planning was interrupted", impossible);
+        }
     }
 
     private List<Decision> planInternal(Manifest baseline, Manifest target, Path installation,
                                         Map<String, Set<String>> trustedPreviousOfficialHashes,
                                         ManifestReader.PreviewPairValidation previewValidation,
-                                        List<String> stickyCasePrefixes)
-            throws IOException, ManifestException {
+                                        List<String> stickyCasePrefixes,
+                                        OperationContext context, OperationPhase phase)
+            throws IOException, ManifestException, InterruptedException {
         Path root = validateRoot(installation);
         Map<String, FileEntry> before = index(baseline);
         Map<String, FileEntry> after = index(target);
@@ -68,11 +100,14 @@ public final class UpdatePlanner {
         after.values().forEach(entry -> paths.add(entry.path()));
 
         List<Decision> decisions = new ArrayList<>();
+        int completed = 0;
         for (String portablePath : paths) {
+            context.checkpoint();
             String sticky = affectedStickyPrefix(portablePath, stickyCasePrefixes);
             if (sticky != null) {
                 decisions.add(new Decision(Action.SKIP, portablePath,
                         "sticky case-only override prefix is preserved across updates: " + sticky));
+                report(context, phase, ++completed, paths.size());
                 continue;
             }
             ManifestReader.CaseOnlyRename rename = previewValidation == null ? null
@@ -82,15 +117,24 @@ public final class UpdatePlanner {
                         "case-only rename/capitalization; preserved; rename unsupported "
                                 + "(baseline prefix: " + rename.baselinePrefix()
                                 + "; target prefix: " + rename.targetPrefix() + ")"));
+                report(context, phase, ++completed, paths.size());
                 continue;
             }
             FileEntry oldEntry = before.get(key(portablePath));
             FileEntry newEntry = after.get(key(portablePath));
             PathState state = inspect(root, portablePath);
             decisions.add(decide(portablePath, oldEntry, newEntry, state,
-                    trustedPreviousOfficialHashes.getOrDefault(key(portablePath), Set.of())));
+                    trustedPreviousOfficialHashes.getOrDefault(key(portablePath), Set.of()),
+                    context));
+            report(context, phase, ++completed, paths.size());
         }
         return List.copyOf(decisions);
+    }
+
+    private static void report(OperationContext context, OperationPhase phase, int completed,
+                               int total) throws org.megamek.launcher.operation.OperationCancelledException {
+        context.progress(phase, completed, total, ProgressUnit.FILES,
+                "Planned " + completed + " of " + total + " managed paths");
     }
 
     private static String affectedStickyPrefix(String path, List<String> prefixes) {
@@ -114,9 +158,10 @@ public final class UpdatePlanner {
         return null;
     }
 
-    private static Decision decide(String path, FileEntry oldEntry, FileEntry newEntry, PathState state,
-                                   Set<String> trustedPreviousOfficialHashes)
-            throws IOException {
+    private static Decision decide(String path, FileEntry oldEntry, FileEntry newEntry,
+                                   PathState state, Set<String> trustedPreviousOfficialHashes,
+                                   OperationContext context)
+            throws IOException, InterruptedException {
         if (newEntry != null) {
             if (!state.exists()) {
                 return new Decision(Action.ADD, path, oldEntry == null
@@ -126,7 +171,7 @@ public final class UpdatePlanner {
             if (!state.regularFile()) {
                 return new Decision(Action.SKIP, path, "target path collides with a non-regular local entry");
             }
-            String localHash = sha256(state.path());
+            String localHash = sha256(state.path(), context);
             if (localHash.equals(newEntry.sha256())) {
                 return new Decision(Action.KEEP, path, "local file already matches target SHA-256");
             }
@@ -149,7 +194,7 @@ public final class UpdatePlanner {
         if (!state.regularFile()) {
             return new Decision(Action.SKIP, path, "obsolete path is a non-regular local entry");
         }
-        String localHash = sha256(state.path());
+        String localHash = sha256(state.path(), context);
         if (localHash.equals(oldEntry.sha256())) {
             return new Decision(Action.REMOVE, path, "obsolete local file matches baseline");
         }
@@ -215,13 +260,19 @@ public final class UpdatePlanner {
         }
     }
 
-    private static String sha256(Path path) throws IOException {
+    private static String sha256(Path path, OperationContext context)
+            throws IOException, InterruptedException {
         try {
             BasicFileAttributes before = Files.readAttributes(
                     path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             try (InputStream input = new DigestInputStream(Files.newInputStream(path), digest)) {
-                input.transferTo(OutputStreamSink.INSTANCE);
+                byte[] buffer = new byte[128 * 1024];
+                while (true) {
+                    context.checkpoint();
+                    int read = input.read(buffer);
+                    if (read < 0) break;
+                }
             }
             BasicFileAttributes after = Files.readAttributes(
                     path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
@@ -249,15 +300,4 @@ public final class UpdatePlanner {
     private record PathState(Path path, boolean exists, boolean regularFile) {
     }
 
-    private static final class OutputStreamSink extends java.io.OutputStream {
-        private static final OutputStreamSink INSTANCE = new OutputStreamSink();
-
-        @Override
-        public void write(int ignored) {
-        }
-
-        @Override
-        public void write(byte[] ignored, int offset, int length) {
-        }
-    }
 }

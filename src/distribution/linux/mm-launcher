@@ -2,6 +2,7 @@
 set -eu
 
 APP_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
+SHARED_LIB="$APP_ROOT/MM Launcher.app/Contents/app/lib"
 
 find_java() {
     if [ -n "${JAVA_HOME:-}" ]; then
@@ -37,4 +38,4 @@ if [ "$JAVA_FEATURE" -lt 21 ]; then
 fi
 
 unset JDK_JAVA_OPTIONS JAVA_TOOL_OPTIONS _JAVA_OPTIONS
-exec "$JAVA_COMMAND" -cp "$APP_ROOT/lib/*" org.megamek.launcher.DesktopLauncher "$@"
+exec "$JAVA_COMMAND" -cp "$SHARED_LIB/*" org.megamek.launcher.DesktopLauncher "$@"

@@ -17,6 +17,10 @@ import org.megamek.launcher.launch.ApplicationLauncher;
 import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.launch.ProcessRunner;
 import org.megamek.launcher.onboarding.InstallationInspector;
+import org.megamek.launcher.operation.OperationCancelledException;
+import org.megamek.launcher.operation.OperationContext;
+import org.megamek.launcher.operation.OperationPhase;
+import org.megamek.launcher.operation.OperationType;
 import org.megamek.launcher.plan.Action;
 import org.megamek.launcher.registry.InstallationRecord;
 import org.megamek.launcher.registry.RegistryData;
@@ -27,7 +31,9 @@ import org.megamek.launcher.release.ReleaseTransport;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.FilterInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.PrintStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -44,7 +50,12 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 import java.util.jar.Attributes;
 import java.util.jar.JarEntry;
@@ -59,6 +70,546 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RealUpdateServiceTest {
     @TempDir Path temp;
+
+    @Test
+    void preparedFacadeDownloadsOneBodyReextractsTrustedBytesAndReplansLocalData()
+            throws Exception {
+        Fixture fixture = install("prepared-once", "v1", packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime-1"),
+                "docs/change.txt", bytes("old"))));
+        Files.writeString(fixture.root.resolve("unknown.local"), "unknown");
+        Files.writeString(fixture.root.resolve("mmconf/user.cfg"), "user-config");
+        byte[] targetArchive = archive("MegaMek-v2", packageFiles(2, Map.of(
+                "lib/runtime.txt", bytes("runtime-2"),
+                "docs/change.txt", bytes("new"))));
+        PackageTransport network = preparedTransport("v2", targetArchive);
+        RootCoordinator coordinator = new RootCoordinator(temp.resolve("prepared-coordination"));
+        LauncherServices services = new LauncherServices(fixture.registry, new RegistryStore(),
+                new InstallationInspector(), network, new JavaRuntime(),
+                new ApplicationLauncher(), coordinator);
+        RegistryStore store = new RegistryStore();
+        RegistryData beforeData = store.read(fixture.registry);
+        InstallationRecord record = store.resolve(beforeData, fixture.id);
+        ReceiptStore receiptStore = new ReceiptStore();
+        OwnershipReceipt receipt = receiptStore.read(fixture.registry, beforeData, record);
+        Path receiptFile = fixture.registry.resolveSibling(
+                fixture.registry.getFileName() + ".metadata").resolve(fixture.id + ".json");
+        byte[] registryBefore = Files.readAllBytes(fixture.registry);
+        byte[] receiptBefore = Files.readAllBytes(receiptFile);
+        var registryTime = Files.getLastModifiedTime(fixture.registry);
+        var receiptTime = Files.getLastModifiedTime(receiptFile);
+        byte[] runtimeBefore = Files.readAllBytes(fixture.root.resolve("lib/runtime.txt"));
+        String digest = "sha256:" + sha(targetArchive);
+
+        PreparedUpdate prepared = services.prepareUpdate(record, receipt,
+                CurrentUpdateState.initial(receipt), "v2",
+                "MegaMek-v2.tar.gz", targetArchive.length, digest, quiet());
+
+        assertEquals(1, network.binaryRequests);
+        assertEquals(targetArchive.length, network.binaryBytes);
+        assertThrows(UnsupportedOperationException.class,
+                () -> prepared.preview().targetManifest().files().clear(),
+                "the displayed report must not mutate trusted expected hashes");
+        assertArrayEquals(registryBefore, Files.readAllBytes(fixture.registry));
+        assertArrayEquals(receiptBefore, Files.readAllBytes(receiptFile));
+        assertEquals(registryTime, Files.getLastModifiedTime(fixture.registry));
+        assertEquals(receiptTime, Files.getLastModifiedTime(receiptFile));
+        assertArrayEquals(runtimeBefore, Files.readAllBytes(
+                fixture.root.resolve("lib/runtime.txt")));
+        assertFalse(Files.exists(receiptFile.resolveSibling(
+                fixture.id + ".current.json")));
+
+        // The preview extraction is observational only. Apply must reconstruct from the retained,
+        // re-verified archive instead of blessing this changed JAR.
+        Files.writeString(prepared.workspace().extracted().resolve("MegaMek.jar"), "tampered");
+        // The local plan is also fresh at Apply time.
+        Files.writeString(fixture.root.resolve("data/default.txt"), "user-after-preview");
+
+        RealUpdateService.ApplyResult result = services.applyPrepared(
+                prepared, RealUpdateService.CONFIRM, quiet());
+
+        assertEquals("v2", result.state().tag());
+        assertEquals("2.0.0", result.record().observedBuild());
+        assertEquals("runtime-2", Files.readString(
+                fixture.root.resolve("lib/runtime.txt")));
+        assertEquals("new", Files.readString(fixture.root.resolve("docs/change.txt")));
+        assertEquals("user-after-preview", Files.readString(
+                fixture.root.resolve("data/default.txt")));
+        assertEquals("unknown", Files.readString(fixture.root.resolve("unknown.local")));
+        assertEquals("user-config", Files.readString(fixture.root.resolve("mmconf/user.cfg")));
+        assertEquals(1, network.binaryRequests,
+                "prepare plus Apply must issue exactly one package body request");
+        assertEquals(targetArchive.length, network.binaryBytes);
+        assertEquals(2, network.metadataRequests,
+                "Apply may refresh metadata but must not fetch another package");
+        assertThrows(IllegalStateException.class, prepared::preview);
+        assertThrows(IOException.class, () -> services.applyPrepared(
+                prepared, RealUpdateService.CONFIRM, quiet()));
+    }
+
+    @Test
+    void preparedCancellationDuringHashExtractionAndPlanningWritesNoUpdateNamespace()
+            throws Exception {
+        for (String checkpoint : List.of("Re-verified", "Extracted", "Planned")) {
+            Fixture fixture = install("cancel-" + checkpoint.toLowerCase(Locale.ROOT), "v1",
+                    packageFiles(1, Map.of("lib/runtime.txt", bytes("runtime-1"))));
+            byte[] targetArchive = archive("MegaMek-v2", packageFiles(2, Map.of(
+                    "lib/runtime.txt", bytes("runtime-2"))));
+            PackageTransport network = preparedTransport("v2", targetArchive);
+            LauncherServices services = new LauncherServices(
+                    fixture.registry, new RegistryStore(), new InstallationInspector(), network,
+                    new JavaRuntime(), new ApplicationLauncher(),
+                    new RootCoordinator(temp.resolve("coord-" + checkpoint)));
+            RegistryData data = new RegistryStore().read(fixture.registry);
+            InstallationRecord record = new RegistryStore().resolve(data, fixture.id);
+            OwnershipReceipt receipt = new ReceiptStore().read(
+                    fixture.registry, data, record);
+            PreparedUpdate prepared = services.prepareUpdate(record, receipt,
+                    CurrentUpdateState.initial(receipt), "v2", "MegaMek-v2.tar.gz",
+                    targetArchive.length, "sha256:" + sha(targetArchive), quiet());
+            AtomicReference<OperationContext> reference = new AtomicReference<>();
+            OperationContext context = new OperationContext(OperationType.UPDATE_APPLY, event -> {
+                if (event.phase() == OperationPhase.PREPARE_INSTALL
+                        && event.detail().startsWith(checkpoint)
+                        && event.cancellationAllowed()) {
+                    reference.get().requestCancellation();
+                }
+            });
+            reference.set(context);
+
+            assertThrows(OperationCancelledException.class, () -> services.applyPrepared(
+                    prepared, RealUpdateService.CONFIRM, quiet(), context), checkpoint);
+            assertFalse(Files.exists(fixture.root.resolve(RootCoordinator.UPDATE_NAMESPACE)),
+                    checkpoint);
+            assertEquals("runtime-1",
+                    Files.readString(fixture.root.resolve("lib/runtime.txt")), checkpoint);
+            assertEquals(1, network.binaryRequests,
+                    "cancelled prepared Apply must not download a second package body");
+        }
+    }
+
+    @Test
+    void actualTransactionBoundaryLetsCancelWinOrDeniesItWithoutInterruptingCommit()
+            throws Exception {
+        Fixture cancelled = install("boundary-cancel", "v1", packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime-1"))));
+        byte[] targetArchive = archive("MegaMek-v2", packageFiles(2, Map.of(
+                "lib/runtime.txt", bytes("runtime-2"))));
+        PackageTransport cancelledNetwork = preparedTransport("v2", targetArchive);
+        LauncherServices cancelledServices = new LauncherServices(
+                cancelled.registry, new RegistryStore(), new InstallationInspector(),
+                cancelledNetwork, new JavaRuntime(), new ApplicationLauncher(),
+                new RootCoordinator(temp.resolve("boundary-cancel-coordination")));
+        RegistryData cancelledData = new RegistryStore().read(cancelled.registry);
+        InstallationRecord cancelledRecord =
+                new RegistryStore().resolve(cancelledData, cancelled.id);
+        OwnershipReceipt cancelledReceipt = new ReceiptStore().read(
+                cancelled.registry, cancelledData, cancelledRecord);
+        PreparedUpdate cancelledPrepared = cancelledServices.prepareUpdate(
+                cancelledRecord, cancelledReceipt, CurrentUpdateState.initial(cancelledReceipt),
+                "v2", "MegaMek-v2.tar.gz", targetArchive.length,
+                "sha256:" + sha(targetArchive), quiet());
+        AtomicReference<OperationContext> cancellingReference = new AtomicReference<>();
+        AtomicReference<OperationContext.CancellationRequest> winningRequest =
+                new AtomicReference<>();
+        OperationContext cancelling = new OperationContext(OperationType.UPDATE_APPLY, event -> {
+            if (event.phase() == OperationPhase.APPLY && event.cancellationAllowed()
+                    && winningRequest.get() == null) {
+                winningRequest.set(cancellingReference.get().requestCancellation());
+            }
+        });
+        cancellingReference.set(cancelling);
+
+        assertThrows(OperationCancelledException.class, () -> cancelledServices.applyPrepared(
+                cancelledPrepared, RealUpdateService.CONFIRM, quiet(), cancelling));
+        assertTrue(winningRequest.get().accepted());
+        assertFalse(Files.exists(cancelled.root.resolve(RootCoordinator.UPDATE_NAMESPACE)));
+        assertEquals("runtime-1",
+                Files.readString(cancelled.root.resolve("lib/runtime.txt")));
+
+        Fixture committed = install("boundary-commit", "v1", packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime-1"))));
+        PackageTransport committedNetwork = preparedTransport("v2", targetArchive);
+        LauncherServices committedServices = new LauncherServices(
+                committed.registry, new RegistryStore(), new InstallationInspector(),
+                committedNetwork, new JavaRuntime(), new ApplicationLauncher(),
+                new RootCoordinator(temp.resolve("boundary-commit-coordination")));
+        RegistryData committedData = new RegistryStore().read(committed.registry);
+        InstallationRecord committedRecord =
+                new RegistryStore().resolve(committedData, committed.id);
+        OwnershipReceipt committedReceipt = new ReceiptStore().read(
+                committed.registry, committedData, committedRecord);
+        PreparedUpdate committedPrepared = committedServices.prepareUpdate(
+                committedRecord, committedReceipt, CurrentUpdateState.initial(committedReceipt),
+                "v2", "MegaMek-v2.tar.gz", targetArchive.length,
+                "sha256:" + sha(targetArchive), quiet());
+        AtomicReference<OperationContext> committedReference = new AtomicReference<>();
+        AtomicReference<OperationContext.CancellationRequest> deniedRequest =
+                new AtomicReference<>();
+        OperationContext finalizing = new OperationContext(OperationType.UPDATE_APPLY, event -> {
+            if (event.phase() == OperationPhase.APPLY && !event.cancellationAllowed()
+                    && deniedRequest.get() == null) {
+                deniedRequest.set(committedReference.get().requestCancellation());
+            }
+        });
+        committedReference.set(finalizing);
+
+        RealUpdateService.ApplyResult result = committedServices.applyPrepared(
+                committedPrepared, RealUpdateService.CONFIRM, quiet(), finalizing);
+
+        assertEquals("v2", result.state().tag());
+        assertFalse(deniedRequest.get().accepted());
+        assertTrue(deniedRequest.get().reason().contains("transaction"));
+        assertFalse(Thread.currentThread().isInterrupted());
+        assertEquals("runtime-2",
+                Files.readString(committed.root.resolve("lib/runtime.txt")));
+        assertFalse(Files.exists(committed.root.resolve(RootCoordinator.UPDATE_NAMESPACE)));
+        assertEquals(1, committedNetwork.binaryRequests);
+    }
+
+    @Test
+    void recoveryDisablesCancellationBeforeInspectingOrCleaningPendingState()
+            throws Exception {
+        Fixture fixture = install("recovery-cutoff", "v1", packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime-1"))));
+        AtomicReference<OperationContext> reference = new AtomicReference<>();
+        AtomicReference<OperationContext.CancellationRequest> request =
+                new AtomicReference<>();
+        OperationContext context = new OperationContext(OperationType.RECOVERY, event -> {
+            if (event.phase() == OperationPhase.RECOVER && !event.cancellationAllowed()
+                    && request.get() == null) {
+                request.set(reference.get().requestCancellation());
+            }
+        });
+        reference.set(context);
+
+        RealUpdateService.RecoveryResult result = new RealUpdateService(
+                new PackageTransport(),
+                new RootCoordinator(temp.resolve("recovery-cutoff-coordination")))
+                .recover(fixture.registry, fixture.id, RealUpdateService.CONFIRM, context);
+
+        assertEquals("no pending transaction", result.outcome());
+        assertFalse(request.get().accepted());
+        assertTrue(request.get().reason().contains("Recovery"));
+        assertFalse(Thread.currentThread().isInterrupted());
+        assertEquals("runtime-1",
+                Files.readString(fixture.root.resolve("lib/runtime.txt")));
+    }
+
+    @Test
+    void retainedArchiveTamperAndHeldRootGateFailWithoutAnotherBodyOrApplicationWrite()
+            throws Exception {
+        Fixture tamper = install("prepared-tamper", "v1", packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime-1"),
+                "docs/change.txt", bytes("old"))));
+        byte[] targetArchive = archive("MegaMek-v2", packageFiles(2, Map.of(
+                "lib/runtime.txt", bytes("runtime-2"),
+                "docs/change.txt", bytes("new"))));
+        PackageTransport tamperNetwork = preparedTransport("v2", targetArchive);
+        PreparedUpdateService tamperService = new PreparedUpdateService(tamperNetwork,
+                new RootCoordinator(temp.resolve("tamper-coordination")));
+        RegistryData tamperData = new RegistryStore().read(tamper.registry);
+        InstallationRecord tamperRecord = new RegistryStore().resolve(tamperData, tamper.id);
+        OwnershipReceipt tamperReceipt = new ReceiptStore().read(
+                tamper.registry, tamperData, tamperRecord);
+        PreparedUpdate changed = tamperService.prepare(tamper.registry, tamperRecord,
+                tamperReceipt, CurrentUpdateState.initial(tamperReceipt), "v2",
+                "MegaMek-v2.tar.gz", targetArchive.length,
+                "sha256:" + sha(targetArchive), quiet());
+        Files.write(changed.workspace().staging().resolve("package.tar.gz"),
+                bytes("not the retained archive"));
+        IOException changedFailure = assertThrows(IOException.class, () ->
+                tamperService.apply(changed, RealUpdateService.CONFIRM, quiet()));
+        assertTrue(changedFailure.getMessage().contains("retained package"));
+        assertEquals("runtime-1", Files.readString(tamper.root.resolve("lib/runtime.txt")));
+        assertEquals("old", Files.readString(tamper.root.resolve("docs/change.txt")));
+        assertEquals(1, tamperNetwork.binaryRequests);
+
+        Fixture gated = install("prepared-gated", "v1", packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime-1"),
+                "docs/change.txt", bytes("old"))));
+        PackageTransport gateNetwork = preparedTransport("v2", targetArchive);
+        RootCoordinator gateCoordinator =
+                new RootCoordinator(temp.resolve("gate-coordination"));
+        PreparedUpdateService gateService =
+                new PreparedUpdateService(gateNetwork, gateCoordinator);
+        RegistryData gateData = new RegistryStore().read(gated.registry);
+        InstallationRecord gateRecord = new RegistryStore().resolve(gateData, gated.id);
+        OwnershipReceipt gateReceipt = new ReceiptStore().read(
+                gated.registry, gateData, gateRecord);
+        PreparedUpdate blocked = gateService.prepare(gated.registry, gateRecord, gateReceipt,
+                CurrentUpdateState.initial(gateReceipt), "v2",
+                "MegaMek-v2.tar.gz", targetArchive.length,
+                "sha256:" + sha(targetArchive), quiet());
+        PreparedUpdateService wrongFacade = new PreparedUpdateService(gateNetwork,
+                gateCoordinator);
+        IOException wrong = assertThrows(IOException.class, () ->
+                wrongFacade.apply(blocked, RealUpdateService.CONFIRM, quiet()));
+        assertTrue(wrong.getMessage().contains("different launcher service"));
+        assertEquals("v2", blocked.preview().targetRelease().tag(),
+                "wrong-facade rejection must not consume the rightful owner's handle");
+        try (RootCoordinator.Lease ignored = gateCoordinator.acquire(gated.root, false)) {
+            IOException held = assertThrows(IOException.class, () ->
+                    gateService.apply(blocked, RealUpdateService.CONFIRM, quiet()));
+            assertTrue(held.getMessage().contains("another launch")
+                    || held.getMessage().contains("active"));
+        }
+        assertEquals(1, gateNetwork.binaryRequests);
+        assertEquals(1, gateNetwork.metadataRequests,
+                "a held root gate must reject before Apply metadata refresh");
+        assertEquals("runtime-1", Files.readString(gated.root.resolve("lib/runtime.txt")));
+    }
+
+    @Test
+    void committedPreparedApplyReportsCleanupFailureTruthfullyAndAllowsExactRetry()
+            throws Exception {
+        Fixture fixture = install("prepared-cleanup", "v1", packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime-1"),
+                "docs/change.txt", bytes("old"))));
+        byte[] targetArchive = archive("MegaMek-v2", packageFiles(2, Map.of(
+                "lib/runtime.txt", bytes("runtime-2"),
+                "docs/change.txt", bytes("new"))));
+        PackageTransport network = preparedTransport("v2", targetArchive);
+        PreparedUpdateService service = new PreparedUpdateService(network,
+                new RootCoordinator(temp.resolve("cleanup-coordination")));
+        RegistryData data = new RegistryStore().read(fixture.registry);
+        InstallationRecord record = new RegistryStore().resolve(data, fixture.id);
+        OwnershipReceipt receipt = new ReceiptStore().read(fixture.registry, data, record);
+        PreparedUpdate prepared = service.prepare(fixture.registry, record, receipt,
+                CurrentUpdateState.initial(receipt), "v2",
+                "MegaMek-v2.tar.gz", targetArchive.length,
+                "sha256:" + sha(targetArchive), quiet());
+        Path outside = Files.createDirectory(temp.resolve("cleanup-outside"));
+        Path link = prepared.workspace().extracted().resolve("cleanup-link");
+        createDirectoryLink(link, outside);
+
+        RealUpdateService.ApplyResult result =
+                service.apply(prepared, RealUpdateService.CONFIRM, quiet());
+
+        assertEquals("v2", result.state().tag());
+        assertTrue(result.cleanupWarning().contains("Update completed"));
+        assertTrue(result.cleanupWarning().contains("do not retry Apply"));
+        assertEquals("runtime-2", Files.readString(fixture.root.resolve("lib/runtime.txt")));
+        assertFalse(Files.exists(fixture.root.resolve(RootCoordinator.UPDATE_NAMESPACE)));
+        assertEquals(1, network.binaryRequests);
+        Files.delete(link);
+        prepared.close();
+        prepared.close();
+        assertFalse(Files.exists(prepared.workspace().staging()));
+        assertTrue(Files.exists(outside),
+                "workspace cleanup must never remove a linked external directory");
+    }
+
+    @Test
+    void preparedSourceMetadataPendingAndRuntimeDriftNeverTriggerAnotherPackageBody()
+            throws Exception {
+        byte[] targetArchive = archive("MegaMek-v2", packageFiles(2, Map.of(
+                "lib/runtime.txt", bytes("runtime-2"),
+                "docs/change.txt", bytes("new"))));
+        String digest = "sha256:" + sha(targetArchive);
+
+        Fixture source = install("prepared-source-drift", "v1", packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime-1"),
+                "docs/change.txt", bytes("old"))));
+        PackageTransport sourceNetwork = preparedTransport("v2", targetArchive);
+        PreparedUpdateService sourceService = new PreparedUpdateService(sourceNetwork,
+                new RootCoordinator(temp.resolve("source-drift-coordination")));
+        RegistryStore sourceStore = new RegistryStore();
+        RegistryData sourceData = sourceStore.read(source.registry);
+        InstallationRecord sourceRecord = sourceStore.resolve(sourceData, source.id);
+        OwnershipReceipt sourceReceipt =
+                new ReceiptStore().read(source.registry, sourceData, sourceRecord);
+        PreparedUpdate sourcePrepared = sourceService.prepare(source.registry, sourceRecord,
+                sourceReceipt, CurrentUpdateState.initial(sourceReceipt), "v2",
+                "MegaMek-v2.tar.gz", targetArchive.length, digest, quiet());
+        sourceStore.selectJava(source.registry, source.id, fakeJava("source-drift-java").toString());
+        IOException staleSource = assertThrows(IOException.class, () -> sourceService.apply(
+                sourcePrepared, RealUpdateService.CONFIRM, quiet()));
+        assertTrue(staleSource.getMessage().contains("source")
+                || staleSource.getMessage().contains("record"));
+        assertEquals(1, sourceNetwork.binaryRequests);
+        assertEquals(1, sourceNetwork.metadataRequests);
+        assertEquals("runtime-1", Files.readString(source.root.resolve("lib/runtime.txt")));
+
+        Fixture metadata = install("prepared-metadata-drift", "v1", packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime-1"),
+                "docs/change.txt", bytes("old"))));
+        byte[] changedArchive = archive("MegaMek-v2", packageFiles(2, Map.of(
+                "lib/runtime.txt", bytes("different-runtime"),
+                "docs/change.txt", bytes("different"))));
+        PackageTransport metadataNetwork = new PackageTransport(
+                releaseResponse("v2", targetArchive), packageResponse(targetArchive),
+                releaseResponse("v2", changedArchive));
+        PreparedUpdateService metadataService = new PreparedUpdateService(metadataNetwork,
+                new RootCoordinator(temp.resolve("metadata-drift-coordination")));
+        RegistryData metadataData = new RegistryStore().read(metadata.registry);
+        InstallationRecord metadataRecord =
+                new RegistryStore().resolve(metadataData, metadata.id);
+        OwnershipReceipt metadataReceipt = new ReceiptStore().read(
+                metadata.registry, metadataData, metadataRecord);
+        PreparedUpdate metadataPrepared = metadataService.prepare(metadata.registry,
+                metadataRecord, metadataReceipt, CurrentUpdateState.initial(metadataReceipt),
+                "v2", "MegaMek-v2.tar.gz", targetArchive.length,
+                digest, quiet());
+        IOException staleTarget = assertThrows(IOException.class, () -> metadataService.apply(
+                metadataPrepared, RealUpdateService.CONFIRM, quiet()));
+        assertTrue(staleTarget.getMessage().contains("changed")
+                || staleTarget.getMessage().contains("restart"));
+        assertEquals(1, metadataNetwork.binaryRequests);
+        assertEquals(targetArchive.length, metadataNetwork.binaryBytes);
+        assertEquals("runtime-1", Files.readString(metadata.root.resolve("lib/runtime.txt")));
+        assertEquals("old", Files.readString(metadata.root.resolve("docs/change.txt")));
+
+        Fixture pending = install("prepared-pending", "v1", packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime-1"),
+                "docs/change.txt", bytes("old"))));
+        PackageTransport pendingNetwork = preparedTransport("v2", targetArchive);
+        PreparedUpdateService pendingService = new PreparedUpdateService(pendingNetwork,
+                new RootCoordinator(temp.resolve("pending-coordination")));
+        RegistryData pendingData = new RegistryStore().read(pending.registry);
+        InstallationRecord pendingRecord = new RegistryStore().resolve(pendingData, pending.id);
+        OwnershipReceipt pendingReceipt =
+                new ReceiptStore().read(pending.registry, pendingData, pendingRecord);
+        PreparedUpdate pendingPrepared = pendingService.prepare(pending.registry, pendingRecord,
+                pendingReceipt, CurrentUpdateState.initial(pendingReceipt), "v2",
+                "MegaMek-v2.tar.gz", targetArchive.length, digest, quiet());
+        Path pendingNamespace =
+                Files.createDirectory(pending.root.resolve(RootCoordinator.UPDATE_NAMESPACE));
+        IOException pendingFailure = assertThrows(IOException.class, () -> pendingService.apply(
+                pendingPrepared, RealUpdateService.CONFIRM, quiet()));
+        assertTrue(pendingFailure.getMessage().contains("pending")
+                || pendingFailure.getMessage().contains("recover"));
+        assertEquals(1, pendingNetwork.binaryRequests);
+        assertEquals(1, pendingNetwork.metadataRequests);
+        assertEquals("runtime-1", Files.readString(pending.root.resolve("lib/runtime.txt")));
+        Files.delete(pendingNamespace);
+
+        Fixture runtime = install("prepared-runtime-drift", "v1", packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime-1"),
+                "docs/change.txt", bytes("old"))));
+        PackageTransport runtimeNetwork = preparedTransport("v2", targetArchive);
+        PreparedUpdateService runtimeService = new PreparedUpdateService(runtimeNetwork,
+                new RootCoordinator(temp.resolve("runtime-drift-coordination")));
+        RegistryData runtimeData = new RegistryStore().read(runtime.registry);
+        InstallationRecord runtimeRecord = new RegistryStore().resolve(runtimeData, runtime.id);
+        OwnershipReceipt runtimeReceipt =
+                new ReceiptStore().read(runtime.registry, runtimeData, runtimeRecord);
+        PreparedUpdate runtimePrepared = runtimeService.prepare(runtime.registry, runtimeRecord,
+                runtimeReceipt, CurrentUpdateState.initial(runtimeReceipt), "v2",
+                "MegaMek-v2.tar.gz", targetArchive.length, digest, quiet());
+        Files.writeString(runtime.root.resolve("lib/runtime.txt"), "local-runtime-change");
+        Exception runtimeFailure = assertThrows(Exception.class, () -> runtimeService.apply(
+                runtimePrepared, RealUpdateService.CONFIRM, quiet()));
+        assertTrue(runtimeFailure.getMessage().toLowerCase(Locale.ROOT).contains("runtime"));
+        assertEquals(1, runtimeNetwork.binaryRequests);
+        assertEquals(targetArchive.length, runtimeNetwork.binaryBytes);
+        assertEquals("old", Files.readString(runtime.root.resolve("docs/change.txt")));
+        assertFalse(Files.exists(runtime.root.resolve(RootCoordinator.UPDATE_NAMESPACE)));
+    }
+
+    @Test
+    void concurrentDiscardCannotDeleteWorkspaceClaimedByPreparedApply() throws Exception {
+        Fixture fixture = install("prepared-concurrent-close", "v1", packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime-1"),
+                "docs/change.txt", bytes("old"))));
+        byte[] targetArchive = archive("MegaMek-v2", packageFiles(2, Map.of(
+                "lib/runtime.txt", bytes("runtime-2"),
+                "docs/change.txt", bytes("new"))));
+        PackageTransport delegate = preparedTransport("v2", targetArchive);
+        AtomicInteger metadata = new AtomicInteger();
+        CountDownLatch applyMetadata = new CountDownLatch(1);
+        CountDownLatch releaseMetadata = new CountDownLatch(1);
+        ReleaseTransport blocking = (uri, accept) -> {
+            if (!"application/octet-stream".equals(accept)
+                    && metadata.incrementAndGet() == 2) {
+                applyMetadata.countDown();
+                releaseMetadata.await();
+            }
+            return delegate.get(uri, accept);
+        };
+        PreparedUpdateService service = new PreparedUpdateService(blocking,
+                new RootCoordinator(temp.resolve("concurrent-close-coordination")));
+        RegistryData data = new RegistryStore().read(fixture.registry);
+        InstallationRecord record = new RegistryStore().resolve(data, fixture.id);
+        OwnershipReceipt receipt =
+                new ReceiptStore().read(fixture.registry, data, record);
+        PreparedUpdate prepared = service.prepare(fixture.registry, record,
+                receipt, CurrentUpdateState.initial(receipt), "v2",
+                "MegaMek-v2.tar.gz", targetArchive.length,
+                "sha256:" + sha(targetArchive), quiet());
+        var executor = Executors.newSingleThreadExecutor();
+        try {
+            var applying = executor.submit(() -> service.apply(
+                    prepared, RealUpdateService.CONFIRM, quiet()));
+            assertTrue(applyMetadata.await(5, TimeUnit.SECONDS));
+            IOException close = assertThrows(IOException.class, prepared::close);
+            assertTrue(close.getMessage().contains("applied")
+                    || close.getMessage().contains("cleaned"));
+            assertTrue(Files.exists(prepared.workspace().staging()),
+                    "concurrent discard must not delete files Apply still owns");
+            releaseMetadata.countDown();
+            RealUpdateService.ApplyResult result = applying.get(10, TimeUnit.SECONDS);
+            assertEquals("v2", result.state().tag());
+            assertFalse(Files.exists(prepared.workspace().staging()));
+            assertEquals(1, delegate.binaryRequests);
+        } finally {
+            releaseMetadata.countDown();
+            executor.shutdownNow();
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS));
+        }
+    }
+
+    @Test
+    void applyFailureKeepsOriginalCauseAndRecoveryArtifactsWhenPackageCleanupAlsoFails()
+            throws Exception {
+        Fixture fixture = install("prepared-failure-cleanup", "v1", packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime-1"),
+                "docs/change.txt", bytes("old"))));
+        byte[] targetArchive = archive("MegaMek-v2", packageFiles(2, Map.of(
+                "lib/runtime.txt", bytes("runtime-2"),
+                "docs/change.txt", bytes("new"))));
+        PackageTransport network = preparedTransport("v2", targetArchive);
+        RootCoordinator coordinator =
+                new RootCoordinator(temp.resolve("failure-cleanup-coordination"));
+        AtomicBoolean failed = new AtomicBoolean();
+        PreparedUpdateService service = new PreparedUpdateService(network,
+                new RegistryStore(), new ReceiptStore(), coordinator, point -> {
+            if (point.startsWith("APP_MUTATION:") && failed.compareAndSet(false, true)) {
+                throw new IOException("original application mutation failure");
+            }
+        });
+        RegistryData data = new RegistryStore().read(fixture.registry);
+        InstallationRecord record = new RegistryStore().resolve(data, fixture.id);
+        OwnershipReceipt receipt =
+                new ReceiptStore().read(fixture.registry, data, record);
+        PreparedUpdate prepared = service.prepare(fixture.registry, record,
+                receipt, CurrentUpdateState.initial(receipt), "v2",
+                "MegaMek-v2.tar.gz", targetArchive.length,
+                "sha256:" + sha(targetArchive), quiet());
+        Path outside = Files.createDirectory(temp.resolve("failure-cleanup-outside"));
+        Path link = prepared.workspace().extracted().resolve("cleanup-link");
+        createDirectoryLink(link, outside);
+
+        IOException failure = assertThrows(IOException.class, () ->
+                service.apply(prepared, RealUpdateService.CONFIRM, quiet()));
+
+        assertTrue(failure.getMessage().contains("original application mutation failure"),
+                "workspace cleanup must not mask the original Apply cause");
+        assertTrue(failure.getSuppressed().length >= 1);
+        assertTrue(Files.exists(fixture.root.resolve(RootCoordinator.UPDATE_NAMESPACE)));
+        assertTrue(Files.exists(transaction(fixture.root).resolve("journal.json")));
+        Files.delete(link);
+        prepared.close();
+        RealUpdateService.RecoveryResult recovered =
+                new RealUpdateService(new PackageTransport(), coordinator).recover(
+                        fixture.registry, fixture.id, RealUpdateService.CONFIRM);
+        assertTrue(recovered.outcome().contains("rolled back"));
+        assertEquals("runtime-1", Files.readString(fixture.root.resolve("lib/runtime.txt")));
+        assertEquals("old", Files.readString(fixture.root.resolve("docs/change.txt")));
+        assertFalse(Files.exists(fixture.root.resolve(RootCoordinator.UPDATE_NAMESPACE)));
+        assertEquals(1, network.binaryRequests,
+                "recovery after prepared Apply failure must not redownload");
+    }
 
     @Test
     void verifiedUpdatePreservesDataAndUnknownThenAdvancesStickyHistoryAcrossReleases()
@@ -775,15 +1326,31 @@ class RealUpdateServiceTest {
     }
 
     private static PackageTransport transport(String tag, byte[] archive) throws Exception {
+        return new PackageTransport(releaseResponse(tag, archive),
+                packageResponse(archive));
+    }
+
+    private static PackageTransport preparedTransport(String tag, byte[] archive)
+            throws Exception {
+        return new PackageTransport(releaseResponse(tag, archive), packageResponse(archive),
+                releaseResponse(tag, archive));
+    }
+
+    private static Supplier<ReleaseTransport.Response> releaseResponse(String tag, byte[] archive)
+            throws Exception {
         String json = """
                 {"tag_name":"%s","name":"%s","draft":false,"prerelease":false,
                 "html_url":"https://github.com/MegaMek/megamek/releases/tag/%s",
                 "assets":[{"name":"MegaMek-%s.tar.gz","size":%d,"digest":"sha256:%s",
                 "browser_download_url":"https://github.com/MegaMek/megamek/releases/download/%s/MegaMek-%s.tar.gz"}]}
                 """.formatted(tag, tag, tag, tag, archive.length, sha(archive), tag, tag);
-        return new PackageTransport(response(json), () -> new ReleaseTransport.Response(
+        return response(json);
+    }
+
+    private static Supplier<ReleaseTransport.Response> packageResponse(byte[] archive) {
+        return () -> new ReleaseTransport.Response(
                 200, Map.of("content-length", List.of(Integer.toString(archive.length))),
-                new ByteArrayInputStream(archive)));
+                new ByteArrayInputStream(archive));
     }
 
     private static Supplier<ReleaseTransport.Response> response(String body) {
@@ -823,6 +1390,9 @@ class RealUpdateServiceTest {
     private static final class PackageTransport implements ReleaseTransport {
         private final ArrayDeque<Supplier<Response>> responses;
         private final java.util.ArrayList<URI> requests = new java.util.ArrayList<>();
+        private int metadataRequests;
+        private int binaryRequests;
+        private long binaryBytes;
 
         @SafeVarargs
         private PackageTransport(Supplier<Response>... responses) {
@@ -834,7 +1404,28 @@ class RealUpdateServiceTest {
             requests.add(uri);
             Supplier<Response> response = responses.poll();
             if (response == null) throw new IOException("unexpected network request");
-            return response.get();
+            Response supplied = response.get();
+            if (!"application/octet-stream".equals(accept)) {
+                metadataRequests++;
+                return supplied;
+            }
+            binaryRequests++;
+            InputStream counted = new FilterInputStream(supplied.body()) {
+                @Override
+                public int read() throws IOException {
+                    int value = in.read();
+                    if (value >= 0) binaryBytes++;
+                    return value;
+                }
+
+                @Override
+                public int read(byte[] buffer, int offset, int length) throws IOException {
+                    int count = in.read(buffer, offset, length);
+                    if (count > 0) binaryBytes += count;
+                    return count;
+                }
+            };
+            return new Response(supplied.status(), supplied.headers(), counted);
         }
     }
 }

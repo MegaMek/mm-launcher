@@ -45,15 +45,15 @@ class UpdatePreviewSwingTest {
         Fixture fixture = fixture("imported", false);
         LauncherFrame frame = show(fixture);
         try {
-            JButton preview = waitForButton(frame, "previewUpdateButton");
-            assertNotNull(preview);
-            assertFalse(preview.isEnabled());
-            assertNotNull(findButton(frame, "launch-megamek-button"));
-            assertNotNull(findButton(frame, "manageInstallationsButton"));
-            JLabel note = findLabel(frame, "previewEligibilityNote");
+            assertNotNull(waitForButton(frame, "launch-megamek-button"));
+            JButton installations = waitForButton(frame, "manageInstallationsButton");
+            assertNotNull(installations);
+            JLabel note = findLabel(frame, "updatesUnavailableMessage");
             assertNotNull(note);
-            assertTrue(note.getText().contains("Preview unavailable:"));
-            assertTrue(note.getText().contains("receipt is absent"));
+            assertTrue(note.getText().contains("imported copy"));
+            SwingUtilities.invokeAndWait(installations::doClick);
+            assertNotNull(waitForButton(frame, "previewUpdateButton"),
+                    "advanced action remains discoverable for an imported copy");
             assertTrue(fixture.network.requests.isEmpty(), "home rendering must not use network");
         } finally {
             dispose(frame);
@@ -70,13 +70,13 @@ class UpdatePreviewSwingTest {
                 StandardCharsets.UTF_8);
         LauncherFrame frame = show(fixture);
         try {
+            JButton installations = waitForButton(frame, "manageInstallationsButton");
+            assertTrue(findButton(frame, "launch-megamek-button") == null);
+            assertNotNull(installations);
+            SwingUtilities.invokeAndWait(installations::doClick);
             JButton preview = waitForButton(frame, "previewUpdateButton");
             assertNotNull(preview);
             assertTrue(preview.isEnabled());
-            assertTrue(findLabel(frame, "previewEligibilityNote").getText()
-                    .contains("Receipt verified"));
-            assertTrue(findButton(frame, "launch-megamek-button") == null);
-            assertNotNull(findButton(frame, "manageInstallationsButton"));
             assertTrue(fixture.network.requests.isEmpty(), "startup must not check releases");
         } finally {
             dispose(frame);

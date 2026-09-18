@@ -2,9 +2,10 @@
 
 ## Scope and authority
 
-`preview-update --registry <json> [--id <uuid>] --tag <exact-tag>` is an observational,
-point-in-time comparison. It may download, verify, extract, and statically inspect one official
-release in launcher metadata staging. It never writes beneath an installed application root,
+`preview-update --registry <json> [--id <uuid>] --tag <exact-tag>` and the standalone GUI
+**Preview update** action are observational, point-in-time comparisons. Each may download, verify,
+extract, and statically inspect one official release in launcher metadata staging, then disposes
+that workspace. It never writes beneath an installed application root,
 changes its timestamps, updates the registry or receipt, locks an installation, converts saves, or
 applies a decision. Its result is not authority to apply later. Tags are exact labels, not
 semantic-version upgrade/downgrade recommendations.
@@ -92,6 +93,32 @@ repository using the installer's digest, size, redirect, timeout, extraction, an
 and must contain the expected product. Only operation-created `.preview-<uuid>` staging is removed. A crash can leave that explicitly
 named staging directory or a uniquely named receipt staging file; publication itself is
 create-new/no-clobber, but directory durability across a power loss is not claimed. No broader
-cleanup or transaction is claimed by **preview**. Real Apply is a separate re-fetch/replan service
-documented in [real-update-contract.md](real-update-contract.md). A missing GitHub digest is
-unsupported.
+cleanup or transaction is claimed by **preview**.
+
+Normal GUI **Update…** and recommended-update attempts use the same planning/target-validation
+engine but deliberately have different ownership: an opaque, process-local, one-use handle retains
+that attempt's verified archive and observational extraction through the second confirmation.
+Apply never trusts the extraction merely because preview passed; it refreshes metadata, re-verifies
+the retained compressed bytes and stable file identity, safely extracts again, and compares the
+result with the pristine captured manifest/inventory/inspection before a fresh local plan. This is
+not a persistent cache, resume facility, offline authority, or path token, and separate Preview/CLI
+operations cannot share it. Real Apply details are documented in
+[real-update-contract.md](real-update-contract.md). A missing GitHub digest is unsupported.
+
+GUI preview reports typed metadata/download/verification/extraction/planning phases. Package bytes
+use the exact metadata total; archive-entry progress remains indeterminate when no truthful total
+exists. Updates are coalesced before Swing rendering. Cancellation closes only the preview-owned
+response, checkpoints archive hashing/extraction and local planning, and removes only that random
+workspace off the EDT. Standalone preview ends as **Cancelled**, failed, or successful without an
+invented overall percentage.
+
+Prepared GUI Update continues from the same one downloaded body into await-consent and
+prepare-install phases. Declining the second consent cancels and discards that handle. Standalone
+GUI/CLI preview never exposes Apply and is not a cache token for another operation. Existing CLI
+arguments, output, and one-download compatibility are unchanged.
+
+Terminal preview errors/progress are persisted as sanitized local structured logs beside the
+registry, outside installation and receipt data. Logs remain available after dialog dismissal or
+restart through **View logs**; reading/copying is bounded and explicit, with no upload, browser
+launch, or arbitrary file input. Logging failure does not change preview read-only semantics or
+hide the original preview error.

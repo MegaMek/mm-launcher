@@ -19,20 +19,53 @@ remains launch-only. The launcher never creates update provenance from current l
 Registry schema remains 1; legacy `updateEligible=false` continues to mean that registry membership
 alone is not authority and is not the source of real-update eligibility.
 
-The preview report is still observational and is never write authority. Apply takes a captured
-record/current-provenance snapshot, exact target tag, full byte size, and GitHub SHA-256. Under the
-root update gate it re-reads the registry, immutable receipt, and latest current provenance,
-requires exact equality with the captured source, re-fetches the exact fixed-repository release,
-and rejects changed target size/digest before downloading its asset. It then verifies, extracts,
-statically inspects, inventories, and replans against fresh installed bytes. Invalid consent,
-source tags, sizes, or digests fail before network or installation writes.
+The preview report is still observational and is never write authority. Standalone CLI Apply keeps
+its existing independent one-package-download behavior. A normal GUI Update attempt instead creates
+an opaque process-local prepared handle after the first consent. It captures the exact
+record/receipt/current-provenance snapshot, target tag, asset name/full byte size/GitHub SHA-256 and
+URL identity, pristine target manifest/excluded inventory/static inspection, and owns the verified
+archive plus extraction. It is neither serialized nor a public path token.
 
-The GUI shows source/target, full second download, digest, decision counts, destructive managed-file
-intent, preserved `SKIP` count, backup/recovery behavior, and the close-all-applications requirement
-before consent. Cancellation performs no Apply write. CLI requires the same exact confirmation.
+Under the root update gate, prepared Apply re-reads the registry, immutable receipt, and latest
+current provenance and requires exact equality with the captured source/root. It refreshes the
+exact fixed-repository tag and asset metadata (and the captured channel/preference recommendation
+when applicable), rejecting drift with a restart message and no second package transfer. It
+rechecks the retained compressed archive's stable file identity, exact size, and SHA-256, safely
+extracts it into another owned area, and requires that extraction's static inspection and complete
+ownership inventory to equal the pristine captured target. A changed observational extraction is
+therefore reconstructed from verified bytes, never blessed. Apply then replans against fresh
+installed bytes and retains the original runtime/pristine checks and per-operation transaction
+verification.
+
+The GUI shows captured installation name/path, source/target, the already-downloaded full size and
+digest, decision counts, destructive managed-file intent, preserved `SKIP` count, backup/recovery
+behavior, no-second-download statement, and the close-all-applications requirement before consent.
+Cancellation performs no Apply write. CLI requires the same exact confirmation.
 There is no automatic release selection, background update, bundled JRE, arbitrary repository,
 custom URL, downgrade/upgrade version interpretation, elevation, process termination, or
 self-update.
+
+The shared operation context uses typed metadata/download/verify/extract/plan/await-consent/
+prepare-install/Apply/recover/cleanup/final phases; control flow never parses presentation text.
+Prepared GUI cancellation remains available while refreshing metadata, re-hashing the retained
+archive, re-extracting, rebuilding ownership, and replanning. The atomic cutoff runs before
+`transact` and therefore before `.mm-launcher-update`, `pending.json`, a transaction UUID, or a
+journal can be created. If cancellation wins, Apply has no root/registry/current-state publication
+and the prepared handle performs exact non-cancellable cleanup. If transaction entry wins, the
+request is denied, the worker is not interrupted, and any later interruption/failure is a recovery
+failure rather than **Cancelled**. Recovery similarly disables cancellation before any replay or
+cleanup. Neither path kills suite processes.
+
+The prepared handle is atomically one-use and bound to its creating facade and captured
+registry/record/root/provenance. Apply owns it against concurrent discard until all retained bytes
+are no longer needed. Cancel, ordinary preparation failure, Apply completion, and Apply failure
+remove only that handle's random external workspace; repeated discard is idempotent. Cleanup
+failure remains explicit and retryable rather than being reported as success. If it occurs after a
+committed update, the result says the update completed and cleanup failed, and does not ask for a
+blind Apply retry. If Apply itself failed, that original cause is preserved, cleanup failure is
+secondary, and root transaction journals/backups remain available for recovery. A process crash
+may leave the exact workspace, but there is no persistent token, startup reuse, resume, or broad
+automatic temporary-directory deletion.
 
 ## Ownership and all-or-nothing runtime boundary
 
@@ -70,6 +103,15 @@ Apply creates the temporary owned `.mm-launcher-update` namespace only after dow
 planning, runtime checks, and writable/same-volume preflight. This is not `.mm-launcher` sandbox
 state and never bypasses `SandboxUpdater` initialization, acknowledgement, or replay rules.
 Presence of the real-update namespace blocks launch and another Apply until explicit recovery.
+
+Persistent diagnostics are a separate registry-sidecar concern, never transaction authority.
+The default `<registry-name>.launcher-logs/` store keeps 20 proven-owned closed structured logs of
+at most 1 MiB each. Terminal outcome/error survives bounded progress truncation. The sanitizer
+removes URL query/fragment/userinfo, authentication/secret fields, command/environment dumps, and
+Jackson source-content snippets before persistence and explicit copy/view. Unknown files/links and
+root journals/backups are not retention targets. Placement, permission, or I/O failure is reported
+separately in memory and cannot throw through a mutating transaction, convert committed Apply to
+cancellation/failure, or replace the original Apply/recovery error.
 
 The transaction is bound to schema, transaction UUID, canonical root and registry, installation
 UUID and registration time, prior/current provenance, captured record, verified target layout,

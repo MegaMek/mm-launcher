@@ -1,13 +1,17 @@
 MM Launcher archive prototype
 =============================
 
-This is a portable application archive, not an installer. Extract it before
-running it. It contains no Java runtime and requires a compatible external
-Java 21 or newer installation.
+This is one all-platform portable application archive, not an installer.
+Extract it before running it. It contains no Java runtime and requires a
+compatible external Java 21 or newer installation.
 
 Windows: run "MM Launcher.exe".
 macOS: open "MM Launcher.app".
 Linux: run "./mm-launcher" from the extracted "MM Launcher" directory.
+
+Keep this entire extracted directory intact. The one shared Java payload is
+inside "MM Launcher.app/Contents/app/lib". The Windows executable and Linux
+script use that same payload and must remain beside the app folder.
 
 The desktop entry point opens the graphical launcher by default. It accepts
 an optional "--registry <absolute-path>" test/development override. Diagnostic

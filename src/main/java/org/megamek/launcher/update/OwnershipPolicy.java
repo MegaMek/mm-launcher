@@ -4,6 +4,10 @@ import org.megamek.launcher.manifest.FileEntry;
 import org.megamek.launcher.manifest.Manifest;
 import org.megamek.launcher.manifest.ManifestException;
 import org.megamek.launcher.manifest.ManifestReader;
+import org.megamek.launcher.operation.OperationContext;
+import org.megamek.launcher.operation.OperationPhase;
+import org.megamek.launcher.operation.OperationType;
+import org.megamek.launcher.operation.ProgressUnit;
 import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.SafeTarExtractor;
 
@@ -38,38 +42,61 @@ public final class OwnershipPolicy {
 
     public Build build(Path root, OfficialRepository repository, String releaseId)
             throws IOException, ManifestException {
+        try {
+            return build(root, repository, releaseId,
+                    OperationContext.none(OperationType.UPDATE_PREVIEW), OperationPhase.PLAN);
+        } catch (InterruptedException impossible) {
+            Thread.currentThread().interrupt();
+            throw new IOException("package inventory was interrupted", impossible);
+        }
+    }
+
+    public Build build(Path root, OfficialRepository repository, String releaseId,
+                       OperationContext context, OperationPhase phase)
+            throws IOException, ManifestException, InterruptedException {
         Path canonical = requireRoot(root);
         List<FileEntry> managed = new ArrayList<>();
         List<String> excluded = new ArrayList<>();
+        List<Path> paths = new ArrayList<>();
         try (var walk = Files.walk(canonical)) {
-            List<Path> paths = walk.skip(1).sorted(Comparator
-                    .comparing((Path path) -> portable(canonical.relativize(path))
-                            .toLowerCase(Locale.ROOT))
-                    .thenComparing(path -> portable(canonical.relativize(path)))).toList();
-            if (paths.size() > SafeTarExtractor.MAX_ENTRIES) {
-                throw new IOException("package inventory exceeds entry limit");
+            var iterator = walk.skip(1).iterator();
+            while (iterator.hasNext()) {
+                context.checkpoint();
+                paths.add(iterator.next());
+                if (paths.size() > SafeTarExtractor.MAX_ENTRIES) {
+                    throw new IOException("package inventory exceeds entry limit");
+                }
             }
-            String previousKey = null;
-            for (Path path : paths) {
-                BasicFileAttributes attrs = Files.readAttributes(path, BasicFileAttributes.class,
-                        LinkOption.NOFOLLOW_LINKS);
-                if (attrs.isSymbolicLink() || attrs.isOther()) {
-                    throw new IOException("package inventory contains a link or special entry: " + path);
-                }
-                String relative = portable(canonical.relativize(path));
-                String key = Normalizer.normalize(relative, Normalizer.Form.NFC)
-                        .toLowerCase(Locale.ROOT);
-                if (key.equals(previousKey)) {
-                    throw new IOException("package inventory contains a case/Unicode alias: " + relative);
-                }
-                previousKey = key;
-                if (!attrs.isRegularFile()) continue;
+        }
+        paths.sort(Comparator
+                .comparing((Path path) -> portable(canonical.relativize(path))
+                        .toLowerCase(Locale.ROOT))
+                .thenComparing(path -> portable(canonical.relativize(path))));
+        String previousKey = null;
+        int completed = 0;
+        for (Path path : paths) {
+            context.checkpoint();
+            BasicFileAttributes attrs = Files.readAttributes(path, BasicFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS);
+            if (attrs.isSymbolicLink() || attrs.isOther()) {
+                throw new IOException("package inventory contains a link or special entry: " + path);
+            }
+            String relative = portable(canonical.relativize(path));
+            String key = Normalizer.normalize(relative, Normalizer.Form.NFC)
+                    .toLowerCase(Locale.ROOT);
+            if (key.equals(previousKey)) {
+                throw new IOException("package inventory contains a case/Unicode alias: " + relative);
+            }
+            previousKey = key;
+            if (attrs.isRegularFile()) {
                 if (managed(relative)) {
-                    managed.add(new FileEntry(relative, sha256(path)));
+                    managed.add(new FileEntry(relative, sha256(path, context)));
                 } else {
                     excluded.add(relative);
                 }
             }
+            context.progress(phase, ++completed, paths.size(), ProgressUnit.FILES,
+                    "Inventoried " + completed + " of " + paths.size() + " package entries");
         }
         Manifest manifest = new Manifest(ManifestReader.SCHEMA_VERSION, repository.key(),
                 repository.key() + "-official-package", releaseId, PROTECTED_PATHS,
@@ -117,11 +144,17 @@ public final class OwnershipPolicy {
         return path.toString().replace('\\', '/');
     }
 
-    private static String sha256(Path path) throws IOException {
+    private static String sha256(Path path, OperationContext context)
+            throws IOException, InterruptedException {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             try (InputStream input = new DigestInputStream(Files.newInputStream(path), digest)) {
-                input.transferTo(java.io.OutputStream.nullOutputStream());
+                byte[] buffer = new byte[128 * 1024];
+                while (true) {
+                    context.checkpoint();
+                    int read = input.read(buffer);
+                    if (read < 0) break;
+                }
             }
             return HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException e) {

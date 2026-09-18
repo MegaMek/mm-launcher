@@ -2,6 +2,9 @@ package org.megamek.launcher.release;
 
 import org.megamek.launcher.onboarding.Inspection;
 import org.megamek.launcher.manifest.ManifestException;
+import org.megamek.launcher.operation.OperationContext;
+import org.megamek.launcher.operation.OperationPhase;
+import org.megamek.launcher.operation.OperationType;
 import org.megamek.launcher.onboarding.InstallationInspector;
 import org.megamek.launcher.registry.InstallationRecord;
 import org.megamek.launcher.registry.RegistryData;
@@ -18,6 +21,8 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.Optional;
+import java.util.Set;
 
 public final class FreshInstaller {
     public static final long MAX_DOWNLOAD = 2L * 1024 * 1024 * 1024;
@@ -49,63 +54,108 @@ public final class FreshInstaller {
     public Result install(OfficialRepository repository, String tag, Path destination,
                           Path registry, String name, PrintStream progress)
             throws IOException, InterruptedException {
-        Path target = destination.toAbsolutePath().normalize();
-        Path registryPath = registry.toAbsolutePath().normalize();
-        Path parent = requireSafeParent(target);
-        preflight(target, registryPath, name);
+        return install(repository, tag, destination, registry, name, progress,
+                OperationContext.none(OperationType.FRESH_INSTALL));
+    }
 
-        VerifiedPackageFetcher fetcher = new VerifiedPackageFetcher(transport, extractor);
-        try (VerifiedPackageFetcher.Workspace workspace = fetcher.fetch(repository, tag, parent,
-                ".mm-launcher-install-", progress)) {
-            ReleaseCatalog.Release release = workspace.release();
-            ReleaseCatalog.Asset asset = workspace.asset();
-            Path extracted = workspace.extracted();
-            Inspection inspection = inspector.inspect(extracted);
-            if (inspection.products().stream()
-                    .noneMatch(product -> product.key().equals(repository.requiredProduct()))) {
-                throw new IOException("downloaded package does not contain selected application "
-                        + repository.requiredProduct());
-            }
-            OwnershipPolicy.Build ownership;
-            try {
-                ownership = new OwnershipPolicy().build(extracted, repository, release.tag());
-            } catch (ManifestException e) {
-                throw new IOException("downloaded package ownership inventory is invalid: "
-                        + e.getMessage(), e);
-            }
-            if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
-                throw new FileAlreadyExistsException("destination appeared during install: " + target);
-            }
-            try {
-                // Deliberately no REPLACE_EXISTING or ATOMIC_MOVE: a concurrent target must win.
-                Files.move(extracted, target);
-            } catch (FileAlreadyExistsException e) {
-                throw new IOException("destination appeared during finalization; nothing was overwritten: "
-                        + target, e);
-            }
-            Inspection finalInspection = inspector.inspect(target);
-            if (!finalInspection.observedBuild().equals(inspection.observedBuild())
-                    || !finalInspection.products().equals(inspection.products())) {
-                throw new IOException("published installation changed during final validation: " + target);
-            }
-            InstallationRecord record;
-            try {
-                record = registryStore.register(registryPath, name, target, null);
-            } catch (IOException e) {
-                throw new IOException("installation is valid at " + target
-                        + " but was NOT REGISTERED: " + e.getMessage()
-                        + ". Use the register-existing flow for this folder.", e);
-            }
-            try {
-                RegistryData registered = registryStore.read(registryPath);
-                OwnershipReceipt receipt = receiptStore.write(registryPath, registered, record,
-                        repository, release.tag(), asset.name(), asset.size(), asset.digest(),
-                        ownership);
-                return new Result(record, release, asset, target, receipt);
-            } catch (IOException e) {
-                throw new IOException("installation is valid and REGISTERED at " + target
-                        + " but ownership receipt creation failed; PREVIEW UNAVAILABLE: "
-                        + e.getMessage() + ". Keep using it for launch/manage.", e);
+    public Result install(OfficialRepository repository, String tag, Path destination,
+                          Path registry, String name, PrintStream progress,
+                          OperationContext context)
+            throws IOException, InterruptedException {
+        return install(repository, tag, destination, registry, name, progress, context,
+                Optional.empty(), Set.of(repository.requiredProduct()));
+    }
+
+    /**
+     * Installs only the asset and product layout captured by an earlier metadata-only plan.
+     * Existing callers deliberately use the overload above, preserving the CLI/fresh behavior.
+     */
+    public Result install(OfficialRepository repository, String tag, Path destination,
+                          Path registry, String name, PrintStream progress,
+                          OperationContext context,
+                          Optional<VerifiedPackageFetcher.ExpectedAsset> expectedAsset,
+                          Set<String> requiredProducts)
+            throws IOException, InterruptedException {
+        if (expectedAsset == null) throw new IOException("expected asset option is required");
+        if (requiredProducts == null || requiredProducts.isEmpty()
+                || requiredProducts.stream().anyMatch(
+                product -> product == null || product.isBlank())) {
+            throw new IOException("at least one required application is required");
+        }
+        try (OperationContext.WorkerRegistration ignored = context.activate()) {
+            context.phase(OperationPhase.METADATA,
+                    "Checking destination and registry safety");
+            Path target = destination.toAbsolutePath().normalize();
+            Path registryPath = registry.toAbsolutePath().normalize();
+            Path parent = requireSafeParent(target);
+            preflight(target, registryPath, name);
+
+            VerifiedPackageFetcher fetcher = new VerifiedPackageFetcher(transport, extractor);
+            try (VerifiedPackageFetcher.Workspace workspace = fetcher.fetch(repository, tag, parent,
+                    ".mm-launcher-install-", progress, expectedAsset.orElse(null), context)) {
+                ReleaseCatalog.Release release = workspace.release();
+                ReleaseCatalog.Asset asset = workspace.asset();
+                Path extracted = workspace.extracted();
+                context.phase(OperationPhase.PLAN,
+                        "Inspecting the extracted application package");
+                Inspection inspection = inspector.inspect(extracted);
+                Set<String> foundProducts = inspection.products().stream()
+                        .map(product -> product.key()).collect(java.util.stream.Collectors.toSet());
+                if (!foundProducts.containsAll(requiredProducts)) {
+                    Set<String> missing = new java.util.TreeSet<>(requiredProducts);
+                    missing.removeAll(foundProducts);
+                    throw new IOException("downloaded package does not contain required "
+                            + "applications: " + missing);
+                }
+                OwnershipPolicy.Build ownership;
+                try {
+                    ownership = new OwnershipPolicy().build(extracted, repository, release.tag(),
+                            context, OperationPhase.PLAN);
+                } catch (ManifestException e) {
+                    throw new IOException("downloaded package ownership inventory is invalid: "
+                            + e.getMessage(), e);
+                }
+                context.phase(OperationPhase.PREPARE_INSTALL,
+                        "Rechecking the unpublished destination");
+                if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+                    throw new FileAlreadyExistsException(
+                            "destination appeared during install: " + target);
+                }
+                context.enterFinalization("Installation publication and registration have begun; "
+                        + "cancellation can no longer be performed safely.");
+                try {
+                    // Deliberately no REPLACE_EXISTING or ATOMIC_MOVE: a concurrent target must win.
+                    Files.move(extracted, target);
+                } catch (FileAlreadyExistsException e) {
+                    throw new IOException("destination appeared during finalization; nothing was "
+                            + "overwritten: " + target, e);
+                }
+                Inspection finalInspection = inspector.inspect(target);
+                if (!finalInspection.observedBuild().equals(inspection.observedBuild())
+                        || !finalInspection.products().equals(inspection.products())) {
+                    throw new IOException("published installation changed during final validation: "
+                            + target);
+                }
+                InstallationRecord record;
+                try {
+                    record = registryStore.register(registryPath, name, target, null);
+                } catch (IOException e) {
+                    throw new IOException("installation is valid at " + target
+                            + " but was NOT REGISTERED: " + e.getMessage()
+                            + ". Use the register-existing flow for this folder.", e);
+                }
+                try {
+                    RegistryData registered = registryStore.read(registryPath);
+                    OwnershipReceipt receipt = receiptStore.write(registryPath, registered, record,
+                            repository, release.tag(), asset.name(), asset.size(), asset.digest(),
+                            ownership);
+                    context.cleanupPhase("Removing the downloaded package workspace");
+                    return new Result(record, release, asset, target, receipt);
+                } catch (IOException e) {
+                    throw new IOException("installation is valid and REGISTERED at " + target
+                            + " but ownership receipt creation failed; PREVIEW UNAVAILABLE: "
+                            + e.getMessage() + ". Keep using it for launch/manage.", e);
+                }
             }
         }
     }

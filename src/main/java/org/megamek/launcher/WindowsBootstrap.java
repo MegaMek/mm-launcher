@@ -12,18 +12,22 @@ import java.util.Comparator;
 
 /**
  * Minimal Java bridge embedded by Launch4j. Launch4j changes to the executable
- * directory before this code resolves the external, shared lib payload.
+ * directory before this code resolves the one shared lib payload inside the
+ * sibling macOS app bundle.
  */
 public final class WindowsBootstrap {
+    private static final Path SHARED_LIB = Path.of(
+            "MM Launcher.app", "Contents", "app", "lib");
+
     private WindowsBootstrap() {
     }
 
     public static void main(String[] args) {
         try {
-            Path lib = Path.of("lib").toAbsolutePath().normalize();
+            Path lib = SHARED_LIB.toAbsolutePath().normalize();
             if (!Files.isDirectory(lib)) {
                 throw new IllegalStateException(
-                        "MM Launcher lib payload is missing beside the executable.");
+                        "MM Launcher shared payload is missing at " + lib + ".");
             }
             URL[] jars;
             try (var files = Files.list(lib)) {
@@ -37,7 +41,8 @@ public final class WindowsBootstrap {
             }
             if (jars.length == 0) {
                 throw new IllegalStateException(
-                        "MM Launcher lib payload contains no application JARs.");
+                        "MM Launcher shared payload at " + lib
+                                + " contains no application JARs.");
             }
 
             URLClassLoader loader = new URLClassLoader(jars,

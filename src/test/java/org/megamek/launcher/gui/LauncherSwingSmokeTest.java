@@ -7,11 +7,16 @@ import org.junit.jupiter.api.io.TempDir;
 import org.megamek.launcher.release.FreshInstaller;
 import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
+import org.megamek.launcher.operation.OperationContext;
+import org.megamek.launcher.operation.OperationPhase;
+import org.megamek.launcher.operation.OperationType;
 
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
+import javax.swing.JLabel;
 import javax.swing.SwingUtilities;
+import javax.swing.JTextArea;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.GraphicsEnvironment;
@@ -22,6 +27,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.jar.Attributes;
 import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
@@ -48,16 +54,28 @@ class LauncherSwingSmokeTest {
             holder[0].showWindow();
         });
         try {
-            JButton manage = waitForButton(holder[0], "manageInstallationsButton");
-            assertNotNull(manage);
-            SwingUtilities.invokeAndWait(manage::doClick);
-            JDialog[] dialogs = holder[0].getOwnedWindows().length == 0 ? new JDialog[0]
-                    : java.util.Arrays.stream(holder[0].getOwnedWindows())
-                    .filter(JDialog.class::isInstance).map(JDialog.class::cast)
-                    .toArray(JDialog[]::new);
-            assertNotNull(java.util.Arrays.stream(dialogs)
-                    .filter(dialog -> dialog.getTitle().equals("Manage installations"))
-                    .findFirst().orElse(null));
+            assertNotNull(waitForButton(holder[0], "downloadAndInstallButton"));
+            JButton more = waitForButton(holder[0], "moreOptionsButton");
+            assertNotNull(more);
+            assertEquals(null, find(holder[0], "useExistingCopyButton"),
+                    "first Home has no competing import primary action");
+            SwingUtilities.invokeAndWait(more::doClick);
+            assertNotNull(waitForButton(holder[0], "manageAddExistingButton"));
+            assertNotNull(waitForButton(holder[0], "manageDownloadMegaMekButton"));
+            JButton settings = waitForButton(holder[0], "settingsButton");
+            SwingUtilities.invokeAndWait(settings::doClick);
+            JButton saveSettings = waitForButton(holder[0], "saveSettingsButton");
+            waitFor(saveSettings::isEnabled);
+            JButton logs = waitForButton(holder[0], "viewOperationLogsButton");
+            assertNotNull(logs);
+            SwingUtilities.invokeAndWait(logs::doClick);
+            JDialog logViewer = owned(holder[0], "Local operation logs");
+            JTextArea logText = findText(logViewer, "operationLogViewer");
+            waitFor(() -> logText.getText().contains("No local operation logs"));
+            assertNotNull(find(logViewer, "copyOperationLogButton"));
+            SwingUtilities.invokeAndWait(logViewer::dispose);
+            JButton installations = waitForButton(holder[0], "installationsButton");
+            SwingUtilities.invokeAndWait(installations::doClick);
             openDownloadFromManage(holder[0]);
         } finally {
             SwingUtilities.invokeAndWait(() -> {
@@ -107,7 +125,7 @@ class LauncherSwingSmokeTest {
             JButton manage = waitForButton(frame, "manageInstallationsButton");
             assertNotNull(manage);
             SwingUtilities.invokeAndWait(manage::doClick);
-            assertNotNull(owned(frame, "Manage installations"));
+            assertNotNull(waitForButton(frame, "manageAddExistingButton"));
             assertEquals(1, services.readRegistry().installations().size(),
                     "opening Manage must not inspect or remove the broken entry");
             openDownloadFromManage(frame);
@@ -134,9 +152,18 @@ class LauncherSwingSmokeTest {
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             assertNotNull(waitForButton(frame, "launch-megamek-button"));
-            JButton manage = waitForButton(frame, "manageInstallationsButton");
-            assertNotNull(manage);
-            SwingUtilities.invokeAndWait(manage::doClick);
+            JButton settings = waitForButton(frame, "settingsButton");
+            SwingUtilities.invokeAndWait(settings::doClick);
+            JButton saveSettings = waitForButton(frame, "saveSettingsButton");
+            waitFor(saveSettings::isEnabled);
+            JButton logs = waitForButton(frame, "viewOperationLogsButton");
+            SwingUtilities.invokeAndWait(logs::doClick);
+            JDialog logViewer = owned(frame, "Local operation logs");
+            waitFor(() -> findText(logViewer, "operationLogViewer").getText()
+                    .contains("No local operation logs"));
+            SwingUtilities.invokeAndWait(logViewer::dispose);
+            JButton installations = waitForButton(frame, "installationsButton");
+            SwingUtilities.invokeAndWait(installations::doClick);
             JDialog download = openDownloadFromManage(frame);
             assertTrue(services.pages.isEmpty(), "opening the picker must not fetch releases");
             SwingUtilities.invokeAndWait(download::dispose);
@@ -186,7 +213,7 @@ class LauncherSwingSmokeTest {
     }
 
     @Test
-    void failedInstallRunsOffEdtClosesStreamRestoresGateAndAllowsRetry() throws Exception {
+    void failedInstallRunsOffEdtClosesStreamAndRetryRequiresFreshSelection() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing worker controls require a display");
         FailingInstallServices services = new FailingInstallServices(temp.resolve("install.json"));
@@ -210,24 +237,95 @@ class LauncherSwingSmokeTest {
             services.streams.getFirst().print("after close");
             assertTrue(services.streams.getFirst().checkError(), "failed stream must be closed");
             closeOwned(frame, "Downloading and installing failed");
+            JButton viewLogs = find(progress, "operationViewLogsButton");
+            SwingUtilities.invokeAndWait(viewLogs::doClick);
+            JDialog logViewer = owned(frame, "Local operation logs");
+            waitFor(() -> findText(logViewer, "operationLogViewer").getText()
+                    .contains("fixture install failure"));
+            SwingUtilities.invokeAndWait(logViewer::dispose);
 
             SwingUtilities.invokeAndWait(retry::doClick);
-            waitFor(() -> services.attempts == 2);
-            waitFor(retry::isEnabled);
-            services.streams.get(1).print("after close");
-            assertTrue(services.streams.get(1).checkError(), "retry stream must also be closed");
+            JDialog picker = owned(frame, "Download an official release");
+            assertTrue(picker.isVisible());
+            assertEquals(1, services.attempts,
+                    "retry must require a fresh release selection and confirmation");
         } finally {
             dispose(frame);
         }
     }
 
+    @Test
+    void activeOperationCancelButtonRemainsReachableWhileBusyAndDisposesWorkerResources()
+            throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing worker controls require a display");
+        FailingInstallServices services =
+                new FailingInstallServices(temp.resolve("cancel-install.json"));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                frame.setVisible(true);
+                frame.install(OfficialRepository.MEGAMEK, "v-test",
+                        temp.resolve("cancel-destination"), "Cancel test");
+            });
+            assertTrue(services.started.await(5, TimeUnit.SECONDS));
+            JDialog progress = owned(frame, "Downloading and installing");
+            JButton cancel = find(progress, "operationCancelButton");
+            assertTrue(cancel.isEnabled(),
+                    "the blanket busy gate must not disable the authoritative Cancel control");
+            SwingUtilities.invokeAndWait(cancel::doClick);
+            waitFor(() -> progress.getTitle().equals("Cancelled"));
+            services.streams.getFirst().print("after close");
+            assertTrue(services.streams.getFirst().checkError(),
+                    "cancelled worker must close its attempt stream");
+            assertFalse(java.nio.file.Files.exists(temp.resolve("cancel-destination")));
+            assertNotNull(find(progress, "operationViewLogsButton"));
+        } finally {
+            services.release.countDown();
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void progressDialogShowsAtomicCutoffReasonAndDeniesLateCancellation()
+            throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing progress controls require a display");
+        LauncherFrame frame = onEdt(() ->
+                new LauncherFrame(new LauncherServices(temp.resolve("cutoff.json"))));
+        AtomicReference<OperationProgressDialog> holder = new AtomicReference<>();
+        OperationContext context = new OperationContext(OperationType.UPDATE_APPLY,
+                event -> holder.get().onProgress(event));
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                frame.setVisible(true);
+                OperationProgressDialog dialog = new OperationProgressDialog(
+                        frame, "Cutoff fixture", "cutoffFixtureLog", () -> {
+                        });
+                holder.set(dialog);
+                dialog.bind(context);
+                dialog.setVisible(true);
+            });
+            context.phase(OperationPhase.APPLY, "entering transaction");
+            context.enterFinalization("The fixture transaction has begun.");
+            JDialog dialog = owned(frame, "Cutoff fixture");
+            JButton cancel = find(dialog, "operationCancelButton");
+            JLabel detail = findLabel(dialog, "operationProgressDetail");
+            waitFor(() -> !cancel.isEnabled()
+                    && detail.getText().contains("transaction has begun"));
+            assertFalse(context.requestCancellation().accepted());
+            assertFalse(Thread.currentThread().isInterrupted());
+        } finally {
+            context.finish(org.megamek.launcher.operation.OperationOutcome.SUCCEEDED, "done");
+            dispose(frame);
+        }
+    }
+
     private static JDialog openDownloadFromManage(LauncherFrame frame) throws Exception {
-        JDialog manage = owned(frame, "Manage installations");
-        JButton download = onEdt(() -> find(manage, "manageDownloadMegaMekButton"));
+        JButton download = onEdt(() -> find(frame, "manageDownloadMegaMekButton"));
         assertNotNull(download);
         SwingUtilities.invokeAndWait(download::doClick);
         JDialog picker = owned(frame, "Download an official release");
-        assertFalse(onEdt(manage::isDisplayable));
         assertTrue(onEdt(picker::isVisible));
         JButton fetch = onEdt(() -> find(picker, "fetchReleasesButton"));
         assertNotNull(fetch);
@@ -262,6 +360,30 @@ class LauncherSwingSmokeTest {
             if (child instanceof JComboBox<?> combo && name.equals(combo.getName())) return combo;
             if (child instanceof Container container) {
                 JComboBox<?> found = findCombo(container, name);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private static JTextArea findText(Container root, String name) {
+        for (Component child : root.getComponents()) {
+            if (child instanceof JTextArea area && name.equals(area.getName())) return area;
+            if (child instanceof Container container) {
+                JTextArea found = findText(container, name);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private static javax.swing.JLabel findLabel(Container root, String name) {
+        for (Component child : root.getComponents()) {
+            if (child instanceof javax.swing.JLabel label && name.equals(label.getName())) {
+                return label;
+            }
+            if (child instanceof Container container) {
+                javax.swing.JLabel found = findLabel(container, name);
                 if (found != null) return found;
             }
         }
@@ -376,6 +498,14 @@ class LauncherSwingSmokeTest {
             if (attempts == 1) release.await(5, TimeUnit.SECONDS);
             progress.println("NOT REGISTERED fixture detail");
             throw new IOException("fixture install failure");
+        }
+
+        @Override public FreshInstaller.Result install(OfficialRepository repository, String tag,
+                                                       Path destination, String name,
+                                                       PrintStream progress,
+                                                       OperationContext context)
+                throws IOException, InterruptedException {
+            return install(repository, tag, destination, name, progress);
         }
     }
 }

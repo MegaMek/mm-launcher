@@ -1,4 +1,4 @@
-name: Launcher archives
+name: Launcher archive
 
 on:
   workflow_dispatch:
@@ -23,30 +23,9 @@ permissions:
   contents: read
 
 jobs:
-  test-and-package:
-    name: ${{ matrix.name }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: Windows x64
-            id: windows-x64
-            os: windows-2025
-            archive: build/distributions/MM-Launcher-*-Windows-x64.zip
-          - name: Linux x64
-            id: linux-x64
-            os: ubuntu-24.04
-            archive: build/distributions/MM-Launcher-*-Linux-x64.tar.gz
-          - name: macOS Intel
-            id: macos-intel
-            os: macos-15-intel
-            archive: build/distributions/MM-Launcher-*-macOS.zip
-          - name: macOS Apple Silicon
-            id: macos-apple-silicon
-            os: macos-15
-            archive: build/distributions/MM-Launcher-*-macOS.zip
-
-    runs-on: ${{ matrix.os }}
+  build-archive:
+    name: Build all-platform archive once
+    runs-on: windows-2025
     timeout-minutes: 30
 
     steps:
@@ -62,53 +41,142 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Test on Windows
-        if: runner.os == 'Windows'
+      - name: Build archive and checksum
         shell: pwsh
-        run: .\gradlew.bat test
+        run: >-
+          .\gradlew.bat "-PbuildIdentifier=${{ github.sha }}"
+          buildArchive
 
-      - name: Test on Linux with a display
-        if: runner.os == 'Linux'
-        shell: bash
-        run: xvfb-run -a ./gradlew test
+      - name: Report producer archive SHA-256
+        shell: pwsh
+        run: |
+          $archives = @(Get-ChildItem -LiteralPath build/distributions -File -Filter 'MM-Launcher-*.tar.gz')
+          if ($archives.Count -ne 1) {
+              throw "Expected exactly one produced tar.gz, found $($archives.Count)."
+          }
+          $archive = $archives[0]
+          $checksum = Get-Item -LiteralPath "$($archive.FullName).sha256"
+          $line = [IO.File]::ReadAllText($checksum.FullName).Trim()
+          if ($line -notmatch '^([0-9a-f]{64})  ([^/\\]+)$' -or $Matches[2] -ne $archive.Name) {
+              throw 'Produced checksum is not in exact sha256sum format.'
+          }
+          $actual = (Get-FileHash -LiteralPath $archive.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $Matches[1]) {
+              throw 'Produced archive SHA-256 does not match.'
+          }
+          Write-Host "Archive SHA-256: $actual"
 
-      - name: Test on macOS
-        if: runner.os == 'macOS'
-        shell: bash
-        run: ./gradlew test
+      - name: Upload the one archive and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: MM-Launcher-all-platform
+          path: |
+            build/distributions/MM-Launcher-*.tar.gz
+            build/distributions/MM-Launcher-*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
 
-      - name: Build and smoke-test Windows archive
+  verify-archive:
+    name: Verify same bytes - ${{ matrix.name }}
+    needs: build-archive
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            id: windows-x64
+            os: windows-2025
+            platform: windows
+          - name: Linux x64
+            id: linux-x64
+            os: ubuntu-24.04
+            platform: linux
+          - name: macOS Intel
+            id: macos-intel
+            os: macos-15-intel
+            platform: mac
+          - name: macOS Apple Silicon
+            id: macos-apple-silicon
+            os: macos-15
+            platform: mac
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Download producer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: MM-Launcher-all-platform
+          path: provided
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Validate inputs and report archive SHA-256
+        shell: pwsh
+        run: |
+          $archives = @(Get-ChildItem -LiteralPath provided -File -Filter 'MM-Launcher-*.tar.gz')
+          if ($archives.Count -ne 1) {
+              throw "Expected exactly one provided tar.gz, found $($archives.Count)."
+          }
+          $archive = $archives[0]
+          $checksum = Get-Item -LiteralPath "$($archive.FullName).sha256"
+          $line = [IO.File]::ReadAllText($checksum.FullName).Trim()
+          if ($line -notmatch '^([0-9a-f]{64})  ([^/\\]+)$') {
+              throw 'Checksum is not in exact sha256sum format.'
+          }
+          if ($Matches[2] -ne $archive.Name) {
+              throw 'Checksum names a different archive.'
+          }
+          $actual = (Get-FileHash -LiteralPath $archive.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $Matches[1]) {
+              throw 'Provided archive SHA-256 does not match.'
+          }
+          "PROVIDED_ARCHIVE=$($archive.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "PROVIDED_CHECKSUM=$($checksum.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+          Write-Host "Archive SHA-256: $actual"
+
+      - name: Test source and verify provided archive on Windows
         if: runner.os == 'Windows'
         shell: pwsh
         run: >-
           .\gradlew.bat "-PbuildIdentifier=${{ github.sha }}"
-          windowsArchiveChecksum verifyWindowsArchive
+          "-PverificationPlatform=${{ matrix.platform }}"
+          "-PprovidedArchive=$env:PROVIDED_ARCHIVE"
+          "-PprovidedChecksum=$env:PROVIDED_CHECKSUM"
+          test verifyProvidedArchive
 
-      - name: Build and smoke-test Linux archive
+      - name: Test source and verify provided archive on Linux with Xvfb
         if: runner.os == 'Linux'
         shell: bash
         run: >-
-          ./gradlew "-PbuildIdentifier=${{ github.sha }}"
-          linuxArchiveChecksum verifyLinuxArchive
+          xvfb-run -a ./gradlew "-PbuildIdentifier=${{ github.sha }}"
+          "-PverificationPlatform=${{ matrix.platform }}"
+          "-PprovidedArchive=${PROVIDED_ARCHIVE}"
+          "-PprovidedChecksum=${PROVIDED_CHECKSUM}"
+          test verifyProvidedArchive
 
-      - name: Build and smoke-test macOS archive
+      - name: Test source and verify provided archive on macOS
         if: runner.os == 'macOS'
         shell: bash
         run: >-
           ./gradlew "-PbuildIdentifier=${{ github.sha }}"
-          macArchiveChecksum verifyMacArchive
+          "-PverificationPlatform=${{ matrix.platform }}"
+          "-PprovidedArchive=${PROVIDED_ARCHIVE}"
+          "-PprovidedChecksum=${PROVIDED_CHECKSUM}"
+          test verifyProvidedArchive
 
-      - name: Upload native archive and checksum
-        uses: actions/upload-artifact@v4
-        with:
-          name: MM-Launcher-${{ matrix.id }}
-          path: |
-            ${{ matrix.archive }}
-            ${{ matrix.archive }}.sha256
-          if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload test reports
+      - name: Upload platform test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:

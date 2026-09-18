@@ -31,6 +31,19 @@ public final class JavaRuntime {
         return List.copyOf(candidates);
     }
 
+    /**
+     * Resolves only the Java runtime which is executing this launcher.  The normal first-install
+     * path intentionally does not fall through to JAVA_HOME or to a runtime inherited from a
+     * different registered copy.
+     */
+    public Path launcherJava() throws IOException {
+        String home = System.getProperty("java.home");
+        if (home == null || home.isBlank()) {
+            throw new IOException("the Java runtime running this launcher could not be located");
+        }
+        return resolve(home);
+    }
+
     public Path resolve(String selected) throws IOException {
         Path path = Path.of(selected).toAbsolutePath().normalize();
         if (Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {

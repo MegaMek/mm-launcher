@@ -2,8 +2,6 @@ package org.megamek.launcher.distribution;
 
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
-import org.apache.commons.compress.archivers.zip.ZipArchiveEntry;
-import org.apache.commons.compress.archivers.zip.ZipFile;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Tag;
@@ -24,7 +22,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
@@ -42,6 +39,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Tag("archive")
 class ArchiveDistributionTest {
+    private static final String ROOT = "MM Launcher";
+    private static final String APP = ROOT + "/MM Launcher.app";
+    private static final String LIB_ROOT = APP + "/Contents/app/lib/";
+    private static final String LINUX_ENTRYPOINT = ROOT + "/mm-launcher";
+    private static final String MAC_ENTRYPOINT =
+            APP + "/Contents/MacOS/MM Launcher";
     private static final Duration PROCESS_TIMEOUT = Duration.ofSeconds(30);
     private static final Set<PosixFilePermission> EXECUTABLE_PERMISSIONS =
             EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE,
@@ -53,15 +56,14 @@ class ArchiveDistributionTest {
     Path temp;
 
     @Test
-    void archiveHasOneSafeFixedRootAndExactRuntimeJars() throws Exception {
+    void archiveHasOneSafeFixedRootAndExactlyOneSharedRuntimePayload() throws Exception {
         ArchiveView archive = readArchive();
-        String root = expectedRoot();
         assertFalse(archive.entries().isEmpty());
 
         Set<String> caseFolded = new HashSet<>();
         for (ArchiveEntry entry : archive.entries()) {
             String name = entry.name();
-            assertTrue(name.startsWith(root + "/") || name.equals(root + "/"),
+            assertTrue(name.startsWith(ROOT + "/") || name.equals(ROOT + "/"),
                     () -> "entry outside fixed root: " + name);
             assertFalse(name.startsWith("/") || name.startsWith("\\")
                             || name.matches("^[A-Za-z]:.*"),
@@ -72,7 +74,7 @@ class ArchiveDistributionTest {
                     () -> "parent traversal archive entry: " + name);
             assertTrue(caseFolded.add(name.toLowerCase(Locale.ROOT)),
                     () -> "case-colliding or duplicate archive entry: " + name);
-            assertFalse(entry.symbolicLink(), () -> "archive link is not allowed: " + name);
+            assertFalse(entry.link(), () -> "archive link is not allowed: " + name);
 
             Set<String> components = Arrays.stream(name.split("/"))
                     .map(part -> part.toLowerCase(Locale.ROOT))
@@ -83,92 +85,117 @@ class ArchiveDistributionTest {
                     () -> "forbidden source, state, credential, or runtime path: " + name);
         }
 
-        String libRoot = switch (kind()) {
-            case "mac" -> root + "/Contents/app/lib/";
-            case "windows", "linux" -> root + "/lib/";
-            default -> throw new IllegalStateException("unknown archive kind");
-        };
-        List<String> actualJars = archive.entries().stream()
+        List<String> actualJarPaths = archive.entries().stream()
                 .map(ArchiveEntry::name)
-                .filter(name -> name.startsWith(libRoot) && name.endsWith(".jar"))
-                .map(name -> name.substring(libRoot.length()))
+                .filter(name -> name.toLowerCase(Locale.ROOT).endsWith(".jar"))
                 .sorted()
                 .toList();
-        assertEquals(expectedJars(), actualJars,
-                "archive must contain exactly the resolved runtime and application JARs");
+        List<String> expectedJarPaths = expectedJars().stream()
+                .map(name -> LIB_ROOT + name)
+                .sorted()
+                .toList();
+        assertEquals(expectedJarPaths, actualJarPaths,
+                "every application/runtime JAR must occur once in the app-owned shared lib");
+        assertTrue(archive.entries().stream().noneMatch(entry ->
+                        entry.name().startsWith(ROOT + "/lib/")),
+                "a duplicate root lib payload is forbidden");
 
-        String noticeRoot = switch (kind()) {
-            case "mac" -> root + "/Contents/app/";
-            default -> root + "/";
-        };
-        assertTrue(archive.contains(noticeRoot + "README.txt"));
-        assertTrue(archive.contains(noticeRoot + "THIRD-PARTY-NOTICES.txt"));
+        assertTrue(archive.contains(ROOT + "/README.txt"));
+        assertTrue(archive.contains(ROOT + "/THIRD-PARTY-NOTICES.txt"));
         assertTrue(archive.entries().stream()
                         .anyMatch(entry -> entry.name().startsWith(
-                                noticeRoot + "third-party-licenses/") && !entry.directory()),
-                "extracted dependency license/notice material must be present");
+                                ROOT + "/third-party-licenses/") && !entry.directory()),
+                "extracted dependency license/notice material must occur in one common place");
+        assertFalse(archive.contains(APP + "/Contents/app/README.txt"),
+                "common legal/readme material must not be duplicated in the app payload");
     }
 
     @Test
-    void archiveContainsOnlyItsDeclaredOsEntrypointAndMetadata() throws Exception {
+    void archiveContainsAllThreeEntrypointsWithPortableMetadataAndModes() throws Exception {
         ArchiveView archive = readArchive();
-        String root = expectedRoot();
-        switch (kind()) {
-            case "windows" -> {
-                assertTrue(archive.contains(root + "/MM Launcher.exe"));
-                assertTrue(archive.entries().stream().noneMatch(entry ->
-                        entry.name().endsWith("/mm-launcher")
-                                || entry.name().contains(".app/Contents/MacOS/")));
-            }
-            case "linux" -> {
-                ArchiveEntry launcher = archive.required(root + "/mm-launcher");
-                assertEquals(0755, launcher.unixMode() & 0777);
-                assertScript(archive.bytes(launcher));
-                assertTrue(archive.entries().stream().noneMatch(entry ->
-                        entry.name().toLowerCase(Locale.ROOT).endsWith(".exe")
-                                || entry.name().contains(".app/")));
-            }
-            case "mac" -> {
-                ArchiveEntry launcher = archive.required(
-                        root + "/Contents/MacOS/MM Launcher");
-                assertEquals(0755, launcher.unixMode() & 0777);
-                assertScript(archive.bytes(launcher));
-                ArchiveEntry plistEntry = archive.required(root + "/Contents/Info.plist");
-                String plist = new String(archive.bytes(plistEntry), StandardCharsets.UTF_8);
-                assertEquals("APPL", plistValue(plist, "CFBundlePackageType"));
-                assertEquals("MM Launcher", plistValue(plist, "CFBundleExecutable"));
-                assertEquals("org.megamek.launcher",
-                        plistValue(plist, "CFBundleIdentifier"));
-                assertFalse(plist.contains("@BUNDLE_VERSION@"));
-                assertTrue(archive.entries().stream().noneMatch(entry ->
-                        entry.name().toLowerCase(Locale.ROOT).endsWith(".exe")
-                                || entry.name().equals(root + "/mm-launcher")));
-            }
-            default -> throw new IllegalStateException("unknown archive kind");
+
+        ArchiveEntry windows = archive.required(ROOT + "/MM Launcher.exe");
+        byte[] windowsBytes = archive.bytes(windows);
+        assertTrue(windowsBytes.length > 2
+                        && windowsBytes[0] == 'M' && windowsBytes[1] == 'Z',
+                "Windows entry point must be the Launch4j executable");
+
+        ArchiveEntry linux = archive.required(LINUX_ENTRYPOINT);
+        assertEquals(0755, linux.unixMode() & 0777);
+        assertScript(archive.bytes(linux));
+        String linuxScript = new String(archive.bytes(linux), StandardCharsets.UTF_8);
+        assertTrue(linuxScript.contains(
+                "SHARED_LIB=\"$APP_ROOT/MM Launcher.app/Contents/app/lib\""));
+        assertTrue(linuxScript.contains("-cp \"$SHARED_LIB/*\""));
+
+        ArchiveEntry mac = archive.required(MAC_ENTRYPOINT);
+        assertEquals(0755, mac.unixMode() & 0777);
+        assertScript(archive.bytes(mac));
+        String macScript = new String(archive.bytes(mac), StandardCharsets.UTF_8);
+        assertTrue(macScript.contains("-cp \"$CONTENTS/app/lib/*\""));
+
+        ArchiveEntry plistEntry = archive.required(APP + "/Contents/Info.plist");
+        String plist = new String(archive.bytes(plistEntry), StandardCharsets.UTF_8);
+        assertEquals("APPL", plistValue(plist, "CFBundlePackageType"));
+        assertEquals("MM Launcher", plistValue(plist, "CFBundleExecutable"));
+        assertEquals("org.megamek.launcher", plistValue(plist, "CFBundleIdentifier"));
+        assertFalse(plist.contains("@BUNDLE_VERSION@"));
+
+        for (ArchiveEntry entry : archive.entries()) {
+            int expectedMode = entry.directory()
+                    || entry.name().equals(LINUX_ENTRYPOINT)
+                    || entry.name().equals(MAC_ENTRYPOINT) ? 0755 : 0644;
+            assertEquals(expectedMode, entry.unixMode() & 0777,
+                    () -> "unexpected archive mode for " + entry.name());
         }
     }
 
     @Test
-    void checksumNamesAndMatchesOnlyTheDeclaredArchive() throws Exception {
+    void archiveAndChecksumNamesAreExactAndChecksumMatches() throws Exception {
         Path archive = archivePath();
-        String checksumLine = Files.readString(checksumPath(), StandardCharsets.US_ASCII).strip();
-        Matcher matcher = Pattern.compile("^([0-9a-f]{64})  ([^/\\\\]+)$").matcher(checksumLine);
-        assertTrue(matcher.matches(), "checksum must use sha256sum-compatible exact-file format");
+        assertEquals(expectedArchiveName(), archive.getFileName().toString());
+        assertEquals(expectedArchiveName() + ".sha256",
+                checksumPath().getFileName().toString());
+
+        String checksumLine = Files.readString(
+                checksumPath(), StandardCharsets.US_ASCII).strip();
+        Matcher matcher = Pattern.compile("^([0-9a-f]{64})  ([^/\\\\]+)$")
+                .matcher(checksumLine);
+        assertTrue(matcher.matches(),
+                "checksum must use sha256sum-compatible exact-file format");
         assertEquals(archive.getFileName().toString(), matcher.group(2));
         assertEquals(sha256(archive), matcher.group(1));
     }
 
     @Test
+    void bothPosixEntrypointsPassAvailableShSyntaxCheck() throws Exception {
+        String shell = shellCommand();
+        Assumptions.assumeTrue(commandIsAvailable(shell),
+                "sh is unavailable; content and LF checks still ran");
+        ArchiveView archive = readArchive();
+        Path syntaxRoot = temp.resolve("syntax Ω & files");
+        Files.createDirectories(syntaxRoot);
+        Path linux = syntaxRoot.resolve("linux launcher");
+        Path mac = syntaxRoot.resolve("mac launcher");
+        Files.write(linux, archive.bytes(archive.required(LINUX_ENTRYPOINT)));
+        Files.write(mac, archive.bytes(archive.required(MAC_ENTRYPOINT)));
+
+        ProcessResult result = run(List.of(shell, "-n", linux.toString(), mac.toString()),
+                temp, Map.of());
+        assertEquals(0, result.exitCode(), result.output());
+    }
+
+    @Test
     void matchingNativeEntrypointRunsFromMovedUnicodePathAndUnrelatedCwd() throws Exception {
-        Assumptions.assumeTrue(hostMatchesKind(),
-                "native execution intentionally runs only on the matching CI/local host");
+        Assumptions.assumeTrue(hostMatchesPlatform(),
+                "native execution intentionally runs only on the selected host platform");
         // Launch4j's classic header uses the Windows ANSI APIs. Exercise a
         // non-ASCII Latin path representable on the qualified Windows runner;
         // the POSIX launchers exercise a wider Unicode path.
-        String nonAscii = kind().equals("windows") ? "café" : "Ω";
+        String nonAscii = platform().equals("windows") ? "café" : "Ω";
         Path extraction = temp.resolve("moved " + nonAscii + " [space] & package");
         extractArchive(extraction);
-        Path root = extraction.resolve(expectedRoot());
+        Path root = extraction.resolve(ROOT);
         Path registry = temp.resolve("isolated state " + nonAscii + " &")
                 .resolve("registry.json").toAbsolutePath();
         Files.createDirectories(registry.getParent());
@@ -178,11 +205,11 @@ class ArchiveDistributionTest {
         Path userHome = temp.resolve("isolated user");
         Files.createDirectories(userHome);
 
-        Path entrypoint = switch (kind()) {
+        Path entrypoint = switch (platform()) {
             case "windows" -> root.resolve("MM Launcher.exe");
             case "linux" -> root.resolve("mm-launcher");
-            case "mac" -> root.resolve("Contents/MacOS/MM Launcher");
-            default -> throw new IllegalStateException("unknown archive kind");
+            case "mac" -> root.resolve("MM Launcher.app/Contents/MacOS/MM Launcher");
+            default -> throw new IllegalStateException("unknown verification platform");
         };
         ProcessResult result = run(
                 List.of(entrypoint.toString(), "--startup-check",
@@ -198,6 +225,7 @@ class ArchiveDistributionTest {
         assertEquals(0, result.exitCode(), result.output());
         String startupReport = Files.readString(report, StandardCharsets.UTF_8);
         assertTrue(startupReport.contains("MM-LAUNCHER-STARTUP-OK"));
+        assertTrue(startupReport.contains("build=" + expectedBuildIdentifier()));
         assertTrue(startupReport.contains("packaged=true"),
                 "startup check must prove the extracted JAR, not checkout classes, was loaded");
         assertTrue(startupReport.contains("codeSource=mm-launcher-"));
@@ -208,14 +236,14 @@ class ArchiveDistributionTest {
     @Test
     void posixBootstrapRejectsMissingAndOldJavaFixturesWithoutTouchingSystemJava()
             throws Exception {
-        Assumptions.assumeTrue(hostMatchesKind()
-                        && (kind().equals("linux") || kind().equals("mac")),
-                "fixture executes only on matching POSIX archive hosts");
+        Assumptions.assumeTrue(hostMatchesPlatform()
+                        && (platform().equals("linux") || platform().equals("mac")),
+                "fixture executes only on a selected matching POSIX archive host");
         Path extraction = temp.resolve("java fixture package Ω &");
         extractArchive(extraction);
-        Path root = extraction.resolve(expectedRoot());
-        Path entrypoint = kind().equals("mac")
-                ? root.resolve("Contents/MacOS/MM Launcher")
+        Path root = extraction.resolve(ROOT);
+        Path entrypoint = platform().equals("mac")
+                ? root.resolve("MM Launcher.app/Contents/MacOS/MM Launcher")
                 : root.resolve("mm-launcher");
         Path cwd = temp.resolve("fixture cwd");
         Files.createDirectories(cwd);
@@ -257,32 +285,13 @@ class ArchiveDistributionTest {
     }
 
     private ArchiveView readArchive() throws IOException {
-        return kind().equals("linux") ? readTar(archivePath()) : readZip(archivePath());
-    }
-
-    private static ArchiveView readZip(Path path) throws IOException {
         List<ArchiveEntry> entries = new ArrayList<>();
-        try (ZipFile zip = ZipFile.builder().setPath(path).get()) {
-            var enumeration = zip.getEntries();
-            while (enumeration.hasMoreElements()) {
-                ZipArchiveEntry entry = enumeration.nextElement();
-                byte[] bytes = entry.isDirectory()
-                        ? new byte[0] : readAll(zip.getInputStream(entry));
-                entries.add(new ArchiveEntry(entry.getName(), entry.isDirectory(),
-                        entry.isUnixSymlink(), entry.getUnixMode(), bytes));
-            }
-        }
-        return new ArchiveView(entries);
-    }
-
-    private static ArchiveView readTar(Path path) throws IOException {
-        List<ArchiveEntry> entries = new ArrayList<>();
-        try (InputStream input = Files.newInputStream(path);
+        try (InputStream input = Files.newInputStream(archivePath());
              GzipCompressorInputStream gzip = new GzipCompressorInputStream(input);
              TarArchiveInputStream tar = new TarArchiveInputStream(gzip)) {
             TarArchiveEntry entry;
             while ((entry = tar.getNextEntry()) != null) {
-                byte[] bytes = entry.isDirectory() ? new byte[0] : readAll(tar);
+                byte[] bytes = entry.isDirectory() ? new byte[0] : tar.readAllBytes();
                 entries.add(new ArchiveEntry(entry.getName(), entry.isDirectory(),
                         entry.isSymbolicLink() || entry.isLink(), entry.getMode(), bytes));
             }
@@ -308,8 +317,35 @@ class ArchiveDistributionTest {
         }
     }
 
-    private static ProcessResult run(List<String> command, Path cwd, Map<String, String> additions)
-            throws Exception {
+    private boolean commandIsAvailable(String command) {
+        try {
+            return run(List.of(command, "--version"), temp, Map.of()).exitCode() == 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private static String shellCommand() {
+        String configured = System.getProperty("archive.shell", "");
+        if (!configured.isBlank()) {
+            return configured;
+        }
+        if (isWindowsHost()) {
+            for (String environmentName : List.of("ProgramFiles", "ProgramFiles(x86)")) {
+                String programFiles = System.getenv(environmentName);
+                if (programFiles != null) {
+                    Path gitShell = Path.of(programFiles, "Git", "bin", "sh.exe");
+                    if (Files.isRegularFile(gitShell)) {
+                        return gitShell.toString();
+                    }
+                }
+            }
+        }
+        return "sh";
+    }
+
+    private static ProcessResult run(
+            List<String> command, Path cwd, Map<String, String> additions) throws Exception {
         ProcessBuilder builder = new ProcessBuilder(command)
                 .directory(cwd.toFile())
                 .redirectErrorStream(true);
@@ -336,10 +372,6 @@ class ArchiveDistributionTest {
         return new ProcessResult(process.exitValue(), output.toString(StandardCharsets.UTF_8));
     }
 
-    private static byte[] readAll(InputStream input) throws IOException {
-        return input.readAllBytes();
-    }
-
     private static String sha256(Path path) throws Exception {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         try (InputStream input = Files.newInputStream(path)) {
@@ -352,10 +384,6 @@ class ArchiveDistributionTest {
         return java.util.HexFormat.of().formatHex(digest.digest());
     }
 
-    private static String kind() {
-        return requiredProperty("archive.kind");
-    }
-
     private static Path archivePath() {
         return Path.of(requiredProperty("archive.path"));
     }
@@ -364,14 +392,22 @@ class ArchiveDistributionTest {
         return Path.of(requiredProperty("archive.checksum"));
     }
 
+    private static String expectedArchiveName() {
+        return requiredProperty("archive.expectedName");
+    }
+
+    private static String expectedBuildIdentifier() {
+        return requiredProperty("archive.expectedBuildIdentifier");
+    }
+
     private static List<String> expectedJars() {
         return Arrays.stream(requiredProperty("archive.expectedJars").split("\\|"))
                 .sorted()
                 .toList();
     }
 
-    private static String expectedRoot() {
-        return kind().equals("mac") ? "MM Launcher.app" : "MM Launcher";
+    private static String platform() {
+        return requiredProperty("archive.platform");
     }
 
     private static String requiredProperty(String name) {
@@ -379,9 +415,9 @@ class ArchiveDistributionTest {
                 () -> "missing test property " + name);
     }
 
-    private static boolean hostMatchesKind() {
+    private static boolean hostMatchesPlatform() {
         String os = System.getProperty("os.name", "").toLowerCase(Locale.ROOT);
-        return switch (kind()) {
+        return switch (platform()) {
             case "windows" -> os.contains("win");
             case "mac" -> os.contains("mac");
             case "linux" -> os.contains("linux");
@@ -396,7 +432,7 @@ class ArchiveDistributionTest {
     private record ArchiveEntry(
             String name,
             boolean directory,
-            boolean symbolicLink,
+            boolean link,
             int unixMode,
             byte[] bytes
     ) {

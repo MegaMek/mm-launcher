@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import org.megamek.launcher.channel.ChannelUpdateChecker;
 import org.megamek.launcher.launch.RootCoordinator;
 import org.megamek.launcher.manifest.FileEntry;
 import org.megamek.launcher.manifest.Manifest;
@@ -11,6 +12,9 @@ import org.megamek.launcher.manifest.ManifestException;
 import org.megamek.launcher.manifest.ManifestReader;
 import org.megamek.launcher.onboarding.Inspection;
 import org.megamek.launcher.onboarding.InstallationInspector;
+import org.megamek.launcher.operation.OperationContext;
+import org.megamek.launcher.operation.OperationPhase;
+import org.megamek.launcher.operation.OperationType;
 import org.megamek.launcher.plan.Action;
 import org.megamek.launcher.plan.Decision;
 import org.megamek.launcher.plan.UpdatePlanner;
@@ -19,6 +23,7 @@ import org.megamek.launcher.registry.RegistryData;
 import org.megamek.launcher.registry.RegistryStore;
 import org.megamek.launcher.release.FreshInstaller;
 import org.megamek.launcher.release.OfficialRepository;
+import org.megamek.launcher.release.ReleaseCatalog;
 import org.megamek.launcher.release.ReleaseTransport;
 import org.megamek.launcher.release.VerifiedPackageFetcher;
 import org.megamek.launcher.sandbox.OverrideEntry;
@@ -78,6 +83,10 @@ public final class RealUpdateService {
         this(transport, new RegistryStore(), new ReceiptStore(), new RootCoordinator(), point -> {});
     }
 
+    public RealUpdateService(ReleaseTransport transport, RootCoordinator coordinator) {
+        this(transport, new RegistryStore(), new ReceiptStore(), coordinator, point -> {});
+    }
+
     RealUpdateService(ReleaseTransport transport, RegistryStore registries, ReceiptStore receipts,
                       RootCoordinator coordinator, FailureHook failureHook) {
         this.transport = transport;
@@ -122,9 +131,119 @@ public final class RealUpdateService {
                              long expectedSize, String expectedDigest, String confirmation,
                              PrintStream progress)
             throws IOException, InterruptedException, ManifestException {
-        Objects.requireNonNull(expected, "expected snapshot");
-        validateAuthorization(expected.current().tag(), targetTag, expectedSize, expectedDigest,
-                confirmation);
+        return apply(expected, targetTag, expectedAssetName, expectedSize, expectedDigest,
+                confirmation, progress, OperationContext.none(OperationType.UPDATE_APPLY));
+    }
+
+    public ApplyResult apply(Snapshot expected, String targetTag, String expectedAssetName,
+                             long expectedSize, String expectedDigest, String confirmation,
+                             PrintStream progress, OperationContext context)
+            throws IOException, InterruptedException, ManifestException {
+        try (OperationContext.WorkerRegistration operationRegistration = context.activate()) {
+            Objects.requireNonNull(expected, "expected snapshot");
+            context.phase(OperationPhase.METADATA,
+                    "Validating current update source and authorization");
+            validateAuthorization(expected.current().tag(), targetTag, expectedSize, expectedDigest,
+                    confirmation);
+            try (RootCoordinator.Lease gate = coordinator.acquire(expected.root(), true)) {
+                gate.requireNoPendingUpdate();
+                Snapshot current = snapshot(expected.registry(), expected.record().id());
+                if (!current.record().equals(expected.record())
+                        || !current.receipt().equals(expected.receipt())
+                        || !current.current().equals(expected.current())
+                        || !current.root().equals(expected.root())) {
+                    throw new IOException(
+                            "selected record or verified provenance changed after consent");
+                }
+                OfficialRepository repository =
+                        OfficialRepository.parse(current.current().repository());
+                try (VerifiedPackageFetcher.Workspace workspace =
+                             new VerifiedPackageFetcher(transport).fetch(repository, targetTag,
+                                     receipts.metadataDirectory(current.registry()),
+                                     ".apply-download-", progress,
+                                     new VerifiedPackageFetcher.ExpectedAsset(
+                                             expectedAssetName, expectedSize, expectedDigest),
+                                     context)) {
+                    context.phase(OperationPhase.PLAN,
+                            "Inspecting package contents and planning local changes");
+                    Inspection targetInspection = new InstallationInspector().inspect(
+                            workspace.extracted());
+                    if (targetInspection.products().stream().noneMatch(
+                            product -> product.key().equals(repository.requiredProduct()))) {
+                        throw new IOException("target package does not contain receipt application "
+                                + repository.requiredProduct());
+                    }
+                    OwnershipPolicy.Build target = new OwnershipPolicy().build(
+                            workspace.extracted(), repository, workspace.release().tag(), context,
+                            OperationPhase.PLAN);
+                    ManifestReader.PreviewPairValidation pair = new ManifestReader()
+                            .validatePreviewPair(current.current().officialManifest(),
+                                    target.manifest());
+                    context.phase(OperationPhase.PLAN,
+                            "Comparing local managed files with the verified target");
+                    List<Decision> decisions = new UpdatePlanner().planPreview(
+                            current.current().officialManifest(), target.manifest(), current.root(),
+                            pair, trustedHashes(current.current()),
+                            stickyPrefixes(current.current()), context, OperationPhase.PLAN);
+                    validatePristineRuntime(current.root(), current.current(), target.manifest(),
+                            decisions, context);
+                    preflight(current.root(), decisions, context);
+                    context.phase(OperationPhase.APPLY,
+                            "Entering verified update transaction");
+                    context.enterFinalization("The update transaction and recovery journal have "
+                            + "begun; cancellation can no longer be performed safely.");
+                    return transact(current, workspace.extracted(), workspace.release(),
+                            workspace.asset(), target, targetInspection, pair, decisions);
+                }
+            }
+        }
+    }
+
+    ApplyResult applyPrepared(PreparedUpdate prepared, Object owner, String confirmation,
+                              PrintStream progress)
+            throws IOException, InterruptedException, ManifestException {
+        return applyPrepared(prepared, owner, confirmation, progress,
+                OperationContext.none(OperationType.UPDATE_APPLY));
+    }
+
+    ApplyResult applyPrepared(PreparedUpdate prepared, Object owner, String confirmation,
+                              PrintStream progress, OperationContext context)
+            throws IOException, InterruptedException, ManifestException {
+        try (OperationContext.WorkerRegistration operationRegistration = context.activate()) {
+            Objects.requireNonNull(prepared, "prepared update");
+            UpdatePreviewService.Preview preview = prepared.capturedPreview();
+            validateAuthorization(prepared.source().current().tag(), preview.targetRelease().tag(),
+                    preview.targetAsset().size(), preview.targetAsset().digest(), confirmation);
+            prepared.claim(owner);
+
+            ApplyResult result;
+            try {
+                result = applyPreparedClaimed(prepared, progress, context);
+            } catch (IOException | InterruptedException | ManifestException | RuntimeException
+                     | Error failure) {
+                context.cleanupPhase(
+                        "Discarding temporary package data; recovery data is retained");
+                IOException cleanup = prepared.finishClaim();
+                if (cleanup != null) failure.addSuppressed(cleanup);
+                throw failure;
+            }
+            context.cleanupPhase("Removing temporary package data");
+            IOException cleanup = prepared.finishClaim();
+            if (cleanup == null) return result;
+            return new ApplyResult(result.record(), result.state(), result.decisions(),
+                    result.skippedDecisions(), result.retainedOverrides(),
+                    "Update completed, but temporary package cleanup failed: " + detail(cleanup)
+                            + ". The installation is updated; do not retry Apply.");
+        }
+    }
+
+    private ApplyResult applyPreparedClaimed(PreparedUpdate prepared, PrintStream progress,
+                                             OperationContext context)
+            throws IOException, InterruptedException, ManifestException {
+        context.phase(OperationPhase.PREPARE_INSTALL,
+                "Revalidating the retained package and selected installation");
+        Snapshot expected = prepared.source();
+        UpdatePreviewService.Preview preview = prepared.capturedPreview();
         try (RootCoordinator.Lease gate = coordinator.acquire(expected.root(), true)) {
             gate.requireNoPendingUpdate();
             Snapshot current = snapshot(expected.registry(), expected.record().id());
@@ -132,41 +251,99 @@ public final class RealUpdateService {
                     || !current.receipt().equals(expected.receipt())
                     || !current.current().equals(expected.current())
                     || !current.root().equals(expected.root())) {
-                throw new IOException("selected record or verified provenance changed after consent");
+                throw new IOException("selected record or verified provenance changed; restart "
+                        + "the update attempt");
             }
-            OfficialRepository repository = OfficialRepository.parse(current.current().repository());
-            try (VerifiedPackageFetcher.Workspace workspace =
-                         new VerifiedPackageFetcher(transport).fetch(repository, targetTag,
-                                 receipts.metadataDirectory(current.registry()), ".apply-download-",
-                                 progress, new VerifiedPackageFetcher.ExpectedAsset(
-                                         expectedAssetName, expectedSize, expectedDigest))) {
-                Inspection targetInspection = new InstallationInspector().inspect(
-                        workspace.extracted());
-                if (targetInspection.products().stream().noneMatch(
-                        product -> product.key().equals(repository.requiredProduct()))) {
-                    throw new IOException("target package does not contain receipt application "
-                            + repository.requiredProduct());
+            ChannelUpdateChecker.Recommendation recommendation = prepared.recommendation();
+            if (recommendation != null) {
+                ChannelUpdateChecker.Result fresh =
+                        new ChannelUpdateChecker(current.registry(), transport)
+                                .check(current.record().id());
+                if (!fresh.updateAvailable()
+                        || !recommendation.equals(fresh.recommendation())) {
+                    throw new IOException("channel source, preference, or target metadata changed; "
+                            + "check again and restart the update attempt");
                 }
-                OwnershipPolicy.Build target = new OwnershipPolicy().build(workspace.extracted(),
-                        repository, workspace.release().tag());
-                ManifestReader.PreviewPairValidation pair = new ManifestReader()
-                        .validatePreviewPair(current.current().officialManifest(), target.manifest());
-                List<Decision> decisions = new UpdatePlanner().planPreview(
-                        current.current().officialManifest(), target.manifest(), current.root(), pair,
-                        trustedHashes(current.current()), stickyPrefixes(current.current()));
-                validatePristineRuntime(current.root(), current.current(), target.manifest(),
-                        decisions);
-                preflight(current.root(), decisions);
-                return transact(current, workspace, target, targetInspection, pair, decisions);
             }
+            OfficialRepository repository =
+                    OfficialRepository.parse(current.current().repository());
+            VerifiedPackageFetcher.ExpectedAsset expectedAsset =
+                    new VerifiedPackageFetcher.ExpectedAsset(preview.targetAsset().name(),
+                            preview.targetAsset().size(), preview.targetAsset().digest());
+            Path extracted = new VerifiedPackageFetcher(transport).revalidateAndExtract(
+                    repository, preview.targetRelease().tag(), prepared.workspace(),
+                    expectedAsset, progress, context);
+
+            Inspection inspection = new InstallationInspector().inspect(extracted);
+            if (inspection.products().stream().noneMatch(
+                    product -> product.key().equals(repository.requiredProduct()))) {
+                throw new IOException("retained target package no longer contains receipt "
+                        + "application " + repository.requiredProduct());
+            }
+            if (!inspection.observedBuild().equals(prepared.targetInspection().observedBuild())
+                    || !inspection.products().equals(prepared.targetInspection().products())
+                    || !inspection.confidence().equals(prepared.targetInspection().confidence())) {
+                throw new IOException("fresh extraction differs from the statically inspected "
+                        + "target; restart the update attempt");
+            }
+            OwnershipPolicy.Build rebuilt = new OwnershipPolicy().build(extracted, repository,
+                    preview.targetRelease().tag(), context, OperationPhase.PREPARE_INSTALL);
+            if (!rebuilt.equals(prepared.target())) {
+                throw new IOException("fresh extraction differs from the trusted prepared "
+                        + "manifest; restart the update attempt");
+            }
+            ManifestReader.PreviewPairValidation pair = new ManifestReader()
+                    .validatePreviewPair(current.current().officialManifest(),
+                            prepared.target().manifest());
+            if (!pair.equals(prepared.pair())) {
+                throw new IOException("prepared target manifest validation changed; restart the "
+                        + "update attempt");
+            }
+            context.phase(OperationPhase.PREPARE_INSTALL,
+                    "Replanning local managed files before finalization");
+            List<Decision> decisions = new UpdatePlanner().planPreview(
+                    current.current().officialManifest(), prepared.target().manifest(),
+                    current.root(), pair, trustedHashes(current.current()),
+                    stickyPrefixes(current.current()), context,
+                    OperationPhase.PREPARE_INSTALL);
+            validatePristineRuntime(current.root(), current.current(),
+                    prepared.target().manifest(), decisions, context);
+            preflight(current.root(), decisions, context);
+            context.phase(OperationPhase.APPLY, "Entering verified update transaction");
+            context.enterFinalization("The update transaction and recovery journal have begun; "
+                    + "cancellation can no longer be performed safely.");
+            return transact(current, extracted, preview.targetRelease(), preview.targetAsset(),
+                    prepared.target(), inspection, pair, decisions);
         }
     }
 
     public RecoveryResult recover(Path registry, String id, String confirmation)
             throws IOException, ManifestException {
+        try {
+            return recover(registry, id, confirmation,
+                    OperationContext.none(OperationType.RECOVERY));
+        } catch (InterruptedException impossible) {
+            Thread.currentThread().interrupt();
+            throw new IOException("recovery was interrupted before it began", impossible);
+        }
+    }
+
+    public RecoveryResult recover(Path registry, String id, String confirmation,
+                                  OperationContext context)
+            throws IOException, ManifestException, InterruptedException {
+        try (OperationContext.WorkerRegistration operationRegistration = context.activate()) {
+            return recoverActivated(registry, id, confirmation, context);
+        }
+    }
+
+    private RecoveryResult recoverActivated(Path registry, String id, String confirmation,
+                                            OperationContext context)
+            throws IOException, ManifestException, InterruptedException {
         if (!CONFIRM.equals(confirmation)) {
             throw new IOException("recovery confirmation must be exactly " + CONFIRM);
         }
+        context.phase(OperationPhase.RECOVER, "Starting verified update recovery");
+        context.enterFinalization("Recovery replay and cleanup have begun; cancellation is disabled.");
         Path registryPath = registry.toAbsolutePath().normalize();
         RegistryData data = registries.read(registryPath);
         InstallationRecord record = registries.resolve(data, id);
@@ -268,14 +445,15 @@ public final class RealUpdateService {
         return coordinator.pending(root);
     }
 
-    private ApplyResult transact(Snapshot snapshot, VerifiedPackageFetcher.Workspace workspace,
+    private ApplyResult transact(Snapshot snapshot, Path extracted,
+                                 ReleaseCatalog.Release release, ReleaseCatalog.Asset asset,
                                  OwnershipPolicy.Build target, Inspection targetInspection,
                                  ManifestReader.PreviewPairValidation pair,
                                  List<Decision> decisions)
             throws IOException, ManifestException {
         String transactionId = UUID.randomUUID().toString();
-        CurrentUpdateState next = nextState(snapshot.current(), target, workspace, pair, decisions,
-                transactionId);
+        CurrentUpdateState next = nextState(snapshot.current(), target, release, asset, pair,
+                decisions, transactionId);
         Path namespace = createNamespace(snapshot, transactionId);
         Path transaction = transaction(namespace, transactionId);
         Path pendingFile = namespace.resolve("pending.json");
@@ -296,7 +474,7 @@ public final class RealUpdateService {
         writeJournal(journalFile, journal); // durable intent precedes every application mutation
         Files.createDirectory(transaction.resolve("staged"));
         Files.createDirectory(transaction.resolve("backups"));
-        stageAndBackup(snapshot.root(), workspace.extracted(), target.manifest(), transaction,
+        stageAndBackup(snapshot.root(), extracted, target.manifest(), transaction,
                 operations);
         failureHook.hit("AFTER_STAGING");
         verifyArtifacts(snapshot.root(), transaction, operations);
@@ -601,9 +779,10 @@ public final class RealUpdateService {
     }
 
     private void validatePristineRuntime(Path root, CurrentUpdateState current, Manifest target,
-                                         List<Decision> decisions)
-            throws IOException, ManifestException {
+                                         List<Decision> decisions, OperationContext context)
+            throws IOException, ManifestException, InterruptedException {
         for (Decision decision : decisions) {
+            context.checkpoint();
             if (decision.action() == Action.SKIP && OwnershipPolicy.runtimePath(decision.path())) {
                 throw new IOException("entire update refused: runtime customization/conflict at "
                         + decision.path());
@@ -614,7 +793,10 @@ public final class RealUpdateService {
         Map<String, Set<String>> trusted = trustedHashes(current);
         Set<String> actualRuntime = new HashSet<>();
         try (var walk = Files.walk(root)) {
-            for (Path path : walk.skip(1).toList()) {
+            var iterator = walk.skip(1).iterator();
+            while (iterator.hasNext()) {
+                context.checkpoint();
+                Path path = iterator.next();
                 Path relative = root.relativize(path);
                 String portable = relative.toString().replace('\\', '/');
                 if (portable.equals(NAMESPACE) || portable.startsWith(NAMESPACE + "/")) continue;
@@ -633,7 +815,7 @@ public final class RealUpdateService {
                 actualRuntime.add(folded);
                 FileEntry oldEntry = old.get(folded);
                 FileEntry newEntry = after.get(folded);
-                String hash = RealUpdateFiles.hash(path);
+                String hash = RealUpdateFiles.hash(path, context);
                 boolean official = oldEntry != null && hash.equals(oldEntry.sha256())
                         || newEntry != null && hash.equals(newEntry.sha256())
                         || trusted.getOrDefault(folded, Set.of()).contains(hash);
@@ -644,6 +826,7 @@ public final class RealUpdateService {
             }
         }
         for (FileEntry entry : old.values()) {
+            context.checkpoint();
             if (OwnershipPolicy.runtimePath(entry.path())
                     && !actualRuntime.contains(key(entry.path()))) {
                 throw new IOException("entire update refused: managed runtime is missing "
@@ -652,10 +835,12 @@ public final class RealUpdateService {
         }
     }
 
-    private void preflight(Path root, List<Decision> decisions) throws IOException {
+    private void preflight(Path root, List<Decision> decisions, OperationContext context)
+            throws IOException, InterruptedException {
         if (!Files.isWritable(root)) throw new IOException("application root is not writable");
         FileStore rootStore = Files.getFileStore(root);
         for (Decision decision : decisions) {
+            context.checkpoint();
             if (decision.action() != Action.ADD && decision.action() != Action.REPLACE
                     && decision.action() != Action.REMOVE) continue;
             Path path = root.resolve(decision.path().replace('/', java.io.File.separatorChar));
@@ -697,7 +882,8 @@ public final class RealUpdateService {
 
     private CurrentUpdateState nextState(CurrentUpdateState previous,
                                          OwnershipPolicy.Build target,
-                                         VerifiedPackageFetcher.Workspace workspace,
+                                         ReleaseCatalog.Release release,
+                                         ReleaseCatalog.Asset asset,
                                          ManifestReader.PreviewPairValidation pair,
                                          List<Decision> decisions, String transactionId) {
         Map<String, OverrideEntry> overrides = new LinkedHashMap<>();
@@ -737,9 +923,8 @@ public final class RealUpdateService {
         }
         return new CurrentUpdateState(CurrentStateStore.SCHEMA, OwnershipPolicy.VERSION,
                 previous.installationId(), previous.canonicalRoot(), previous.registeredAt(),
-                previous.repository(), workspace.release().tag(), workspace.asset().name(),
-                workspace.asset().size(),
-                workspace.asset().digest().substring("sha256:".length()).toLowerCase(Locale.ROOT),
+                previous.repository(), release.tag(), asset.name(), asset.size(),
+                asset.digest().substring("sha256:".length()).toLowerCase(Locale.ROOT),
                 target.manifest(), target.excludedPaths(),
                 overrides.values().stream().sorted(Comparator.comparing(
                         OverrideEntry::path, String.CASE_INSENSITIVE_ORDER)).toList(),
@@ -1107,7 +1292,12 @@ public final class RealUpdateService {
 
     public record ApplyResult(InstallationRecord record, CurrentUpdateState state,
                               List<Decision> decisions, long skippedDecisions,
-                              long retainedOverrides) {
+                              long retainedOverrides, String cleanupWarning) {
+        public ApplyResult(InstallationRecord record, CurrentUpdateState state,
+                           List<Decision> decisions, long skippedDecisions,
+                           long retainedOverrides) {
+            this(record, state, decisions, skippedDecisions, retainedOverrides, null);
+        }
     }
 
     public record RecoveryResult(String outcome, InstallationRecord record) {

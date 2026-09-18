@@ -5,6 +5,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.megamek.launcher.launch.ApplicationLauncher;
 import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.onboarding.InstallationInspector;
+import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.plan.Action;
 import org.megamek.launcher.registry.InstallationRecord;
 import org.megamek.launcher.registry.RegistryStore;
@@ -56,6 +57,9 @@ class UpdatePreviewConsentMaterialTest {
         LauncherFrame frame = onEdt(() -> new LauncherFrame(fixture.services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
+            JButton installations = waitFor(
+                    () -> find(frame, "manageInstallationsButton"));
+            SwingUtilities.invokeAndWait(installations::doClick);
             JButton homePreview = waitFor(() -> find(frame, "previewUpdateButton"));
             assertTrue(homePreview.isEnabled());
             SwingUtilities.invokeAndWait(homePreview::doClick);
@@ -281,6 +285,12 @@ class UpdatePreviewConsentMaterialTest {
             return new UpdatePreviewService.Preview(record, receipt, release, asset,
                     receipt.officialManifest(), receipt.excludedOfficialPaths(),
                     List.of(), Map.copyOf(counts));
+        }
+
+        @Override public UpdatePreviewService.Preview previewUpdate(
+                InstallationRecord record, OwnershipReceipt receipt, String tag,
+                PrintStream progress, OperationContext context) {
+            return previewUpdate(record, receipt, tag, progress);
         }
     }
 

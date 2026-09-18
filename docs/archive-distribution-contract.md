@@ -2,40 +2,61 @@
 
 ## Scope
 
-MM Launcher produces separate Windows, macOS, and Linux downloads. These are portable archives:
-the user extracts one archive and starts one obvious desktop entry point. They are not installers,
-do not write startup integration, do not elevate, and do not contain or install a Java runtime.
-This contract does not infer package counts or platform policy from any current upstream
-MegaMek/MekHQ asset inventory.
+MM Launcher produces one versioned all-platform `tar.gz`. The user extracts the archive and starts
+the entry point for Windows, macOS, or Linux from one fixed root. It is not an installer, does not
+write startup integration, does not elevate, and does not contain or install a Java runtime. This
+matches the current MegaMek/MekHQ single-archive distribution model; it does not infer any broader
+platform or package policy from upstream assets.
 
-The Java application JAR and resolved dependency JARs are the shared payload in every archive.
-The ordinary Gradle `application`, `run`, and `installDist` behavior continues to use
-`org.megamek.launcher.Main` for developer CLI use. Desktop artifacts instead enter through
-`DesktopLauncher`, which opens the existing GUI by default. The application's generic `distZip`
-and `distTar` tasks are intentionally disabled so they cannot create universal distribution
-outputs.
+The Java application JAR and resolved dependency JARs occur once. The ordinary Gradle
+`application`, `run`, and `installDist` behavior continues to use `org.megamek.launcher.Main` for
+developer CLI use. Desktop artifacts instead enter through `DesktopLauncher`, which opens the
+existing GUI by default. The application's generic `distZip` and `distTar` tasks remain
+intentionally disabled; the dedicated archive task owns the portable desktop distribution.
 
-## Declared artifacts and fixed roots
+## Declared artifact and fixed root
 
-All file names include the project version:
+The two declared outputs include the dynamic project version:
 
-| OS | Archive | Only top-level root | Desktop entry point |
-| --- | --- | --- | --- |
-| Windows x64 | `MM-Launcher-<version>-Windows-x64.zip` | `MM Launcher/` | `MM Launcher.exe` |
-| macOS | `MM-Launcher-<version>-macOS.zip` | `MM Launcher.app/` | app bundle / `Contents/MacOS/MM Launcher` |
-| Linux x64 | `MM-Launcher-<version>-Linux-x64.tar.gz` | `MM Launcher/` | `mm-launcher` |
+```text
+MM-Launcher-<version>.tar.gz
+MM-Launcher-<version>.tar.gz.sha256
+```
 
-Windows uses Launch4j's classic GUI header and an `asInvoker` application manifest. The small
-embedded Java bridge locates only the extracted external `lib` payload; it is not a runtime.
-The macOS ZIP contains a normal `APPL` bundle with `Info.plist`, `CFBundleExecutable`, and payload
-under `Contents/app/lib`. The macOS archive is architecture-neutral because both the application
-and bootstrap are Java/shell content and select an external host JVM. Linux's root script and the
-macOS `Contents/MacOS` bootstrap are LF files with executable archive mode `0755`.
+The archive has one top-level `MM Launcher/` root:
+
+```text
+MM Launcher/
+├── MM Launcher.exe
+├── MM Launcher.app/
+│   └── Contents/
+│       ├── Info.plist
+│       ├── MacOS/MM Launcher
+│       └── app/lib/*.jar
+├── mm-launcher
+├── README.txt
+├── THIRD-PARTY-NOTICES.txt
+└── third-party-licenses/
+```
+
+`MM Launcher.app/Contents/app/lib/` is the one shared application/dependency payload. Owning the
+payload inside the app bundle keeps the macOS app self-contained. The sibling Windows executable
+and Linux script resolve that exact same directory. They use no cross-root symbolic links or hard
+links, and the app does not depend on sibling mutable files. Windows and Linux users must keep the
+extracted tree intact rather than moving an entry point away from the app folder.
+
+Windows uses Launch4j's classic GUI header and an `asInvoker` application manifest. Its small
+embedded Java bridge resolves the app-owned payload relative to the executable directory; it is
+not a runtime. The macOS app is architecture-neutral Java/shell content with a normal `APPL`
+bundle, `Info.plist`, and `CFBundleExecutable`. Linux's root script and the macOS
+`Contents/MacOS` bootstrap are LF files with executable archive mode `0755`. Other regular files
+are mode `0644`, directories are `0755`, and the archive contains no links.
 
 Archive tasks disable source-file timestamps and request reproducible file ordering. The Java and
-script archives are expected to reproduce from identical inputs. No claim of bit-identical native
-EXE output is made. SHA-256 tasks hash the one declared output path for their task and write
-`<archive-name>.sha256`; they do not glob the distributions directory.
+script content is expected to reproduce from identical inputs. No claim of bit-identical native
+EXE output from independent rebuilds is made. The checksum task hashes only the one declared
+archive path and writes a sha256sum-compatible exact-name line; it does not glob the distributions
+directory.
 
 ## External Java and arguments
 
@@ -46,9 +67,9 @@ All entry points require Java 21 or newer and never download or install it.
 - macOS also asks `/usr/libexec/java_home` for Java 21+ before its `PATH` fallback so Finder
   launches do not depend on an interactive-shell environment.
 
-The POSIX launchers quote each path and forward arguments with `"$@"`; they use neither `eval` nor
-constructed shell commands. The desktop entry point accepts only the existing optional
-`--registry <absolute-path>` GUI override. Diagnostics are:
+The POSIX launchers quote the shared classpath and each path, forward arguments with `"$@"`, and
+use neither `eval` nor constructed shell commands. The desktop entry point accepts only the
+existing optional `--registry <absolute-path>` GUI override. Diagnostics are:
 
 ```text
 MM Launcher --version [--report <new-absolute-file>]
@@ -80,38 +101,49 @@ step may be offered as an explicit user action, not startup behavior.
 
 ## Verification and current qualification
 
-`verifyWindowsArchive`, `verifyMacArchive`, and `verifyLinuxArchive` check the exact fixed root,
-expected application/runtime JAR set, OS metadata and modes, path/case safety, absence of bundled
-JRE/JDK and source/state/credential paths, and exact SHA-256 file. Matching hosts extract into a
-path containing spaces, metacharacters, and non-ASCII text, start from an unrelated working
-directory, pass an isolated absolute registry path, and require the report to prove that code came
-from the extracted application JAR. POSIX host tests also use missing and Java 17 fixtures without
-changing system Java.
+`buildArchive` selects the canonical archive and checksum chain. `verifyArchive` checks the one
+fixed root, all three entry points, exact application/runtime JAR set with no duplicate payload,
+OS metadata and modes, path/case safety, absence of bundled JRE/JDK and source/state/credential
+paths, and exact SHA-256 file. It extracts into a path containing spaces, metacharacters, and
+non-ASCII text, starts from an unrelated working directory, passes an isolated absolute registry
+path, and requires the report to prove that code came from the extracted application JAR. On a
+matching host it natively starts that host's entry point. POSIX host tests also use missing and
+Java 17 fixtures without changing system Java; structural tests check both POSIX scripts on every
+host and run `sh -n` when `sh` is available.
 
-The prepared read-only GitHub Actions matrix uses these current runner labels:
+`verifyProvidedArchive` is a separate, read-only mode requiring explicit `providedArchive` and
+`providedChecksum` Gradle properties. It validates the dynamic expected names, existence,
+structure, and integrity of those exact files. Its task graph includes test compilation and the
+configuration guard but no staging, Launch4j, archive, or checksum producer, so a missing or wrong
+checksum fails instead of being regenerated.
+
+The prepared read-only GitHub Actions workflow builds the archive once on Windows, uploads one
+named CI artifact containing the archive and checksum, and makes every verifier download those
+same bytes. The workflow reports the archive SHA on each job and uses unique platform report
+artifact names:
 
 | Runner | Tested architecture intent |
 | --- | --- |
 | `windows-2025` | Windows x64 |
-| `ubuntu-24.04` | Linux x64, with Xvfb for Swing tests |
+| `ubuntu-24.04` with Xvfb | Linux x64 |
 | `macos-15-intel` | macOS Intel |
 | `macos-15` | macOS Apple Silicon |
 
-These labels describe test coverage, not a minimum supported OS promise. The workflow uploads each
-native archive, checksum, and XML test reports as CI artifacts only. It does not create a Release,
-write repository contents, use secrets, sign, notarize, or publish anything. Native Windows has
-been exercised locally; native macOS/Linux and both Mac architectures remain pending the user's CI
-run. Windows ARM and Linux ARM are not qualified by this matrix.
+The macOS and Linux verifiers do not run Launch4j or any packaging task. Runner labels describe
+test coverage, not a minimum supported OS promise. The workflow does not create a Release, write
+repository contents, use secrets, sign, notarize, or publish anything. Native Windows has been
+exercised locally; native macOS/Linux and both Mac architectures remain pending the user's CI run.
+Windows ARM and Linux ARM are not qualified by this matrix.
 
 ## Licensing and signing limitations
 
 Dependency JARs stay unmodified and retain embedded `META-INF` legal material. Packaging also
-extracts available dependency `LICENSE`, `NOTICE`, and `DEPENDENCIES` files beside the payload for
-review. This is not a claim about MM Launcher's own source license: the repository currently has no
-tracked root `LICENSE` or `NOTICE`, so a public licensing decision is a future release prerequisite.
-No project copyright, trademark, icon, signing identity, or notarization identity is invented by
-the packaging.
+extracts available dependency `LICENSE`, `NOTICE`, and `DEPENDENCIES` files into the one common
+`third-party-licenses/` location. This is not a claim about MM Launcher's own source license: the
+repository currently has no tracked root `LICENSE` or `NOTICE`, so a public licensing decision is
+a future release prerequisite. No project copyright, trademark, icon, signing identity, or
+notarization identity is invented by the packaging.
 
-The current archives are unsigned prototypes. Users must not be instructed to disable or bypass
-Gatekeeper, SmartScreen, or another security control. Signing/notarization and release assembly
-remain explicit future owner actions.
+The current archive is an unsigned prototype and the app is not notarized. Users must not be
+instructed to disable or bypass Gatekeeper, SmartScreen, or another security control.
+Signing/notarization and release assembly remain explicit future owner actions.
