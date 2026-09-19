@@ -23,12 +23,16 @@ import java.nio.file.StandardOpenOption;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
 public final class RegistryStore {
-    public static final int SCHEMA = 1;
+    public static final int SCHEMA = 2;
+    public static final Set<String> PREFERRED_PRODUCTS =
+            Set.of("megamek", "mekhq", "lab");
     public static final String CONFIRM = "REGISTER-LAUNCH-ONLY";
     private final ObjectMapper mapper = JsonMapper.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build()
@@ -43,7 +47,33 @@ public final class RegistryStore {
         }
         rejectLink(file);
         try {
-            RegistryData data = mapper.readValue(Files.readAllBytes(file), RegistryData.class);
+            byte[] bytes = Files.readAllBytes(file);
+            com.fasterxml.jackson.databind.JsonNode tree = mapper.readTree(bytes);
+            com.fasterxml.jackson.databind.JsonNode version = tree.get("schemaVersion");
+            if (version == null || !version.canConvertToInt()) {
+                throw new IOException("registry schema version is missing or invalid");
+            }
+            RegistryData data;
+            if (version.intValue() == 1) {
+                LegacyRegistryData legacy = mapper.treeToValue(tree, LegacyRegistryData.class);
+                data = migrateLegacy(legacy);
+            } else {
+                com.fasterxml.jackson.databind.JsonNode preferences =
+                        tree.get("preferredInstallationIds");
+                if (preferences == null || !preferences.isObject()) {
+                    throw new IOException("application preferences must be an object");
+                }
+                java.util.Iterator<Map.Entry<String,
+                        com.fasterxml.jackson.databind.JsonNode>> fields = preferences.fields();
+                while (fields.hasNext()) {
+                    Map.Entry<String, com.fasterxml.jackson.databind.JsonNode> field =
+                            fields.next();
+                    if (!field.getValue().isTextual()) {
+                        throw new IOException("application preference values must be strings");
+                    }
+                }
+                data = mapper.treeToValue(tree, RegistryData.class);
+            }
             validate(data, file);
             return data;
         } catch (IOException e) {
@@ -73,7 +103,7 @@ public final class RegistryStore {
             records.add(record);
             String defaultId = current.defaultInstallationId() == null
                     ? record.id() : current.defaultInstallationId();
-            return new RegistryData(SCHEMA, defaultId, records);
+            return withRegisteredPreferences(current, defaultId, records, record);
         });
         return record;
     }
@@ -89,7 +119,7 @@ public final class RegistryStore {
             throws IOException {
         validateName(name);
         if (confirmed == null || validatedJava == null) {
-            throw new IOException("confirmed inspection and launcher Java are required");
+            throw new IOException("confirmed inspection and validated game Java are required");
         }
         if (confirmed.rootIdentity() == null) {
             throw new IOException("confirmed inspection has no canonical root identity");
@@ -113,7 +143,7 @@ public final class RegistryStore {
             Path root = Path.of(observed.canonicalRoot());
             Path java = validatedJava.requireUnchanged();
             if (java.startsWith(root)) {
-                throw new IOException("launcher Java must be external to the imported "
+                throw new IOException("selected game Java must be external to the imported "
                         + "application folder");
             }
             rejectRegistryPlacement(file, root);
@@ -127,7 +157,7 @@ public final class RegistryStore {
             boolean becameMain = current.defaultInstallationId() == null;
             String defaultId = becameMain ? record.id() : current.defaultInstallationId();
             result[0] = new ImportedRegistration(record, becameMain);
-            return new RegistryData(SCHEMA, defaultId, records);
+            return withRegisteredPreferences(current, defaultId, records, record);
         });
         return result[0];
     }
@@ -135,7 +165,34 @@ public final class RegistryStore {
     public void select(Path registry, String id) throws IOException {
         mutate(registry.toAbsolutePath().normalize(), current -> {
             requirePresent(current, id);
-            return new RegistryData(SCHEMA, id, current.installations());
+            return new RegistryData(SCHEMA, id, current.preferredInstallationIds(),
+                    current.installations());
+        });
+    }
+
+    /**
+     * Sets one application preference without changing the legacy default.  The complete captured
+     * record is revalidated under the registry lock so a stale card or Home action cannot retarget
+     * a launch.
+     */
+    public void selectPreferred(Path registry, String productKey,
+                                InstallationRecord expected) throws IOException {
+        if (!PREFERRED_PRODUCTS.contains(productKey) || expected == null) {
+            throw new IOException("unknown application preference");
+        }
+        mutate(registry.toAbsolutePath().normalize(), current -> {
+            InstallationRecord registered = find(current, expected.id());
+            if (!registered.equals(expected)) {
+                throw failure("selected installation changed before it could become preferred");
+            }
+            if (!containsProduct(registered, productKey)) {
+                throw failure("selected installation does not contain " + productKey);
+            }
+            Map<String, String> preferences =
+                    new LinkedHashMap<>(current.preferredInstallationIds());
+            preferences.put(productKey, registered.id());
+            return new RegistryData(SCHEMA, current.defaultInstallationId(), preferences,
+                    current.installations());
         });
     }
 
@@ -149,7 +206,8 @@ public final class RegistryStore {
                         record.registeredAt()) : record);
             }
             requirePresent(current, id);
-            return new RegistryData(SCHEMA, current.defaultInstallationId(), records);
+            return new RegistryData(SCHEMA, current.defaultInstallationId(),
+                    current.preferredInstallationIds(), records);
         });
     }
 
@@ -161,7 +219,10 @@ public final class RegistryStore {
             String defaultId = id.equals(current.defaultInstallationId())
                     ? (records.isEmpty() ? null : records.getFirst().id())
                     : current.defaultInstallationId();
-            return new RegistryData(SCHEMA, defaultId, records);
+            Map<String, String> preferences =
+                    new LinkedHashMap<>(current.preferredInstallationIds());
+            preferences.entrySet().removeIf(entry -> id.equals(entry.getValue()));
+            return new RegistryData(SCHEMA, defaultId, preferences, records);
         });
     }
 
@@ -201,7 +262,8 @@ public final class RegistryStore {
                 result[0] = updated;
             }
             if (!found) throw failure("selected update record was removed");
-            return new RegistryData(SCHEMA, current.defaultInstallationId(), records);
+            return new RegistryData(SCHEMA, current.defaultInstallationId(),
+                    current.preferredInstallationIds(), records);
         });
         return result[0];
     }
@@ -210,6 +272,31 @@ public final class RegistryStore {
         String selected = id == null ? data.defaultInstallationId() : id;
         if (selected == null) throw new IOException("registry has no default installation");
         return find(data, selected);
+    }
+
+    /**
+     * Resolves an application's explicit target, or the first registered containing record.
+     * Missing or stale values are deliberately not repaired here: fallback is deterministic and
+     * side-effect free until the user explicitly chooses a preference.
+     */
+    public InstallationRecord resolvePreferred(RegistryData data, String productKey)
+            throws IOException {
+        if (!PREFERRED_PRODUCTS.contains(productKey)) {
+            throw new IOException("unknown application preference: " + productKey);
+        }
+        String selected = data.preferredInstallationIds().get(productKey);
+        if (selected != null) {
+            InstallationRecord preferred = data.installations().stream()
+                    .filter(record -> record.id().equals(selected))
+                    .filter(record -> containsProduct(record, productKey))
+                    .findFirst().orElse(null);
+            if (preferred != null) return preferred;
+        }
+        return data.installations().stream()
+                .filter(record -> containsProduct(record, productKey))
+                .findFirst()
+                .orElseThrow(() -> new IOException(
+                        "no registered installation contains " + productKey));
     }
 
     private void mutate(Path file, RegistryMutation operation) throws IOException {
@@ -227,7 +314,7 @@ public final class RegistryStore {
         try (FileChannel channel = FileChannel.open(lockPath, StandardOpenOption.CREATE,
                 StandardOpenOption.WRITE); FileLock ignored = tryLock(channel)) {
             RegistryData current = Files.exists(file, LinkOption.NOFOLLOW_LINKS)
-                    ? read(file) : new RegistryData(SCHEMA, null, List.of());
+                    ? read(file) : new RegistryData(SCHEMA, null, Map.of(), List.of());
             RegistryData next;
             try {
                 next = operation.apply(current);
@@ -257,7 +344,8 @@ public final class RegistryStore {
         byte[] bytes = mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(data);
         try (FileChannel channel = FileChannel.open(staging, StandardOpenOption.CREATE_NEW,
                 StandardOpenOption.WRITE)) {
-            channel.write(ByteBuffer.wrap(bytes));
+            ByteBuffer buffer = ByteBuffer.wrap(bytes);
+            while (buffer.hasRemaining()) channel.write(buffer);
             channel.force(true);
         }
         try {
@@ -266,12 +354,25 @@ public final class RegistryStore {
         } catch (AtomicMoveNotSupportedException e) {
             Files.deleteIfExists(staging);
             throw new IOException("atomic registry replacement is unsupported", e);
+        } catch (IOException e) {
+            Files.deleteIfExists(staging);
+            throw e;
         }
     }
 
     private void validate(RegistryData data, Path registry) throws IOException {
-        if (data == null || data.schemaVersion() != SCHEMA || data.installations() == null) {
+        if (data == null || data.schemaVersion() != SCHEMA
+                || data.preferredInstallationIds() == null
+                || data.installations() == null) {
             throw new IOException("unsupported registry schema");
+        }
+        for (Map.Entry<String, String> preference
+                : data.preferredInstallationIds().entrySet()) {
+            if (!PREFERRED_PRODUCTS.contains(preference.getKey())
+                    || preference.getValue() == null
+                    || !preference.getValue().matches("[0-9a-f]{8}-[0-9a-f-]{27}")) {
+                throw new IOException("invalid application preference");
+            }
         }
         Set<String> ids = new HashSet<>();
         Set<String> names = new HashSet<>();
@@ -317,6 +418,46 @@ public final class RegistryStore {
     private static InstallationRecord find(RegistryData data, String id) throws IOException {
         return data.installations().stream().filter(record -> record.id().equals(id)).findFirst()
                 .orElseThrow(() -> new IOException("unknown installation id: " + id));
+    }
+
+    private static RegistryData migrateLegacy(LegacyRegistryData legacy) throws IOException {
+        if (legacy == null || legacy.schemaVersion() != 1 || legacy.installations() == null) {
+            throw new IOException("unsupported legacy registry schema");
+        }
+        Map<String, String> preferences = new LinkedHashMap<>();
+        if (legacy.defaultInstallationId() != null) {
+            InstallationRecord selected = legacy.installations().stream()
+                    .filter(record -> record != null
+                            && legacy.defaultInstallationId().equals(record.id()))
+                    .findFirst().orElse(null);
+            if (selected != null && selected.products() != null) {
+                for (Product product : selected.products()) {
+                    if (product != null && PREFERRED_PRODUCTS.contains(product.key())) {
+                        preferences.putIfAbsent(product.key(), selected.id());
+                    }
+                }
+            }
+        }
+        return new RegistryData(SCHEMA, legacy.defaultInstallationId(), preferences,
+                legacy.installations());
+    }
+
+    private static RegistryData withRegisteredPreferences(
+            RegistryData current, String defaultId, List<InstallationRecord> records,
+            InstallationRecord added) {
+        Map<String, String> preferences =
+                new LinkedHashMap<>(current.preferredInstallationIds());
+        for (Product product : added.products()) {
+            if (PREFERRED_PRODUCTS.contains(product.key())) {
+                preferences.putIfAbsent(product.key(), added.id());
+            }
+        }
+        return new RegistryData(SCHEMA, defaultId, preferences, records);
+    }
+
+    private static boolean containsProduct(InstallationRecord record, String productKey) {
+        return record.products() != null && record.products().stream()
+                .anyMatch(product -> productKey.equals(product.key()));
     }
 
     private static void requirePresent(RegistryData data, String id) {
@@ -381,6 +522,10 @@ public final class RegistryStore {
     }
 
     public record ImportedRegistration(InstallationRecord record, boolean becameMain) {
+    }
+
+    private record LegacyRegistryData(int schemaVersion, String defaultInstallationId,
+                                      List<InstallationRecord> installations) {
     }
 
     @FunctionalInterface

@@ -111,6 +111,23 @@ class LauncherServicesTest {
     }
 
     @Test
+    void homeTargetsUseProductUnionAndIndependentRegistryPreferences() throws Exception {
+        LauncherServices services = services(
+                temp.resolve("per-app.json"), new RecordingRunner());
+        InstallationRecord mega = services.register("Mega only", suite("mega-only"));
+        Path suite = suite("suite");
+        writeJar(suite.resolve("MekHQ.jar"), "mekhq.MekHQ");
+        writeJar(suite.resolve("MegaMekLab.jar"), "megameklab.MegaMekLab");
+        InstallationRecord bundle = services.register("Bundle", suite);
+
+        LauncherServices.HomeState home = services.loadHome();
+
+        assertEquals(mega, home.preferredApplications().get("megamek"));
+        assertEquals(bundle, home.preferredApplications().get("mekhq"));
+        assertEquals(bundle, home.preferredApplications().get("lab"));
+    }
+
+    @Test
     void missingChecksumUsesSharedEligibilityAndCannotSelectAsset() throws Exception {
         ReleaseCatalog.Asset asset = new ReleaseCatalog.Asset("MekHQ-v0.50.02.tar.gz", 42,
                 null, URI.create("https://github.com/MegaMek/mekhq/releases/download/"
@@ -142,6 +159,10 @@ class LauncherServicesTest {
         Path externalJava = Files.writeString(temp.resolve("java.exe"), "fixture");
         assertEquals(21, services.selectJava(initialRecord, externalJava));
         InstallationRecord record = services.readRegistry().installations().getFirst();
+        assertTrue(assertThrows(IOException.class,
+                () -> services.preview(initialRecord, "megamek"))
+                .getMessage().contains("record changed"),
+                "a menu snapshot with a changed record cannot silently launch Main");
         int afterSelection = runner.commands.size();
         List<String> preview = services.preview(record, "megamek");
         assertTrue(preview.contains("megamek.MegaMek"));
@@ -150,6 +171,12 @@ class LauncherServicesTest {
 
         assertEquals(0, services.launch(record, "megamek"));
         assertTrue(runner.inheritIO.getLast());
+
+        services.remove(record);
+        assertTrue(assertThrows(IOException.class,
+                () -> services.launch(record, "megamek"))
+                .getMessage().contains("no longer registered"),
+                "a removed captured record cannot fall back to another copy");
     }
 
     @Test

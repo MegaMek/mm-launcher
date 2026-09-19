@@ -10,11 +10,14 @@ import org.megamek.launcher.release.ReleaseCatalog;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationPhase;
 import org.megamek.launcher.operation.OperationType;
+import org.megamek.launcher.operation.ProgressUnit;
 
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JProgressBar;
 import javax.swing.SwingUtilities;
 import javax.swing.JTextArea;
 import java.awt.Component;
@@ -36,6 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -51,8 +55,9 @@ class LauncherSwingSmokeTest {
         SwingUtilities.invokeAndWait(() -> {
             holder[0] = new LauncherFrame(
                     new LauncherServices(temp.resolve("registry.json")) {
-                        @Override public String latestMilestoneVersion() {
-                            return "0.51.0";
+                        @Override public org.megamek.launcher.channel.QuickInstallSnapshot
+                                quickInstallSnapshot() {
+                            return QuickInstallTestData.snapshot("0.51.0", "0.52.0");
                         }
                     });
             holder[0].showWindow();
@@ -67,7 +72,7 @@ class LauncherSwingSmokeTest {
             FirstLaunchSplitButton split = (FirstLaunchSplitButton) options.getParent();
             SwingUtilities.invokeAndWait(options::doClick);
             waitFor(() -> split.popupMenu().isVisible());
-            assertEquals(2, split.popupMenu().getComponentCount());
+            assertEquals(5, split.popupMenu().getComponentCount());
             SwingUtilities.invokeAndWait(split::closePopup);
         } finally {
             SwingUtilities.invokeAndWait(() -> {
@@ -146,8 +151,18 @@ class LauncherSwingSmokeTest {
             assertNotNull(waitForButton(frame, "launch-megamek-button"));
             JButton settings = waitForButton(frame, "settingsButton");
             SwingUtilities.invokeAndWait(settings::doClick);
-            JButton saveSettings = waitForButton(frame, "saveSettingsButton");
-            waitFor(saveSettings::isEnabled);
+            waitFor(() -> component(frame,
+                    "installedVersionsCheckMasterCheckbox") != null);
+            assertNotNull(component(frame, "installedVersionsCheckMasterCheckbox"));
+            assertNull(find(frame, "saveSettingsButton"),
+                    "settings are persisted immediately without a save workflow");
+            JPanel settingsSections = component(frame, "settingsSections");
+            assertEquals(FirstLaunchPanel.BACKGROUND, settingsSections.getBackground());
+            assertNotNull(component(frame, "settingsUpdatesSection"));
+            assertNotNull(component(frame, "settingsGameJavaSection"));
+            assertNotNull(component(frame, "settingsDiagnosticsSection"));
+            assertNotNull(component(frame, "defaultJavaPath"));
+            assertNotNull(waitForButton(frame, "changeDefaultJavaButton"));
             JButton logs = waitForButton(frame, "viewOperationLogsButton");
             SwingUtilities.invokeAndWait(logs::doClick);
             JDialog logViewer = owned(frame, "Local operation logs");
@@ -205,7 +220,7 @@ class LauncherSwingSmokeTest {
     }
 
     @Test
-    void failedInstallRunsOffEdtClosesStreamAndRetryRequiresFreshSelection() throws Exception {
+    void failedInstallUsesOneCompactFailureSurfaceAndClosesStream() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing worker controls require a display");
         FailingInstallServices services = new FailingInstallServices(temp.resolve("install.json"));
@@ -219,28 +234,43 @@ class LauncherSwingSmokeTest {
             assertTrue(services.started.await(5, TimeUnit.SECONDS));
             assertFalse(services.wasEdt);
             JDialog progress = owned(frame, "Downloading and installing");
-            JButton retry = find(progress, "retryInstallButton");
-            assertFalse(retry.isEnabled());
-            SwingUtilities.invokeAndWait(retry::doClick);
+            JButton repair = find(progress, "repairPublishedInstallButton");
+            JButton cancel = find(progress, "operationCancelButton");
+            JButton details = find(progress, "operationViewDetailsButton");
+            assertFalse(repair.isEnabled());
+            assertFalse(repair.isVisible());
+            assertTrue(cancel.isVisible());
+            assertEquals("Cancel", cancel.getText());
+            assertFalse(details.isVisible());
+            assertNull(find(progress, "operationViewLogsButton"));
+            assertNull(find(progress, "copyOperationDetailsButton"));
+            assertNull(findText(progress, "installProgressLog"),
+                    "the bounded legacy log is not in the visible component hierarchy");
             assertEquals(1, services.attempts);
 
             services.release.countDown();
-            waitFor(retry::isEnabled);
+            waitFor(details::isVisible);
+            assertEquals("Close", cancel.getText());
+            assertTrue(cancel.isVisible());
+            assertFalse(repair.isVisible(),
+                    "an unpublished failure must not offer repair or generic Retry");
             services.streams.getFirst().print("after close");
             assertTrue(services.streams.getFirst().checkError(), "failed stream must be closed");
-            closeOwned(frame, "Downloading and installing failed");
-            JButton viewLogs = find(progress, "operationViewLogsButton");
+            assertFalse(hasShowingDialog(frame, "Downloading and installing failed"),
+                    "the progress failure state replaces the generic error dialog");
+            SwingUtilities.invokeAndWait(details::doClick);
+            JDialog failureDetails = owned(frame, "Installation failed details");
+            assertTrue(findText(failureDetails, "errorDetails").getText()
+                    .contains("fixture install failure"));
+            JButton viewLogs = find(failureDetails, "viewOperationLogsButton");
             SwingUtilities.invokeAndWait(viewLogs::doClick);
             JDialog logViewer = owned(frame, "Local operation logs");
             waitFor(() -> findText(logViewer, "operationLogViewer").getText()
                     .contains("fixture install failure"));
             SwingUtilities.invokeAndWait(logViewer::dispose);
-
-            SwingUtilities.invokeAndWait(retry::doClick);
-            JDialog picker = owned(frame, "Download an official release");
-            assertTrue(picker.isVisible());
+            SwingUtilities.invokeAndWait(failureDetails::dispose);
             assertEquals(1, services.attempts,
-                    "retry must require a fresh release selection and confirmation");
+                    "failure does not expose an implicit retry");
         } finally {
             dispose(frame);
         }
@@ -265,15 +295,119 @@ class LauncherSwingSmokeTest {
             JButton cancel = find(progress, "operationCancelButton");
             assertTrue(cancel.isEnabled(),
                     "the blanket busy gate must not disable the authoritative Cancel control");
+            assertNull(find(progress, "operationViewLogsButton"));
+            assertNull(find(progress, "copyOperationDetailsButton"));
             SwingUtilities.invokeAndWait(cancel::doClick);
-            waitFor(() -> progress.getTitle().equals("Cancelled"));
+            waitFor(() -> !progress.isDisplayable());
             services.streams.getFirst().print("after close");
             assertTrue(services.streams.getFirst().checkError(),
                     "cancelled worker must close its attempt stream");
             assertFalse(java.nio.file.Files.exists(temp.resolve("cancel-destination")));
-            assertNotNull(find(progress, "operationViewLogsButton"));
         } finally {
             services.release.countDown();
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void progressDialogIsCompactStyledAndKeepsOnlyBoundedHiddenDetails() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing progress controls require a display");
+        LauncherFrame frame = onEdt(() ->
+                new LauncherFrame(new LauncherServices(temp.resolve("styled-progress.json"))));
+        AtomicReference<OperationProgressDialog> holder = new AtomicReference<>();
+        AtomicReference<JButton> repairHolder = new AtomicReference<>();
+        OperationContext context = new OperationContext(OperationType.FRESH_INSTALL,
+                event -> holder.get().onProgress(event));
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                frame.setVisible(true);
+                OperationProgressDialog dialog = new OperationProgressDialog(
+                        frame, "Installing MekHQ 0.51.0", "styledFixtureLog", () -> {
+                        });
+                JButton repair = new JButton("Open Installations");
+                repair.setName("styledFixtureRepair");
+                repair.setEnabled(false);
+                dialog.addActionButton(repair);
+                holder.set(dialog);
+                repairHolder.set(repair);
+                dialog.bind(context);
+                dialog.append("x".repeat(70_000) + "tail");
+                dialog.setVisible(true);
+            });
+
+            JDialog dialog = holder.get();
+            JPanel content = component(dialog, "operationProgressContent");
+            JPanel summary = component(dialog, "operationSummary");
+            JLabel phase = findLabel(dialog, "operationPhaseLabel");
+            JProgressBar bar = component(dialog, "operationProgressBar");
+            JButton cancel = find(dialog, "operationCancelButton");
+            JButton details = find(dialog, "operationViewDetailsButton");
+            assertEquals(OperationProgressDialog.BACKGROUND, content.getBackground());
+            assertFalse(summary.isOpaque(),
+                    "phase, progress, and detail sit directly on the dialog background");
+            assertEquals(0, summary.getBorder().getBorderInsets(summary).top);
+            assertEquals(0, summary.getBorder().getBorderInsets(summary).left);
+            assertEquals(OperationProgressDialog.GOLD, phase.getForeground());
+            assertEquals(OperationProgressDialog.GOLD, bar.getForeground());
+            assertTrue(cancel instanceof FirstLaunchButton,
+                    "Cancel uses the local vector-painted secondary control");
+            assertFalse(cancel.isOpaque());
+            assertFalse(cancel.isContentAreaFilled());
+            assertFalse(cancel.isFocusPainted(),
+                    "the custom whole-plate focus outline replaces the OS focus artifact");
+            assertTrue(cancel.isVisible());
+            assertFalse(details.isVisible());
+            assertFalse(repairHolder.get().isVisible());
+            assertNull(find(dialog, "operationViewLogsButton"));
+            assertNull(find(dialog, "copyOperationDetailsButton"));
+            assertNull(findText(dialog, "styledFixtureLog"));
+            assertNull(holder.get().logArea().getParent());
+            assertTrue(holder.get().logArea().getDocument().getLength() <= 64_000);
+            assertTrue(holder.get().logArea().getText().endsWith("tail"));
+
+            context.phase(OperationPhase.DOWNLOAD,
+                    "C:\\private\\technical\\package.tar.gz");
+            waitFor(() -> "Downloading package".equals(phase.getText()));
+            assertEquals("Downloading the verified package…",
+                    findLabel(dialog, "operationProgressDetail").getText());
+
+            context.progress(OperationPhase.DOWNLOAD, 282_000_000, 690_000_000,
+                    ProgressUnit.BYTES, "282000000 / 690000000 bytes");
+            waitFor(() -> "41%".equals(bar.getString()));
+            assertEquals("Downloaded 282 MB of 690 MB",
+                    findLabel(dialog, "operationProgressDetail").getText());
+            assertFalse(bar.getString().contains("282000000"));
+            assertTrue(bar.getAccessibleContext().getAccessibleDescription()
+                    .contains("Downloaded 282 MB of 690 MB"));
+
+            context.progress(OperationPhase.EXTRACT, 4_218, -1, ProgressUnit.FILES,
+                    "Extracted 4218 archive entries");
+            waitFor(() -> "Extracting application files".equals(phase.getText()));
+            assertEquals("4,218 files processed",
+                    findLabel(dialog, "operationProgressDetail").getText());
+            assertTrue(bar.isIndeterminate(),
+                    "unknown archive totals remain truthfully indeterminate");
+            assertFalse(bar.isStringPainted(),
+                    "extraction remains indeterminate without a progress-bar string");
+
+            SwingUtilities.invokeAndWait(() -> holder.get().showFailure(
+                    new IOException("The package could not be installed."),
+                    "fixture logging warning"));
+            assertFalse(bar.isVisible());
+            assertEquals("Close", cancel.getText());
+            assertTrue(cancel.isVisible());
+            assertTrue(details.isVisible());
+            assertFalse(repairHolder.get().isVisible());
+            JLabel logging = findLabel(dialog, "operationLoggingWarning");
+            assertTrue(logging.isVisible());
+            assertTrue(logging.getText().contains("original failure"));
+
+            SwingUtilities.invokeAndWait(() -> repairHolder.get().setEnabled(true));
+            assertTrue(repairHolder.get().isVisible(),
+                    "a needed repair action appears only after failure");
+        } finally {
+            context.finish(org.megamek.launcher.operation.OperationOutcome.FAILED, "done");
             dispose(frame);
         }
     }
@@ -304,9 +438,17 @@ class LauncherSwingSmokeTest {
             JButton cancel = find(dialog, "operationCancelButton");
             JLabel detail = findLabel(dialog, "operationProgressDetail");
             waitFor(() -> !cancel.isEnabled()
-                    && detail.getText().contains("transaction has begun"));
+                    && !cancel.isVisible()
+                    && detail.getText().equals(
+                    "Finishing update — do not close the launcher."));
             assertFalse(context.requestCancellation().accepted());
             assertFalse(Thread.currentThread().isInterrupted());
+            SwingUtilities.invokeAndWait(() -> dialog.dispatchEvent(
+                    new java.awt.event.WindowEvent(dialog,
+                            java.awt.event.WindowEvent.WINDOW_CLOSING)));
+            assertTrue(dialog.isDisplayable(),
+                    "window close cannot dismiss progress after the atomic cutoff");
+            assertFalse(hasShowingDialog(frame, "Cancellation unavailable"));
         } finally {
             context.finish(org.megamek.launcher.operation.OperationOutcome.SUCCEEDED, "done");
             dispose(frame);
@@ -314,7 +456,7 @@ class LauncherSwingSmokeTest {
     }
 
     private static JDialog openDownloadFromManage(LauncherFrame frame) throws Exception {
-        JButton download = onEdt(() -> find(frame, "manageDownloadMegaMekButton"));
+        JButton download = onEdt(() -> find(frame, "installAnotherVersionButton"));
         assertNotNull(download);
         SwingUtilities.invokeAndWait(download::doClick);
         JDialog picker = owned(frame, "Download an official release");
@@ -394,6 +536,33 @@ class LauncherSwingSmokeTest {
             return false;
         });
         return result[0];
+    }
+
+    private static boolean hasShowingDialog(LauncherFrame frame, String title) throws Exception {
+        boolean[] result = new boolean[1];
+        SwingUtilities.invokeAndWait(() -> {
+            for (java.awt.Window window : frame.getOwnedWindows()) {
+                if (window instanceof JDialog dialog && dialog.isShowing()
+                        && title.equals(dialog.getTitle())) {
+                    result[0] = true;
+                }
+            }
+        });
+        return result[0];
+    }
+
+    private static <T extends Component> T component(Container root, String name) {
+        for (Component child : root.getComponents()) {
+            if (name.equals(child.getName())) {
+                @SuppressWarnings("unchecked") T cast = (T) child;
+                return cast;
+            }
+            if (child instanceof Container container) {
+                T found = component(container, name);
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 
     private static void closeOwned(LauncherFrame frame, String title) throws Exception {

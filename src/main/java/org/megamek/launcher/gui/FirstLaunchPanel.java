@@ -17,6 +17,9 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.GridBagConstraints;
+import java.awt.GridBagLayout;
+import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
@@ -25,25 +28,29 @@ import java.io.IOException;
 /** Empty-home presentation only; all user actions are supplied by the existing launcher frame. */
 final class FirstLaunchPanel extends JPanel {
     static final String ART_RESOURCE = "/org/megamek/launcher/gui/first-launch-art.png";
-    private static final Color BACKGROUND = new Color(16, 26, 29);
-    private static final Color PANEL = new Color(22, 36, 40);
-    private static final Color TEXT = new Color(237, 243, 237);
-    private static final Color MUTED = new Color(166, 186, 181);
+    static final Color BACKGROUND = new Color(16, 26, 29);
+    static final Color PANEL = new Color(22, 36, 40);
+    static final Color TEXT = new Color(237, 243, 237);
+    static final Color MUTED = new Color(166, 186, 181);
+    static final Color GOLD = new Color(226, 196, 125);
     private final GuiScale scale;
     private final ArtworkPanel artwork;
     private final ContentPanel controls;
     private final JScrollPane scroller;
-    private final JLabel releaseChannelLabel;
-    private final Box.Filler actionsGap;
+    private final JPanel actionRow;
+    private final JPanel primaryAction;
+    private final JPanel existingAction;
+    private final Box.Filler verticalCenterBefore;
+    private final Box.Filler verticalCenterAfter;
     private boolean compact;
 
     FirstLaunchPanel(BufferedImage image, GuiScale scale, FirstLaunchSplitButton download,
-                     JButton useExisting, String releaseChannel, JLabel status) {
+                     JButton useExisting, JLabel status) {
         this.scale = scale;
         setName("firstLaunchPanel");
         setLayout(null);
         setBackground(BACKGROUND);
-        artwork = new ArtworkPanel(image, scale);
+        artwork = new ArtworkPanel(image, scale, true);
         artwork.setName("firstLaunchArtwork");
         artwork.getAccessibleContext().setAccessibleName("MegaMek launcher artwork");
         add(artwork);
@@ -54,37 +61,34 @@ final class FirstLaunchPanel extends JPanel {
         controls.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(26),
                 scale.scaleForGUI(25), scale.scaleForGUI(20), scale.scaleForGUI(25)));
         Font base = UIManager.getFont("Label.font");
-        JLabel title = label("MegaMek Launcher", scale.font(base, Font.BOLD, 27), TEXT);
-        title.setName("homeTitle");
-        controls.add(title);
-        actionsGap = gap(28);
-        controls.add(actionsGap);
-
-        JPanel primaryAction = new JPanel(new BorderLayout(0, scale.scaleForGUI(9)));
+        verticalCenterBefore = flexibleSpace();
+        controls.add(verticalCenterBefore);
+        primaryAction = new JPanel(new BorderLayout());
         primaryAction.setOpaque(false);
-        primaryAction.setAlignmentX(LEFT_ALIGNMENT);
         primaryAction.add(download, BorderLayout.CENTER);
-        releaseChannelLabel = label(releaseChannel, scale.font(base, Font.PLAIN, 14), MUTED);
-        releaseChannelLabel.setName("releaseChannelLabel");
-        releaseChannelLabel.setHorizontalAlignment(SwingConstants.CENTER);
-        primaryAction.add(releaseChannelLabel, BorderLayout.SOUTH);
-        primaryAction.setMaximumSize(new Dimension(Integer.MAX_VALUE,
-                primaryAction.getPreferredSize().height));
-        controls.add(primaryAction);
-        controls.add(Box.createVerticalStrut(scale.scaleForGUI(14)));
 
-        JPanel existingAction = new JPanel(new BorderLayout(0, scale.scaleForGUI(5)));
+        existingAction = new JPanel(new BorderLayout(0, scale.scaleForGUI(5)));
         existingAction.setOpaque(false);
-        existingAction.setAlignmentX(LEFT_ALIGNMENT);
         existingAction.add(useExisting, BorderLayout.CENTER);
         JLabel existingCaption = label("MegaMek, MekHQ, or MegaMekLab",
                 scale.font(base, Font.PLAIN, 12), MUTED);
         existingCaption.setName("existingCopyCaption");
         existingCaption.setHorizontalAlignment(SwingConstants.CENTER);
         existingAction.add(existingCaption, BorderLayout.SOUTH);
-        existingAction.setMaximumSize(new Dimension(Integer.MAX_VALUE,
+        int actionWidth = scale.scaleForGUI(480);
+        primaryAction.setPreferredSize(new Dimension(actionWidth,
+                primaryAction.getPreferredSize().height));
+        existingAction.setPreferredSize(new Dimension(actionWidth,
                 existingAction.getPreferredSize().height));
-        controls.add(existingAction);
+
+        actionRow = new JPanel(new GridBagLayout());
+        actionRow.setName("firstLaunchActions");
+        actionRow.setOpaque(false);
+        actionRow.setAlignmentX(CENTER_ALIGNMENT);
+        layoutActions(false);
+        actionRow.setMaximumSize(new Dimension(scale.scaleForGUI(1000),
+                actionRow.getPreferredSize().height));
+        controls.add(actionRow);
         controls.add(Box.createVerticalStrut(scale.scaleForGUI(12)));
         status.setForeground(MUTED);
         status.setFont(scale.font(base, Font.PLAIN, 11));
@@ -92,21 +96,16 @@ final class FirstLaunchPanel extends JPanel {
         status.setName("homeStatusLabel");
         status.setVisible(status.getText() != null && !status.getText().isBlank());
         controls.add(status);
-        controls.add(Box.createVerticalGlue());
+        verticalCenterAfter = flexibleSpace();
+        controls.add(verticalCenterAfter);
 
         scroller = new JScrollPane(controls, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
                 JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scroller.setName("firstLaunchControlsScroller");
         scroller.setBorder(BorderFactory.createEmptyBorder());
         scroller.getViewport().setBackground(PANEL);
         scroller.getVerticalScrollBar().setUnitIncrement(scale.scaleForGUI(18));
         add(scroller);
-    }
-
-    void setReleaseChannel(String text, String detail) {
-        releaseChannelLabel.setText(text);
-        releaseChannelLabel.setToolTipText(detail);
-        releaseChannelLabel.getAccessibleContext().setAccessibleDescription(
-                detail == null ? text : text + ". " + detail);
     }
 
     static BufferedImage loadArtwork() throws IOException {
@@ -136,36 +135,68 @@ final class FirstLaunchPanel extends JPanel {
         return new Box.Filler(size, size, new Dimension(Short.MAX_VALUE, size.height));
     }
 
+    private Box.Filler flexibleSpace() {
+        Dimension zero = new Dimension();
+        return new Box.Filler(zero, zero,
+                new Dimension(Short.MAX_VALUE, Short.MAX_VALUE));
+    }
+
     private void resizeGap(Box.Filler gap, int height) {
         Dimension size = scale.scaleForGUI(0, height);
         gap.changeShape(size, size, new Dimension(Short.MAX_VALUE, size.height));
     }
 
+    private void layoutActions(boolean stacked) {
+        actionRow.removeAll();
+        GridBagConstraints primary = new GridBagConstraints();
+        primary.gridx = 0;
+        primary.gridy = 0;
+        primary.weightx = 1;
+        primary.fill = GridBagConstraints.HORIZONTAL;
+        primary.anchor = GridBagConstraints.NORTH;
+        primary.insets = stacked ? new Insets(0, 0, scale.scaleForGUI(10), 0)
+                : new Insets(0, 0, 0, scale.scaleForGUI(7));
+        actionRow.add(primaryAction, primary);
+
+        GridBagConstraints existing = new GridBagConstraints();
+        existing.gridx = stacked ? 0 : 1;
+        existing.gridy = stacked ? 1 : 0;
+        existing.weightx = 1;
+        existing.fill = GridBagConstraints.HORIZONTAL;
+        existing.anchor = GridBagConstraints.NORTH;
+        existing.insets = stacked ? new Insets(0, 0, 0, 0)
+                : new Insets(0, scale.scaleForGUI(7), 0, 0);
+        actionRow.add(existingAction, existing);
+        actionRow.revalidate();
+    }
+
     @Override
     public Dimension getPreferredSize() {
-        return scale.scaleForGUI(1312, 560);
+        return scale.scaleForGUI(1180, 760);
     }
 
     @Override
     public void doLayout() {
-        boolean nextCompact = getWidth() < scale.scaleForGUI(1000);
+        boolean nextCompact = getWidth() < scale.scaleForGUI(850)
+                || getHeight() < scale.scaleForGUI(620);
         if (compact != nextCompact) {
             compact = nextCompact;
-            resizeGap(actionsGap, compact ? 18 : 28);
+            verticalCenterBefore.setVisible(!compact);
+            layoutActions(compact);
+            actionRow.setMaximumSize(new Dimension(
+                    compact ? Integer.MAX_VALUE : scale.scaleForGUI(1000),
+                    actionRow.getPreferredSize().height));
             controls.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(compact ? 18 : 26),
                     scale.scaleForGUI(25), scale.scaleForGUI(compact ? 14 : 20),
                     scale.scaleForGUI(25)));
             controls.revalidate();
         }
-        if (compact) {
-            int artHeight = Math.min(scale.scaleForGUI(260), getHeight() * 45 / 100);
-            artwork.setBounds(0, 0, getWidth(), artHeight);
-            scroller.setBounds(0, artHeight, getWidth(), Math.max(0, getHeight() - artHeight));
-        } else {
-            int sidebar = scale.scaleForGUI(352);
-            artwork.setBounds(0, 0, Math.max(0, getWidth() - sidebar), getHeight());
-            scroller.setBounds(getWidth() - sidebar, 0, sidebar, getHeight());
-        }
+        int minimumDeck = scale.scaleForGUI(compact ? 260 : 150);
+        int deckHeight = Math.min(getHeight(),
+                Math.max(minimumDeck, controls.getPreferredSize().height));
+        int artHeight = Math.max(0, getHeight() - deckHeight);
+        artwork.setBounds(0, 0, getWidth(), artHeight);
+        scroller.setBounds(0, artHeight, getWidth(), deckHeight);
     }
 
     private final class ContentPanel extends JPanel implements Scrollable {
@@ -185,6 +216,7 @@ final class FirstLaunchPanel extends JPanel {
     private static final class ManagedHomePanel extends JPanel {
         private final GuiScale scale;
         private final ArtworkPanel artwork;
+        private final JPanel deck;
         private final JScrollPane scroller;
 
         private ManagedHomePanel(BufferedImage image, GuiScale scale, JPanel controls) {
@@ -192,14 +224,22 @@ final class FirstLaunchPanel extends JPanel {
             setName("managedHomePanel");
             setLayout(null);
             setBackground(BACKGROUND);
-            artwork = new ArtworkPanel(image, scale);
+            artwork = new ArtworkPanel(image, scale, true);
             artwork.setName("homeArtwork");
             artwork.getAccessibleContext().setAccessibleName("MegaMek launcher artwork");
+            controls.setOpaque(true);
+            controls.setBackground(PANEL);
             controls.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(16),
                     scale.scaleForGUI(20), scale.scaleForGUI(14), scale.scaleForGUI(20)));
-            scroller = new JScrollPane(controls, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+            deck = new ManagedDeckPanel(scale);
+            deck.setLayout(new BorderLayout());
+            deck.add(controls, BorderLayout.CENTER);
+            scroller = new JScrollPane(deck, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
                     JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+            scroller.setName("managedHomeDeckScroller");
+            scroller.setBackground(PANEL);
             scroller.setBorder(BorderFactory.createEmptyBorder());
+            scroller.getViewport().setBackground(PANEL);
             scroller.getVerticalScrollBar().setUnitIncrement(scale.scaleForGUI(18));
             add(artwork);
             add(scroller);
@@ -207,26 +247,56 @@ final class FirstLaunchPanel extends JPanel {
 
         @Override
         public void doLayout() {
-            if (getWidth() < scale.scaleForGUI(850)) {
-                int artHeight = Math.min(scale.scaleForGUI(190), getHeight() * 38 / 100);
-                artwork.setBounds(0, 0, getWidth(), artHeight);
-                scroller.setBounds(0, artHeight, getWidth(),
-                        Math.max(0, getHeight() - artHeight));
-            } else {
-                int artWidth = Math.min(scale.scaleForGUI(430), getWidth() * 45 / 100);
-                artwork.setBounds(0, 0, artWidth, getHeight());
-                scroller.setBounds(artWidth, 0, Math.max(0, getWidth() - artWidth), getHeight());
-            }
+            int minimumArt = Math.min(scale.scaleForGUI(180),
+                    Math.max(0, getHeight() * 35 / 100));
+            int maximumDeck = Math.max(0, getHeight() - minimumArt);
+            int deckHeight = Math.min(maximumDeck, deck.getPreferredSize().height);
+            int artHeight = Math.max(0, getHeight() - deckHeight);
+            artwork.setBounds(0, 0, getWidth(), artHeight);
+            scroller.setBounds(0, artHeight, getWidth(), deckHeight);
+        }
+    }
+
+    private static final class ManagedDeckPanel extends JPanel implements Scrollable {
+        private final GuiScale scale;
+
+        private ManagedDeckPanel(GuiScale scale) {
+            this.scale = scale;
+            setBackground(PANEL);
+        }
+
+        @Override public Dimension getPreferredScrollableViewportSize() {
+            return getPreferredSize();
+        }
+
+        @Override public int getScrollableUnitIncrement(
+                Rectangle visible, int orientation, int direction) {
+            return scale.scaleForGUI(18);
+        }
+
+        @Override public int getScrollableBlockIncrement(
+                Rectangle visible, int orientation, int direction) {
+            return Math.max(scale.scaleForGUI(18), visible.height - scale.scaleForGUI(18));
+        }
+
+        @Override public boolean getScrollableTracksViewportWidth() {
+            return true;
+        }
+
+        @Override public boolean getScrollableTracksViewportHeight() {
+            return getParent() != null && getParent().getHeight() >= getPreferredSize().height;
         }
     }
 
     private static final class ArtworkPanel extends JPanel {
         private final BufferedImage image;
         private final GuiScale scale;
+        private final boolean fill;
 
-        private ArtworkPanel(BufferedImage image, GuiScale scale) {
+        private ArtworkPanel(BufferedImage image, GuiScale scale, boolean fill) {
             this.image = image;
             this.scale = scale;
+            this.fill = fill;
             setBackground(BACKGROUND);
         }
 
@@ -237,14 +307,23 @@ final class FirstLaunchPanel extends JPanel {
                 graphics.drawString("Artwork unavailable", scale.scaleForGUI(20), scale.scaleForGUI(30));
                 return;
             }
-            Rectangle destination = GuiScale.fitImage(image.getWidth(), image.getHeight(),
-                    getWidth(), getHeight());
             Graphics2D canvas = (Graphics2D) graphics.create();
             try {
                 canvas.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
                         RenderingHints.VALUE_INTERPOLATION_BICUBIC);
-                canvas.drawImage(image, destination.x, destination.y,
-                        destination.width, destination.height, this);
+                if (fill) {
+                    double ratio = Math.max((double) getWidth() / image.getWidth(),
+                            (double) getHeight() / image.getHeight());
+                    int width = (int) Math.ceil(image.getWidth() * ratio);
+                    int height = (int) Math.ceil(image.getHeight() * ratio);
+                    canvas.drawImage(image, (getWidth() - width) / 2,
+                            (getHeight() - height) / 2, width, height, this);
+                } else {
+                    Rectangle destination = GuiScale.fitImage(image.getWidth(), image.getHeight(),
+                            getWidth(), getHeight());
+                    canvas.drawImage(image, destination.x, destination.y,
+                            destination.width, destination.height, this);
+                }
             } finally {
                 canvas.dispose();
             }

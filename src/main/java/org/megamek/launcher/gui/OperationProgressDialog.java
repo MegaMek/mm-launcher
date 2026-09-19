@@ -2,87 +2,166 @@ package org.megamek.launcher.gui;
 
 import org.megamek.launcher.diagnostics.SanitizedErrors;
 import org.megamek.launcher.operation.OperationContext;
+import org.megamek.launcher.operation.OperationOutcome;
+import org.megamek.launcher.operation.OperationPhase;
 import org.megamek.launcher.operation.OperationProgress;
 import org.megamek.launcher.operation.OperationProgressListener;
+import org.megamek.launcher.operation.OperationType;
 import org.megamek.launcher.operation.ProgressUnit;
 
 import javax.swing.BorderFactory;
+import javax.swing.Box;
+import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
-import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
-import javax.swing.JScrollPane;
 import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.WindowConstants;
+import javax.swing.plaf.basic.BasicProgressBarUI;
 import java.awt.BorderLayout;
+import java.awt.Color;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.Toolkit;
-import java.awt.datatransfer.StringSelection;
+import java.awt.Font;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.text.NumberFormat;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
+/**
+ * Compact operation presentation. Detailed backend output remains bounded in {@link #logArea()}
+ * for legacy streams, but is deliberately not part of the visible component hierarchy.
+ */
 final class OperationProgressDialog extends JDialog implements OperationProgressListener {
     static final String OPERATION_CONTROL = "mmLauncherOperationControl";
+    static final Color BACKGROUND = new Color(16, 31, 34);
+    static final Color PANEL = new Color(23, 46, 49);
+    static final Color GOLD = new Color(226, 196, 125);
+    static final Color TEXT = new Color(239, 246, 240);
+    static final Color MUTED = new Color(174, 194, 189);
+    static final Color TRACK = new Color(41, 69, 72);
     private static final int UPDATE_INTERVAL_MS = 150;
-    private final JLabel phase = new JLabel("Starting operation...");
-    private final JLabel detail = new JLabel(" ");
+    private static final int DETAIL_LIMIT = 90;
+
+    private final GuiScale scale = GuiScale.DEFAULT;
+    private final JLabel phase = new JLabel("Getting ready");
+    private final JLabel detail = new JLabel("Preparing the operation…");
+    private final JLabel loggingWarning = new JLabel();
     private final JProgressBar progress = new JProgressBar();
+    private final Component beforeProgress =
+            Box.createVerticalStrut(scale.scaleForGUI(14));
+    private final Component afterProgress =
+            Box.createVerticalStrut(scale.scaleForGUI(12));
     private final JTextArea log;
     private final JButton cancel = control("Cancel", "operationCancelButton");
-    private final JButton viewLogs = control("View logs", "operationViewLogsButton");
-    private final JButton copy = control("Copy sanitized details", "copyOperationDetailsButton");
-    private final JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+    private final JButton viewDetails =
+            control("View details", "operationViewDetailsButton");
+    private final JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT,
+            scale.scaleForGUI(8), 0));
+    private final List<JButton> contextualActions = new ArrayList<>();
     private final AtomicReference<OperationProgress> pending = new AtomicReference<>();
     private final Timer updateTimer;
+    private final LauncherFrame owner;
+    private final Runnable showLogs;
     private OperationContext context;
+    private Throwable failure;
     private boolean finished;
+    private boolean failureShown;
+    private boolean nonCancellableFromStart;
 
     OperationProgressDialog(LauncherFrame owner, String title, String logName,
                             Runnable showLogs) {
         super(owner, title, false);
+        this.owner = owner;
+        this.showLogs = showLogs;
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+
         phase.setName("operationPhaseLabel");
+        phase.setForeground(GOLD);
+        phase.setFont(scale.font(phase.getFont(), Font.BOLD, 22f));
+        phase.setAlignmentX(LEFT_ALIGNMENT);
+
         detail.setName("operationProgressDetail");
+        detail.setForeground(MUTED);
+        detail.setFont(scale.font(detail.getFont(), Font.PLAIN, 13f));
+        detail.setAlignmentX(LEFT_ALIGNMENT);
+
+        loggingWarning.setName("operationLoggingWarning");
+        loggingWarning.setForeground(GOLD);
+        loggingWarning.setFont(scale.font(loggingWarning.getFont(), Font.PLAIN, 12f));
+        loggingWarning.setAlignmentX(LEFT_ALIGNMENT);
+        loggingWarning.setVisible(false);
+
         progress.setName("operationProgressBar");
+        progress.setForeground(GOLD);
+        progress.setBackground(TRACK);
+        progress.setBorder(BorderFactory.createLineBorder(new Color(91, 124, 122)));
         progress.setStringPainted(true);
         progress.setIndeterminate(true);
-        progress.setString("Starting...");
+        progress.setString("Starting…");
+        progress.setPreferredSize(scale.scaleForGUI(500, 22));
+        progress.setMaximumSize(new Dimension(Integer.MAX_VALUE, scale.scaleForGUI(22)));
+        progress.setAlignmentX(LEFT_ALIGNMENT);
+        progress.setUI(new BasicProgressBarUI() {
+            @Override protected Color getSelectionBackground() {
+                return BACKGROUND;
+            }
+
+            @Override protected Color getSelectionForeground() {
+                return TEXT;
+            }
+        });
+
         log = LauncherFrame.textArea("");
         log.setName(logName);
 
         JPanel summary = new JPanel();
-        summary.setLayout(new javax.swing.BoxLayout(summary,
-                javax.swing.BoxLayout.Y_AXIS));
+        summary.setName("operationSummary");
+        summary.setLayout(new BoxLayout(summary, BoxLayout.Y_AXIS));
+        summary.setOpaque(false);
+        summary.setBorder(BorderFactory.createEmptyBorder());
         summary.add(phase);
-        summary.add(javax.swing.Box.createVerticalStrut(5));
+        summary.add(beforeProgress);
         summary.add(progress);
-        summary.add(javax.swing.Box.createVerticalStrut(5));
+        summary.add(afterProgress);
         summary.add(detail);
+        summary.add(loggingWarning);
 
-        actions.add(viewLogs);
-        actions.add(copy);
+        styleButton(cancel);
+        styleButton(viewDetails);
+        viewDetails.setVisible(false);
+        actions.setName("operationActions");
+        actions.setBackground(BACKGROUND);
+        actions.add(viewDetails);
         actions.add(cancel);
 
-        JPanel panel = new JPanel(new BorderLayout(8, 8));
-        panel.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
-        panel.add(summary, BorderLayout.NORTH);
-        panel.add(new JScrollPane(log), BorderLayout.CENTER);
+        JPanel panel = new JPanel(new BorderLayout(0, scale.scaleForGUI(14)));
+        panel.setName("operationProgressContent");
+        panel.setBackground(BACKGROUND);
+        panel.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(18),
+                scale.scaleForGUI(18), scale.scaleForGUI(16), scale.scaleForGUI(18)));
+        panel.add(summary, BorderLayout.CENTER);
         panel.add(actions, BorderLayout.SOUTH);
         setContentPane(panel);
-        setSize(new Dimension(760, 440));
+        setSize(scale.scaleForGUI(560, 220));
+        setMinimumSize(scale.scaleForGUI(480, 205));
         setLocationRelativeTo(owner);
 
         cancel.addActionListener(event -> requestCancellation());
-        viewLogs.addActionListener(event -> showLogs.run());
-        copy.addActionListener(event -> Toolkit.getDefaultToolkit().getSystemClipboard()
-                .setContents(new StringSelection(SanitizedErrors.document(log.getText())), null));
+        viewDetails.addActionListener(event -> {
+            if (failure == null) {
+                this.showLogs.run();
+            } else {
+                owner.showOperationFailureDetails(getTitle() + " details", failure);
+            }
+        });
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent event) {
@@ -108,30 +187,88 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
     }
 
     void append(String text) {
-        LauncherFrame.appendBounded(log, text);
+        if (SwingUtilities.isEventDispatchThread()) {
+            LauncherFrame.appendBounded(log, text);
+        } else {
+            SwingUtilities.invokeLater(() -> LauncherFrame.appendBounded(log, text));
+        }
     }
 
-    void markFinished() {
+    void startNonCancellable(String message) {
+        nonCancellableFromStart = true;
+        cancel.setEnabled(false);
+        cancel.setVisible(false);
+        detail.setText(concise(message));
+    }
+
+    void showFailure(Throwable problem) {
+        showFailure(problem, null);
+    }
+
+    void showFailure(Throwable problem, String logWarning) {
+        failure = problem;
+        failureShown = true;
         finished = true;
-        flush();
+        pending.set(null);
         updateTimer.stop();
+        progress.setVisible(false);
+        beforeProgress.setVisible(false);
+        afterProgress.setVisible(false);
+        phase.setText(getTitle() == null || getTitle().isBlank()
+                ? "Operation failed" : getTitle());
+        detail.setText(conciseFailure(problem));
+        if (logWarning != null && !logWarning.isBlank()) {
+            loggingWarning.setText(
+                    "Local diagnostics could not be saved. The original failure is unchanged.");
+            loggingWarning.setBorder(BorderFactory.createEmptyBorder(
+                    scale.scaleForGUI(8), 0, 0, 0));
+            loggingWarning.setVisible(true);
+        }
+        for (JButton button : contextualActions) {
+            button.setVisible(button.isEnabled());
+        }
+        viewDetails.setVisible(true);
         cancel.setText("Close");
+        cancel.getAccessibleContext().setAccessibleName("Close");
         cancel.setEnabled(true);
+        cancel.setVisible(true);
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        actions.revalidate();
+        getContentPane().revalidate();
+        getContentPane().repaint();
+    }
+
+    void showCancelled() {
+        finished = true;
+        pending.set(null);
+        updateTimer.stop();
+        dispose();
     }
 
     void addActionButton(JButton button) {
         button.putClientProperty(OPERATION_CONTROL, Boolean.TRUE);
+        styleButton(button);
+        contextualActions.add(button);
+        button.setVisible(false);
+        button.addPropertyChangeListener("enabled", event ->
+                button.setVisible(failureShown && button.isEnabled()));
         actions.add(button, 0);
         actions.revalidate();
     }
 
     @Override
     public void onProgress(OperationProgress event) {
+        // OperationLogStore still receives terminal typed progress. The dialog waits for the
+        // authoritative outcome handler so it never flashes Finished/100% before success closes
+        // or a compact failure state is ready.
+        if (event.outcome() != OperationOutcome.RUNNING) return;
         pending.set(event);
-        if (event.outcome() != org.megamek.launcher.operation.OperationOutcome.RUNNING) {
-            SwingUtilities.invokeLater(this::flush);
-        }
+    }
+
+    @Override
+    public void dispose() {
+        if (updateTimer != null) updateTimer.stop();
+        super.dispose();
     }
 
     private void requestCancellation() {
@@ -140,21 +277,24 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
             return;
         }
         if (context == null) return;
-        OperationContext.CancellationRequest request = context.requestCancellation();
-        if (request.accepted()) {
+        if (nonCancellableFromStart) {
             cancel.setEnabled(false);
-            cancel.setText("Cancelling...");
-            detail.setText(request.reason());
+            cancel.setVisible(false);
+            detail.setText(finishingMessage(context.type(), null));
+            return;
+        }
+        OperationContext.CancellationRequest request = context.requestCancellation();
+        cancel.setEnabled(false);
+        cancel.setVisible(false);
+        if (request.accepted()) {
+            detail.setText("Cancelling safely…");
             if (request.closeFailure() != null) {
                 append("\nCancellation resource-close warning: "
                         + SanitizedErrors.display(request.closeFailure()) + "\n");
             }
             return;
         }
-        cancel.setEnabled(false);
-        detail.setText(request.reason());
-        JOptionPane.showMessageDialog(this, request.reason(),
-                "Cancellation unavailable", JOptionPane.INFORMATION_MESSAGE);
+        detail.setText(finishingMessage(context.type(), request.reason()));
     }
 
     private void flush() {
@@ -163,18 +303,21 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
             return;
         }
         OperationProgress event = pending.getAndSet(null);
-        if (event == null || !isDisplayable()) return;
+        if (event == null || !isDisplayable() || finished) return;
         phase.setText(event.phase().displayName());
-        detail.setText(event.detail().isBlank() ? " " : event.detail());
-        if (event.determinate()) {
+        boolean extraction = event.phase() == OperationPhase.EXTRACT;
+        if (extraction) {
+            progress.setIndeterminate(true);
+            progress.setStringPainted(false);
+            progress.setString(null);
+        } else if (event.determinate()) {
+            progress.setStringPainted(true);
             progress.setIndeterminate(false);
             int value = (int) Math.min(100,
                     Math.round(100.0 * event.completed() / event.total()));
             progress.setValue(value);
             if (event.unit() == ProgressUnit.BYTES) {
-                progress.setString(NumberFormat.getIntegerInstance().format(event.completed())
-                        + " / " + NumberFormat.getIntegerInstance().format(event.total())
-                        + " bytes");
+                progress.setString(value + "%");
             } else if (event.unit() == ProgressUnit.FILES) {
                 progress.setString(NumberFormat.getIntegerInstance().format(event.completed())
                         + " / " + NumberFormat.getIntegerInstance().format(event.total())
@@ -183,27 +326,159 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
                 progress.setString(value + "%");
             }
         } else {
-            progress.setIndeterminate(event.outcome()
-                    == org.megamek.launcher.operation.OperationOutcome.RUNNING);
-            progress.setString(event.outcome()
-                    == org.megamek.launcher.operation.OperationOutcome.RUNNING
-                    ? "Working..." : event.outcome().name());
+            progress.setStringPainted(true);
+            progress.setIndeterminate(true);
+            progress.setString("Working…");
         }
-        cancel.setEnabled(event.cancellationAllowed());
-        cancel.setToolTipText(event.cancellationAllowed()
-                ? "Cancel before installation finalization begins"
-                : event.cancellationReason());
-        if (!event.cancellationAllowed() && event.cancellationReason() != null
-                && !event.cancellationReason().isBlank()) {
-            detail.setText(event.cancellationReason());
-        }
+        progress.getAccessibleContext().setAccessibleDescription(accessibleProgress(event));
+        boolean cancellationAllowed = event.cancellationAllowed()
+                && !nonCancellableFromStart;
+        cancel.setEnabled(cancellationAllowed);
+        cancel.setVisible(cancellationAllowed);
+        cancel.setToolTipText(cancellationAllowed
+                ? "Cancel at the next safe checkpoint" : null);
+        detail.setText(cancellationAllowed
+                ? progressDetail(event)
+                : finishingMessage(event.operationType(), event.cancellationReason()));
     }
 
-    private static JButton control(String text, String name) {
-        JButton button = new JButton(text);
-        button.setName(name);
+    private String progressDetail(OperationProgress event) {
+        if (event.phase() == OperationPhase.DOWNLOAD
+                && event.unit() == ProgressUnit.BYTES
+                && event.completed() >= 0 && event.total() > 0) {
+            return "Downloaded " + humanSize(event.completed())
+                    + " of " + humanSize(event.total());
+        }
+        if (event.phase() == OperationPhase.EXTRACT
+                && event.unit() == ProgressUnit.FILES && event.completed() >= 0) {
+            return NumberFormat.getIntegerInstance().format(event.completed())
+                    + " files processed";
+        }
+        String supplied = safeEventDetail(event.detail());
+        return supplied == null ? phaseDetail(event.phase(), event.operationType()) : supplied;
+    }
+
+    private static String accessibleProgress(OperationProgress event) {
+        if (event.phase() == OperationPhase.DOWNLOAD
+                && event.unit() == ProgressUnit.BYTES && event.total() > 0) {
+            long percentage = Math.min(100,
+                    Math.round(100.0 * event.completed() / event.total()));
+            return "Download " + percentage + " percent. Downloaded "
+                    + humanSize(event.completed()) + " of " + humanSize(event.total()) + ".";
+        }
+        if (event.phase() == OperationPhase.EXTRACT
+                && event.unit() == ProgressUnit.FILES && event.completed() >= 0) {
+            return NumberFormat.getIntegerInstance().format(event.completed())
+                    + " files processed.";
+        }
+        return event.phase().displayName();
+    }
+
+    static String humanSize(long bytes) {
+        if (bytes < 1_000) {
+            return NumberFormat.getIntegerInstance().format(Math.max(0, bytes)) + " B";
+        }
+        final String[] units = {"KB", "MB", "GB", "TB"};
+        double value = bytes;
+        int unit = -1;
+        do {
+            value /= 1_000.0;
+            unit++;
+        } while (value >= 1_000 && unit < units.length - 1);
+        NumberFormat format = NumberFormat.getNumberInstance();
+        format.setMaximumFractionDigits(value < 10 ? 1 : 0);
+        format.setMinimumFractionDigits(0);
+        return format.format(value) + " " + units[unit];
+    }
+
+    private String safeEventDetail(String supplied) {
+        if (supplied == null || supplied.isBlank()) return null;
+        String singleLine = supplied.replaceAll("\\s+", " ").trim();
+        String lower = singleLine.toLowerCase(java.util.Locale.ROOT);
+        boolean pathOrAddress = singleLine.contains("\\") || singleLine.contains("/")
+                || lower.contains("://") || lower.startsWith("file:")
+                || lower.matches("^[a-z]:.*");
+        boolean digest = lower.contains("sha-256") || lower.contains("sha256")
+                || lower.contains("digest")
+                || lower.matches(".*\\b[0-9a-f]{32,}\\b.*");
+        if (pathOrAddress || digest) return null;
+        return concise(singleLine);
+    }
+
+    private String phaseDetail(OperationPhase current, OperationType type) {
+        return switch (current) {
+            case METADATA -> type == OperationType.IMPORT_EXISTING
+                    ? "Checking the selected installation…"
+                    : "Checking release information…";
+            case DOWNLOAD -> "Downloading the verified package…";
+            case VERIFY -> type == OperationType.IMPORT_EXISTING
+                    ? "Checking installation compatibility…"
+                    : "Checking the downloaded package…";
+            case EXTRACT -> "Processing application files…";
+            case PLAN -> "Reviewing the planned changes…";
+            case AWAIT_CONSENT -> "Waiting for confirmation…";
+            case PREPARE_INSTALL -> type == OperationType.IMPORT_EXISTING
+                    ? "Registering the selected installation…"
+                    : "Preparing the installation…";
+            case APPLY -> "Applying the verified update…";
+            case RECOVER -> "Repairing the interrupted update…";
+            case CLEANUP -> "Cleaning up temporary files…";
+            case FINAL -> "Completing the operation…";
+        };
+    }
+
+    private String finishingMessage(OperationType type, String reason) {
+        if (reason != null && reason.toLowerCase(java.util.Locale.ROOT)
+                .contains("accepted")) {
+            return "Cancelling safely…";
+        }
+        String operation = switch (type) {
+            case FRESH_INSTALL -> "installation";
+            case IMPORT_EXISTING -> "import";
+            case UPDATE_PREVIEW -> "preview";
+            case UPDATE_APPLY -> "update";
+            case RECOVERY -> "recovery";
+            case GUI_ERROR -> "operation";
+        };
+        return "Finishing " + operation + " — do not close the launcher.";
+    }
+
+    private String conciseFailure(Throwable problem) {
+        if (problem == null) return "The operation could not be completed.";
+        String message = problem.getMessage();
+        if (message == null || message.isBlank()) {
+            return "The operation could not be completed.";
+        }
+        return concise(SanitizedErrors.text(message));
+    }
+
+    private String concise(String value) {
+        if (value == null || value.isBlank()) return " ";
+        String singleLine = value.replaceAll("\\s+", " ").trim();
+        return singleLine.length() <= DETAIL_LIMIT ? singleLine
+                : singleLine.substring(0, DETAIL_LIMIT - 1) + "…";
+    }
+
+    private JButton control(String text, String name) {
+        JButton button = new FirstLaunchButton(text, name, false, scale,
+                FirstLaunchButton.Size.SMALL);
         button.putClientProperty(OPERATION_CONTROL, Boolean.TRUE);
         button.getAccessibleContext().setAccessibleName(text);
+        button.getAccessibleContext().setAccessibleDescription(
+                "Operation control: " + text);
         return button;
+    }
+
+    private void styleButton(JButton button) {
+        if (button instanceof FirstLaunchButton) return;
+        button.setBackground(PANEL);
+        button.setForeground(TEXT);
+        button.setFocusPainted(true);
+        button.setOpaque(true);
+        button.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(GOLD),
+                BorderFactory.createEmptyBorder(scale.scaleForGUI(6),
+                        scale.scaleForGUI(12), scale.scaleForGUI(6),
+                        scale.scaleForGUI(12))));
     }
 }

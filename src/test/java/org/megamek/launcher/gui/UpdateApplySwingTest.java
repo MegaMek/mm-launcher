@@ -81,19 +81,18 @@ class UpdateApplySwingTest {
             JButton update = waitFor(() -> find(frame, "applyUpdateButton"));
             assertTrue(update.isEnabled());
 
-            Picker first = openPicker(frame, update);
-            SwingUtilities.invokeLater(first.inspect()::doClick);
-            JDialog firstConsent = waitForDialog("Confirm read-only preview download");
+            SwingUtilities.invokeLater(update::doClick);
+            JDialog firstConsent = waitForDialog("Confirm recommended preview download");
             String firstText = componentText(firstConsent);
-            assertTrue(firstText.contains("READ-ONLY"));
             assertTrue(firstText.contains("v2.0.0"));
             click(firstConsent, "Cancel");
             waitUntil(() -> !firstConsent.isDisplayable());
             assertEquals(0, fixture.services.previewCalls);
             assertEquals(0, fixture.services.applyCalls);
 
-            SwingUtilities.invokeLater(first.inspect()::doClick);
-            JDialog secondFirstConsent = waitForDialog("Confirm read-only preview download");
+            SwingUtilities.invokeLater(update::doClick);
+            JDialog secondFirstConsent =
+                    waitForDialog("Confirm recommended preview download");
             click(secondFirstConsent, "OK");
             JDialog applyConsent = waitForDialog("Authorize update Apply");
             String applyText = componentText(applyConsent);
@@ -117,9 +116,10 @@ class UpdateApplySwingTest {
                         "cancel after preparation must discard its exact workspace");
             }
 
-            Picker finalPicker = openPicker(frame, update);
-            SwingUtilities.invokeLater(finalPicker.inspect()::doClick);
-            JDialog finalFirstConsent = waitForDialog("Confirm read-only preview download");
+            JButton finalUpdate = waitFor(() -> find(frame, "applyUpdateButton"));
+            SwingUtilities.invokeLater(finalUpdate::doClick);
+            JDialog finalFirstConsent =
+                    waitForDialog("Confirm recommended preview download");
             click(finalFirstConsent, "OK");
             JDialog finalApplyConsent = waitForDialog("Authorize update Apply");
 
@@ -155,8 +155,7 @@ class UpdateApplySwingTest {
             });
             JButton home = waitFor(() -> find(frame, "homeButton"));
             SwingUtilities.invokeAndWait(home::doClick);
-            JLabel mainName = waitFor(() -> find(frame, "mainInstallationName"));
-            assertEquals("New preference", mainName.getText());
+            assertEquals(null, find(frame, "mainInstallationName"));
         } finally {
             dispose(frame);
         }
@@ -168,9 +167,10 @@ class UpdateApplySwingTest {
         LauncherFrame frame = onEdt(() -> new LauncherFrame(fixture.services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
+            navigateToInstallations(frame);
             JButton check = waitFor(() -> find(frame, "checkUpdatesButton"));
             SwingUtilities.invokeAndWait(check::doClick);
-            JButton recommended = waitFor(() -> find(frame, "recommendedUpdateButton"));
+            JButton recommended = waitFor(() -> find(frame, "applyUpdateButton"));
 
             SwingUtilities.invokeLater(recommended::doClick);
             JDialog firstConsent = waitForDialog("Confirm recommended preview download");
@@ -217,9 +217,9 @@ class UpdateApplySwingTest {
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             navigateToInstallations(frame);
-            Picker picker = openPicker(frame, waitFor(() -> find(frame, "applyUpdateButton")));
-            SwingUtilities.invokeLater(picker.inspect()::doClick);
-            click(waitForDialog("Confirm read-only preview download"), "OK");
+            JButton update = waitFor(() -> find(frame, "applyUpdateButton"));
+            SwingUtilities.invokeLater(update::doClick);
+            click(waitForDialog("Confirm recommended preview download"), "OK");
             assertTrue(fixture.services.network.binaryStarted.await(5, TimeUnit.SECONDS));
 
             SwingUtilities.invokeAndWait(frame::dispose);
@@ -272,9 +272,10 @@ class UpdateApplySwingTest {
         LauncherFrame frame = onEdt(() -> new LauncherFrame(fixture.services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
+            navigateToInstallations(frame);
             JButton check = waitFor(() -> find(frame, "checkUpdatesButton"));
             SwingUtilities.invokeAndWait(check::doClick);
-            JButton recommended = waitFor(() -> find(frame, "recommendedUpdateButton"));
+            JButton recommended = waitFor(() -> find(frame, "applyUpdateButton"));
             SwingUtilities.invokeLater(recommended::doClick);
             click(waitForDialog("Confirm recommended preview download"), "OK");
             JDialog applyConsent = waitForDialog("Authorize update Apply");
@@ -307,9 +308,8 @@ class UpdateApplySwingTest {
             SwingUtilities.invokeAndWait(frame::showWindow);
             navigateToInstallations(frame);
             JButton update = waitFor(() -> find(frame, "applyUpdateButton"));
-            Picker picker = openPicker(frame, update);
-            SwingUtilities.invokeLater(picker.inspect()::doClick);
-            click(waitForDialog("Confirm read-only preview download"), "OK");
+            SwingUtilities.invokeLater(update::doClick);
+            click(waitForDialog("Confirm recommended preview download"), "OK");
             click(waitForDialog("Authorize update Apply"), "OK");
             waitUntil(() -> fixture.services.applyCalls == 1);
 
@@ -321,7 +321,7 @@ class UpdateApplySwingTest {
             assertTrue(recovery.isEnabled());
             SwingUtilities.invokeAndWait(
                     () -> ((JButton) find(frame, "homeButton")).doClick());
-            assertNotNull(find(frame, "preferredUnavailableTitle"));
+            assertNotNull(find(frame, "resolveHomeBlockerButton"));
         } finally {
             dispose(frame);
         }
@@ -360,23 +360,10 @@ class UpdateApplySwingTest {
         return new Fixture(services, first, second, firstCurrent);
     }
 
-    private static Picker openPicker(LauncherFrame frame, JButton update) throws Exception {
-        SwingUtilities.invokeAndWait(update::doClick);
-        JDialog picker = waitForDialog("Choose update");
-        JButton fetch = find(picker, "fetchPreviewReleasesButton");
-        SwingUtilities.invokeAndWait(fetch::doClick);
-        JList<?> releases = waitFor(() -> find(picker, "previewReleaseList"));
-        waitUntil(() -> releases.getModel().getSize() == 1);
-        SwingUtilities.invokeAndWait(() -> releases.setSelectedIndex(0));
-        JButton inspect = find(picker, "runPreviewButton");
-        waitUntil(inspect::isEnabled);
-        return new Picker(picker, inspect);
-    }
-
     private static void navigateToInstallations(LauncherFrame frame) throws Exception {
         JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
         SwingUtilities.invokeAndWait(installations::doClick);
-        waitFor(() -> find(frame, "installationList"));
+        waitFor(() -> find(frame, "installationCards"));
     }
 
     private static void click(Container dialog, String text) throws Exception {
@@ -537,9 +524,6 @@ class UpdateApplySwingTest {
     private static String sha(byte[] bytes) throws Exception {
         return HexFormat.of().formatHex(
                 MessageDigest.getInstance("SHA-256").digest(bytes));
-    }
-
-    private record Picker(JDialog dialog, JButton inspect) {
     }
 
     private record Fixture(FakeServices services, InstallationRecord first,

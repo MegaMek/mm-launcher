@@ -4,7 +4,7 @@ public enum OperationPhase {
     METADATA("Reading metadata"),
     DOWNLOAD("Downloading package"),
     VERIFY("Verifying package"),
-    EXTRACT("Extracting package"),
+    EXTRACT("Extracting application files"),
     PLAN("Planning changes"),
     AWAIT_CONSENT("Awaiting confirmation"),
     PREPARE_INSTALL("Preparing installation"),

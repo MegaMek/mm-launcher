@@ -4,9 +4,9 @@ import org.megamek.launcher.channel.ChannelPreference;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.ChannelUpdateChecker;
 import org.megamek.launcher.channel.FollowChannel;
+import org.megamek.launcher.channel.QuickInstallSnapshot;
 import org.megamek.launcher.diagnostics.SanitizedErrors;
 import org.megamek.launcher.onboarding.ExistingImportService;
-import org.megamek.launcher.onboarding.Inspection;
 import org.megamek.launcher.onboarding.NormalInstallService;
 import org.megamek.launcher.onboarding.Product;
 import org.megamek.launcher.operation.OperationCancelledException;
@@ -34,17 +34,18 @@ import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JList;
+import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
-import javax.swing.JSeparator;
 import javax.swing.JTextArea;
-import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
 import javax.swing.SwingWorker;
 import javax.swing.WindowConstants;
 import java.awt.BorderLayout;
+import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Dimension;
@@ -74,9 +75,9 @@ import java.util.function.Consumer;
 
 public final class LauncherFrame extends JFrame {
     private static final int LOG_LIMIT = 64_000;
-    private static final String NORMAL_FOLDER = "Main";
     private final LauncherServices services;
     private final ExistingImportPrompts existingImportPrompts;
+    private final NormalInstallLocationPrompts normalInstallLocationPrompts;
     private final BusyGate gate = new BusyGate();
     private final Map<Component, Boolean> enabledBeforeWork = new IdentityHashMap<>();
     private final JPanel content = new JPanel(new BorderLayout(12, 12));
@@ -87,7 +88,7 @@ public final class LauncherFrame extends JFrame {
     private ChannelUpdateChecker.Result channelCheck;
     private String channelCheckError;
     private SwingWorker<ChannelUpdateChecker.Result, Void> channelWorker;
-    private SwingWorker<String, Void> firstLaunchMilestoneWorker;
+    private SwingWorker<QuickInstallSnapshot, Void> firstLaunchOptionsWorker;
     private SwingWorker<Map<String, InstallationCheck>, Void> otherChecksWorker;
     private SwingWorker<InstallationCheck, Void> installationCheckWorker;
     private final Map<String, InstallationCheck> installationChecks = new HashMap<>();
@@ -97,22 +98,40 @@ public final class LauncherFrame extends JFrame {
     private Throwable firstLaunchArtworkError;
     private FirstLaunchSplitButton firstLaunchSplitButton;
     private FirstLaunchPanel firstLaunchPanel;
+    private final List<HomeLaunchSplitButton> homeLaunchButtons =
+            new java.util.ArrayList<>();
+    private JButton homeInstallationsButton;
+    private JButton homeUpdateSummary;
     private boolean homeSizeInitialized;
     private long homeGeneration;
     private Page page = Page.HOME;
     private String selectedInstallationId;
-    private LauncherSettingsStore.Settings launcherSettings;
+    private LauncherServices.SettingsView launcherSettings;
     private Throwable launcherSettingsError;
     private boolean settingsLoading;
+    private String homeNotice;
 
     public LauncherFrame(LauncherServices services) {
-        this(services, new SwingExistingImportPrompts());
+        this(services, new SwingExistingImportPrompts(),
+                new SwingNormalInstallLocationPrompts());
     }
 
     LauncherFrame(LauncherServices services, ExistingImportPrompts existingImportPrompts) {
+        this(services, existingImportPrompts, new SwingNormalInstallLocationPrompts());
+    }
+
+    LauncherFrame(LauncherServices services,
+                  NormalInstallLocationPrompts normalInstallLocationPrompts) {
+        this(services, new SwingExistingImportPrompts(), normalInstallLocationPrompts);
+    }
+
+    private LauncherFrame(LauncherServices services,
+                          ExistingImportPrompts existingImportPrompts,
+                          NormalInstallLocationPrompts normalInstallLocationPrompts) {
         super("MegaMek Launcher");
         this.services = services;
         this.existingImportPrompts = existingImportPrompts;
+        this.normalInstallLocationPrompts = normalInstallLocationPrompts;
         status.addPropertyChangeListener("text", event ->
                 status.setVisible(status.getText() != null && !status.getText().isBlank()));
         setName("launcherFrame");
@@ -126,20 +145,21 @@ public final class LauncherFrame extends JFrame {
                 if (gate.isBusy()) {
                     OperationContext operation = activeOperation.get();
                     if (operation != null) {
+                        if (operation.type() == OperationType.RECOVERY) {
+                            status.setText(
+                                    "Recovery is finishing — keep the launcher open.");
+                            return;
+                        }
                         OperationContext.CancellationRequest request =
                                 operation.requestCancellation();
                         if (request.accepted()) {
                             status.setText("Cancelling at a safe checkpoint...");
                             return;
                         }
-                        JOptionPane.showMessageDialog(LauncherFrame.this, request.reason(),
-                                "Operation in progress", JOptionPane.WARNING_MESSAGE);
+                        status.setText("The operation is finishing — keep the launcher open.");
                         return;
                     }
-                    JOptionPane.showMessageDialog(LauncherFrame.this,
-                            "An operation is still running. The launcher must remain open until "
-                                    + "it finishes; downloads and games are not force-cancelled.",
-                            "Operation in progress", JOptionPane.WARNING_MESSAGE);
+                    status.setText("An operation is still running — keep the launcher open.");
                 } else {
                     dispose();
                 }
@@ -160,7 +180,8 @@ public final class LauncherFrame extends JFrame {
     private void reload() {
         homeGeneration++;
         disposeFirstLaunchSplitButton();
-        cancelFirstLaunchMilestoneWorker();
+        disposeHomeLaunchButtons();
+        cancelFirstLaunchOptionsWorker();
         cancelChannelWorker();
         channelCheck = null;
         channelCheckError = null;
@@ -202,47 +223,67 @@ public final class LauncherFrame extends JFrame {
 
     private void renderHome() {
         disposeFirstLaunchSplitButton();
+        disposeHomeLaunchButtons();
         content.removeAll();
-        if (state.preferred() == null && state.preferredError() == null) {
+        if (state.registry().installations().isEmpty()) {
             renderFirstLaunch();
             content.revalidate();
             content.repaint();
             return;
         }
-        restoreStandardChrome();
+        content.setBorder(BorderFactory.createEmptyBorder());
+        content.setBackground(FirstLaunchPanel.BACKGROUND);
         homeSizeInitialized = true;
-        JPanel header = new JPanel();
-        header.setLayout(new BoxLayout(header, BoxLayout.Y_AXIS));
-        JLabel title = new JLabel("MegaMek Launcher");
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 26f));
-        title.setName("homeTitle");
-        header.add(title);
-        header.add(Box.createVerticalStrut(4));
-        status.setText(channelWorker == null ? "Ready" : "Checking for updates…");
-        header.add(status);
-        content.add(header, BorderLayout.NORTH);
+        status.setText(channelWorker == null ? "" : "Checking for updates…");
 
         JPanel center = new JPanel();
         center.setLayout(new BoxLayout(center, BoxLayout.Y_AXIS));
-        center.setBorder(BorderFactory.createEmptyBorder(22, 0, 14, 0));
-        if (state.preferredError() != null) renderUnavailable(center);
-        else renderPreferred(center, state.preferred(), state.currentInspection());
-        content.add(firstLaunchArtwork == null ? center
-                : FirstLaunchPanel.managedHome(firstLaunchArtwork, guiScale, center),
-                BorderLayout.CENTER);
+        center.setName("managedHomeDeck");
+        center.setBackground(FirstLaunchPanel.PANEL);
+        center.setBorder(BorderFactory.createEmptyBorder());
+        if (homeNotice != null && !homeNotice.isBlank()) {
+            JLabel notice = new JLabel(homeNotice);
+            notice.setName("installationReadyNotice");
+            notice.setOpaque(false);
+            notice.setForeground(new Color(232, 211, 146));
+            notice.setFont(guiScale.font(notice.getFont(), Font.PLAIN, 12f));
+            notice.setBorder(BorderFactory.createEmptyBorder(0,
+                    guiScale.scaleForGUI(8), 0, guiScale.scaleForGUI(8)));
+            notice.setAlignmentX(Component.CENTER_ALIGNMENT);
+            notice.setMaximumSize(new Dimension(Integer.MAX_VALUE,
+                    notice.getPreferredSize().height));
+            center.add(notice);
+            center.add(Box.createVerticalStrut(guiScale.scaleForGUI(12)));
+        }
+        renderApplicationLaunches(center);
+        renderHomeUpdateSummary(center);
 
-        JButton manage = button("Installations", "manageInstallationsButton");
+        center.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
+        status.setForeground(FirstLaunchPanel.MUTED);
+        status.setFont(guiScale.font(status.getFont(), Font.PLAIN, 11f));
+        status.setAlignmentX(Component.CENTER_ALIGNMENT);
+        center.add(status);
+        center.add(Box.createVerticalStrut(guiScale.scaleForGUI(5)));
+
+        JButton manage = homeButton("Installations", "manageInstallationsButton");
         manage.setMnemonic(java.awt.event.KeyEvent.VK_I);
         manage.addActionListener(event -> navigateTo(Page.INSTALLATIONS));
-        JButton settings = button("Settings", "settingsButton");
+        homeInstallationsButton = manage;
+        updateHomeInstallationsLabel();
+        JButton settings = homeButton("Settings", "settingsButton");
         settings.setMnemonic(java.awt.event.KeyEvent.VK_S);
         settings.addActionListener(event -> navigateTo(Page.SETTINGS));
-        JPanel left = new JPanel();
-        left.add(manage);
-        left.add(settings);
-        JPanel footer = new JPanel(new BorderLayout());
-        footer.add(left, BorderLayout.WEST);
-        content.add(footer, BorderLayout.SOUTH);
+        JPanel navigation = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.CENTER,
+                guiScale.scaleForGUI(8), 0));
+        navigation.setName("managedHomeNavigation");
+        navigation.setOpaque(false);
+        navigation.setAlignmentX(Component.CENTER_ALIGNMENT);
+        navigation.add(manage);
+        navigation.add(settings);
+        center.add(navigation);
+
+        content.add(FirstLaunchPanel.managedHome(firstLaunchArtwork, guiScale, center),
+                BorderLayout.CENTER);
         content.revalidate();
         content.repaint();
     }
@@ -257,9 +298,11 @@ public final class LauncherFrame extends JFrame {
 
     private void navigateTo(Page next) {
         if (gate.isBusy()) return;
+        if (next != page) homeNotice = null;
         if (next != Page.HOME) {
             disposeFirstLaunchSplitButton();
-            cancelFirstLaunchMilestoneWorker();
+            disposeHomeLaunchButtons();
+            cancelFirstLaunchOptionsWorker();
         }
         page = next;
         if (next == Page.SETTINGS) {
@@ -275,7 +318,7 @@ public final class LauncherFrame extends JFrame {
         if (settingsLoading) return;
         settingsLoading = true;
         renderSettingsPage();
-        run("Loading settings", services::settings, loaded -> {
+        run("Loading settings", services::settingsView, loaded -> {
             settingsLoading = false;
             launcherSettings = loaded;
             launcherSettingsError = null;
@@ -289,23 +332,6 @@ public final class LauncherFrame extends JFrame {
             renderSettingsPage();
         }, () -> {
         }, false);
-    }
-
-    private void renderUnavailable(JPanel panel) {
-        JLabel heading = new JLabel("Preferred installation unavailable");
-        heading.setName("preferredUnavailableTitle");
-        heading.setFont(heading.getFont().deriveFont(Font.BOLD, 20f));
-        panel.add(heading);
-        panel.add(Box.createVerticalStrut(10));
-        JTextArea details = textArea(state.preferredError());
-        details.setName("preferredUnavailableDetails");
-        panel.add(details);
-        panel.add(Box.createVerticalStrut(8));
-        panel.add(new JLabel("Choose another copy in Installations, or repair this one."));
-        JButton installations = button("Choose another copy", "chooseAnotherInstallationButton");
-        installations.addActionListener(event -> navigateTo(Page.INSTALLATIONS));
-        panel.add(installations);
-        renderRecoveryAction(panel);
     }
 
     private void renderLoadError(Throwable error) {
@@ -347,6 +373,7 @@ public final class LauncherFrame extends JFrame {
     private void restoreStandardChrome() {
         content.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(20),
                 guiScale.scaleForGUI(24), guiScale.scaleForGUI(18), guiScale.scaleForGUI(24)));
+        content.setBackground(javax.swing.UIManager.getColor("Panel.background"));
         status.setFont(javax.swing.UIManager.getFont("Label.font"));
         status.setForeground(javax.swing.UIManager.getColor("Label.foreground"));
     }
@@ -359,17 +386,18 @@ public final class LauncherFrame extends JFrame {
         FirstLaunchSplitButton download = new FirstLaunchSplitButton(guiScale,
                 () -> {
                     if (!isCurrentFirstLaunch(generation, capturedHome, source[0])) return;
-                    cancelFirstLaunchMilestoneWorker();
-                    prepareNormalInstall(FollowChannel.MILESTONE, null, null);
+                    cancelFirstLaunchOptionsWorker();
+                    prepareNormalInstall(OfficialRepository.MEKHQ,
+                            FollowChannel.MILESTONE, null, null);
+                },
+                key -> {
+                    if (!isCurrentFirstLaunch(generation, capturedHome, source[0])) return;
+                    cancelFirstLaunchOptionsWorker();
+                    prepareNormalInstall(key.repository(), key.channel(), null, null);
                 },
                 () -> {
                     if (!isCurrentFirstLaunch(generation, capturedHome, source[0])) return;
-                    cancelFirstLaunchMilestoneWorker();
-                    prepareNormalInstall(FollowChannel.DEVELOPMENT, null, null);
-                },
-                () -> {
-                    if (!isCurrentFirstLaunch(generation, capturedHome, source[0])) return;
-                    downloadDialog();
+                    resumeFirstLaunchOptions();
                 });
         source[0] = download;
         firstLaunchSplitButton = download;
@@ -384,10 +412,10 @@ public final class LauncherFrame extends JFrame {
                 ? ""
                 : "Artwork unavailable; diagnostics are available in Settings.");
         FirstLaunchPanel firstLaunch = new FirstLaunchPanel(firstLaunchArtwork, guiScale,
-                download, useExisting, "Latest Milestone", status);
+                download, useExisting, status);
         firstLaunchPanel = firstLaunch;
         content.add(firstLaunch, BorderLayout.CENTER);
-        startFirstLaunchMilestoneCheck(firstLaunch);
+        startFirstLaunchOptionsCheck(firstLaunch, download);
         if (!homeSizeInitialized) {
             homeSizeInitialized = true;
             Dimension preferred = firstLaunch.getPreferredSize();
@@ -397,38 +425,40 @@ public final class LauncherFrame extends JFrame {
         }
     }
 
-    private void startFirstLaunchMilestoneCheck(FirstLaunchPanel panel) {
-        if (firstLaunchMilestoneWorker != null) return;
+    private void startFirstLaunchOptionsCheck(FirstLaunchPanel panel,
+                                              FirstLaunchSplitButton split) {
+        if (firstLaunchOptionsWorker != null) return;
         final long generation = homeGeneration;
-        firstLaunchMilestoneWorker = new SwingWorker<>() {
+        firstLaunchOptionsWorker = new SwingWorker<>() {
             @Override
-            protected String doInBackground() throws Exception {
-                return services.latestMilestoneVersion();
+            protected QuickInstallSnapshot doInBackground() throws Exception {
+                return services.quickInstallSnapshot();
             }
 
             @Override
             protected void done() {
-                if (firstLaunchMilestoneWorker != this) return;
-                firstLaunchMilestoneWorker = null;
+                if (firstLaunchOptionsWorker != this) return;
+                firstLaunchOptionsWorker = null;
                 if (isCancelled() || !isDisplayable() || generation != homeGeneration
                         || page != Page.HOME || state == null || state.preferred() != null
-                        || panel != firstLaunchPanel || panel.getParent() != content) {
+                        || panel != firstLaunchPanel || split != firstLaunchSplitButton
+                        || panel.getParent() != content) {
                     return;
                 }
                 try {
-                    panel.setReleaseChannel("Latest Milestone (" + get() + ")",
-                            "Validated from the official Milestone release metadata.");
+                    QuickInstallSnapshot snapshot = get();
+                    split.setOptions(snapshot);
                 } catch (java.util.concurrent.ExecutionException error) {
-                    panel.setReleaseChannel("Latest Milestone",
-                            "Current version unavailable. Download & install will retry.");
+                    split.setOptionsUnavailable(
+                            "Version unavailable. Close and reopen this menu to retry.");
                 } catch (InterruptedException error) {
                     Thread.currentThread().interrupt();
-                    panel.setReleaseChannel("Latest Milestone",
-                            "Current version check was interrupted.");
+                    split.setOptionsUnavailable(
+                            "Version check interrupted. Close and reopen this menu to retry.");
                 }
             }
         };
-        firstLaunchMilestoneWorker.execute();
+        firstLaunchOptionsWorker.execute();
     }
 
     private boolean isCurrentFirstLaunch(long generation, LauncherServices.HomeState capturedHome,
@@ -446,16 +476,32 @@ public final class LauncherFrame extends JFrame {
         firstLaunchPanel = null;
     }
 
-    private void resumeFirstLaunchMilestoneCaption() {
+    private void disposeHomeLaunchButtons() {
+        for (HomeLaunchSplitButton button : homeLaunchButtons) {
+            button.disposePopup();
+        }
+        homeLaunchButtons.clear();
+        homeInstallationsButton = null;
+        homeUpdateSummary = null;
+    }
+
+    private void updateHomeInstallationsLabel() {
+        if (homeInstallationsButton == null) return;
+        String text = "Installations";
+        homeInstallationsButton.setText(text);
+        homeInstallationsButton.getAccessibleContext().setAccessibleName(text);
+        updateHomeUpdateSummary();
+    }
+
+    private void resumeFirstLaunchOptions() {
         if (!isDisplayable() || page != Page.HOME || state == null
                 || state.preferred() != null || firstLaunchPanel == null
                 || firstLaunchSplitButton == null) {
             return;
         }
         status.setText("");
-        firstLaunchPanel.setReleaseChannel("Latest Milestone",
-                "Checking the current official Milestone release metadata.");
-        startFirstLaunchMilestoneCheck(firstLaunchPanel);
+        firstLaunchSplitButton.setOptionsLoading();
+        startFirstLaunchOptionsCheck(firstLaunchPanel, firstLaunchSplitButton);
     }
 
     private void fitWindowToScreen(Dimension requested) {
@@ -470,102 +516,157 @@ public final class LauncherFrame extends JFrame {
                 fitted.width, fitted.height);
     }
 
-    private void renderPreferred(JPanel panel, InstallationRecord record, Inspection inspection) {
-        JLabel name = new JLabel(record.name());
-        name.setName("mainInstallationName");
-        name.setFont(name.getFont().deriveFont(Font.BOLD, 21f));
-        panel.add(name);
-        panel.add(Box.createVerticalStrut(7));
-        JLabel version = new JLabel("Version " + inspection.observedBuild());
-        version.setName("mainInstallationVersion");
-        panel.add(version);
-        panel.add(Box.createVerticalStrut(18));
-        JPanel launches = new JPanel();
-        launches.setLayout(new BoxLayout(launches, BoxLayout.X_AXIS));
-        for (Product product : inspection.products()) {
-            JButton launch = button("Launch " + displayProduct(product.key()),
-                    "launch-" + product.key() + "-button");
-            launch.addActionListener(event -> previewLaunch(record, product));
+    private void renderApplicationLaunches(JPanel panel) {
+        Map<String, InstallationRecord> targets = new java.util.LinkedHashMap<>();
+        if (state.preferredApplications() != null) {
+            targets.putAll(state.preferredApplications());
+        }
+        // Compatibility for synthetic HomeState values used by older callers/tests.
+        for (String key : List.of("megamek", "mekhq", "lab")) {
+            if (targets.containsKey(key)) continue;
+            String preferredId = state.registry().preferredInstallationIds().get(key);
+            InstallationRecord fallback = state.registry().installations().stream()
+                    .filter(record -> record.products().stream()
+                            .anyMatch(product -> key.equals(product.key())))
+                    .filter(record -> preferredId == null || preferredId.equals(record.id()))
+                    .findFirst().orElse(null);
+            if (fallback == null) {
+                fallback = state.registry().installations().stream()
+                        .filter(record -> record.products().stream()
+                                .anyMatch(product -> key.equals(product.key())))
+                        .findFirst().orElse(null);
+            }
+            if (fallback != null) targets.put(key, fallback);
+        }
+
+        JPanel launches = new ResponsiveHomeActions(guiScale);
+        launches.setName("homeLaunchActions");
+        launches.setOpaque(false);
+        launches.setAlignmentX(Component.CENTER_ALIGNMENT);
+        boolean missingJava = false;
+        boolean pending = false;
+        boolean unavailable = state.preferredError() != null
+                && targets.containsValue(state.preferred());
+        for (Map.Entry<String, InstallationRecord> target : targets.entrySet()) {
+            String productKey = target.getKey();
+            InstallationRecord record = target.getValue();
+            HomeLaunchSplitButton launch = new HomeLaunchSplitButton(guiScale, productKey,
+                    displayProduct(productKey), record.observedBuild(),
+                    () -> previewLaunch(record, productKey),
+                    homeLaunchAlternatives(record, productKey));
+            missingJava |= record.javaExecutable() == null;
+            LauncherServices.InstallationStatus local = installationLocalStatus(record);
+            pending |= local != null && local.pendingUpdate();
+            unavailable |= local != null && local.error() != null;
+            launch.setEnabled(record.javaExecutable() != null
+                    && (local == null || !local.pendingUpdate() && local.error() == null));
+            homeLaunchButtons.add(launch);
             launches.add(launch);
-            launches.add(Box.createHorizontalStrut(8));
         }
         panel.add(launches);
+        if (missingJava || pending || unavailable) {
+            panel.add(Box.createVerticalStrut(guiScale.scaleForGUI(7)));
+            String message = pending
+                    ? "An installation needs update recovery before it can be played."
+                    : missingJava
+                    ? "A preferred application needs Java 21+ before it can be played."
+                    : "An installation changed or is unavailable.";
+            JLabel blocker = homeStatusLabel(message);
+            blocker.setName("homeActionRequiredMessage");
+            blocker.setForeground(FirstLaunchPanel.GOLD);
+            panel.add(blocker);
+            JButton open = homeButton("Open Installations", "resolveHomeBlockerButton");
+            open.setAlignmentX(Component.CENTER_ALIGNMENT);
+            open.addActionListener(event -> navigateTo(Page.INSTALLATIONS));
+            panel.add(open);
+        }
+    }
+
+    private void renderHomeUpdateSummary(JPanel panel) {
         panel.add(Box.createVerticalStrut(guiScale.scaleForGUI(9)));
-        JLabel channel = new JLabel(homeChannelText());
-        channel.setName("releaseChannelLabel");
-        panel.add(channel);
-        panel.add(Box.createVerticalStrut(12));
-        if (record.javaExecutable() == null) {
-            JLabel missing = new JLabel("Java 21 or newer must be set up before launching.");
-            missing.setName("missingJavaMessage");
-            panel.add(missing);
-            JButton java = button("Set up Java", "selectJavaButton");
-            java.addActionListener(event -> chooseJava(record));
-            panel.add(java);
-        }
-        renderHomeUpdateAction(panel, record);
-        renderRecoveryAction(panel);
-        boolean otherAvailable = installationChecks.entrySet().stream()
-                .anyMatch(entry -> !entry.getKey().equals(record.id())
-                        && entry.getValue().result() != null
-                        && entry.getValue().result().updateAvailable());
-        if (otherAvailable) {
-            JButton others = button("Updates available for other copies",
-                    "otherUpdatesButton");
-            others.addActionListener(event -> navigateTo(Page.INSTALLATIONS));
-            panel.add(Box.createVerticalStrut(8));
-            panel.add(others);
-        }
+        homeUpdateSummary = homeButton("", "installationUpdateSummary");
+        homeUpdateSummary.setAlignmentX(Component.CENTER_ALIGNMENT);
+        homeUpdateSummary.addActionListener(event -> navigateTo(Page.INSTALLATIONS));
+        panel.add(homeUpdateSummary);
+        updateHomeUpdateSummary();
     }
 
-    private String homeChannelText() {
-        if (state.preferred() == null) return FollowChannel.MILESTONE.toString();
-        ChannelPreferenceStore.ReadResult selected = state.channelPreference();
-        if (selected == null || selected.status() == ChannelPreferenceStore.Status.UNKNOWN) {
-            return "Channel not configured";
-        }
-        if (selected.status() == ChannelPreferenceStore.Status.UNAVAILABLE) {
-            return "Channel setting needs attention";
-        }
-        return selected.preference().channel().toString();
-    }
-
-    private void renderHomeUpdateAction(JPanel panel, InstallationRecord record) {
-        if (state.previewEligibility() == null || !state.previewEligibility().available()) {
-            JLabel imported = new JLabel("Updates are unavailable for this imported copy; "
-                    + "launching still works.");
-            imported.setName("updatesUnavailableMessage");
-            panel.add(imported);
-            return;
-        }
-        ChannelPreferenceStore.ReadResult selected = state.channelPreference();
-        if (selected == null || selected.status() != ChannelPreferenceStore.Status.CONFIGURED) {
-            JButton configure = button("Choose update channel in Installations",
-                    "configureUpdatesButton");
-            configure.addActionListener(event -> navigateTo(Page.INSTALLATIONS));
-            panel.add(configure);
-            return;
-        }
-        if (channelCheck == null && channelCheckError == null) {
-            JButton check = button(channelWorker == null ? "Check for updates" : "Checking…",
-                    "checkUpdatesButton");
-            check.setEnabled(channelWorker == null);
-            check.addActionListener(event -> startChannelCheck(false));
-            panel.add(check);
-            return;
-        }
-        JLabel result = new JLabel(channelStatus(channelCheck, channelCheckError));
-        result.setName("channelCheckResult");
-        panel.add(result);
-        if (channelCheck != null && channelCheck.updateAvailable()) {
-            JButton update = button("Update", "recommendedUpdateButton");
-            update.addActionListener(event -> recommendedUpdate(channelCheck));
-            panel.add(update);
+    private void updateHomeUpdateSummary() {
+        if (homeUpdateSummary == null || state == null || state.registry() == null) return;
+        int installations = state.registry().installations().size();
+        long updates = installationChecks.values().stream()
+                .filter(check -> check.result() != null && check.result().updateAvailable())
+                .count();
+        boolean failedOrUnknown = installationChecks.size() < installations
+                || installationChecks.values().stream().anyMatch(check ->
+                check.error() != null || check.result() == null
+                        || check.result().status() == ChannelUpdateChecker.Status.UNAVAILABLE
+                        || check.result().status() == ChannelUpdateChecker.Status.UNCONFIGURED
+                        || check.result().status() == ChannelUpdateChecker.Status.NON_COMPARABLE);
+        String text;
+        if (updates > 0) {
+            text = updates + (updates == 1
+                    ? " installation has updates" : " installations have updates");
+        } else if (failedOrUnknown) {
+            text = "Some versions could not be checked";
         } else {
-            JButton again = button("Check again", "checkUpdatesButton");
-            again.addActionListener(event -> startChannelCheck(false));
-            panel.add(again);
+            text = "All installed versions are up to date";
         }
+        homeUpdateSummary.setText(text);
+        homeUpdateSummary.getAccessibleContext().setAccessibleName(text);
+        homeUpdateSummary.getAccessibleContext().setAccessibleDescription(
+                "Open Installations to review per-installation update status.");
+    }
+
+    private List<HomeLaunchSplitButton.Option> homeLaunchAlternatives(
+            InstallationRecord preferred, String productKey) {
+        if (state == null || state.registry() == null
+                || state.registry().installations() == null) {
+            return List.of();
+        }
+        return state.registry().installations().stream()
+                .filter(record -> !record.id().equals(preferred.id()))
+                .filter(record -> record.products() != null && record.products().stream()
+                        .anyMatch(product -> product.key().equals(productKey)))
+                .map(record -> new HomeLaunchSplitButton.Option(
+                        homeAlternativeLabel(record),
+                        () -> previewLaunch(record, productKey)))
+                .toList();
+    }
+
+    private String homeAlternativeLabel(InstallationRecord record) {
+        String name = record.name() == null || record.name().isBlank()
+                ? "Registered copy" : record.name();
+        String version = record.observedBuild() == null || record.observedBuild().isBlank()
+                ? "Unknown version" : record.observedBuild();
+        InstallationCheck check = installationChecks.get(record.id());
+        String channel = check == null ? null : localChannelLabel(check.channel());
+        if (channel == null && state != null && state.installationStatuses() != null) {
+            LauncherServices.InstallationStatus local = installationLocalStatus(record);
+            if (local != null && local.channelPreference() != null
+                    && local.channelPreference().status()
+                    == ChannelPreferenceStore.Status.CONFIGURED) {
+                channel = local.channelPreference().preference().channel().toString();
+            }
+        }
+        String update = check == null ? null : channelStatus(check.result(), check.error());
+        return name + " · " + version + (channel == null ? "" : " · " + channel)
+                + (update == null ? "" : " · " + update);
+    }
+
+    private static String localChannelLabel(String value) {
+        if (value == null) return null;
+        for (FollowChannel channel : FollowChannel.values()) {
+            if (channel.toString().equals(value)) return value;
+        }
+        return null;
+    }
+
+    private JLabel homeStatusLabel(String text) {
+        JLabel label = new JLabel(text);
+        label.setForeground(FirstLaunchPanel.GOLD);
+        label.setFont(guiScale.font(label.getFont(), Font.BOLD, 12f));
+        return label;
     }
 
     private static String channelStatus(ChannelUpdateChecker.Result result, String error) {
@@ -581,13 +682,12 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void chooseChannel(InstallationRecord record) {
-        final ChannelPreferenceStore.ReadResult read;
-        try {
-            read = state != null && state.preferred() != null
-                    && state.preferred().equals(record) ? state.channelPreference()
-                    : services.channelPreference(record);
-        } catch (IOException error) {
-            showError("Reading update channel failed", error);
+        LauncherServices.InstallationStatus local = installationLocalStatus(record);
+        ChannelPreferenceStore.ReadResult read =
+                local == null ? null : local.channelPreference();
+        if (read == null) {
+            showError("Reading update channel failed",
+                    new IOException("The installation status changed; reload Installations."));
             return;
         }
         if (read != null && read.status() == ChannelPreferenceStore.Status.UNAVAILABLE) {
@@ -625,6 +725,7 @@ public final class LauncherFrame extends JFrame {
 
     private void maybeCheckOnOpen() {
         if (state == null || state.preferred() == null || state.channelPreference() == null
+                || !state.automaticChecksEnabled()
                 || state.channelPreference().status() != ChannelPreferenceStore.Status.CONFIGURED
                 || !state.channelPreference().preference().checkOnOpen()
                 || state.previewEligibility() == null
@@ -646,6 +747,7 @@ public final class LauncherFrame extends JFrame {
         final ChannelPreference preference = state.channelPreference().preference();
         status.setText(automatic ? "Checking followed channel in background…"
                 : "Checking followed channel…");
+        channelCheck = null;
         channelCheckError = null;
         channelWorker = new SwingWorker<>() {
             @Override
@@ -684,7 +786,8 @@ public final class LauncherFrame extends JFrame {
                     status.setText("Unable to check for updates");
                 }
                 if (gate.isBusy()) return;
-                renderCurrentPage();
+                if (page == Page.INSTALLATIONS) renderInstallationsPage();
+                else if (page == Page.HOME) updateHomeUpdateSummary();
             }
         };
         channelWorker.execute();
@@ -706,10 +809,10 @@ public final class LauncherFrame extends JFrame {
         }
     }
 
-    private void cancelFirstLaunchMilestoneWorker() {
-        if (firstLaunchMilestoneWorker != null) {
-            firstLaunchMilestoneWorker.cancel(true);
-            firstLaunchMilestoneWorker = null;
+    private void cancelFirstLaunchOptionsWorker() {
+        if (firstLaunchOptionsWorker != null) {
+            firstLaunchOptionsWorker.cancel(true);
+            firstLaunchOptionsWorker = null;
         }
     }
 
@@ -759,7 +862,8 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void maybeCheckOtherCopiesOnOpen() {
-        if (state == null || state.registry() == null || otherChecksWorker != null) return;
+        if (state == null || state.registry() == null || otherChecksWorker != null
+                || !state.automaticChecksEnabled()) return;
         final long generation = homeGeneration;
         final RegistryData captured = state.registry();
         final String mainId = captured.defaultInstallationId();
@@ -824,16 +928,21 @@ public final class LauncherFrame extends JFrame {
                     recordErrorAsync("Background update checks", error.getCause(), ignored -> {
                     });
                 }
-                renderCurrentPage();
+                if (page == Page.INSTALLATIONS) {
+                    renderInstallationsPage();
+                } else if (page == Page.HOME) {
+                    updateHomeInstallationsLabel();
+                }
             }
         };
         otherChecksWorker.execute();
     }
 
-    private void recommendedUpdate(ChannelUpdateChecker.Result checked) {
-        if (checked == null || !checked.updateAvailable() || state == null
-                || state.preferred() == null || state.previewEligibility() == null
-                || !state.previewEligibility().available()) return;
+    private void recommendedUpdate(InstallationRecord record,
+                                   UpdatePreviewService.Eligibility eligibility,
+                                   ChannelUpdateChecker.Result checked) {
+        if (checked == null || !checked.updateAvailable() || record == null
+                || eligibility == null || !eligibility.available()) return;
         ChannelUpdateChecker.Recommendation recommendation = checked.recommendation();
         int answer = JOptionPane.showConfirmDialog(this,
                 "Installed verified tag: " + checked.currentTag()
@@ -849,23 +958,10 @@ public final class LauncherFrame extends JFrame {
                 "Confirm recommended preview download", JOptionPane.OK_CANCEL_OPTION,
                 JOptionPane.WARNING_MESSAGE);
         if (answer != JOptionPane.OK_OPTION) return;
-        runPreparedUpdate(state.preferred(), state.previewEligibility().receipt(),
-                state.previewEligibility().current(), recommendation.targetTag(),
+        runPreparedUpdate(record, eligibility.receipt(),
+                eligibility.current(), recommendation.targetTag(),
                 recommendation.assetName(),
                 recommendation.assetSize(), recommendation.assetDigest(), checked);
-    }
-
-    private void renderRecoveryAction(JPanel panel) {
-        if (state == null || state.preferred() == null) return;
-        if (!state.pendingUpdate() && (state.previewEligibility() == null
-                || state.previewEligibility().receipt() == null)) return;
-        panel.add(Box.createVerticalStrut(5));
-        JButton recover = button(state.pendingUpdate()
-                        ? "Recover interrupted update…" : "Check update recovery…",
-                "recoverUpdateButton");
-        recover.setToolTipText("Recovery is available even when static inspection or launch fails.");
-        recover.addActionListener(event -> recoverUpdate());
-        panel.add(recover);
     }
 
     private void chooseExisting(boolean firstLaunchEntry) {
@@ -908,14 +1004,15 @@ public final class LauncherFrame extends JFrame {
                 List.of(Path.of(plan.inspection().canonicalRoot())), progress,
                 context -> services.importExisting(plan, name, context),
                 result -> {
-                    progress.append("\nRegistered successfully. Nothing was launched or moved.\n");
                     progress.dispose();
+                    progress.append("\nRegistered successfully. Nothing was launched or moved.\n");
                     selectedInstallationId = result.record().id();
                     String message = result.becameMain()
                             ? "Imported “" + result.record().name()
-                            + "” and made it Main. Nothing was launched."
+                            + "” and set its included applications as preferred. "
+                            + "Nothing was launched."
                             : "Imported “" + result.record().name()
-                            + "”. The existing Main installation was not changed.";
+                            + "”. Existing application preferences were not changed.";
                     existingImportPrompts.completed(this, message);
                     page = firstLaunchEntry && result.becameMain()
                             ? Page.HOME : Page.INSTALLATIONS;
@@ -934,191 +1031,268 @@ public final class LauncherFrame extends JFrame {
                 + "\nDetected build: " + plan.inspection().observedBuild()
                 + "\nPrograms: " + programs
                 + "\nFolder: " + plan.inspection().canonicalRoot()
-                + "\nLauncher Java: Java " + plan.javaFeature() + " detected"
+                + "\nGame Java: Java " + plan.javaFeature() + " detected"
                 + "\n\nRegister this copy for launch-only use? Existing files will stay "
                 + "where they are and will not be moved. No game JAR has been executed.";
     }
 
     private void renderInstallationsPage() {
         content.removeAll();
-        restoreStandardChrome();
+        content.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(18),
+                guiScale.scaleForGUI(22), guiScale.scaleForGUI(14),
+                guiScale.scaleForGUI(22)));
+        content.setBackground(FirstLaunchPanel.BACKGROUND);
         JPanel header = pageHeader("Installations",
-                "Import a portable copy or add an exact official release.");
+                "Manage each physical installation independently.");
+        header.setBackground(FirstLaunchPanel.BACKGROUND);
+        for (Component child : header.getComponents()) child.setForeground(FirstLaunchPanel.TEXT);
+        JPanel topActions = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT,
+                guiScale.scaleForGUI(8), 0));
+        topActions.setName("installationTopActions");
+        topActions.setOpaque(false);
+        JButton install = homeButton("Install another version",
+                "installAnotherVersionButton");
+        install.addActionListener(event -> downloadDialog());
+        JButton importExisting = homeButton("Import existing installation",
+                "manageAddExistingButton");
+        importExisting.addActionListener(event -> chooseExisting(false));
+        topActions.add(install);
+        topActions.add(importExisting);
+        header.add(Box.createVerticalStrut(guiScale.scaleForGUI(8)));
+        header.add(topActions);
         content.add(header, BorderLayout.NORTH);
 
         RegistryData data = state.registry();
-        DefaultListModel<InstallationRecord> model = new DefaultListModel<>();
-        data.installations().forEach(model::addElement);
-        JList<InstallationRecord> list = new JList<>(model);
-        list.setName("installationList");
-        list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
-        list.setCellRenderer((component, value, index, selected, focus) -> {
-            InstallationCheck check = installationChecks.get(value.id());
-            String followed = check == null ? null : check.channel();
-            if (followed == null && value.id().equals(data.defaultInstallationId())
-                    && state.channelPreference() != null) {
-                followed = state.channelPreference().status()
-                        == ChannelPreferenceStore.Status.CONFIGURED
-                        ? state.channelPreference().preference().channel().toString()
-                        : state.channelPreference().status()
-                        == ChannelPreferenceStore.Status.UNKNOWN
-                        ? "Channel not configured" : "Channel setting needs attention";
-            }
-            String update = check == null ? "Not checked"
-                    : "Checking".equals(check.error()) ? "Checking"
-                    : channelStatus(check.result(), check.error());
-            String target = check == null || check.result() == null
-                    || check.result().recommendation() == null ? ""
-                    : " → " + check.result().recommendation().targetTag();
-            JLabel label = new JLabel((value.id().equals(data.defaultInstallationId()) ? "★ " : "")
-                    + value.name() + " · " + value.observedBuild()
-                    + (followed == null ? "" : " · " + followed)
-                    + " · " + update + target);
-            label.setOpaque(true);
-            label.setBackground(selected ? component.getSelectionBackground()
-                    : component.getBackground());
-            label.setForeground(selected ? component.getSelectionForeground()
-                    : component.getForeground());
-            label.setBorder(BorderFactory.createEmptyBorder(6, 7, 6, 7));
-            return label;
-        });
-        JButton preferred = button("Make preferred", "makePreferredButton");
-        JButton remove = button("Remove record…", "removeRecordButton");
-        JButton add = button("Import existing copy…", "manageAddExistingButton");
-        JButton download = button("Add exact release…", "manageDownloadMegaMekButton");
-        JButton java = button("Choose Java…", "selectJavaButton");
-        JButton channel = button("Channel & checks…", "chooseChannelButton");
-        JButton check = button("Check selected", "checkUpdatesButton");
-        JButton preview = button("Preview…", "previewUpdateButton");
-        JButton update = button("Update…", "applyUpdateButton");
-        JButton recover = button("Recover…", "recoverUpdateButton");
-        JButton location = button("Show location", "showInstallationLocationButton");
-        JPanel buttons = new JPanel(new java.awt.GridLayout(0, 3,
-                guiScale.scaleForGUI(8), guiScale.scaleForGUI(6)));
-        buttons.setName("installationActionsPanel");
-        buttons.add(preferred);
-        buttons.add(remove);
-        buttons.add(add);
-        buttons.add(download);
-        buttons.add(java);
-        buttons.add(channel);
-        buttons.add(check);
-        buttons.add(preview);
-        buttons.add(update);
-        buttons.add(recover);
-        buttons.add(location);
-        content.add(new JScrollPane(list), BorderLayout.CENTER);
-        JPanel south = new JPanel(new BorderLayout());
-        JLabel selectedStatus = new JLabel("Select a copy to see its update status.");
-        selectedStatus.setName("channelCheckResult");
-        south.add(selectedStatus, BorderLayout.NORTH);
-        south.add(buttons, BorderLayout.CENTER);
-        south.add(pageNavigation(Page.INSTALLATIONS), BorderLayout.SOUTH);
-        content.add(south, BorderLayout.SOUTH);
-
-        Runnable updateEnabled = () -> {
-            boolean selected = list.getSelectedValue() != null;
-            preferred.setEnabled(selected);
-            remove.setEnabled(selected);
-            java.setEnabled(selected);
-            channel.setEnabled(selected);
-            check.setEnabled(selected);
-            preview.setEnabled(selected);
-            update.setEnabled(selected);
-            recover.setEnabled(selected);
-            location.setEnabled(selected);
-            if (selected) {
-                InstallationRecord record = list.getSelectedValue();
-                InstallationCheck current = installationChecks.get(record.id());
-                selectedStatus.setText(record.name() + ": "
-                        + (current == null ? "Not checked"
-                        : "Checking".equals(current.error()) ? "Checking"
-                        : channelStatus(current.result(), current.error())));
-                selectedStatus.setToolTipText(current == null || current.result() == null
-                        ? current == null ? null : current.error()
-                        : current.result().reason());
-            } else {
-                selectedStatus.setText("Select a copy to see its update status.");
-                selectedStatus.setToolTipText(null);
-            }
-        };
-        list.addListSelectionListener(event -> {
-            InstallationRecord selected = list.getSelectedValue();
-            selectedInstallationId = selected == null ? null : selected.id();
-            updateEnabled.run();
-        });
-        if (selectedInstallationId != null) {
-            for (int index = 0; index < model.size(); index++) {
-                if (model.get(index).id().equals(selectedInstallationId)) {
-                    list.setSelectedIndex(index);
-                    break;
-                }
-            }
+        JPanel cards = new JPanel();
+        cards.setName("installationCards");
+        cards.setLayout(new BoxLayout(cards, BoxLayout.Y_AXIS));
+        cards.setBackground(FirstLaunchPanel.BACKGROUND);
+        for (InstallationRecord record : data.installations()) {
+            cards.add(installationCard(record));
+            cards.add(Box.createVerticalStrut(guiScale.scaleForGUI(9)));
         }
-        if (list.getSelectedIndex() < 0 && !model.isEmpty()) list.setSelectedIndex(0);
-        updateEnabled.run();
-        preferred.addActionListener(event -> {
-            InstallationRecord selected = list.getSelectedValue();
-            if (selected == null) return;
-            run("Changing preferred installation", () -> {
-                services.select(selected);
-                return null;
-            }, ignored -> {
-                page = Page.HOME;
-                reload();
-            });
-        });
-        remove.addActionListener(event -> {
-            InstallationRecord selected = list.getSelectedValue();
-            if (selected == null) return;
-            int answer = JOptionPane.showConfirmDialog(this,
-                    "Remove only the launcher record for “" + selected.name()
-                            + "”?\nThe files at " + selected.canonicalRoot() + " will be retained.",
-                    "Remove registry record", JOptionPane.OK_CANCEL_OPTION,
-                    JOptionPane.WARNING_MESSAGE);
-            if (answer != JOptionPane.OK_OPTION) return;
-            run("Removing registry record", () -> {
-                services.remove(selected);
-                return null;
-            }, ignored -> {
-                selectedInstallationId = null;
-                reload();
-            });
-        });
-        add.addActionListener(event -> chooseExisting(false));
-        download.addActionListener(event -> downloadDialog());
-        java.addActionListener(event -> {
-            InstallationRecord selected = list.getSelectedValue();
-            if (selected != null) chooseJava(selected);
-        });
-        channel.addActionListener(event -> {
-            InstallationRecord selected = list.getSelectedValue();
-            if (selected != null) chooseChannel(selected);
-        });
-        check.addActionListener(event -> {
-            InstallationRecord selected = list.getSelectedValue();
-            if (selected != null) startInstallationCheck(selected);
-        });
-        update.addActionListener(event -> {
-            InstallationRecord selected = list.getSelectedValue();
-            if (selected != null) openSelectedUpdate(selected, true);
-        });
-        preview.addActionListener(event -> {
-            InstallationRecord selected = list.getSelectedValue();
-            if (selected != null) openSelectedUpdate(selected, false);
-        });
-        recover.addActionListener(event -> {
-            InstallationRecord selected = list.getSelectedValue();
-            if (selected != null) recoverUpdate(selected);
-        });
-        location.addActionListener(event -> {
-            InstallationRecord selected = list.getSelectedValue();
-            if (selected != null) JOptionPane.showMessageDialog(this,
-                    selected.canonicalRoot(), selected.name() + " location",
-                    JOptionPane.INFORMATION_MESSAGE);
-        });
+        JScrollPane scroll = new JScrollPane(cards);
+        scroll.setName("installationCardsScrollPane");
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.getViewport().setBackground(FirstLaunchPanel.BACKGROUND);
+        scroll.getVerticalScrollBar().setUnitIncrement(guiScale.scaleForGUI(16));
+        content.add(scroll, BorderLayout.CENTER);
+        JPanel navigation = pageNavigation(Page.INSTALLATIONS);
+        navigation.setBackground(FirstLaunchPanel.BACKGROUND);
+        content.add(navigation, BorderLayout.SOUTH);
         content.revalidate();
         content.repaint();
+    }
+
+    private JPanel installationCard(InstallationRecord record) {
+        JPanel card = new JPanel(new BorderLayout(guiScale.scaleForGUI(12),
+                guiScale.scaleForGUI(8)));
+        card.setName("installationCard-" + record.id());
+        card.setBackground(FirstLaunchPanel.PANEL);
+        card.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(84, 116, 108)),
+                BorderFactory.createEmptyBorder(guiScale.scaleForGUI(12),
+                        guiScale.scaleForGUI(14), guiScale.scaleForGUI(12),
+                        guiScale.scaleForGUI(14))));
+        card.setMaximumSize(new Dimension(Integer.MAX_VALUE, guiScale.scaleForGUI(190)));
+        card.getAccessibleContext().setAccessibleName(
+                record.name() + " " + record.observedBuild());
+
+        JPanel summary = new JPanel();
+        summary.setOpaque(false);
+        summary.setLayout(new BoxLayout(summary, BoxLayout.Y_AXIS));
+        JLabel name = new JLabel(record.name() + "  " + record.observedBuild());
+        name.setForeground(FirstLaunchPanel.TEXT);
+        name.setFont(guiScale.font(name.getFont(), Font.BOLD, 18f));
+        summary.add(name);
+        LauncherServices.InstallationStatus local = installationLocalStatus(record);
+        String channel = installationChannel(record, local);
+        JLabel metadata = new JLabel(channel + " · " + record.products().stream()
+                .map(Product::key).map(LauncherFrame::displayProduct)
+                .collect(java.util.stream.Collectors.joining(", ")));
+        metadata.setForeground(FirstLaunchPanel.MUTED);
+        summary.add(metadata);
+        String markers = record.products().stream().map(Product::key)
+                .filter(key -> (state.preferredApplications() != null
+                        && record.equals(state.preferredApplications().get(key)))
+                        || record.id().equals(
+                                state.registry().preferredInstallationIds().get(key)))
+                .map(key -> "Preferred for " + displayProduct(key))
+                .collect(java.util.stream.Collectors.joining(" · "));
+        if (!markers.isBlank()) {
+            JLabel preferred = new JLabel(markers);
+            preferred.setName("preferredApplicationMarkers");
+            preferred.setForeground(FirstLaunchPanel.GOLD);
+            summary.add(preferred);
+        }
+        JLabel updateStatus = new JLabel(installationUpdateStatus(record, local));
+        updateStatus.setName("installationStatus-" + record.id());
+        updateStatus.setForeground(local != null && local.pendingUpdate()
+                ? FirstLaunchPanel.GOLD : FirstLaunchPanel.MUTED);
+        summary.add(updateStatus);
+        card.add(summary, BorderLayout.CENTER);
+
+        JPanel actions = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT,
+                guiScale.scaleForGUI(7), 0));
+        actions.setOpaque(false);
+        InstallationCheck checked = installationChecks.get(record.id());
+        boolean updateAvailable = checked != null && checked.result() != null
+                && checked.result().updateAvailable();
+        boolean updateManaged = local != null && local.previewEligibility() != null
+                && local.previewEligibility().available();
+        if (local != null && local.pendingUpdate()) {
+            JButton recover = homeButton("Recover", "recoverUpdateButton");
+            recover.addActionListener(event -> recoverUpdate(record));
+            actions.add(recover);
+        } else if (updateAvailable && updateManaged) {
+            JButton update = homeButton("Update", "applyUpdateButton");
+            update.setFont(guiScale.font(update.getFont(), Font.BOLD, 14f));
+            ChannelUpdateChecker.Result captured = checked.result();
+            UpdatePreviewService.Eligibility eligibility = local.previewEligibility();
+            update.addActionListener(event ->
+                    recommendedUpdate(record, eligibility, captured));
+            actions.add(update);
+        }
+        if (updateManaged) {
+            JButton channel = homeButton("Channel & checks", "chooseChannelButton");
+            channel.addActionListener(event -> chooseChannel(record));
+            actions.add(channel);
+            boolean checking = checked != null && "Checking".equals(checked.error());
+            boolean needsCheck = checked == null || checked.error() != null
+                    || checked.result() == null
+                    || checked.result().status() == ChannelUpdateChecker.Status.UNAVAILABLE
+                    || checked.result().status() == ChannelUpdateChecker.Status.UNCONFIGURED
+                    || checked.result().status() == ChannelUpdateChecker.Status.NON_COMPARABLE;
+            if (needsCheck) {
+                String checkText = checking ? "Checking…"
+                        : checked != null ? "Retry check" : "Check";
+                JButton check = homeButton(checkText, "checkUpdatesButton");
+                check.setEnabled(installationCheckWorker == null && !checking);
+                check.addActionListener(event -> startInstallationCheck(record));
+                actions.add(check);
+            }
+        }
+        JButton more = homeButton("More…", "installationMenuButton-" + record.id());
+        JPopupMenu menu = installationMenu(record, local, updateManaged);
+        more.getAccessibleContext().setAccessibleDescription(
+                "More actions for " + record.name());
+        more.addActionListener(event -> menu.show(more, 0, more.getHeight()));
+        actions.add(more);
+        card.add(actions, BorderLayout.EAST);
+        return card;
+    }
+
+    private LauncherServices.InstallationStatus installationLocalStatus(
+            InstallationRecord record) {
+        LauncherServices.InstallationStatus local = state.installationStatuses() == null
+                ? null : state.installationStatuses().get(record.id());
+        if (local == null && record.equals(state.preferred())) {
+            return new LauncherServices.InstallationStatus(state.channelPreference(),
+                    state.previewEligibility(), state.pendingUpdate(),
+                    state.preferredError());
+        }
+        return local;
+    }
+
+    private JPopupMenu installationMenu(InstallationRecord record,
+                                        LauncherServices.InstallationStatus local,
+                                        boolean updateManaged) {
+        JPopupMenu menu = new JPopupMenu();
+        menu.setName("installationMenu-" + record.id());
+        menu.setBackground(HomeLaunchSplitButton.POPUP_BACKGROUND);
+        menu.setBorder(BorderFactory.createLineBorder(HomeLaunchSplitButton.POPUP_BORDER));
+        for (Product product : record.products()) {
+            JMenuItem preferred = installationMenuItem(
+                    "Use as preferred for " + displayProduct(product.key()));
+            preferred.setEnabled(!record.id().equals(
+                    state.registry().preferredInstallationIds().get(product.key())));
+            preferred.addActionListener(event -> run(
+                    "Changing " + displayProduct(product.key()) + " preference",
+                    () -> {
+                        services.selectPreferred(product.key(), record);
+                        return null;
+                    }, ignored -> reload()));
+            menu.add(preferred);
+        }
+        menu.addSeparator();
+        JMenuItem java = installationMenuItem("Change Java");
+        java.addActionListener(event -> chooseJava(record));
+        menu.add(java);
+        if (updateManaged) {
+            JMenuItem channel = installationMenuItem("Channel & checks");
+            channel.addActionListener(event -> chooseChannel(record));
+            menu.add(channel);
+            JMenuItem preview = installationMenuItem("Preview update");
+            preview.addActionListener(event -> openSelectedUpdate(record, false));
+            menu.add(preview);
+        }
+        if (local != null && local.pendingUpdate()) {
+            JMenuItem recover = installationMenuItem("Recover interrupted update");
+            recover.addActionListener(event -> recoverUpdate(record));
+            menu.add(recover);
+        }
+        JMenuItem location = installationMenuItem("Show location");
+        location.addActionListener(event -> JOptionPane.showMessageDialog(this,
+                record.canonicalRoot(), record.name() + " location",
+                JOptionPane.INFORMATION_MESSAGE));
+        menu.add(location);
+        JMenuItem remove = installationMenuItem("Remove record");
+        remove.addActionListener(event -> removeInstallation(record));
+        menu.add(remove);
+        return menu;
+    }
+
+    private JMenuItem installationMenuItem(String text) {
+        JMenuItem item = new JMenuItem(text);
+        item.setOpaque(true);
+        item.setBackground(HomeLaunchSplitButton.POPUP_BACKGROUND);
+        item.setForeground(HomeLaunchSplitButton.POPUP_FOREGROUND);
+        item.getAccessibleContext().setAccessibleName(text);
+        return item;
+    }
+
+    private String installationChannel(InstallationRecord record,
+                                       LauncherServices.InstallationStatus local) {
+        InstallationCheck checked = installationChecks.get(record.id());
+        if (checked != null && checked.channel() != null) return checked.channel();
+        if (local == null || local.channelPreference() == null) return "Updates unavailable";
+        return switch (local.channelPreference().status()) {
+            case CONFIGURED -> local.channelPreference().preference().channel().toString();
+            case UNKNOWN -> "Channel not configured";
+            case UNAVAILABLE -> "Channel setting needs attention";
+        };
+    }
+
+    private String installationUpdateStatus(InstallationRecord record,
+                                            LauncherServices.InstallationStatus local) {
+        if (local != null && local.pendingUpdate()) return "Recovery required";
+        if (local != null && local.error() != null) {
+            return "Installation needs attention";
+        }
+        InstallationCheck checked = installationChecks.get(record.id());
+        if (checked == null) {
+            return local != null && local.previewEligibility() != null
+                    && !local.previewEligibility().available()
+                    ? "Launch only · updates unavailable" : "Update status not checked";
+        }
+        if ("Checking".equals(checked.error())) return "Checking…";
+        return channelStatus(checked.result(), checked.error());
+    }
+
+    private void removeInstallation(InstallationRecord record) {
+        int answer = JOptionPane.showConfirmDialog(this,
+                "Remove only the launcher record for “" + record.name()
+                        + "”?\nThe application files will be retained.",
+                "Remove registry record", JOptionPane.OK_CANCEL_OPTION,
+                JOptionPane.WARNING_MESSAGE);
+        if (answer != JOptionPane.OK_OPTION) return;
+        run("Removing registry record", () -> {
+            services.remove(record);
+            return null;
+        }, ignored -> {
+            selectedInstallationId = null;
+            reload();
+        });
     }
 
     private JPanel pageHeader(String titleText, String subtitle) {
@@ -1134,13 +1308,13 @@ public final class LauncherFrame extends JFrame {
 
     private JPanel pageNavigation(Page current) {
         JPanel navigation = new JPanel();
-        JButton home = button("Home", "homeButton");
+        JButton home = homeButton("Home", "homeButton");
         home.setMnemonic(java.awt.event.KeyEvent.VK_H);
         home.addActionListener(event -> navigateTo(Page.HOME));
-        JButton installations = button("Installations", "installationsButton");
+        JButton installations = homeButton("Installations", "installationsButton");
         installations.setEnabled(current != Page.INSTALLATIONS);
         installations.addActionListener(event -> navigateTo(Page.INSTALLATIONS));
-        JButton settings = button("Settings", "settingsButton");
+        JButton settings = homeButton("Settings", "settingsButton");
         settings.setEnabled(current != Page.SETTINGS);
         settings.addActionListener(event -> navigateTo(Page.SETTINGS));
         navigation.add(home);
@@ -1151,56 +1325,174 @@ public final class LauncherFrame extends JFrame {
 
     private void renderSettingsPage() {
         content.removeAll();
-        restoreStandardChrome();
-        content.add(pageHeader("Settings",
-                "Launcher preferences and local diagnostics."), BorderLayout.NORTH);
+        content.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(18),
+                guiScale.scaleForGUI(22), guiScale.scaleForGUI(16),
+                guiScale.scaleForGUI(22)));
+        content.setBackground(FirstLaunchPanel.BACKGROUND);
+        JPanel heading = pageHeader("Settings",
+                "Launcher preferences and local diagnostics.");
+        heading.setBackground(FirstLaunchPanel.BACKGROUND);
+        for (Component child : heading.getComponents()) child.setForeground(FirstLaunchPanel.TEXT);
+        content.add(heading, BorderLayout.NORTH);
         JPanel center = new JPanel();
         center.setLayout(new BoxLayout(center, BoxLayout.Y_AXIS));
+        center.setName("settingsSections");
+        center.setBackground(FirstLaunchPanel.BACKGROUND);
         if (settingsLoading) {
             JLabel loading = new JLabel("Loading settings…");
             loading.setName("settingsLoadingMessage");
+            loading.setForeground(FirstLaunchPanel.MUTED);
             center.add(loading);
         } else if (launcherSettings != null) {
+            JPanel updates = settingsSection("Updates");
             JCheckBox checks = new JCheckBox(
-                    "Check newly added releases for updates when the launcher opens",
-                    launcherSettings.checkNewInstallsOnOpen());
-            checks.setName("newInstallCheckDefaultCheckbox");
+                    "Check installed versions when the launcher opens",
+                    launcherSettings.settings().checkInstalledVersionsOnOpen());
+            checks.setName("installedVersionsCheckMasterCheckbox");
+            checks.setOpaque(false);
+            checks.setForeground(FirstLaunchPanel.TEXT);
             checks.getAccessibleContext().setAccessibleDescription(
-                    "This default affects only future graphical installs. Existing copy "
-                            + "preferences are not changed.");
-            center.add(checks);
-            center.add(new JLabel("Existing per-copy on/off choices stay unchanged."));
-            JButton save = button("Save settings", "saveSettingsButton");
-            save.addActionListener(event -> run("Saving settings",
-                    () -> services.setCheckNewInstallsOnOpen(checks.isSelected()),
+                    "Master gate for automatic checks. Existing per-installation Off choices "
+                            + "remain Off.");
+            updates.add(checks);
+            JLabel preserves = new JLabel(
+                    "Per-installation channel and check-on-open choices stay unchanged.");
+            preserves.setForeground(FirstLaunchPanel.MUTED);
+            updates.add(preserves);
+            checks.addActionListener(event -> {
+                boolean requested = checks.isSelected();
+                checks.setEnabled(false);
+                run("Saving automatic update checks",
+                    () -> services.setCheckInstalledVersionsOnOpen(requested),
                     saved -> {
-                        launcherSettings = saved;
+                        launcherSettings = new LauncherServices.SettingsView(saved,
+                                launcherSettings.defaultJava(),
+                                launcherSettings.defaultJavaFeature(),
+                                launcherSettings.defaultJavaPersisted());
                         launcherSettingsError = null;
                         renderSettingsPage();
-                    }));
-            center.add(save);
+                    }, error -> {
+                        checks.setSelected(!requested);
+                        showError("Automatic check setting was not saved", error);
+                        renderSettingsPage();
+                    }, () -> {
+                    }, false);
+            });
+            center.add(updates);
+            center.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
+
+            JPanel java = settingsSection("Game Java");
+            JLabel runtime = new JLabel("Java " + launcherSettings.defaultJavaFeature()
+                    + (launcherSettings.defaultJavaPersisted()
+                    ? " · launcher default" : " · current launcher runtime (not yet saved)"));
+            runtime.setName("defaultJavaStatus");
+            runtime.setForeground(FirstLaunchPanel.TEXT);
+            java.add(runtime);
+            JTextArea javaPath = textArea(launcherSettings.defaultJava().toString());
+            javaPath.setName("defaultJavaPath");
+            javaPath.setToolTipText(launcherSettings.defaultJava().toString());
+            javaPath.setLineWrap(false);
+            javaPath.setRows(1);
+            javaPath.setBackground(FirstLaunchPanel.PANEL);
+            javaPath.setForeground(FirstLaunchPanel.MUTED);
+            java.add(javaPath);
+            JButton changeJava = homeButton("Change default Java",
+                    "changeDefaultJavaButton");
+            changeJava.setAlignmentX(Component.LEFT_ALIGNMENT);
+            changeJava.addActionListener(event -> chooseDefaultJava());
+            java.add(changeJava);
+            center.add(java);
+            center.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
+
+            JPanel diagnostics = settingsSection("Diagnostics");
+            JButton logs = homeButton("View logs", "viewOperationLogsButton");
+            logs.setAlignmentX(Component.LEFT_ALIGNMENT);
+            logs.addActionListener(event -> showOperationLogs());
+            diagnostics.add(logs);
+            center.add(diagnostics);
         } else {
             JLabel unavailable = new JLabel("Settings could not be read and were not reset.");
             unavailable.setName("settingsErrorMessage");
+            unavailable.setForeground(FirstLaunchPanel.GOLD);
             unavailable.setToolTipText(launcherSettingsError == null ? null
                     : errorDetail(launcherSettingsError));
             center.add(unavailable);
-            JButton retry = button("Retry settings", "retrySettingsButton");
+            JButton retry = homeButton("Retry settings", "retrySettingsButton");
             retry.addActionListener(event -> loadSettingsPage());
             center.add(retry);
         }
-        center.add(Box.createVerticalStrut(18));
-        JButton logs = button("View logs", "viewOperationLogsButton");
-        logs.addActionListener(event -> showOperationLogs());
-        center.add(logs);
-        content.add(center, BorderLayout.CENTER);
-        content.add(pageNavigation(Page.SETTINGS), BorderLayout.SOUTH);
+        JScrollPane scroll = new JScrollPane(center);
+        scroll.setName("settingsScrollPane");
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.getViewport().setBackground(FirstLaunchPanel.BACKGROUND);
+        content.add(scroll, BorderLayout.CENTER);
+        JPanel navigation = pageNavigation(Page.SETTINGS);
+        navigation.setBackground(FirstLaunchPanel.BACKGROUND);
+        content.add(navigation, BorderLayout.SOUTH);
         content.revalidate();
         content.repaint();
     }
 
+    private JPanel settingsSection(String titleText) {
+        JPanel section = new JPanel();
+        section.setName("settings" + titleText.replace(" ", "") + "Section");
+        section.setLayout(new BoxLayout(section, BoxLayout.Y_AXIS));
+        section.setBackground(FirstLaunchPanel.PANEL);
+        section.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(new Color(92, 121, 112)),
+                BorderFactory.createEmptyBorder(guiScale.scaleForGUI(12),
+                        guiScale.scaleForGUI(14), guiScale.scaleForGUI(12),
+                        guiScale.scaleForGUI(14))));
+        section.setAlignmentX(Component.LEFT_ALIGNMENT);
+        section.setMaximumSize(new Dimension(Integer.MAX_VALUE,
+                guiScale.scaleForGUI(150)));
+        JLabel title = new JLabel(titleText);
+        title.setForeground(FirstLaunchPanel.GOLD);
+        title.setFont(guiScale.font(title.getFont(), Font.BOLD, 17f));
+        section.add(title);
+        section.add(Box.createVerticalStrut(guiScale.scaleForGUI(7)));
+        return section;
+    }
+
+    private void chooseDefaultJava() {
+        run("Finding Java runtimes", services::javaCandidates,
+                this::chooseDefaultJavaFromCandidates);
+    }
+
+    private void chooseDefaultJavaFromCandidates(List<Path> candidates) {
+        JComboBox<Object> choices = new JComboBox<>();
+        candidates.forEach(choices::addItem);
+        choices.addItem("Browse for Java home or executable…");
+        choices.setName("defaultJavaCandidateCombo");
+        int answer = JOptionPane.showConfirmDialog(this, choices,
+                "Change default game Java", JOptionPane.OK_CANCEL_OPTION);
+        if (answer != JOptionPane.OK_OPTION) return;
+        Object choice = choices.getSelectedItem();
+        Path selected;
+        if (choice instanceof Path path) {
+            selected = path;
+        } else {
+            JFileChooser chooser = new JFileChooser();
+            chooser.setDialogTitle("Choose Java home or java executable");
+            chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
+            if (chooser.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
+            selected = chooser.getSelectedFile().toPath();
+        }
+        Path captured = selected;
+        run("Validating default game Java",
+                () -> services.selectDefaultJava(captured), saved -> {
+                    launcherSettings = null;
+                    launcherSettingsError = null;
+                    loadSettingsPage();
+                });
+    }
+
     private void chooseJava(InstallationRecord record) {
-        List<Path> candidates = services.javaCandidates(); // nonexecuting discovery
+        run("Finding Java runtimes", services::javaCandidates,
+                candidates -> chooseJavaFromCandidates(record, candidates));
+    }
+
+    private void chooseJavaFromCandidates(InstallationRecord record, List<Path> candidates) {
         JComboBox<Object> choices = new JComboBox<>();
         candidates.forEach(choices::addItem);
         choices.addItem("Browse for Java home or executable…");
@@ -1227,16 +1519,17 @@ public final class LauncherFrame extends JFrame {
         });
     }
 
-    private void previewLaunch(InstallationRecord record, Product product) {
-        run("Preparing launch preview", () -> services.preview(record, product.key()), command -> {
+    private void previewLaunch(InstallationRecord record, String productKey) {
+        homeNotice = null;
+        run("Preparing launch preview", () -> services.preview(record, productKey), command -> {
             JTextArea details = textArea("Copy: " + record.name() + "\nProgram: "
-                    + displayProduct(product.key()) + "\nRuntime: " + command.getFirst()
+                    + displayProduct(productKey) + "\nRuntime: " + command.getFirst()
                     + "\n\nCommand (direct arguments; no shell):\n" + command);
             int answer = JOptionPane.showConfirmDialog(this, new JScrollPane(details),
                     "Confirm launch", JOptionPane.OK_CANCEL_OPTION, JOptionPane.QUESTION_MESSAGE);
             if (answer == JOptionPane.OK_OPTION) {
                 InstallationRecord capturedRecord = record;
-                String capturedProduct = product.key();
+                String capturedProduct = productKey;
                 run("Running " + displayProduct(capturedProduct),
                         () -> services.launch(capturedRecord, capturedProduct), exit -> {
                             if (exit == 0) {
@@ -1253,25 +1546,26 @@ public final class LauncherFrame extends JFrame {
         });
     }
 
-    private void prepareNormalInstall(FollowChannel channel, Path destination,
-                                      Path selectedJava) {
+    private void prepareNormalInstall(OfficialRepository repository, FollowChannel channel,
+                                      Path destination, Path selectedJava) {
         final Path target;
         try {
-            target = destination == null ? services.normalInstallDestination() : destination;
+            target = destination == null
+                    ? services.normalInstallDestination(repository, channel) : destination;
         } catch (IOException error) {
-            showError("Preparing Download & install failed", error);
-            resumeFirstLaunchMilestoneCaption();
+            showError("Preparing " + quickChoiceName(repository, channel) + " failed", error);
+            resumeFirstLaunchOptions();
             return;
         }
-        run("Checking the current official " + channel,
-                () -> services.prepareNormalInstall(channel, target, selectedJava),
+        run("Checking " + quickChoiceName(repository, channel),
+                () -> services.prepareNormalInstall(repository, channel, target, selectedJava),
                 this::showNormalInstallConfirmation,
-                error -> normalPlanFailure(channel, target, selectedJava, error), () -> {
+                error -> normalPlanFailure(repository, channel, target, selectedJava, error), () -> {
                 }, false);
     }
 
-    private void normalPlanFailure(FollowChannel channel, Path target, Path selectedJava,
-                                   Throwable error) {
+    private void normalPlanFailure(OfficialRepository repository, FollowChannel channel,
+                                   Path target, Path selectedJava, Throwable error) {
         String detail = errorDetail(error);
         boolean javaProblem = detail.toLowerCase(java.util.Locale.ROOT).contains("java");
         Object[] choices = javaProblem
@@ -1280,7 +1574,7 @@ public final class LauncherFrame extends JFrame {
         int answer = JOptionPane.showOptionDialog(this,
                 (javaProblem
                         ? "A compatible external Java 21 or newer could not be verified."
-                        : "The current official " + channel + " could not be checked.")
+                        : quickChoiceName(repository, channel) + " could not be checked.")
                         + "\n\n" + detail
                         + "\n\nNo package was downloaded and no destination was created.",
                 javaProblem ? "Java setup required" : "Could not prepare download",
@@ -1291,113 +1585,79 @@ public final class LauncherFrame extends JFrame {
             chooser.setDialogTitle("Choose Java home or Java executable");
             chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
             if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-                prepareNormalInstall(channel, target, chooser.getSelectedFile().toPath());
+                prepareNormalInstall(repository, channel, target,
+                        chooser.getSelectedFile().toPath());
             } else {
-                resumeFirstLaunchMilestoneCaption();
+                resumeFirstLaunchOptions();
             }
         } else if (answer == (javaProblem ? 1 : 0)) {
-            prepareNormalInstall(channel, target, selectedJava);
+            prepareNormalInstall(repository, channel, target, selectedJava);
         } else {
-            resumeFirstLaunchMilestoneCaption();
+            resumeFirstLaunchOptions();
         }
     }
 
     private void showNormalInstallConfirmation(NormalInstallService.Plan plan) {
-        String details = "Current official " + plan.channel() + " MekHQ suite\n"
-                + "Includes: MegaMek, MekHQ, and MegaMekLab\n\n"
-                + "Repository: " + plan.repository().slug() + "\n"
-                + "Release: " + plan.release().tag() + "\n"
-                + "Asset: " + plan.asset().name() + "\n"
-                + "URL: " + plan.asset().url() + "\n"
-                + "Size: " + NumberFormat.getIntegerInstance().format(plan.asset().size())
-                + " bytes\n"
-                + "SHA-256: " + plan.asset().digest() + "\n"
-                + "Destination: " + plan.destination() + "\n"
-                + "Java: " + plan.javaExecutable() + " (Java " + plan.javaFeature() + ")\n"
-                + "Automatic checks when the launcher opens: "
-                + (plan.checkConfiguration().checkOnOpen() ? "On" : "Off") + "\n\n"
-                + "Nothing has been downloaded or installed yet.";
-        JTextArea quote = textArea(details);
-        quote.setName("normalInstallConfirmationDetails");
-        JButton change = button("Change location…", "changeNormalLocationButton");
-        JButton changeJava = button("Choose Java…", "changeNormalJavaButton");
-        JButton install = button("Install", "confirmNormalInstallButton");
-        install.setMnemonic(java.awt.event.KeyEvent.VK_I);
-        JButton cancel = button("Cancel", "cancelNormalInstallButton");
-        JPanel actions = new JPanel();
-        actions.add(change);
-        actions.add(changeJava);
-        actions.add(install);
-        actions.add(cancel);
-        JDialog dialog = dialog("Confirm Download & install",
-                new JScrollPane(quote), actions, new Dimension(720, 470));
+        String product = displayProduct(plan.repository().key());
+        List<String> programs = List.of("megamek", "mekhq", "lab").stream()
+                .filter(plan.requiredProducts()::contains)
+                .map(LauncherFrame::displayProduct)
+                .toList();
         boolean[] continuing = {false};
+        NormalInstallConfirmationDialog dialog = new NormalInstallConfirmationDialog(
+                this, plan, product, programs, guiScale, source -> {
+                    final Path changed;
+                    try {
+                        changed = normalInstallLocationPrompts.choose(source, plan);
+                    } catch (IOException error) {
+                        showError("Preparing install location failed", error);
+                        return false;
+                    }
+                    if (changed == null) return false;
+                    continuing[0] = true;
+                    source.dispose();
+                    prepareNormalInstall(plan.repository(), plan.channel(), changed,
+                            plan.javaExecutable());
+                    return true;
+                }, source -> {
+                    continuing[0] = true;
+                    source.dispose();
+                    runNormalInstall(plan);
+                    return true;
+                });
         dialog.addWindowListener(new WindowAdapter() {
             @Override public void windowClosed(WindowEvent event) {
-                if (!continuing[0]) resumeFirstLaunchMilestoneCaption();
+                if (!continuing[0]) resumeFirstLaunchOptions();
             }
         });
-        change.addActionListener(event -> {
-            JFileChooser chooser = folders("Choose an existing writable parent folder");
-            if (chooser.showOpenDialog(dialog) != JFileChooser.APPROVE_OPTION) return;
-            String value = JOptionPane.showInputDialog(dialog,
-                    "New subfolder name (it must not exist):", NORMAL_FOLDER);
-            if (value == null) return;
-            final Path folder;
-            try {
-                folder = safeSubfolder(value);
-            } catch (IllegalArgumentException error) {
-                JOptionPane.showMessageDialog(dialog, error.getMessage(),
-                        "Invalid folder name", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-            Path changed = chooser.getSelectedFile().toPath().resolve(folder);
-            continuing[0] = true;
-            dialog.dispose();
-            prepareNormalInstall(plan.channel(), changed, plan.javaExecutable());
-        });
-        changeJava.addActionListener(event -> {
-            JFileChooser chooser = new JFileChooser();
-            chooser.setDialogTitle("Choose Java home or Java executable");
-            chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
-            if (chooser.showOpenDialog(dialog) != JFileChooser.APPROVE_OPTION) return;
-            continuing[0] = true;
-            dialog.dispose();
-            prepareNormalInstall(plan.channel(), plan.destination(),
-                    chooser.getSelectedFile().toPath());
-        });
-        install.addActionListener(event -> {
-            continuing[0] = true;
-            dialog.dispose();
-            runNormalInstall(plan);
-        });
-        cancel.addActionListener(event -> dialog.dispose());
-        dialog.getRootPane().setDefaultButton(install);
         dialog.setVisible(true);
     }
 
     private void runNormalInstall(NormalInstallService.Plan plan) {
+        String product = displayProduct(plan.repository().key());
+        String operationDescription = "Installing " + product + " " + plan.version();
         OperationProgressDialog progress = new OperationProgressDialog(this,
-                "Downloading and installing", "normalInstallProgressLog",
-                this::showOperationLogs);
-        progress.append("Installing the confirmed official " + plan.channel()
-                + " MekHQ suite...\n");
+                operationDescription, "normalInstallProgressLog", this::showOperationLogs);
+        progress.append("Installing the confirmed official " + product + " "
+                + plan.channel() + "...\n");
         JButton repair = button("Open Installations", "repairNormalInstallButton");
         repair.setEnabled(false);
         progress.addActionButton(repair);
         progress.setVisible(true);
         PrintStream stream = new PrintStream(new LogOutput(progress.logArea()), true,
                 StandardCharsets.UTF_8);
-        runOperation("Downloading and installing", OperationType.FRESH_INSTALL,
+        runOperation(operationDescription, OperationType.FRESH_INSTALL,
                 List.of(plan.destination()), progress,
                 context -> services.installNormal(plan, stream, context),
                 result -> {
-                    progress.append("\nInstalled and set as Main. Nothing was launched.\n");
-                    JOptionPane.showMessageDialog(progress,
-                            "MegaMek, MekHQ, and MegaMekLab are ready on Home.\n"
-                                    + "Nothing was launched.",
-                            "Install complete", JOptionPane.INFORMATION_MESSAGE);
                     progress.dispose();
+                    progress.append(result.becameMain()
+                                    ? "\nInstalled and set as the initial preferred copy. "
+                                    + "Nothing was launched.\n"
+                                    : "\nInstalled; existing application preferences were preserved. "
+                                    + "Nothing was launched.\n");
+                    String installedVersion = result.record().observedBuild();
+                    homeNotice = product + " " + installedVersion + " is ready";
                     page = Page.HOME;
                     reload();
                 }, error -> {
@@ -1796,12 +2056,6 @@ public final class LauncherFrame extends JFrame {
         throw new IllegalStateException("prepared update discard did not retain cancellation");
     }
 
-    private void recoverUpdate() {
-        InstallationRecord record = state == null ? null : state.preferred();
-        if (record == null) return;
-        recoverUpdate(record);
-    }
-
     private void recoverUpdate(InstallationRecord record) {
         int answer = JOptionPane.showConfirmDialog(this,
                 "Close ALL MegaMek, MekHQ, and MegaMekLab applications, including ones started "
@@ -1815,6 +2069,8 @@ public final class LauncherFrame extends JFrame {
         OperationProgressDialog progress = new OperationProgressDialog(this,
                 "Recovering update", "recoveryProgressLog", this::showOperationLogs);
         progress.append("Recovery is non-cancellable once replay or cleanup begins.\n");
+        progress.startNonCancellable(
+                "Recovery is starting and must remain open until it finishes.");
         progress.setVisible(true);
         runOperation("Recovering update", OperationType.RECOVERY,
                 List.of(Path.of(record.canonicalRoot())), progress,
@@ -1900,9 +2156,9 @@ public final class LauncherFrame extends JFrame {
         OperationProgressDialog progress = new OperationProgressDialog(this,
                 "Downloading and installing", "installProgressLog", this::showOperationLogs);
         progress.append("Preparing exact release " + tag + "...\n");
-        JButton retry = button("Retry install", "retryInstallButton");
-        retry.setEnabled(false);
-        progress.addActionButton(retry);
+        JButton repair = button("Open Installations", "repairPublishedInstallButton");
+        repair.setEnabled(false);
+        progress.addActionButton(repair);
         progress.setVisible(true);
         PrintStream stream = new PrintStream(new LogOutput(progress.logArea()), true,
                 StandardCharsets.UTF_8);
@@ -1911,12 +2167,12 @@ public final class LauncherFrame extends JFrame {
                     ? services.install(repository, tag, destination, name, stream, context)
                     : services.install(repository, tag, destination, name, channel, stream, context),
                     result -> {
+                        progress.dispose();
                         progress.append("\nInstalled and registered at "
                                 + result.destination() + "\n");
-                        JOptionPane.showMessageDialog(progress,
+                        JOptionPane.showMessageDialog(LauncherFrame.this,
                                 "Installed and registered successfully.\nNothing was launched.",
                                 "Install complete", JOptionPane.INFORMATION_MESSAGE);
-                        progress.dispose();
                         reload();
                     }, error -> {
                         boolean published = Files.exists(destination,
@@ -1925,21 +2181,15 @@ public final class LauncherFrame extends JFrame {
                                 + (published
                                 ? "\nA published copy is retained. Do not download over it; "
                                 + "open Installations to register or repair the copy.\n"
-                                : "\nNothing was published. Retry starts a new selection and "
-                                + "confirmation.\n"));
+                                : "\nNothing was published.\n"));
                         progress.setTitle(published
                                 ? "Copy retained — setup needs repair" : "Installation failed");
-                        retry.setText(published ? "Open Installations" : "Retry install");
-                        retry.setEnabled(true);
+                        repair.setEnabled(published);
                     }, stream::close);
-        retry.addActionListener(event -> {
+        repair.addActionListener(event -> {
             progress.dispose();
-            if (Files.exists(destination, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
-                page = Page.INSTALLATIONS;
-                reload();
-            } else {
-                downloadDialog();
-            }
+            page = Page.INSTALLATIONS;
+            reload();
         });
     }
 
@@ -2021,7 +2271,6 @@ public final class LauncherFrame extends JFrame {
                 activeOperation.compareAndSet(context, null);
                 gate.leave();
                 setActionsEnabled(true);
-                progress.markFinished();
                 OperationExecution<T> result;
                 try {
                     result = get();
@@ -2038,19 +2287,27 @@ public final class LauncherFrame extends JFrame {
                 }
                 if (!isDisplayable()) return;
                 if (result.cancelled()) {
-                    progress.setTitle("Cancelled");
                     progress.append("\nCANCELLED before installation finalization. "
                             + "Any operation-owned temporary files were discarded.\n");
-                    status.setText("Cancelled - no finalization was started");
+                    progress.showCancelled();
+                    if (page == Page.HOME && state != null && state.preferred() == null) {
+                        resumeFirstLaunchOptions();
+                    }
+                    status.setText(type == OperationType.FRESH_INSTALL
+                            ? "Installation cancelled" : description + " cancelled");
                     return;
                 }
                 if (result.problem() != null) {
                     failure.accept(result.problem());
-                    showError(description + " failed", result.problem(), false);
-                    status.setText("Operation failed - details shown");
+                    progress.showFailure(result.problem(), result.loggingWarning());
+                    status.setText("Operation failed — details are available");
                     return;
                 }
                 success.accept(result.value());
+                if (result.loggingWarning() != null) {
+                    status.setText(
+                            "Operation completed, but local diagnostics could not be saved.");
+                }
             }
         }.execute();
     }
@@ -2148,6 +2405,10 @@ public final class LauncherFrame extends JFrame {
         showError(title, error, true);
     }
 
+    void showOperationFailureDetails(String title, Throwable error) {
+        showError(title, error, false);
+    }
+
     private void showError(String title, Throwable error, boolean record) {
         JTextArea area = textArea(SanitizedErrors.display(error));
         area.setName("errorDetails");
@@ -2158,7 +2419,7 @@ public final class LauncherFrame extends JFrame {
         JButton logs = button("View logs", "viewOperationLogsButton");
         logs.addActionListener(event -> showOperationLogs());
         JLabel logging = new JLabel(record ? "Saving local diagnostics..." :
-                "Local diagnostics were recorded with the operation.");
+                "Local operation diagnostics are available when recording succeeded.");
         logging.setName("errorLoggingStatus");
         JPanel actions = new JPanel();
         actions.add(copy);
@@ -2268,6 +2529,14 @@ public final class LauncherFrame extends JFrame {
         return button;
     }
 
+    private JButton homeButton(String text, String name) {
+        JButton button = new FirstLaunchButton(text, name, false, guiScale,
+                FirstLaunchButton.Size.SMALL);
+        button.getAccessibleContext().setAccessibleDescription(
+                text + " on the managed Home screen.");
+        return button;
+    }
+
     static JTextArea textArea(String text) {
         JTextArea area = new JTextArea(text, 10, 65);
         area.setEditable(false);
@@ -2284,6 +2553,11 @@ public final class LauncherFrame extends JFrame {
             case "megamek" -> "MegaMek";
             default -> key;
         };
+    }
+
+    private static String quickChoiceName(OfficialRepository repository,
+                                          FollowChannel channel) {
+        return "Latest " + displayProduct(repository.key()) + " " + channel;
     }
 
     static Path safeSubfolder(String value) {
@@ -2323,6 +2597,34 @@ public final class LauncherFrame extends JFrame {
         void completed(Component parent, String message);
     }
 
+    @FunctionalInterface
+    interface NormalInstallLocationPrompts {
+        Path choose(Component parent, NormalInstallService.Plan plan) throws IOException;
+    }
+
+    private static final class SwingNormalInstallLocationPrompts
+            implements NormalInstallLocationPrompts {
+        @Override
+        public Path choose(Component parent, NormalInstallService.Plan plan) throws IOException {
+            JFileChooser chooser = folders("Choose an existing writable parent folder");
+            if (chooser.showOpenDialog(parent) != JFileChooser.APPROVE_OPTION) return null;
+            String proposedName =
+                    NormalInstallService.defaultFolderName(plan.repository(), plan.channel());
+            String value = JOptionPane.showInputDialog(parent,
+                    "New subfolder name (it must not exist):", proposedName);
+            if (value == null) return null;
+            final Path folder;
+            try {
+                folder = safeSubfolder(value);
+            } catch (IllegalArgumentException error) {
+                JOptionPane.showMessageDialog(parent, error.getMessage(),
+                        "Invalid folder name", JOptionPane.ERROR_MESSAGE);
+                return null;
+            }
+            return chooser.getSelectedFile().toPath().resolve(folder);
+        }
+    }
+
     private static final class SwingExistingImportPrompts implements ExistingImportPrompts {
         @Override
         public Path chooseFolder(Component parent) {
@@ -2351,7 +2653,10 @@ public final class LauncherFrame extends JFrame {
     }
 
     static void appendBounded(JTextArea area, String text) {
-        if (!area.isDisplayable()) return;
+        if (!SwingUtilities.isEventDispatchThread()) {
+            SwingUtilities.invokeLater(() -> appendBounded(area, text));
+            return;
+        }
         area.append(text);
         int excess = area.getDocument().getLength() - LOG_LIMIT;
         if (excess > 0) area.replaceRange("", 0, excess);
@@ -2362,7 +2667,8 @@ public final class LauncherFrame extends JFrame {
     public void dispose() {
         homeGeneration++;
         disposeFirstLaunchSplitButton();
-        cancelFirstLaunchMilestoneWorker();
+        disposeHomeLaunchButtons();
+        cancelFirstLaunchOptionsWorker();
         cancelChannelWorker();
         OperationContext operation = activeOperation.get();
         if (operation != null && !operation.finalizationStarted()) {
@@ -2392,6 +2698,55 @@ public final class LauncherFrame extends JFrame {
         private InstallationCheck(ChannelUpdateChecker.Result result, String error) {
             this(result, error, result == null || result.preference() == null
                     ? null : result.preference().channel().toString());
+        }
+    }
+
+    private static final class ResponsiveHomeActions extends JPanel {
+        private final GuiScale scale;
+        private final int gap;
+        private int columns = 3;
+
+        private ResponsiveHomeActions(GuiScale scale) {
+            this.scale = scale;
+            gap = scale.scaleForGUI(8);
+            setLayout(new java.awt.GridLayout(0, columns, gap, gap));
+        }
+
+        @Override
+        public void doLayout() {
+            int count = Math.max(1, getComponentCount());
+            int cell = scale.scaleForGUI(210);
+            int next = Math.max(1, Math.min(Math.min(3, count),
+                    Math.max(1, (getWidth() + gap) / (cell + gap))));
+            if (next != columns) {
+                columns = next;
+                java.awt.GridLayout layout = (java.awt.GridLayout) getLayout();
+                layout.setColumns(columns);
+                revalidate();
+            }
+            super.doLayout();
+        }
+
+        @Override
+        public Dimension getPreferredSize() {
+            int count = getComponentCount();
+            if (count == 0) return new Dimension();
+            int width = 0;
+            int height = 0;
+            for (Component child : getComponents()) {
+                Dimension preferred = child.getPreferredSize();
+                width = Math.max(width, preferred.width);
+                height = Math.max(height, preferred.height);
+            }
+            int usedColumns = Math.max(1, Math.min(columns, count));
+            int rows = (count + usedColumns - 1) / usedColumns;
+            return new Dimension(width * usedColumns + gap * (usedColumns - 1),
+                    height * rows + gap * (rows - 1));
+        }
+
+        @Override
+        public Dimension getMaximumSize() {
+            return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
         }
     }
 

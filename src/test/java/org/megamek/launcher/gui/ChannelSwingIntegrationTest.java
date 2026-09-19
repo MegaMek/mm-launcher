@@ -23,6 +23,7 @@ import java.awt.Component;
 import java.awt.Container;
 import java.awt.GraphicsEnvironment;
 import java.awt.Window;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
@@ -75,7 +76,7 @@ class ChannelSwingIntegrationTest {
 
             SwingUtilities.invokeAndWait(
                     () -> find(frame, "manageInstallationsButton").doClick());
-            JButton addRelease = waitFor(() -> find(frame, "manageDownloadMegaMekButton"));
+            JButton addRelease = waitFor(() -> find(frame, "installAnotherVersionButton"));
             SwingUtilities.invokeAndWait(addRelease::doClick);
             JDialog download = waitForDialog("Download an official release");
             JComboBox<?> freshChannel = findCombo(download, "downloadChannelCombo");
@@ -106,7 +107,37 @@ class ChannelSwingIntegrationTest {
             assertTrue(onEdt(() -> find(frame, "launch-megamek-button").isEnabled()));
             assertTrue(onEdt(() -> find(frame, "manageInstallationsButton").isEnabled()));
             services.release.countDown();
-            waitFor(() -> findNamed(frame, "channelCheckResult"));
+            Component result = waitFor(() -> findNamed(frame, "channelCheckResult"));
+            assertEquals("Up to date", ((javax.swing.JLabel) result).getText());
+            assertNull(onEdt(() -> find(frame, "checkUpdatesButton")),
+                    "an exact-current result has no redundant Check again action");
+            assertNull(onEdt(() -> find(frame, "recoverUpdateButton")),
+                    "a healthy receipt alone does not expose Home recovery");
+        } finally {
+            services.release.countDown();
+            SwingUtilities.invokeAndWait(frame::dispose);
+        }
+    }
+
+    @Test
+    void failedAutomaticCheckShowsCouldNotCheckAndExplicitRetry() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing channel integration requires a display");
+        FakeServices services = new FakeServices(temp.resolve("failed-check.json"), true);
+        services.checkFailure = new IOException("fixture metadata unavailable");
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            assertTrue(services.started.await(5, TimeUnit.SECONDS));
+            services.release.countDown();
+            Component result = waitFor(() -> {
+                Component found = findNamed(frame, "channelCheckResult");
+                return found instanceof javax.swing.JLabel label
+                        && "Could not check".equals(label.getText()) ? found : null;
+            });
+            assertNotNull(result);
+            JButton retry = waitFor(() -> find(frame, "checkUpdatesButton"));
+            assertEquals("Retry", retry.getText());
         } finally {
             services.release.countDown();
             SwingUtilities.invokeAndWait(frame::dispose);
@@ -230,6 +261,7 @@ class ChannelSwingIntegrationTest {
         private final AtomicInteger checks = new AtomicInteger();
         private final CountDownLatch started = new CountDownLatch(1);
         private final CountDownLatch release = new CountDownLatch(1);
+        private volatile IOException checkFailure;
 
         FakeServices(Path registry) {
             this(registry, false);
@@ -259,7 +291,9 @@ class ChannelSwingIntegrationTest {
 
         @Override
         public HomeState loadHome() {
-            RegistryData data = new RegistryData(1, record.id(), List.of(record));
+            RegistryData data = new RegistryData(
+                    org.megamek.launcher.registry.RegistryStore.SCHEMA,
+                    record.id(), List.of(record));
             UpdatePreviewService.Eligibility eligible = new UpdatePreviewService.Eligibility(
                     record, true, "fixture", receipt, null);
             return new HomeState(data, record, inspection, null, eligible, false, preference);
@@ -294,10 +328,11 @@ class ChannelSwingIntegrationTest {
 
         @Override
         public ChannelUpdateChecker.Result checkUpdates(InstallationRecord expected)
-                throws InterruptedException {
+                throws IOException, InterruptedException {
             checks.incrementAndGet();
             started.countDown();
             release.await();
+            if (checkFailure != null) throw checkFailure;
             return new ChannelUpdateChecker.Result(ChannelUpdateChecker.Status.EXACT_CURRENT,
                     record, preference.preference(), "v0.51.0", null,
                     "The exact followed release is installed.");

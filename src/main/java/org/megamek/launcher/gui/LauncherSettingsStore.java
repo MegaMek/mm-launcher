@@ -21,13 +21,14 @@ import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.function.UnaryOperator;
 
 /**
  * One launcher-level default for future graphical installs. Per-copy choices remain solely in
  * ChannelPreferenceStore; reading this setting never migrates or changes an existing copy.
  */
 final class LauncherSettingsStore {
-    static final int SCHEMA = 1;
+    static final int SCHEMA = 2;
     private static final int MAX_BYTES = 4096;
     private final Path registry;
     private final ObjectMapper mapper = JsonMapper.builder()
@@ -62,10 +63,32 @@ final class LauncherSettingsStore {
             throw new IOException("launcher settings changed while being read (not reset)");
         }
         try {
-            Settings settings = mapper.readValue(bytes, Settings.class);
-            if (settings.schemaVersion() != SCHEMA) {
+            com.fasterxml.jackson.databind.JsonNode tree = mapper.readTree(bytes);
+            com.fasterxml.jackson.databind.JsonNode version = tree.get("schemaVersion");
+            if (version == null || !version.canConvertToInt()) {
                 throw new IOException("unsupported launcher settings schema");
             }
+            Settings settings;
+            if (version.intValue() == 1) {
+                requireBoolean(tree, "checkNewInstallsOnOpen");
+                LegacySettings legacy = mapper.treeToValue(tree, LegacySettings.class);
+                settings = new Settings(SCHEMA, true, legacy.checkNewInstallsOnOpen(),
+                        null, null);
+            } else {
+                requireBoolean(tree, "checkInstalledVersionsOnOpen");
+                requireBoolean(tree, "checkNewInstallsOnOpen");
+                com.fasterxml.jackson.databind.JsonNode java =
+                        tree.get("defaultJavaExecutable");
+                com.fasterxml.jackson.databind.JsonNode feature =
+                        tree.get("defaultJavaFeature");
+                if (java == null || feature == null
+                        || !(java.isNull() || java.isTextual())
+                        || !(feature.isNull() || feature.isIntegralNumber())) {
+                    throw new IOException("default Java settings have invalid types");
+                }
+                settings = mapper.treeToValue(tree, Settings.class);
+            }
+            validate(settings);
             return new CheckConfiguration(settings, "sha256:" + sha256(bytes));
         } catch (IOException error) {
             throw new IOException("launcher settings are invalid or unreadable (not reset): "
@@ -74,6 +97,31 @@ final class LauncherSettingsStore {
     }
 
     Settings write(boolean checkNewInstallsOnOpen) throws IOException {
+        return update(settings -> new Settings(SCHEMA,
+                settings.checkInstalledVersionsOnOpen(), checkNewInstallsOnOpen,
+                settings.defaultJavaExecutable(), settings.defaultJavaFeature()));
+    }
+
+    Settings writeAutomaticChecks(boolean enabled) throws IOException {
+        return update(settings -> new Settings(SCHEMA, enabled,
+                settings.checkNewInstallsOnOpen(), settings.defaultJavaExecutable(),
+                settings.defaultJavaFeature()));
+    }
+
+    Settings writeDefaultJava(Path executable, int feature) throws IOException {
+        if (executable == null || feature < 21) {
+            throw new IOException("validated Java 21+ is required");
+        }
+        Path canonical = executable.toAbsolutePath().normalize();
+        if (!canonical.toString().equals(executable.toString())) {
+            throw new IOException("default Java executable must be canonical");
+        }
+        return update(settings -> new Settings(SCHEMA,
+                settings.checkInstalledVersionsOnOpen(),
+                settings.checkNewInstallsOnOpen(), canonical.toString(), feature));
+    }
+
+    private Settings update(UnaryOperator<Settings> change) throws IOException {
         Path file = path();
         Path parent = file.getParent();
         StrictPathSafety.requireDirectory(parent, "launcher settings parent");
@@ -82,8 +130,10 @@ final class LauncherSettingsStore {
         rejectUnexpected(lockPath, "launcher settings lock");
         try (FileChannel channel = FileChannel.open(lockPath, StandardOpenOption.CREATE,
                 StandardOpenOption.WRITE); FileLock ignored = lock(channel, lockPath)) {
-            if (Files.exists(file, LinkOption.NOFOLLOW_LINKS)) read();
-            Settings settings = new Settings(SCHEMA, checkNewInstallsOnOpen);
+            Settings current = Files.exists(file, LinkOption.NOFOLLOW_LINKS)
+                    ? read() : Settings.DEFAULT;
+            Settings settings = change.apply(current);
+            validate(settings);
             byte[] bytes = mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(settings);
             if (bytes.length <= 0 || bytes.length > MAX_BYTES) {
                 throw new IOException("launcher settings exceed size limit");
@@ -110,6 +160,38 @@ final class LauncherSettingsStore {
                 throw error;
             }
             return settings;
+        }
+    }
+
+    private static void validate(Settings settings) throws IOException {
+        if (settings == null || settings.schemaVersion() != SCHEMA
+                || (settings.defaultJavaExecutable() == null)
+                != (settings.defaultJavaFeature() == null)) {
+            throw new IOException("unsupported launcher settings schema");
+        }
+
+        private static void requireBoolean(com.fasterxml.jackson.databind.JsonNode tree,
+                                           String field) throws IOException {
+            com.fasterxml.jackson.databind.JsonNode value = tree.get(field);
+            if (value == null || !value.isBoolean()) {
+                throw new IOException(field + " must be boolean");
+            }
+        }
+        if (settings.defaultJavaExecutable() == null) return;
+        if (settings.defaultJavaExecutable().isBlank()
+                || settings.defaultJavaExecutable().length() > 2048
+                || settings.defaultJavaExecutable().chars().anyMatch(Character::isISOControl)
+                || settings.defaultJavaFeature() < 21) {
+            throw new IOException("invalid default Java setting");
+        }
+        try {
+            Path path = Path.of(settings.defaultJavaExecutable());
+            if (!path.isAbsolute()
+                    || !path.normalize().toString().equals(settings.defaultJavaExecutable())) {
+                throw new IOException("default Java setting is not canonical");
+            }
+        } catch (RuntimeException error) {
+            throw new IOException("invalid default Java setting", error);
         }
     }
 
@@ -162,10 +244,15 @@ final class LauncherSettingsStore {
         }
     }
 
-    record Settings(int schemaVersion, boolean checkNewInstallsOnOpen) {
-        static final Settings DEFAULT = new Settings(SCHEMA, true);
+    record Settings(int schemaVersion, boolean checkInstalledVersionsOnOpen,
+                    boolean checkNewInstallsOnOpen, String defaultJavaExecutable,
+                    Integer defaultJavaFeature) {
+        static final Settings DEFAULT = new Settings(SCHEMA, true, true, null, null);
     }
 
     record CheckConfiguration(Settings settings, String revision) {
+    }
+
+    private record LegacySettings(int schemaVersion, boolean checkNewInstallsOnOpen) {
     }
 }

@@ -18,6 +18,7 @@ import org.megamek.launcher.operation.OperationType;
 import org.megamek.launcher.registry.InstallationRecord;
 import org.megamek.launcher.registry.RegistryData;
 import org.megamek.launcher.registry.RegistryStore;
+import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseTransport;
 
 import java.io.ByteArrayInputStream;
@@ -43,7 +44,6 @@ import java.util.jar.Manifest;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -60,6 +60,7 @@ class NormalInstallServiceTest {
         assertEquals(FollowChannel.MILESTONE, plan.channel());
         assertTrue(plan.checkConfiguration().checkOnOpen());
         assertEquals("MegaMek/mekhq", plan.repository().slug());
+        assertEquals(NormalInstallService.SUITE_PRODUCTS, plan.requiredProducts());
         assertEquals("v1.2.3", plan.release().tag());
         assertEquals(fixture.transport.assetName, plan.asset().name());
         assertEquals(fixture.destination, plan.destination());
@@ -76,8 +77,9 @@ class NormalInstallServiceTest {
         RegistryData data = fixture.registries.read(fixture.registry);
         InstallationRecord latest = fixture.registries.resolve(data, null);
         assertEquals(result.record(), latest, "result must not return the pre-Java record");
+        assertTrue(result.becameMain());
         assertEquals(plan.javaExecutable().toString(), latest.javaExecutable());
-        assertEquals("Main", latest.name());
+        assertEquals("Default", latest.name());
         assertEquals(NormalInstallService.SUITE_PRODUCTS,
                 latest.products().stream().map(Product::key)
                         .collect(java.util.stream.Collectors.toSet()));
@@ -90,6 +92,23 @@ class NormalInstallServiceTest {
         assertTrue(launcher.command(latest, "megamek").contains("megamek.MegaMek"));
         assertTrue(launcher.command(latest, "mekhq").contains("mekhq.MekHQ"));
         assertTrue(launcher.command(latest, "lab").contains("megameklab.MegaMekLab"));
+    }
+
+    @Test
+    void configuredDefaultGameJavaIsUsedByNewNormalPlanAndImport() throws Exception {
+        Fixture fixture = fixture("6.7.8");
+        Path selectedJava = Files.writeString(
+                fixture.state.resolve("java.exe"), "fixture").toRealPath();
+        fixture.launcherServices.selectDefaultJava(selectedJava);
+
+        NormalInstallService.Plan install =
+                fixture.launcherServices.prepareNormalInstall(fixture.destination, null);
+        assertEquals(selectedJava, install.javaExecutable());
+
+        Path existing = createSuite(fixture.state.resolve("existing-copy"), "6.7.8");
+        var imported = fixture.launcherServices.prepareExistingImport(existing,
+                OperationContext.none(OperationType.IMPORT_EXISTING));
+        assertEquals(selectedJava, imported.java().executable());
     }
 
     @Test
@@ -115,13 +134,126 @@ class NormalInstallServiceTest {
         RegistryData data = fixture.registries.read(fixture.registry);
         InstallationRecord main = fixture.registries.resolve(data, null);
         assertEquals(result.record(), main);
-        assertEquals("Main", main.name());
+        assertTrue(result.becameMain());
+        assertEquals("Default", main.name());
         assertEquals("9.9.9", main.observedBuild());
         assertEquals(FollowChannel.DEVELOPMENT,
                 new ChannelPreferenceStore().read(fixture.registry, data, main)
                         .preference().channel());
         assertTrue(new ChannelPreferenceStore().read(fixture.registry, data, main)
                 .preference().checkOnOpen());
+    }
+
+    @Test
+    void everyOfficialRepositoryChannelPairPersistsItsChannelAndExactProductLayout()
+            throws Exception {
+        for (OfficialRepository repository : OfficialRepository.values()) {
+            for (FollowChannel channel : FollowChannel.values()) {
+                Fixture fixture = fixture("4." + repository.ordinal() + "."
+                        + channel.ordinal());
+                NormalInstallService.Plan plan = fixture.service.prepare(
+                        repository, channel, fixture.destination, null);
+
+                NormalInstallService.Result result = fixture.service.install(plan, quiet(),
+                        OperationContext.none(OperationType.FRESH_INSTALL));
+
+                assertEquals(repository, plan.repository());
+                assertEquals(channel, plan.channel());
+                assertEquals(repository.key(), result.ownershipReceipt().repository());
+                assertEquals(plan.requiredProducts(),
+                        result.record().products().stream().map(Product::key)
+                                .collect(java.util.stream.Collectors.toSet()));
+                RegistryData data = fixture.registries.read(fixture.registry);
+                assertEquals(channel, new ChannelPreferenceStore().read(
+                        fixture.registry, data, result.record()).preference().channel());
+                assertEquals(result.record().id(), data.defaultInstallationId());
+            }
+        }
+    }
+
+    @Test
+    void defaultFoldersAreDistinctAndNameTheSelectedProductAndChannel() throws Exception {
+        Fixture fixture = fixture("5.0.0");
+        assertEquals(fixture.state.resolve("installations").resolve("MekHQ Milestone"),
+                fixture.service.defaultDestination(OfficialRepository.MEKHQ,
+                        FollowChannel.MILESTONE));
+        assertEquals(fixture.state.resolve("installations").resolve("MegaMek Development"),
+                fixture.service.defaultDestination(OfficialRepository.MEGAMEK,
+                        FollowChannel.DEVELOPMENT));
+        assertEquals(fixture.state.resolve("installations").resolve("MegaMekLab Milestone"),
+                fixture.service.defaultDestination(OfficialRepository.LAB,
+                        FollowChannel.MILESTONE));
+    }
+
+    @Test
+    void managedDefaultQuotesSeparateStateAndApplicationDataParentsWithoutWriting()
+            throws Exception {
+        Fixture fixture = fixture("5.0.2");
+        Path stateParent = fixture.state.resolve("new-state");
+        Path registry = stateParent.resolve("registry.json");
+        Path dataHome = fixture.state.resolve("new-data");
+        PlatformInstallLocations locations = new PlatformInstallLocations(
+                new PlatformInstallLocations.PlatformSource() {
+                    @Override
+                    public String operatingSystem() {
+                        return "Linux";
+                    }
+
+                    @Override
+                    public String environment(String name) {
+                        return name.equals("XDG_DATA_HOME") ? dataHome.toString() : null;
+                    }
+
+                    @Override
+                    public String userHome() {
+                        return fixture.state.toString();
+                    }
+
+                    @Override
+                    public Path defaultRegistry() {
+                        return registry;
+                    }
+                });
+        NormalInstallService service = new NormalInstallService(registry, fixture.transport,
+                new JavaRuntime(new FakeJava(Integer.MAX_VALUE)),
+                () -> new NormalInstallService.CheckConfiguration(true, "test:true"),
+                locations);
+        Path destination = dataHome.resolve("MegaMek").resolve("MekHQ Milestone");
+
+        assertEquals(destination, service.defaultDestination());
+        NormalInstallService.Plan plan = service.prepare(destination, null);
+        assertEquals(List.of(stateParent, dataHome, dataHome.resolve("MegaMek")),
+                plan.missingParents());
+        for (Path parent : plan.missingParents()) {
+            assertFalse(Files.exists(parent, LinkOption.NOFOLLOW_LINKS),
+                    "planning does not create state or application-data parents");
+        }
+        assertFalse(Files.exists(registry, LinkOption.NOFOLLOW_LINKS));
+    }
+
+    @Test
+    void quoteAllowsFourSafeMissingParentsButRejectsADeeperUncreatedChain()
+            throws Exception {
+        Fixture fixture = fixture("5.0.1");
+        Path first = fixture.state.resolve("one");
+        Path second = first.resolve("two");
+        Path third = second.resolve("three");
+        Path fourth = third.resolve("four");
+        Path destination = fourth.resolve("MekHQ Milestone");
+
+        NormalInstallService.Plan plan =
+                fixture.service.prepare(destination, null);
+
+        assertEquals(List.of(first, second, third, fourth), plan.missingParents());
+        for (Path parent : plan.missingParents()) {
+            assertFalse(Files.exists(parent, LinkOption.NOFOLLOW_LINKS),
+                    "planning does not create quoted parents");
+        }
+
+        IOException tooDeep = assertThrows(IOException.class,
+                () -> fixture.service.prepare(
+                        fourth.resolve("five").resolve("MekHQ Development"), null));
+        assertTrue(tooDeep.getMessage().contains("too many new parent"));
     }
 
     @Test
@@ -135,6 +267,12 @@ class NormalInstallServiceTest {
         assertEquals(0, invalid.transport.apiRequests);
         assertEquals(0, invalid.transport.binaryRequests);
         assertFalse(Files.exists(invalid.registry, LinkOption.NOFOLLOW_LINKS));
+        IOException missingRepository = assertThrows(IOException.class,
+                () -> invalid.service.prepare(null, FollowChannel.MILESTONE,
+                        invalid.destination, null));
+        assertTrue(missingRepository.getMessage().contains(
+                "MekHQ, MegaMek, or MegaMekLab"));
+        assertEquals(0, invalid.transport.yamlRequests);
 
         Fixture drift = fixture("2.3.4");
         NormalInstallService.Plan plan = drift.service.prepare(
@@ -303,15 +441,17 @@ class NormalInstallServiceTest {
         InstallationRecord unchanged = fixture.registries.resolve(data, expectedOld.id());
         assertEquals(expectedOld, unchanged);
         assertEquals("keep-pin", unchanged.pin());
-        assertEquals(result.record().id(), data.defaultInstallationId());
-        assertNotEquals(expectedOld.id(), data.defaultInstallationId());
+        assertEquals(expectedOld.id(), data.defaultInstallationId(),
+                "normal install must make Main only when the captured default is empty");
+        assertFalse(result.becameMain(),
+                "the result reports the actual locked Main outcome, not the plan-time default");
         assertFalse(new ChannelPreferenceStore().read(fixture.registry, data, unchanged)
                 .preference().checkOnOpen());
         assertFalse(new ChannelPreferenceStore().read(fixture.registry, data, result.record())
                 .preference().checkOnOpen());
         int metadataRequests = fixture.transport.apiRequests;
         LauncherServices.HomeState home = fixture.launcherServices.loadHome();
-        assertEquals(result.record(), home.preferred());
+        assertEquals(expectedOld.id(), home.preferred().id());
         assertFalse(home.channelPreference().preference().checkOnOpen());
         assertFalse(fixture.launcherServices.canCheckOnOpen(result.record()));
         assertEquals(metadataRequests, fixture.transport.apiRequests,
@@ -417,7 +557,7 @@ class NormalInstallServiceTest {
                 () -> fixture.service.install(plan, quiet(),
                         OperationContext.none(OperationType.FRESH_INSTALL)));
 
-        assertTrue(failure.getMessage().contains("Main selection"));
+        assertTrue(failure.getMessage().contains("default selection"));
         RegistryData data = fixture.registries.read(fixture.registry);
         assertEquals(concurrent.get().id(), data.defaultInstallationId());
         assertEquals(2, data.installations().size());
@@ -436,11 +576,11 @@ class NormalInstallServiceTest {
         Path state = Files.createDirectory(temp.resolve("state-" + version + "-"
                 + Integer.toUnsignedString(System.identityHashCode(java))));
         Path registry = state.resolve("registry.json");
-        byte[] archive = suiteArchive(version);
+        Map<OfficialRepository, byte[]> archives = archives(version);
         String developmentVersion = "9.9.9";
-        byte[] developmentArchive = suiteArchive(developmentVersion);
-        FixtureTransport transport = new FixtureTransport(version, archive,
-                developmentVersion, developmentArchive);
+        Map<OfficialRepository, byte[]> developmentArchives = archives(developmentVersion);
+        FixtureTransport transport = new FixtureTransport(version, archives,
+                developmentVersion, developmentArchives);
         RegistryStore registries = new RegistryStore();
         JavaRuntime runtime = new JavaRuntime(java);
         NormalInstallService service = new NormalInstallService(registry, transport, runtime);
@@ -466,21 +606,39 @@ class NormalInstallServiceTest {
         return root;
     }
 
-    private static byte[] suiteArchive(String version) throws Exception {
-        String root = "MekHQ-" + version;
+    private static Map<OfficialRepository, byte[]> archives(String version) throws Exception {
+        Map<OfficialRepository, byte[]> archives = new java.util.EnumMap<>(
+                OfficialRepository.class);
+        for (OfficialRepository repository : OfficialRepository.values()) {
+            archives.put(repository, applicationArchive(repository, version));
+        }
+        return Map.copyOf(archives);
+    }
+
+    private static byte[] applicationArchive(OfficialRepository repository, String version)
+            throws Exception {
+        String root = repository.assetPrefix() + version;
         List<Entry> entries = new ArrayList<>();
         for (String directory : List.of(root, root + "/data", root + "/mmconf",
                 root + "/lib")) {
             entries.add(new Entry(directory, new byte[0], true));
         }
-        entries.add(new Entry(root + "/MegaMek.jar",
-                jar("megamek.MegaMek", version), false));
-        entries.add(new Entry(root + "/MekHQ.jar",
-                jar("mekhq.MekHQ", version), false));
-        entries.add(new Entry(root + "/MegaMekLab.jar",
-                jar("megameklab.MegaMekLab", version), false));
-        entries.add(new Entry(root + "/lib/MegaMek.jar",
-                jar("megamek.MegaMek", version), false));
+        if (repository == OfficialRepository.MEKHQ
+                || repository == OfficialRepository.MEGAMEK) {
+            entries.add(new Entry(root + "/MegaMek.jar",
+                    jar("megamek.MegaMek", version), false));
+            entries.add(new Entry(root + "/lib/MegaMek.jar",
+                    jar("megamek.MegaMek", version), false));
+        }
+        if (repository == OfficialRepository.MEKHQ) {
+            entries.add(new Entry(root + "/MekHQ.jar",
+                    jar("mekhq.MekHQ", version), false));
+        }
+        if (repository == OfficialRepository.MEKHQ
+                || repository == OfficialRepository.LAB) {
+            entries.add(new Entry(root + "/MegaMekLab.jar",
+                    jar("megameklab.MegaMekLab", version), false));
+        }
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (GzipCompressorOutputStream gzip = new GzipCompressorOutputStream(bytes);
              TarArchiveOutputStream tar = new TarArchiveOutputStream(gzip)) {
@@ -545,9 +703,9 @@ class NormalInstallServiceTest {
 
     private static final class FixtureTransport implements ReleaseTransport {
         private String version;
-        private final byte[] archive;
+        private final Map<OfficialRepository, byte[]> archives;
         private String developmentVersion;
-        private final byte[] developmentArchive;
+        private final Map<OfficialRepository, byte[]> developmentArchives;
         private int binaryRequests;
         private final String assetName;
         private int apiRequests;
@@ -557,12 +715,13 @@ class NormalInstallServiceTest {
         private Runnable onBinary = () -> {
         };
 
-        private FixtureTransport(String version, byte[] archive,
-                                 String developmentVersion, byte[] developmentArchive) {
+        private FixtureTransport(String version, Map<OfficialRepository, byte[]> archives,
+                                 String developmentVersion,
+                                 Map<OfficialRepository, byte[]> developmentArchives) {
             this.version = version;
-            this.archive = archive;
+            this.archives = archives;
             this.developmentVersion = developmentVersion;
-            this.developmentArchive = developmentArchive;
+            this.developmentArchives = developmentArchives;
             this.assetName = "MekHQ-" + version + ".tar.gz";
         }
 
@@ -579,7 +738,9 @@ class NormalInstallServiceTest {
                 if (uri.getHost().equals("api.github.com")) {
                     apiRequests++;
                     String requested = requestedVersion(uri);
-                    return response(releaseJson(requested, archiveFor(requested),
+                    OfficialRepository repository = repository(uri);
+                    return response(releaseJson(repository, requested,
+                                    archiveFor(repository, requested),
                                     driftOnThirdApi && apiRequests >= 3)
                                     .getBytes(StandardCharsets.UTF_8),
                             "application/json");
@@ -587,7 +748,7 @@ class NormalInstallServiceTest {
                 if (uri.getHost().equals("github.com")) {
                     binaryRequests++;
                     onBinary.run();
-                    return response(archiveFor(requestedVersion(uri)),
+                    return response(archiveFor(repository(uri), requestedVersion(uri)),
                             "application/octet-stream");
                 }
                 throw new IOException("unexpected fixture URI: " + uri);
@@ -597,8 +758,20 @@ class NormalInstallServiceTest {
             }
         }
 
-        private byte[] archiveFor(String requested) {
-            return requested.equals(developmentVersion) ? developmentArchive : archive;
+        private byte[] archiveFor(OfficialRepository repository, String requested) {
+            return requested.equals(developmentVersion)
+                    ? developmentArchives.get(repository) : archives.get(repository);
+        }
+
+        private static OfficialRepository repository(URI uri) throws IOException {
+            String path = uri.getPath().toLowerCase(java.util.Locale.ROOT);
+            for (OfficialRepository repository : OfficialRepository.values()) {
+                if (path.contains("/" + repository.slug().toLowerCase(
+                        java.util.Locale.ROOT) + "/")) {
+                    return repository;
+                }
+            }
+            throw new IOException("fixture URI has no official repository: " + uri);
         }
 
         private static String requestedVersion(URI uri) throws IOException {
@@ -610,19 +783,20 @@ class NormalInstallServiceTest {
             return slash < 0 ? path.substring(start) : path.substring(start, slash);
         }
 
-        private String releaseJson(String requested, byte[] requestedArchive, boolean drift)
+        private String releaseJson(OfficialRepository repository, String requested,
+                                   byte[] requestedArchive, boolean drift)
                 throws Exception {
-            String currentName = "MekHQ-" + requested + ".tar.gz";
+            String currentName = repository.assetPrefix() + requested + ".tar.gz";
             return """
                     {"tag_name":"v%s","name":"Milestone %s","draft":false,
                     "prerelease":false,
-                    "html_url":"https://github.com/MegaMek/mekhq/releases/tag/v%s",
+                    "html_url":"https://github.com/%s/releases/tag/v%s",
                     "assets":[{"name":"%s","size":%d,"digest":"sha256:%s",
-                    "browser_download_url":"https://github.com/MegaMek/mekhq/releases/download/v%s/%s"}]}
-                    """.formatted(requested, requested, requested, currentName,
+                    "browser_download_url":"https://github.com/%s/releases/download/v%s/%s"}]}
+                    """.formatted(requested, requested, repository.slug(), requested, currentName,
                     requestedArchive.length + (drift ? 1 : 0),
                     drift ? "0".repeat(64) : sha(requestedArchive),
-                    requested, currentName);
+                    repository.slug(), requested, currentName);
         }
 
         private static Response response(byte[] bytes, String type) {

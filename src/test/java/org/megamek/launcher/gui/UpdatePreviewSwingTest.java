@@ -50,7 +50,9 @@ class UpdatePreviewSwingTest {
             assertNotNull(installations);
             JLabel note = findLabel(frame, "updatesUnavailableMessage");
             assertNotNull(note);
-            assertTrue(note.getText().contains("imported copy"));
+            assertTrue(note.getText().contains("unavailable"));
+            assertTrue(findButton(frame, "recoverUpdateButton") == null,
+                    "an imported copy without a pending update has no Home recovery action");
             SwingUtilities.invokeAndWait(installations::doClick);
             assertNotNull(waitForButton(frame, "previewUpdateButton"),
                     "advanced action remains discoverable for an imported copy");

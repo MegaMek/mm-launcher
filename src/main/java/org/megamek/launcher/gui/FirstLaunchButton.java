@@ -105,7 +105,7 @@ final class FirstLaunchButton extends JButton {
             if (isFocusOwner()) {
                 canvas.setColor(new Color(246, 238, 207));
                 canvas.setStroke(new BasicStroke(scale.scaleForGUI(2f)));
-                canvas.drawRect(0, 0, getWidth() - 1, getHeight() - 1);
+                canvas.drawPolygon(plate);
             }
         } finally {
             canvas.dispose();

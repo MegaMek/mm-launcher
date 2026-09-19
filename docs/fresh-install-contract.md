@@ -40,9 +40,19 @@ application root. `InstallationInspector` then verifies the supported static lay
 selected application is present. It does not classload or execute artifacts.
 
 The shared legacy/CLI installer requires the destination parent to already exist, be real,
-canonical, and writable. The normal GUI planner may create at most two explicitly quoted real
-parents beneath an existing writable ancestor after consent, covering the launcher state parent
-and its `installations` directory on a new machine. The destination must be wholly
+canonical, and writable. The normal GUI planner may create at most four individually quoted real
+parents beneath an existing writable ancestor after consent. With the ordinary GUI registry, its
+managed payload/support-data root is `%LOCALAPPDATA%\MegaMek` on Windows,
+`~/Library/Application Support/MegaMek` on macOS, and
+`${XDG_DATA_HOME:-~/.local/share}/MegaMek` on Linux; a relative `XDG_DATA_HOME` is ignored.
+Explicit `gui --registry` overrides and custom `LauncherServices` registries retain
+`<registry parent>/installations` for disposable isolation. This placement does not move existing
+records, install a payload directly as the shared `MegaMek` support root, or place payloads inside
+`MM Launcher.app`. Registry/receipt files remain outside each product/channel child. Leaf names
+include the selected product and channel, such as
+`MekHQ Milestone`, `MegaMek Development`, or `MegaMekLab Milestone`, so different quick choices
+do not collide or misdescribe their contents.
+The destination must be wholly
 nonexistent—even an empty directory is refused. Registry/destination/registered-root
 overlaps, duplicate names, and linked or special ancestors fail preflight. Extraction occurs in a
 random create-new sibling staging directory. Final move has no replace option and refuses a target
@@ -59,24 +69,48 @@ channel finalization, and exact temporary cleanup run without interruption. A la
 the existing **NOT REGISTERED**, **REGISTERED**, and channel-salvage wording; it is never mislabeled
 as cancellation and publication is not rolled back.
 
-Only after final static validation does `RegistryStore.register` run. Existing default selection
-is preserved by registration; the first record is the default for an empty registry. The normal
+Only after final static validation does `RegistryStore.register` run. Existing legacy default
+selection is preserved by registration; the first record supplies that compatibility field for an
+empty registry. Independently, registration initializes only still-unset per-application
+preferences for products actually in the new static record and never overwrites an explicit
+preference. The normal
 GUI setup then revalidates and stores the exact external Java from its quote, persists the exact
 planned Milestone or Development channel with the quoted Settings check default, rechecks that no
-unrelated registry/default drift occurred, and explicitly selects the new Main. The primary
-first-run route defaults to Milestone; the split menu's Development route is explicit and cannot
-silently alter the primary default. Normal and advanced GUI installs initially use true, but
-preserve a user's later false default for each new copy. The normal quote displays that choice and
-re-reads the exact settings configuration before transfer or parent creation; change, corruption,
-or an unknown result requires a fresh quote. Existing per-copy settings are never rewritten.
-Legacy/CLI behavior is unchanged and false remains the omitted-option default. Every record remains
-`updateEligible=false`; no Java is bundled and no game is automatically launched.
+unrelated registry/default drift occurred, and updates the compatibility default only for the
+still-empty registry captured by the quote. The primary first-run route defaults to
+`(MEKHQ, MILESTONE)`; the five popup routes bind their displayed fixed repository/channel pairs and
+cannot silently alter the primary default. The same installer requires exact product matching for
+normal quotes: MekHQ is the three-program suite, while MegaMek and MegaMekLab are standalone.
+Repository titles and extra/missing products cannot substitute for that binding. Normal and
+advanced GUI installs initially use true, but preserve a user's later explicit false default for
+each new copy. The normal backend re-reads the exact settings configuration before transfer or
+parent creation; change, corruption, or an unknown result requires a fresh quote. The simple
+summary keeps the exact planned destination visible but has no passive update-behavior row and no
+technical-details toggle or pane. Raw source, asset, digest, Java, registry, and Settings bindings
+remain validated backend state, and operation logs retain errors. Existing per-copy settings are
+never rewritten. Legacy/CLI behavior is unchanged and false remains the omitted-option default.
+Every record remains `updateEligible=false`; no Java is bundled and no game is automatically
+launched.
+
+The normal planner and existing-copy importer use the validated launcher-level default game Java
+when configured. With no saved default they lazily validate the current compatible launcher
+runtime and do not write a setting. A successful explicit default change is canonical, Java 21+,
+and atomic; invalid/old Java leaves the previous setting intact. Existing installations retain
+their record-level Java override.
 
 Before publication, policy-version-1 hashes are made only from the pristine verified extracted
 package. After registration generates its UUID, a receipt bound to that UUID, canonical root,
 registration time, fixed repository/tag/asset identity, size, GitHub SHA-256, protected-path
 contract, complete managed manifest, and excluded-file inventory is created beside the registry
 in `<registry-name>.metadata/<uuid>.json`. Archives are not retained.
+
+The first-launch display snapshot is separate from planning. It reads stable/dev once and resolves
+the six validated repository/channel choices, deduplicating exact release metadata for identical
+repository/tag pairs. It performs no package transfer, Java validation, destination/state write,
+or action disabling. Opening its styled menu while metadata is loading or available performs no
+request; closing and reopening after viewing unavailable rows is an explicit display-snapshot
+retry. Selecting an available choice cancels any display worker and starts a fresh normal quote,
+which is revalidated again before binary transfer.
 
 ## Failure and recovery
 
@@ -101,3 +135,18 @@ in `<registry-name>.launcher-logs/`. A corrupt/unreadable registry or unsafe ove
 directory creation and produces a separate logging warning without hiding the original install
 outcome. Standalone CLI arguments, output/exit behavior, package model, and lack of cache/resume
 semantics are unchanged.
+
+The GUI operation window is a compact dark-teal/gold phase/progress surface, not a live technical
+log viewer. While cancellation is safe its only bottom action is **Cancel**; after publication
+wins, Cancel disappears and the window says that installation is finishing and must remain open.
+Accepted pre-publication cancellation disposes progress and returns to the current page with
+**Installation cancelled**. Failure remains in progress as one concise sanitized summary with
+**Close** and failure-only **View details**; a retained published normal copy alone reveals
+**Open Installations**. The generic error dialog is not duplicated.
+
+On normal-install success the authoritative result reports whether the new record actually became
+Main under the locked registry outcome. Progress closes immediately and managed Home reloads
+without an install-complete modal or launch. Home shows a process-local gold/green notice naming
+the installed product and observed version. It says **installed and ready** only when that result
+became Main; otherwise it says to find the new copy in Installations while Home continues showing
+the existing Main.

@@ -76,6 +76,30 @@ public final class FreshInstaller {
                           Optional<VerifiedPackageFetcher.ExpectedAsset> expectedAsset,
                           Set<String> requiredProducts)
             throws IOException, InterruptedException {
+        return install(repository, tag, destination, registry, name, progress, context,
+                expectedAsset, requiredProducts, false);
+    }
+
+    /**
+     * Uses the same installer while requiring the published layout to contain exactly the
+     * product set bound into a normal-install quote.
+     */
+    public Result installMatchingProducts(OfficialRepository repository, String tag,
+                                          Path destination, Path registry, String name,
+                                          PrintStream progress, OperationContext context,
+                                          Optional<VerifiedPackageFetcher.ExpectedAsset> expectedAsset,
+                                          Set<String> expectedProducts)
+            throws IOException, InterruptedException {
+        return install(repository, tag, destination, registry, name, progress, context,
+                expectedAsset, expectedProducts, true);
+    }
+
+    private Result install(OfficialRepository repository, String tag, Path destination,
+                           Path registry, String name, PrintStream progress,
+                           OperationContext context,
+                           Optional<VerifiedPackageFetcher.ExpectedAsset> expectedAsset,
+                           Set<String> requiredProducts, boolean exactProducts)
+            throws IOException, InterruptedException {
         if (expectedAsset == null) throw new IOException("expected asset option is required");
         if (requiredProducts == null || requiredProducts.isEmpty()
                 || requiredProducts.stream().anyMatch(
@@ -101,7 +125,12 @@ public final class FreshInstaller {
                 Inspection inspection = inspector.inspect(extracted);
                 Set<String> foundProducts = inspection.products().stream()
                         .map(product -> product.key()).collect(java.util.stream.Collectors.toSet());
-                if (!foundProducts.containsAll(requiredProducts)) {
+                if (exactProducts && !foundProducts.equals(requiredProducts)) {
+                    throw new IOException("downloaded package applications do not match the "
+                            + "selected official product: expected " + requiredProducts
+                            + " but found " + foundProducts);
+                }
+                if (!exactProducts && !foundProducts.containsAll(requiredProducts)) {
                     Set<String> missing = new java.util.TreeSet<>(requiredProducts);
                     missing.removeAll(foundProducts);
                     throw new IOException("downloaded package does not contain required "

@@ -38,7 +38,7 @@ class OfficialYamlChannelCatalogTest {
                 labels.get(FollowChannel.DEVELOPMENT));
 
         QueueTransport transport = new QueueTransport(text(200, FIXTURE),
-                text(200, release("v0.51.0", true)));
+                text(200, release(OfficialRepository.MEKHQ, "v0.51.0", true)));
         ChannelCatalog.Target target = new OfficialYamlChannelCatalog(transport)
                 .target(FollowChannel.DEVELOPMENT, OfficialRepository.MEKHQ);
 
@@ -50,6 +50,58 @@ class OfficialYamlChannelCatalogTest {
                 transport.uris);
         assertTrue(transport.accepts.stream().noneMatch("application/octet-stream"::equals),
                 "a channel check must never request package bytes");
+    }
+
+    @Test
+    void quickSnapshotFetchesYamlOnceAndDeduplicatesExactMetadataForAllRepositories()
+            throws Exception {
+        QueueTransport transport = new QueueTransport(
+                text(200, FIXTURE),
+                text(200, release(OfficialRepository.MEKHQ, "v0.51.0", true)),
+                text(200, release(OfficialRepository.MEGAMEK, "v0.51.0", true)),
+                text(200, release(OfficialRepository.LAB, "v0.51.0", true)));
+
+        QuickInstallSnapshot snapshot =
+                new OfficialYamlChannelCatalog(transport).quickInstallSnapshot();
+
+        assertEquals(QuickInstallSnapshot.ALL_KEYS,
+                snapshot.options().stream().map(QuickInstallOption::key).toList());
+        assertEquals(6, snapshot.byKey().size());
+        assertEquals("MekHQ-v0.51.0.tar.gz",
+                snapshot.option(QuickInstallSnapshot.DEFAULT_KEY).asset().name());
+        assertEquals("MegaMek-v0.51.0.tar.gz",
+                snapshot.option(QuickInstallSnapshot.MENU_KEYS.get(0)).asset().name());
+        assertEquals("MegaMekLab-v0.51.0.tar.gz",
+                snapshot.option(QuickInstallSnapshot.MENU_KEYS.get(1)).asset().name());
+        assertEquals(1, transport.uris.stream()
+                .filter(OfficialYamlChannelCatalog.SOURCE::equals).count());
+        assertEquals(3, transport.uris.stream()
+                .filter(uri -> "api.github.com".equals(uri.getHost())).count(),
+                "stable==dev must share exact release metadata per repository/tag");
+        assertTrue(transport.accepts.stream().noneMatch("application/octet-stream"::equals));
+    }
+
+    @Test
+    void quickSnapshotKeepsDifferentStableAndDevelopmentVersionsForEveryRepository()
+            throws Exception {
+        String different = "stable: 0.51.0\ndev: 0.52.0\n";
+        QueueTransport transport = new QueueTransport(
+                text(200, different),
+                text(200, release(OfficialRepository.MEKHQ, "v0.51.0", true)),
+                text(200, release(OfficialRepository.MEGAMEK, "v0.51.0", true)),
+                text(200, release(OfficialRepository.LAB, "v0.51.0", true)),
+                text(200, release(OfficialRepository.MEKHQ, "v0.52.0", true)),
+                text(200, release(OfficialRepository.MEGAMEK, "v0.52.0", true)),
+                text(200, release(OfficialRepository.LAB, "v0.52.0", true)));
+
+        QuickInstallSnapshot snapshot =
+                new OfficialYamlChannelCatalog(transport).quickInstallSnapshot();
+
+        assertEquals(List.of("0.51.0", "0.51.0", "0.51.0",
+                        "0.52.0", "0.52.0", "0.52.0"),
+                snapshot.options().stream().map(QuickInstallOption::version).toList());
+        assertEquals(6, transport.uris.stream()
+                .filter(uri -> "api.github.com".equals(uri.getHost())).count());
     }
 
     @Test
@@ -78,21 +130,22 @@ class OfficialYamlChannelCatalogTest {
     @Test
     void releaseMetadataMustContainAnEligibleDigestBoundAsset() {
         QueueTransport transport = new QueueTransport(text(200, FIXTURE),
-                text(200, release("v0.51.0", false)));
+                text(200, release(OfficialRepository.MEKHQ, "v0.51.0", false)));
         IOException error = assertThrows(IOException.class,
                 () -> new OfficialYamlChannelCatalog(transport)
                         .target(FollowChannel.MILESTONE, OfficialRepository.MEKHQ));
         assertTrue(error.getMessage().contains("SHA-256"));
     }
 
-    private static String release(String tag, boolean digest) {
+    private static String release(OfficialRepository repository, String tag, boolean digest) {
         String digestField = digest ? "\"digest\":\"sha256:" + "a".repeat(64) + "\"," : "";
         return """
                 {"tag_name":"%s","name":"Development","draft":false,"prerelease":false,
-                 "html_url":"https://github.com/MegaMek/mekhq/releases/tag/%s",
-                 "assets":[{"name":"MekHQ-%s.tar.gz","size":123,%s
-                 "browser_download_url":"https://github.com/MegaMek/mekhq/releases/download/%s/MekHQ-%s.tar.gz"}]}
-                """.formatted(tag, tag, tag, digestField, tag, tag);
+                 "html_url":"https://github.com/%s/releases/tag/%s",
+                 "assets":[{"name":"%s%s.tar.gz","size":123,%s
+                 "browser_download_url":"https://github.com/%s/releases/download/%s/%s%s.tar.gz"}]}
+                """.formatted(tag, repository.slug(), tag, repository.assetPrefix(), tag,
+                digestField, repository.slug(), tag, repository.assetPrefix(), tag);
     }
 
     private static ReleaseTransport.Response text(int status, String body) {

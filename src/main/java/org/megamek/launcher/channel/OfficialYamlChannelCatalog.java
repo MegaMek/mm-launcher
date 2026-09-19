@@ -19,6 +19,9 @@ import java.net.URI;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.util.Iterator;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -55,11 +58,51 @@ public final class OfficialYamlChannelCatalog implements ChannelCatalog {
     @Override
     public Target target(FollowChannel channel, OfficialRepository repository)
             throws IOException, InterruptedException {
-        if (channel == null || repository == null) throw new IOException("channel and repository are required");
+        if (channel == null || repository == null) {
+            throw new IOException("channel and repository are required");
+        }
         Map<FollowChannel, String> versions = versions();
-        String version = versions.get(channel);
-        String tag = "v" + version;
         ReleaseCatalog catalog = new ReleaseCatalog(transport);
+        return resolve(channel, repository, versions.get(channel), catalog);
+    }
+
+    /**
+     * Fetches stable/dev once, then resolves the complete six-choice first-launch snapshot.
+     * Exact metadata is shared when stable and dev currently point at the same repository/tag.
+     */
+    public QuickInstallSnapshot quickInstallSnapshot()
+            throws IOException, InterruptedException {
+        Map<FollowChannel, String> versions = versions();
+        ReleaseCatalog catalog = new ReleaseCatalog(transport);
+        Map<RepositoryTag, ResolvedRelease> releases = new HashMap<>();
+        List<QuickInstallOption> options = new ArrayList<>();
+        for (QuickInstallOption.Key key : QuickInstallSnapshot.ALL_KEYS) {
+            String version = versions.get(key.channel());
+            String tag = "v" + version;
+            RepositoryTag repositoryTag = new RepositoryTag(key.repository(), tag);
+            ResolvedRelease resolved = releases.get(repositoryTag);
+            if (resolved == null) {
+                ReleaseCatalog.Release release = catalog.exact(key.repository(), tag);
+                ReleaseCatalog.Assessment assessment = catalog.assess(key.repository(), release);
+                if (!assessment.eligible()) {
+                    throw new IOException("official " + key.channel() + " "
+                            + key.repository().key() + " target is unavailable: "
+                            + assessment.reason());
+                }
+                resolved = new ResolvedRelease(release, assessment.asset());
+                releases.put(repositoryTag, resolved);
+            }
+            ChannelCatalog.Target target = new ChannelCatalog.Target(key.channel(), version,
+                    key.repository(), resolved.release(), resolved.asset(), SOURCE.toString());
+            options.add(new QuickInstallOption(key, target));
+        }
+        return new QuickInstallSnapshot(options);
+    }
+
+    private Target resolve(FollowChannel channel, OfficialRepository repository, String version,
+                           ReleaseCatalog catalog)
+            throws IOException, InterruptedException {
+        String tag = "v" + version;
         ReleaseCatalog.Release release = catalog.exact(repository, tag);
         ReleaseCatalog.Assessment assessment = catalog.assess(repository, release);
         if (!assessment.eligible()) {
@@ -68,6 +111,12 @@ public final class OfficialYamlChannelCatalog implements ChannelCatalog {
         }
         return new Target(channel, version, repository, release, assessment.asset(),
                 SOURCE.toString());
+    }
+
+    private record RepositoryTag(OfficialRepository repository, String tag) {
+    }
+
+    private record ResolvedRelease(ReleaseCatalog.Release release, ReleaseCatalog.Asset asset) {
     }
 
     Map<FollowChannel, String> versions() throws IOException, InterruptedException {

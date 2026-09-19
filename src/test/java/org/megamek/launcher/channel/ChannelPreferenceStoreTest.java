@@ -87,7 +87,8 @@ class ChannelPreferenceStoreTest {
                 record.observedBuild(), record.products(), record.javaExecutable(), record.pin(),
                 false, "2026-09-16T01:02:04Z");
         assertEquals(ChannelPreferenceStore.Status.UNAVAILABLE,
-                store.read(registry, new RegistryData(1, replacement.id(), List.of(replacement)),
+                store.read(registry, new RegistryData(RegistryStore.SCHEMA, replacement.id(),
+                                List.of(replacement)),
                         replacement).status());
     }
 
@@ -95,7 +96,8 @@ class ChannelPreferenceStoreTest {
     void lockContentionFailsWithoutChangingExistingChoice() throws Exception {
         Path root = Files.createDirectory(temp.resolve("copy"));
         InstallationRecord record = record(root, "Copy", null, null);
-        Path registry = registry(new RegistryData(1, record.id(), List.of(record)));
+        Path registry = registry(new RegistryData(
+                RegistryStore.SCHEMA, record.id(), List.of(record)));
         ChannelPreferenceStore store = new ChannelPreferenceStore();
         store.set(registry, record, FollowChannel.MILESTONE, false);
         Path directory = new ReceiptStore().metadataDirectory(registry);

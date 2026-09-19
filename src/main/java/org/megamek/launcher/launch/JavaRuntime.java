@@ -81,11 +81,21 @@ public final class JavaRuntime {
      */
     public CurrentJava validateCurrentExternal(Path applicationRoot)
             throws IOException, InterruptedException {
+        return validateExternal(currentExecutable(), applicationRoot);
+    }
+
+    /**
+     * Validates and captures an explicitly selected Java executable (or Java home) for a new
+     * installation/import.  The captured file identity is rechecked by RegistryStore at publish
+     * time.
+     */
+    public CurrentJava validateExternal(Path selected, Path applicationRoot)
+            throws IOException, InterruptedException {
         Path root = applicationRoot.toAbsolutePath().normalize().toRealPath();
-        Path executable = currentExecutable();
+        Path executable = resolve(selected.toString());
         if (executable.startsWith(root)) {
-            throw new IOException("the Java runtime running MM Launcher is inside the selected "
-                    + "application folder; start the launcher with an external Java 21+ runtime");
+            throw new IOException("selected Java is inside the application folder; choose an "
+                    + "external Java 21+ runtime");
         }
         int feature = validate(executable, executable.getParent());
         return CurrentJava.capture(executable, feature);

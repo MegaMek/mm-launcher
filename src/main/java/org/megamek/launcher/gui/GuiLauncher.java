@@ -1,9 +1,12 @@
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.onboarding.PlatformInstallLocations;
+
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import java.awt.GraphicsEnvironment;
 import java.io.PrintStream;
+import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 
 public final class GuiLauncher {
@@ -11,9 +14,9 @@ public final class GuiLauncher {
     }
 
     public static int start(String[] args, PrintStream error) {
-        Path registry;
+        RegistrySelection selection;
         try {
-            registry = registryArgument(args);
+            selection = registrySelection(args);
         } catch (IllegalArgumentException e) {
             error.println("ERROR: " + e.getMessage());
             error.println("Usage: mm-launcher gui [--registry <path>]");
@@ -29,15 +32,24 @@ public final class GuiLauncher {
             } catch (ReflectiveOperationException | javax.swing.UnsupportedLookAndFeelException ignored) {
                 // The cross-platform Swing look and feel remains usable.
             }
-            new LauncherFrame(new LauncherServices(registry)).showWindow();
+            PlatformInstallLocations installLocations = selection.defaultRegistry()
+                    ? PlatformInstallLocations.system(selection.registry())
+                    : PlatformInstallLocations.customRegistry();
+            new LauncherFrame(new LauncherServices(
+                    selection.registry(), installLocations)).showWindow();
         });
         return 0;
     }
 
     static Path registryArgument(String[] args) {
-        if (args.length == 1) return defaultRegistry();
+        return registrySelection(args).registry();
+    }
+
+    private static RegistrySelection registrySelection(String[] args) {
+        if (args.length == 1) return new RegistrySelection(defaultRegistry(), true);
         if (args.length == 3 && args[1].equals("--registry") && !args[2].isBlank()) {
-            return Path.of(args[2]).toAbsolutePath().normalize();
+            return new RegistrySelection(
+                    Path.of(args[2]).toAbsolutePath().normalize(), false);
         }
         throw new IllegalArgumentException("gui accepts only an optional --registry <path>");
     }
@@ -48,14 +60,37 @@ public final class GuiLauncher {
         if (os.contains("win") && System.getenv("LOCALAPPDATA") != null) {
             base = System.getenv("LOCALAPPDATA");
         } else if (os.contains("mac")) {
-            base = Path.of(System.getProperty("user.home"), "Library", "Application Support").toString();
+            base = absoluteUserHome().resolve("Library")
+                    .resolve("Application Support").toString();
         } else {
             base = System.getenv("XDG_STATE_HOME");
             if (base == null || base.isBlank()) {
-                return Path.of(System.getProperty("user.home"), ".megamek",
-                        "launcher-registry.json").toAbsolutePath().normalize();
+                return absoluteUserHome().resolve(".megamek")
+                        .resolve("launcher-registry.json").toAbsolutePath().normalize();
             }
         }
         return Path.of(base, "MegaMek", "launcher-registry.json").toAbsolutePath().normalize();
+    }
+
+    private static Path absoluteUserHome() {
+        String value = System.getProperty("user.home");
+        if (value == null || value.isBlank()) {
+            throw new IllegalArgumentException(
+                    "user.home must be a nonblank absolute path");
+        }
+        try {
+            Path home = Path.of(value);
+            if (!home.isAbsolute()) {
+                throw new IllegalArgumentException(
+                        "user.home must be a nonblank absolute path");
+            }
+            return home.normalize();
+        } catch (InvalidPathException error) {
+            throw new IllegalArgumentException(
+                    "user.home must be a valid absolute path", error);
+        }
+    }
+
+    private record RegistrySelection(Path registry, boolean defaultRegistry) {
     }
 }

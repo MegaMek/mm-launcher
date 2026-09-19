@@ -15,7 +15,6 @@ import org.megamek.launcher.update.UpdatePreviewService;
 
 import javax.swing.JButton;
 import javax.swing.JLabel;
-import javax.swing.JList;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
@@ -33,7 +32,7 @@ import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OtherCopyCheckSwingTest {
@@ -47,14 +46,17 @@ class OtherCopyCheckSwingTest {
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             assertTrue(services.started.await(5, TimeUnit.SECONDS));
+            Component originalHome = waitFor(() -> find(frame, "managedHomePanel"));
             services.release.countDown();
             waitUntil(() -> services.calls.get() == 1);
-            JButton installations = waitFor(
-                    () -> find(frame, "manageInstallationsButton"));
-            SwingUtilities.invokeAndWait(installations::doClick);
-            JList<?> list = waitFor(() -> find(frame, "installationList"));
-            SwingUtilities.invokeAndWait(() -> list.setSelectedIndex(1));
-            JLabel status = waitFor(() -> find(frame, "channelCheckResult"));
+            JButton summary = waitFor(
+                    () -> find(frame, "installationUpdateSummary"));
+            waitUntil(() -> "1 installation has updates".equals(summary.getText()));
+            assertSame(originalHome, onEdt(() -> find(frame, "managedHomePanel")),
+                    "late other-copy checks update the summary without replacing Home");
+            SwingUtilities.invokeAndWait(summary::doClick);
+            JLabel status = waitFor(() -> find(frame,
+                    "installationStatus-" + services.opted.id()));
             waitUntil(() -> status.getText().contains("Update available"));
 
             assertEquals(List.of(services.opted.id()), services.checkedIds);
@@ -68,7 +70,7 @@ class OtherCopyCheckSwingTest {
     }
 
     @Test
-    void mainSwitchDuringOtherCheckDiscardsLateResultWithoutAutoApply() throws Exception {
+    void leavingHomeDuringOtherCheckNeverAutoApplies() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         FakeServices services = new FakeServices(temp.resolve("stale.json"));
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
@@ -78,21 +80,35 @@ class OtherCopyCheckSwingTest {
             JButton installations = waitFor(
                     () -> find(frame, "manageInstallationsButton"));
             SwingUtilities.invokeAndWait(installations::doClick);
-            JList<?> list = waitFor(() -> find(frame, "installationList"));
-            SwingUtilities.invokeAndWait(() -> list.setSelectedIndex(4));
-            SwingUtilities.invokeAndWait(
-                    () -> ((JButton) find(frame, "makePreferredButton")).doClick());
-            JLabel main = waitFor(() -> find(frame, "mainInstallationName"));
-            assertEquals("New Main", main.getText());
+            assertNotNull(waitFor(() -> find(frame, "installationCards")));
 
             services.release.countDown();
             Thread.sleep(150);
-            assertNull(onEdt(() -> find(frame, "otherUpdatesButton")));
             assertEquals(0, services.applies.get());
             assertEquals(1, services.calls.get());
         } finally {
             services.release.countDown();
             dispose(frame);
+        }
+
+        @Test
+        void globalMasterOffGatesOptedInCopiesWithoutChangingTheirPreference() throws Exception {
+            Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
+            FakeServices services = new FakeServices(temp.resolve("master-off.json"));
+            services.automaticChecks = false;
+            LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+            try {
+                SwingUtilities.invokeAndWait(frame::showWindow);
+                JButton summary = waitFor(() -> find(frame, "installationUpdateSummary"));
+                assertEquals("Some versions could not be checked", summary.getText(),
+                        "unchecked/unknown copies never produce an all-current summary");
+                assertEquals(0, services.calls.get());
+                assertTrue(services.preferences.get(services.opted.id())
+                        .preference().checkOnOpen(),
+                        "the master gate does not rewrite an installation's explicit opt-in");
+            } finally {
+                dispose(frame);
+            }
         }
     }
 
@@ -114,6 +130,7 @@ class OtherCopyCheckSwingTest {
         private final java.util.concurrent.CopyOnWriteArrayList<String> checkedIds =
                 new java.util.concurrent.CopyOnWriteArrayList<>();
         private volatile InstallationRecord main;
+        private volatile boolean automaticChecks = true;
 
         private FakeServices(Path registry) {
             super(registry);
@@ -135,11 +152,14 @@ class OtherCopyCheckSwingTest {
         @Override
         public HomeState loadHome() {
             ChannelPreferenceStore.ReadResult channel = preferences.get(main.id());
-            return new HomeState(new RegistryData(1, main.id(), records), main,
+            return new HomeState(new RegistryData(
+                    org.megamek.launcher.registry.RegistryStore.SCHEMA,
+                    main.id(), records), main,
                     new Inspection(main.canonicalRoot(), main.products(),
                             main.observedBuild(), "fixture"),
                     null, new UpdatePreviewService.Eligibility(main, false,
-                    "fixture imported", null, null), false, channel);
+                    "fixture imported", null, null), false, channel,
+                    Map.of("megamek", main), Map.of(), automaticChecks);
         }
 
         @Override

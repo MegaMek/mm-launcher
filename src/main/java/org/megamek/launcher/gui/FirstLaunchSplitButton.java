@@ -1,5 +1,10 @@
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.channel.FollowChannel;
+import org.megamek.launcher.channel.QuickInstallOption;
+import org.megamek.launcher.channel.QuickInstallSnapshot;
+import org.megamek.launcher.release.OfficialRepository;
+
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.Icon;
@@ -12,8 +17,11 @@ import javax.swing.MenuElement;
 import javax.swing.MenuSelectionManager;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
+import javax.swing.UIManager;
 import javax.swing.plaf.basic.BasicButtonUI;
 import javax.swing.plaf.basic.BasicGraphicsUtils;
+import javax.swing.plaf.basic.BasicMenuItemUI;
+import javax.swing.plaf.basic.BasicPopupMenuUI;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
@@ -23,12 +31,18 @@ import java.awt.Font;
 import java.awt.GradientPaint;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.HeadlessException;
 import java.awt.Polygon;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.Toolkit;
 import java.awt.event.ActionEvent;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.Set;
+import java.util.function.Consumer;
 
 /**
  * A real two-segment first-run command: the large segment performs the safe default while the
@@ -38,31 +52,44 @@ import java.awt.event.KeyEvent;
 final class FirstLaunchSplitButton extends JPanel {
     static final String PRIMARY_NAME = "downloadAndInstallButton";
     static final String OPTIONS_NAME = "downloadOptionsButton";
-    static final String DEVELOPMENT_ITEM_NAME = "latestDevelopmentMenuItem";
-    static final String EXACT_ITEM_NAME = "chooseAnotherVersionMenuItem";
+    static final String PRIMARY_LABEL = "Install latest MekHQ Milestone";
+    static final Color POPUP_BACKGROUND = new Color(22, 36, 40);
+    static final Color POPUP_FOREGROUND = new Color(237, 243, 237);
+    static final Color POPUP_MUTED = new Color(166, 186, 181);
+    static final Color POPUP_SELECTION = new Color(226, 196, 125);
+    static final Color POPUP_SELECTION_FOREGROUND = new Color(25, 34, 30);
+    static final Color POPUP_BORDER = new Color(192, 159, 88);
     private static final String OPEN_POPUP_ACTION = "openFirstLaunchDownloadOptions";
     private static final String CLOSE_POPUP_ACTION = "closeFirstLaunchDownloadOptions";
 
     private final GuiScale scale;
     private final SegmentButton primaryButton;
     private final SegmentButton optionsButton;
-    private final JPopupMenu popupMenu = new JPopupMenu();
+    private final JPopupMenu popupMenu;
+    private final Map<QuickInstallOption.Key, JMenuItem> optionItems = new LinkedHashMap<>();
+    private final Runnable unavailableRetryAction;
+    private Set<QuickInstallOption.Key> availableOptions = Set.of();
+    private boolean optionsUnavailable;
+    private boolean unavailableViewed;
     private boolean disposed;
 
     FirstLaunchSplitButton(GuiScale scale, Runnable primaryAction,
-                           Runnable developmentAction, Runnable exactReleaseAction) {
+                           Consumer<QuickInstallOption.Key> optionAction,
+                           Runnable unavailableRetryAction) {
         this.scale = scale;
+        this.unavailableRetryAction = java.util.Objects.requireNonNull(
+                unavailableRetryAction, "unavailableRetryAction");
         setName("firstLaunchSplitButton");
         setLayout(new BorderLayout());
         setOpaque(false);
         setAlignmentX(Component.LEFT_ALIGNMENT);
-        getAccessibleContext().setAccessibleName("Download and install");
+        getAccessibleContext().setAccessibleName("Install latest official applications");
         getAccessibleContext().setAccessibleDescription(
-                "Install the latest Milestone, or open the adjacent menu for another choice.");
+                "Install the latest MekHQ Milestone, or open the adjacent five-choice menu.");
 
-        primaryButton = new SegmentButton("Download & install", PRIMARY_NAME, false);
+        primaryButton = new SegmentButton(PRIMARY_LABEL, PRIMARY_NAME, false);
         primaryButton.setMnemonic(KeyEvent.VK_D);
-        primaryButton.setToolTipText("Install the latest official Milestone MekHQ bundle.");
+        primaryButton.getAccessibleContext().setAccessibleName(PRIMARY_LABEL);
         primaryButton.getAccessibleContext().setAccessibleDescription(
                 "Review and install the latest official Milestone MekHQ bundle containing "
                         + "MegaMek, MekHQ, and MegaMekLab.");
@@ -74,25 +101,27 @@ final class FirstLaunchSplitButton extends JPanel {
         optionsButton.setIcon(new DownArrowIcon(scale));
         optionsButton.setHorizontalAlignment(SwingConstants.CENTER);
         optionsButton.setToolTipText(
-                "Choose Latest Development or another application and exact release.");
+                "Choose another official application and Milestone or Development channel.");
         optionsButton.getAccessibleContext().setAccessibleName(
-                "Choose another version or application");
+                "Choose another application and channel");
         optionsButton.getAccessibleContext().setAccessibleDescription(
-                "Open a menu for Latest Development or the full version and application picker.");
+                "Open the five-choice quick-install menu. Opening it performs no network request.");
         optionsButton.addActionListener(event -> openPopup());
 
-        JMenuItem development = menuItem("Latest Development", DEVELOPMENT_ITEM_NAME,
-                "Review and install the exact official Development MekHQ bundle.");
-        development.addActionListener(event -> invokeMenuAction(developmentAction));
-        JMenuItem exact = menuItem("Choose another version or application…", EXACT_ITEM_NAME,
-                "Open the full product, exact release, and channel picker.");
-        exact.addActionListener(event -> invokeMenuAction(exactReleaseAction));
+        popupMenu = new StyledPopupMenu(palette(), scale);
         popupMenu.setName("downloadOptionsPopup");
-        popupMenu.getAccessibleContext().setAccessibleName("Download and install options");
+        popupMenu.getAccessibleContext().setAccessibleName("Latest application choices");
         popupMenu.getAccessibleContext().setAccessibleDescription(
-                "Contains Latest Development and the full release picker.");
-        popupMenu.add(development);
-        popupMenu.add(exact);
+                "Five validated official Milestone or Development choices. "
+                        + "Opening this menu performs no network request.");
+        for (QuickInstallOption.Key key : QuickInstallSnapshot.MENU_KEYS) {
+            JMenuItem item = menuItem(menuLabel(key) + " (Loading…)", menuItemName(key),
+                    menuLabel(key) + " version metadata is loading.", palette());
+            item.setEnabled(false);
+            item.addActionListener(event -> invokeMenuAction(key, optionAction));
+            optionItems.put(key, item);
+            popupMenu.add(item);
+        }
 
         installOpenBindings(primaryButton);
         installOpenBindings(optionsButton);
@@ -111,9 +140,16 @@ final class FirstLaunchSplitButton extends JPanel {
         add(optionsButton, BorderLayout.EAST);
     }
 
-    private JMenuItem menuItem(String text, String name, String description) {
+    private JMenuItem menuItem(String text, String name, String description, Palette palette) {
         JMenuItem item = new JMenuItem(text);
+        item.setUI(new StyledMenuItemUI(palette));
         item.setName(name);
+        item.setOpaque(true);
+        item.setBackground(palette.background());
+        item.setForeground(palette.foreground());
+        item.setFont(scale.font(item.getFont(), Font.BOLD, 13f));
+        item.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(9),
+                scale.scaleForGUI(12), scale.scaleForGUI(9), scale.scaleForGUI(12)));
         item.getAccessibleContext().setAccessibleName(text);
         item.getAccessibleContext().setAccessibleDescription(description);
         return item;
@@ -137,9 +173,99 @@ final class FirstLaunchSplitButton extends JPanel {
         });
     }
 
-    private void invokeMenuAction(Runnable action) {
+    private void invokeMenuAction(QuickInstallOption.Key key,
+                                  Consumer<QuickInstallOption.Key> action) {
         closePopup();
-        if (!disposed && isEnabled()) action.run();
+        if (!disposed && isEnabled() && availableOptions.contains(key)) action.accept(key);
+    }
+
+    void setOptions(QuickInstallSnapshot snapshot) {
+        if (disposed) return;
+        setPrimaryLabel(PRIMARY_LABEL + " ("
+                + snapshot.option(QuickInstallSnapshot.DEFAULT_KEY).version() + ")");
+        optionsUnavailable = false;
+        unavailableViewed = false;
+        setNormalOptionsDescription();
+        Map<QuickInstallOption.Key, String> labels = new LinkedHashMap<>();
+        for (QuickInstallOption.Key key : QuickInstallSnapshot.MENU_KEYS) {
+            labels.put(key, menuLabel(key) + " (" + snapshot.option(key).version() + ")");
+        }
+        availableOptions = Set.copyOf(labels.keySet());
+        for (Map.Entry<QuickInstallOption.Key, String> entry : labels.entrySet()) {
+            JMenuItem item = optionItems.get(entry.getKey());
+            item.setText(entry.getValue());
+            item.setToolTipText(null);
+            item.getAccessibleContext().setAccessibleName(entry.getValue());
+            item.getAccessibleContext().setAccessibleDescription(
+                    entry.getValue() + ". Review this exact normal-install choice.");
+            item.setEnabled(isEnabled());
+        }
+        popupMenu.getAccessibleContext().setAccessibleDescription(
+                "Five validated official choices with versions. "
+                        + "Opening this menu performs no network request.");
+        popupMenu.revalidate();
+        popupMenu.repaint();
+    }
+
+    void setOptionsLoading() {
+        if (disposed) return;
+        setPrimaryLabel(PRIMARY_LABEL);
+        optionsUnavailable = false;
+        unavailableViewed = false;
+        setNormalOptionsDescription();
+        availableOptions = Set.of();
+        for (Map.Entry<QuickInstallOption.Key, JMenuItem> entry : optionItems.entrySet()) {
+            String label = menuLabel(entry.getKey()) + " (Loading…)";
+            JMenuItem item = entry.getValue();
+            item.setText(label);
+            item.setToolTipText("Official channel and release metadata is loading.");
+            item.getAccessibleContext().setAccessibleName(label);
+            item.getAccessibleContext().setAccessibleDescription(
+                    label + ". Wait for validated metadata.");
+            item.setEnabled(false);
+        }
+        popupMenu.getAccessibleContext().setAccessibleDescription(
+                "Five official choices are loading. Opening this menu performs no "
+                        + "network request.");
+        popupMenu.revalidate();
+        popupMenu.repaint();
+    }
+
+    void setOptionsUnavailable(String detail) {
+        if (disposed) return;
+        setPrimaryLabel(PRIMARY_LABEL);
+        optionsUnavailable = true;
+        unavailableViewed = popupMenu.isVisible();
+        availableOptions = Set.of();
+        String explanation = detail == null || detail.isBlank()
+                ? "Version unavailable. Close and reopen this menu to retry."
+                : detail;
+        for (Map.Entry<QuickInstallOption.Key, JMenuItem> entry : optionItems.entrySet()) {
+            String label = menuLabel(entry.getKey()) + " (Unavailable)";
+            JMenuItem item = entry.getValue();
+            item.setText(label);
+            item.setToolTipText(explanation);
+            item.getAccessibleContext().setAccessibleName(label);
+            item.getAccessibleContext().setAccessibleDescription(label + ". " + explanation);
+            item.setEnabled(false);
+        }
+        popupMenu.getAccessibleContext().setAccessibleDescription(
+                "Five official choices are unavailable. Close and reopen this menu to "
+                        + "explicitly retry their metadata.");
+        optionsButton.setToolTipText(
+                "Open the unavailable choices; close and reopen the menu to retry metadata.");
+        optionsButton.getAccessibleContext().setAccessibleDescription(
+                "Open the five-choice quick-install menu and explicitly retry unavailable "
+                        + "version metadata.");
+        popupMenu.revalidate();
+        popupMenu.repaint();
+    }
+
+    private void setPrimaryLabel(String label) {
+        primaryButton.setText(label);
+        primaryButton.getAccessibleContext().setAccessibleName(label);
+        revalidate();
+        repaint();
     }
 
     void openPopup() {
@@ -147,13 +273,40 @@ final class FirstLaunchSplitButton extends JPanel {
                 || !isShowing()) {
             return;
         }
+        if (optionsUnavailable && unavailableViewed) {
+            setOptionsLoading();
+            unavailableRetryAction.run();
+        } else if (optionsUnavailable) {
+            unavailableViewed = true;
+            optionsButton.setToolTipText(
+                    "Close and reopen the choices to retry unavailable version metadata.");
+        }
         int x = Math.max(0, getWidth() - popupMenu.getPreferredSize().width);
         popupMenu.show(this, x, Math.max(0, getHeight() - scale.scaleForGUI(3)));
         MenuElement[] items = popupMenu.getSubElements();
-        if (items.length > 0) {
-            MenuSelectionManager.defaultManager().setSelectedPath(
-                    new MenuElement[]{popupMenu, items[0]});
+        MenuElement firstEnabled = null;
+        for (MenuElement item : items) {
+            if (item.getComponent().isEnabled()) {
+                firstEnabled = item;
+                break;
+            }
         }
+
+        if (firstEnabled != null) {
+            MenuSelectionManager.defaultManager().setSelectedPath(
+                    new MenuElement[]{popupMenu, firstEnabled});
+        } else {
+            MenuSelectionManager.defaultManager().setSelectedPath(
+                    new MenuElement[]{popupMenu});
+        }
+    }
+
+    private void setNormalOptionsDescription() {
+        optionsButton.setToolTipText(
+                "Choose another official application and Milestone or Development channel.");
+        optionsButton.getAccessibleContext().setAccessibleDescription(
+                "Open the five-choice quick-install menu. Opening it performs no "
+                        + "network request while metadata is loading or available.");
     }
 
     void closePopup() {
@@ -185,8 +338,106 @@ final class FirstLaunchSplitButton extends JPanel {
         super.setEnabled(enabled);
         if (primaryButton != null) primaryButton.setEnabled(enabled);
         if (optionsButton != null) optionsButton.setEnabled(enabled);
+        if (optionItems != null) {
+            optionItems.forEach((key, item) ->
+                    item.setEnabled(enabled && availableOptions.contains(key)));
+        }
         if (!enabled && popupMenu != null) closePopup();
         repaint();
+    }
+
+    private static String menuLabel(QuickInstallOption.Key key) {
+        String product = switch (key.repository()) {
+            case MEKHQ -> "MekHQ";
+            case MEGAMEK -> "MegaMek";
+            case LAB -> "MegaMekLab";
+        };
+        return "Install latest " + product + " " + key.channel();
+    }
+
+    private static String menuItemName(QuickInstallOption.Key key) {
+        if (key.repository() == OfficialRepository.MEGAMEK
+                && key.channel() == FollowChannel.MILESTONE) {
+            return "latestMegaMekMilestoneMenuItem";
+        }
+        if (key.repository() == OfficialRepository.LAB
+                && key.channel() == FollowChannel.MILESTONE) {
+            return "latestMegaMekLabMilestoneMenuItem";
+        }
+        if (key.repository() == OfficialRepository.MEKHQ) {
+            return "latestMekHQDevelopmentMenuItem";
+        }
+        if (key.repository() == OfficialRepository.MEGAMEK) {
+            return "latestMegaMekDevelopmentMenuItem";
+        }
+        return "latestMegaMekLabDevelopmentMenuItem";
+    }
+
+    private static Palette palette() {
+        if (!highContrast()) {
+            return new Palette(POPUP_BACKGROUND, POPUP_FOREGROUND, POPUP_MUTED,
+                    POPUP_SELECTION, POPUP_SELECTION_FOREGROUND, POPUP_BORDER);
+        }
+        return new Palette(uiColor("MenuItem.background", Color.BLACK),
+                uiColor("MenuItem.foreground", Color.WHITE),
+                uiColor("MenuItem.disabledForeground", Color.LIGHT_GRAY),
+                uiColor("MenuItem.selectionBackground", Color.WHITE),
+                uiColor("MenuItem.selectionForeground", Color.BLACK),
+                uiColor("MenuItem.foreground", Color.WHITE));
+    }
+
+    private static boolean highContrast() {
+        if (UIManager.getBoolean("Theme.highContrast")
+                || UIManager.getBoolean("win.highContrast.on")) {
+            return true;
+        }
+        try {
+            return Boolean.TRUE.equals(
+                    Toolkit.getDefaultToolkit().getDesktopProperty("win.highContrast.on"));
+        } catch (HeadlessException ignored) {
+            return false;
+        }
+    }
+
+    private static Color uiColor(String key, Color fallback) {
+        Color color = UIManager.getColor(key);
+        return color == null ? fallback : color;
+    }
+
+    private record Palette(Color background, Color foreground, Color disabled,
+                           Color selection, Color selectionForeground, Color border) {
+    }
+
+    private static final class StyledPopupMenu extends JPopupMenu {
+        private StyledPopupMenu(Palette palette, GuiScale scale) {
+            setUI(new BasicPopupMenuUI());
+            setOpaque(true);
+            setBackground(palette.background());
+            setForeground(palette.foreground());
+            setBorder(BorderFactory.createCompoundBorder(
+                    BorderFactory.createLineBorder(palette.border(), scale.scaleForGUI(2)),
+                    BorderFactory.createEmptyBorder(scale.scaleForGUI(3),
+                            scale.scaleForGUI(3), scale.scaleForGUI(3),
+                            scale.scaleForGUI(3))));
+        }
+    }
+
+    private static final class StyledMenuItemUI extends BasicMenuItemUI {
+        private final Palette palette;
+
+        private StyledMenuItemUI(Palette palette) {
+            this.palette = palette;
+        }
+
+        @Override
+        protected void installDefaults() {
+            super.installDefaults();
+            selectionBackground = palette.selection();
+            selectionForeground = palette.selectionForeground();
+            disabledForeground = palette.disabled();
+            acceleratorForeground = palette.foreground();
+            acceleratorSelectionForeground = palette.selectionForeground();
+        }
     }
 
     @Override
@@ -244,6 +495,11 @@ final class FirstLaunchSplitButton extends JPanel {
                     ? new Color(143, 115, 58) : new Color(74, 88, 88));
             canvas.drawLine(separator, inset + scale.scaleForGUI(4),
                     separator, bottom - scale.scaleForGUI(4));
+            if (primaryButton.isFocusOwner() || optionsButton.isFocusOwner()) {
+                canvas.setColor(new Color(246, 238, 207));
+                canvas.setStroke(new BasicStroke(scale.scaleForGUI(2f)));
+                canvas.drawPolygon(plate);
+            }
         } finally {
             canvas.dispose();
         }
@@ -299,23 +555,6 @@ final class FirstLaunchSplitButton extends JPanel {
                     Math.max(preferred.height, scale.scaleForGUI(54)));
         }
 
-        @Override
-        protected void paintComponent(Graphics graphics) {
-            super.paintComponent(graphics);
-            if (!isFocusOwner()) return;
-            Graphics2D canvas = (Graphics2D) graphics.create();
-            try {
-                canvas.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
-                        RenderingHints.VALUE_ANTIALIAS_ON);
-                canvas.setColor(new Color(246, 238, 207));
-                canvas.setStroke(new BasicStroke(scale.scaleForGUI(2f)));
-                int inset = scale.scaleForGUI(3);
-                canvas.drawRect(inset, inset, Math.max(0, getWidth() - inset * 2 - 1),
-                        Math.max(0, getHeight() - inset * 2 - 1));
-            } finally {
-                canvas.dispose();
-            }
-        }
     }
 
     private static final class DownArrowIcon implements Icon {

@@ -11,8 +11,9 @@ It is bound to installation UUID, canonical root, and registration time. Strict 
 unknown, duplicate, missing, and null fields. Publication uses a per-record try-lock, create-new
 staging, flush, and atomic replacement. A corrupt, unreadable, interrupted, or stale sidecar is
 Unavailable rather than absent and is not reset. This metadata is not provenance: selecting a
-channel neither authorizes an imported copy nor changes registry schema 1, selected Java, pin,
-default selection, receipt, current provenance, or installed bytes. Apply/recovery leave it alone.
+channel neither authorizes an imported copy nor changes registry schema 2 application
+preferences, selected Java, pin, compatibility default, receipt, current provenance, or installed
+bytes. Apply/recovery leave it alone.
 
 ## Fixed official source
 
@@ -66,16 +67,22 @@ uploaded, opened in a browser, attached to an issue/project, or used to change c
 An unsafe/corrupt registry prevents log creation and reports that logging failure without changing
 the original **Unable to check** result.
 
-The main first-run action explicitly persists Milestone. Its split-menu **Latest Development**
-route explicitly persists Development while sharing the same verified normal installer. Merely
-opening the menu or full picker changes no channel, Main selection, or preference. Normal and
+The main first-run **Install latest MekHQ Milestone** action explicitly persists Milestone for the MekHQ
+repository. Its five split-menu routes cover MegaMek/MegaMekLab Milestone and
+MekHQ/MegaMek/MegaMekLab Development; each persists exactly its displayed channel while sharing
+the same verified normal installer. The menu has no redundant MekHQ Milestone or exact-picker row.
+Opening the styled menu while versions are loading or available starts no request and changes no
+channel, Main selection, or preference. Closing and reopening after unavailable rows have been
+viewed is the explicit snapshot retry and still changes no installation state. The deferred exact
+picker remains on Installations after a copy exists or in relevant problem navigation. Normal and
 advanced new GUI installs use one launcher Settings check-on-open default: it is true while
 initially absent, and a user's explicit false is preserved for later new copies. The normal quote
-captures and displays its exact channel and On or Off; a
-changed, corrupt, or unavailable settings configuration blocks transfer and publication until a
-fresh quote is accepted. This is not a migration: every existing explicit false remains false, and
-absent/corrupt/unknown legacy channels remain Unknown or Unavailable with no inferred choice. The
-CLI remains false when its legacy option is omitted.
+binds its exact repository/product set/channel/source version, Settings revision,
+registry/default snapshot, and On or Off state without displaying a passive update row or
+technical pane. A changed, corrupt, or unavailable settings configuration blocks transfer and
+publication until a fresh quote is accepted. This is not a migration: every existing explicit
+false remains false, and absent/corrupt/unknown legacy channels remain Unknown or Unavailable with
+no inferred choice. The CLI remains false when its legacy option is omitted.
 
 Eligible opt-in checks run serially and independently off the event-dispatch thread, do not disable
 healthy launch or page navigation, are cancelled on disposal/mutation, and discard results after
@@ -83,3 +90,11 @@ Main, record, preference, or package changes. Off, unknown, corrupt, and launch-
 reported as checked. Manual Installations checks may inspect the selected copy regardless of its
 on-open switch. There is no automatic Apply, automatic downgrade, launcher self-update, Nightly
 support, component download, game launch, or website/game CI change in this contract.
+
+Automatic checks additionally require the launcher-wide
+`checkInstalledVersionsOnOpen` master setting. Its absent/schema-1 migration value is enabled to
+preserve prior startup behavior. Turning it off gates all startup checks but does not rewrite the
+per-installation `checkOnOpen` value or channel; therefore explicit Off remains Off after either
+master transition. Manual per-card Check/Retry remains available for eligible managed records.
+Home aggregates physical-installation results and cannot call unchecked, unavailable,
+non-comparable, or imported launch-only records current. There is no bulk update.

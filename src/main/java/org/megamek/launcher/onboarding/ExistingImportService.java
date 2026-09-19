@@ -35,13 +35,20 @@ public final class ExistingImportService {
     /** Performs no write, classloading, application execution, download, or registry mutation. */
     public Plan prepare(Path selectedRoot, OperationContext context)
             throws IOException, InterruptedException {
+        return prepare(selectedRoot, null, context);
+    }
+
+    public Plan prepare(Path selectedRoot, Path selectedJava, OperationContext context)
+            throws IOException, InterruptedException {
         requireContext(context);
         context.phase(OperationPhase.METADATA,
                 "Statically inspecting the selected existing installation");
         Inspection inspection = inspector.inspect(selectedRoot);
         context.phase(OperationPhase.VERIFY,
-                "Validating the Java runtime running MM Launcher");
-        JavaRuntime.CurrentJava java = javaRuntime.validateCurrentExternal(
+                "Validating the default game Java runtime");
+        JavaRuntime.CurrentJava java = selectedJava == null
+                ? javaRuntime.validateCurrentExternal(Path.of(inspection.canonicalRoot()))
+                : javaRuntime.validateExternal(selectedJava,
                 Path.of(inspection.canonicalRoot()));
         context.checkpoint();
         return new Plan(inspection, java);
@@ -57,10 +64,10 @@ public final class ExistingImportService {
         requireContext(context);
         context.phase(OperationPhase.VERIFY,
                 "Revalidating the launcher Java and selected application");
-        JavaRuntime.CurrentJava current = javaRuntime.validateCurrentExternal(
-                Path.of(plan.inspection().canonicalRoot()));
+        JavaRuntime.CurrentJava current = javaRuntime.validateExternal(
+                plan.java().executable(), Path.of(plan.inspection().canonicalRoot()));
         if (!plan.java().sameRuntime(current)) {
-            throw new IOException("the Java runtime running MM Launcher changed; inspect and "
+            throw new IOException("the selected default game Java changed; inspect and "
                     + "confirm the existing copy again");
         }
         context.checkpoint();

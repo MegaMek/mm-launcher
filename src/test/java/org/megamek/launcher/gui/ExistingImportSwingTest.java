@@ -80,7 +80,8 @@ class ExistingImportSwingTest {
             assertNotNull(waitFor(() -> findButton(frame, "launch-megamek-button")));
             assertNull(onEdt(() -> findButton(frame, "launch-mekhq-button")));
             assertNull(onEdt(() -> findButton(frame, "launch-lab-button")));
-            assertTrue(prompts.completed.getFirst().contains("made it Main"));
+            assertTrue(prompts.completed.getFirst().contains(
+                    "included applications as preferred"));
 
             JButton installations =
                     waitFor(() -> findButton(frame, "manageInstallationsButton"));
@@ -97,9 +98,9 @@ class ExistingImportSwingTest {
             waitUntil(() -> prompts.completed.size() == 2);
             assertTrue(prompts.confirmations.get(1).contains(
                     "Programs: MegaMek, MegaMekLab, MekHQ"));
-            assertTrue(prompts.completed.get(1).contains("existing Main installation was not "
-                    + "changed"));
-            assertNotNull(waitFor(() -> find(frame, "installationList")),
+            assertTrue(prompts.completed.get(1).contains(
+                    "Existing application preferences were not changed"));
+            assertNotNull(waitFor(() -> find(frame, "installationCards")),
                     "advanced import remains on Installations");
 
             RegistryData data = services.readRegistry();
@@ -157,8 +158,9 @@ class ExistingImportSwingTest {
         };
         return new LauncherServices(registry, new RegistryStore(), new InstallationInspector(),
                 noNetwork, new JavaRuntime(runner), new ApplicationLauncher(runner)) {
-            @Override public String latestMilestoneVersion() {
-                return "0.51.0";
+            @Override public org.megamek.launcher.channel.QuickInstallSnapshot
+                    quickInstallSnapshot() {
+                return QuickInstallTestData.snapshot("0.51.0", "0.52.0");
             }
         };
     }
