@@ -5,6 +5,7 @@ import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.ChannelUpdateChecker;
 import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.channel.OfficialYamlChannelCatalog;
+import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.channel.QuickInstallSnapshot;
 import org.megamek.launcher.diagnostics.OperationLogStore;
 import org.megamek.launcher.diagnostics.SanitizedErrors;
@@ -32,6 +33,8 @@ import org.megamek.launcher.release.ReleaseTransport;
 import org.megamek.launcher.update.UpdatePreviewService;
 import org.megamek.launcher.update.OwnershipReceipt;
 import org.megamek.launcher.update.CurrentUpdateState;
+import org.megamek.launcher.update.ImportedCopyAdoptionService;
+import org.megamek.launcher.update.PreparedAdoption;
 import org.megamek.launcher.update.PreparedUpdate;
 import org.megamek.launcher.update.PreparedUpdateService;
 import org.megamek.launcher.update.RealUpdateService;
@@ -63,6 +66,7 @@ public class LauncherServices {
     private final OperationLogStore operationLogs;
     private final NormalInstallService normalInstalls;
     private final ExistingImportService existingImports;
+    private final ImportedCopyAdoptionService adoptions;
     private final LauncherSettingsStore settings;
 
     public LauncherServices(Path registry) {
@@ -115,6 +119,8 @@ public class LauncherServices {
                 }, installLocations);
         this.existingImports = new ExistingImportService(this.registry, store, inspector,
                 javaRuntime);
+        this.adoptions = new ImportedCopyAdoptionService(this.registry, transport,
+                updateCoordinator);
     }
 
     public Path registry() {
@@ -124,6 +130,21 @@ public class LauncherServices {
     public QuickInstallSnapshot quickInstallSnapshot()
             throws IOException, InterruptedException {
         return new OfficialYamlChannelCatalog(transport).quickInstallSnapshot();
+    }
+
+    /**
+     * Resolves only the requested current product/channel target: one bounded website YAML read
+     * followed by one exact repository/tag lookup, with no historical release enumeration.
+     */
+    public QuickInstallOption quickInstallOption(OfficialRepository repository,
+                                                  FollowChannel channel)
+            throws IOException, InterruptedException {
+        if (repository == null || channel == null) {
+            throw new IOException("product and channel are required");
+        }
+        QuickInstallOption.Key key = new QuickInstallOption.Key(repository, channel);
+        return new QuickInstallOption(key,
+                new OfficialYamlChannelCatalog(transport).target(channel, repository));
     }
 
     public LoggedOperation beginOperation(OperationType type,
@@ -170,6 +191,23 @@ public class LauncherServices {
             throws IOException, InterruptedException {
         Path selected = selectedJava == null ? configuredDefaultJava() : selectedJava;
         return normalInstalls.prepare(repository, channel, destination, selected);
+    }
+
+    public NormalInstallService.Plan prepareCapturedNormalInstall(QuickInstallOption option,
+                                                                  Path destination,
+                                                                  Path selectedJava)
+            throws IOException, InterruptedException {
+        Path selected = selectedJava == null ? configuredDefaultJava() : selectedJava;
+        return normalInstalls.prepareCapturedCurrent(option, destination, selected);
+    }
+
+    public NormalInstallService.Plan prepareExactNormalInstall(OfficialRepository repository,
+                                                               FollowChannel futureChannel,
+                                                               String tag, Path destination,
+                                                               Path selectedJava)
+            throws IOException, InterruptedException {
+        Path selected = selectedJava == null ? configuredDefaultJava() : selectedJava;
+        return normalInstalls.prepareExact(repository, futureChannel, tag, destination, selected);
     }
 
     public NormalInstallService.Result installNormal(NormalInstallService.Plan plan,
@@ -269,7 +307,15 @@ public class LauncherServices {
         }
         Map<String, InstallationStatus> statuses = new LinkedHashMap<>();
         for (InstallationRecord record : data.installations()) {
+            ChannelPreferenceStore.ReadResult channel = null;
+            UpdatePreviewService.Eligibility eligibility = null;
+            boolean pending = pending(record);
+            ImportedCopyAdoptionService.Availability adoption =
+                    adoptions.availability(data, record, pending);
             try {
+                channel = new ChannelPreferenceStore().read(registry, data, record);
+                eligibility = new UpdatePreviewService(transport)
+                        .eligibility(registry, record.id());
                 Inspection observed = inspector.inspect(Path.of(record.canonicalRoot()));
                 if (!observed.canonicalRoot().equals(record.canonicalRoot())
                         || !observed.observedBuild().equals(record.observedBuild())
@@ -277,12 +323,10 @@ public class LauncherServices {
                     throw new IOException("registered build or application layout changed");
                 }
                 statuses.put(record.id(), new InstallationStatus(
-                        new ChannelPreferenceStore().read(registry, data, record),
-                        new UpdatePreviewService(transport).eligibility(registry, record.id()),
-                        pending(record), null));
+                        channel, eligibility, pending, null, adoption));
             } catch (IOException | RuntimeException error) {
-                statuses.put(record.id(), new InstallationStatus(null, null, pending(record),
-                        detail(error)));
+                statuses.put(record.id(), new InstallationStatus(
+                        channel, eligibility, pending, detail(error), adoption));
             }
         }
         return new HomeState(data, legacy.preferred(), legacy.currentInspection(),
@@ -352,6 +396,31 @@ public class LauncherServices {
         return existingImports.register(plan, name, context);
     }
 
+    public ImportedCopyAdoptionService.Suggestion adoptionSuggestion(
+            InstallationRecord record) throws IOException {
+        RegistryData data = readRegistry();
+        InstallationRecord current = store.resolve(data, record.id());
+        if (!current.equals(record)) {
+            throw new IOException("selected imported copy changed; reopen Installations");
+        }
+        return adoptions.suggest(current);
+    }
+
+    public PreparedAdoption prepareAdoption(
+            InstallationRecord record, OfficialRepository repository, String exactTag,
+            FollowChannel channel, PrintStream progress, OperationContext context)
+            throws IOException, InterruptedException,
+            org.megamek.launcher.manifest.ManifestException {
+        return adoptions.prepare(record, repository, exactTag, channel, progress, context);
+    }
+
+    public ImportedCopyAdoptionService.CommitResult commitAdoption(
+            PreparedAdoption prepared)
+            throws IOException, InterruptedException,
+            org.megamek.launcher.manifest.ManifestException {
+        return adoptions.commit(prepared);
+    }
+
     public void select(InstallationRecord record) throws IOException {
         store.select(registry, record.id());
     }
@@ -419,17 +488,17 @@ public class LauncherServices {
         return new ReleaseCatalog(transport).assess(repository, release);
     }
 
-    public FreshInstaller.Result install(OfficialRepository repository, String tag,
-                                         Path destination, String name, PrintStream progress)
+    private FreshInstaller.Result install(OfficialRepository repository, String tag,
+                                          Path destination, String name, PrintStream progress)
             throws IOException, InterruptedException {
         ensureRegistryParent();
         return new FreshInstaller(transport).install(repository, tag, destination, registry,
                 name, progress);
     }
 
-    public FreshInstaller.Result install(OfficialRepository repository, String tag,
-                                         Path destination, String name, PrintStream progress,
-                                         OperationContext context)
+    private FreshInstaller.Result install(OfficialRepository repository, String tag,
+                                          Path destination, String name, PrintStream progress,
+                                          OperationContext context)
             throws IOException, InterruptedException {
         ensureRegistryParent();
         return new FreshInstaller(transport).install(repository, tag, destination, registry,
@@ -443,13 +512,14 @@ public class LauncherServices {
         if (channel == null) throw new IOException("choose a channel for the new installation");
         FreshInstaller.Result result = install(repository, tag, destination, name, progress);
         try {
-            new ChannelPreferenceStore().set(registry, result.record(), channel,
+            new ChannelPreferenceStore().initializeManaged(registry, result.record(),
+                    result.ownershipReceipt(), channel,
                     settings.read().checkNewInstallsOnOpen());
         } catch (IOException error) {
             throw new IOException("installation is valid and REGISTERED at "
-                    + result.destination() + " but the CHANNEL SETTING WAS NOT PERSISTED: "
-                    + detail(error) + ". Keep using the retained copy and choose its channel "
-                    + "again.", error);
+                    + result.destination() + " but FIXED CHANNEL PROVENANCE WAS NOT PERSISTED: "
+                    + detail(error) + ". Keep the retained copy launch-only until setup is "
+                    + "repaired; its channel cannot be assigned or changed manually.", error);
         }
         return result;
     }
@@ -462,20 +532,23 @@ public class LauncherServices {
         FreshInstaller.Result result = install(
                 repository, tag, destination, name, progress, context);
         try {
-            new ChannelPreferenceStore().set(registry, result.record(), channel,
+            new ChannelPreferenceStore().initializeManaged(registry, result.record(),
+                    result.ownershipReceipt(), channel,
                     settings.read().checkNewInstallsOnOpen());
         } catch (IOException error) {
             throw new IOException("installation is valid and REGISTERED at "
-                    + result.destination() + " but the CHANNEL SETTING WAS NOT PERSISTED: "
-                    + detail(error) + ". Keep using the retained copy and choose its channel "
-                    + "again.", error);
+                    + result.destination() + " but FIXED CHANNEL PROVENANCE WAS NOT PERSISTED: "
+                    + detail(error) + ". Keep the retained copy launch-only until setup is "
+                    + "repaired; its channel cannot be assigned or changed manually.", error);
         }
         return result;
     }
 
-    public ChannelPreference setChannel(InstallationRecord record, FollowChannel channel,
-                                        boolean checkOnOpen) throws IOException {
-        return new ChannelPreferenceStore().set(registry, record, channel, checkOnOpen);
+    public ChannelPreference setCheckOnOpen(InstallationRecord record,
+                                            ChannelPreference expectedPreference,
+                                            boolean checkOnOpen) throws IOException {
+        return new ChannelPreferenceStore().setCheckOnOpen(
+                registry, record, expectedPreference, checkOnOpen);
     }
 
     public ChannelPreferenceStore.ReadResult channelPreference(InstallationRecord expected)
@@ -775,7 +848,14 @@ public class LauncherServices {
 
     public record InstallationStatus(ChannelPreferenceStore.ReadResult channelPreference,
                                      UpdatePreviewService.Eligibility previewEligibility,
-                                     boolean pendingUpdate, String error) {
+                                     boolean pendingUpdate, String error,
+                                     ImportedCopyAdoptionService.Availability adoption) {
+        public InstallationStatus(ChannelPreferenceStore.ReadResult channelPreference,
+                                  UpdatePreviewService.Eligibility previewEligibility,
+                                  boolean pendingUpdate, String error) {
+            this(channelPreference, previewEligibility, pendingUpdate, error,
+                    ImportedCopyAdoptionService.Availability.INCOMPLETE);
+        }
     }
 
     public record SettingsView(LauncherSettingsStore.Settings settings, Path defaultJava,

@@ -1,6 +1,5 @@
 package org.megamek.launcher;
 
-import org.megamek.launcher.channel.ChannelPreference;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.ChannelUpdateChecker;
 import org.megamek.launcher.channel.FollowChannel;
@@ -64,6 +63,7 @@ public final class Main {
             }
             String command = args[0].startsWith("--") ? "plan" : args[0];
             int offset = command.equals("plan") && args[0].startsWith("--") ? 0 : 1;
+            if (command.equals("channel-set")) return rejectChannelMutation();
             Map<String, String> options = parse(args, offset);
             return switch (command) {
                 case "gui" -> GuiLauncher.start(args, err);
@@ -79,7 +79,6 @@ public final class Main {
                 case "java-discover" -> javaDiscover(options, out);
                 case "java-select" -> javaSelect(options, out);
                 case "launch" -> launch(options, out);
-                case "channel-set" -> channelSet(options, out);
                 case "check-updates" -> checkUpdates(options, out, releaseTransport);
                 case "releases" -> releases(options, out, releaseTransport);
                 case "install-release" -> installRelease(options, out, releaseTransport);
@@ -137,33 +136,29 @@ public final class Main {
                                           ReleaseTransport transport)
                 throws IOException, InterruptedException {
             requireKeys(options, Set.of("--application", "--tag", "--destination",
-                    "--registry", "--name"), Set.of("--channel"));
-            FollowChannel channel = options.containsKey("--channel")
-                    ? FollowChannel.parse(options.get("--channel")) : null;
+                    "--registry", "--name", "--channel"), Set.of());
+            FollowChannel channel = FollowChannel.parse(options.get("--channel"));
             OfficialRepository repository = OfficialRepository.parse(options.get("--application"));
             Path registry = path(options, "--registry");
             FreshInstaller.Result result = new FreshInstaller(transport).install(repository,
                     options.get("--tag"), path(options, "--destination"), registry,
                     options.get("--name"), out);
-            out.printf("INSTALLED-AND-REGISTERED id=%s application=%s tag=%s asset=%s root=%s "
-                            + "updateEligible=false%n", result.record().id(), repository.key(),
-                    result.release().tag(), result.asset().name(), result.destination());
-            if (channel != null) {
-                try {
-                    new ChannelPreferenceStore().set(registry, result.record(), channel, false);
-                    out.printf("CHANNEL-SAVED id=%s channel=%s checkOnOpen=false%n",
-                            result.record().id(), channel.cliName());
-                } catch (IOException error) {
-                    out.printf("CHANNEL-NOT-PERSISTED id=%s channel=%s "
-                                    + "retainedRegisteredCopy=true reason=%s%n",
-                            result.record().id(), channel.cliName(), oneLine(error.getMessage()));
-                    out.println("NOT LAUNCHED: the valid registered copy was retained; choose its "
-                            + "channel again before checking.");
-                    return 3;
-                }
-            } else {
-                out.printf("CHANNEL-UNKNOWN id=%s reason=explicit-choice-omitted%n",
-                        result.record().id());
+            try {
+                new ChannelPreferenceStore().initializeManaged(registry, result.record(),
+                        result.ownershipReceipt(), channel, false);
+                out.printf("INSTALLED-AND-REGISTERED id=%s application=%s tag=%s asset=%s "
+                                + "root=%s fixedChannel=%s%n",
+                        result.record().id(), repository.key(), result.release().tag(),
+                        result.asset().name(), result.destination(), channel.cliName());
+                out.printf("FIXED-CHANNEL-SAVED id=%s channel=%s checkOnOpen=false%n",
+                        result.record().id(), channel.cliName());
+            } catch (IOException error) {
+                out.printf("FIXED-CHANNEL-NOT-PERSISTED id=%s channel=%s "
+                                + "retainedRegisteredCopy=true reason=%s%n",
+                        result.record().id(), channel.cliName(), oneLine(error.getMessage()));
+                out.println("NOT LAUNCHED: the valid registered copy was retained, but managed "
+                        + "updates remain unavailable until its interrupted setup is repaired.");
+                return 3;
             }
             out.println("NOT LAUNCHED: select an external Java 21+ runtime and preview explicitly.");
             out.println("INTEGRITY NOTE: GitHub HTTPS plus GitHub's same-source SHA-256 digest "
@@ -171,31 +166,8 @@ public final class Main {
             return 0;
         }
 
-    private static int channelSet(Map<String, String> options, PrintStream out)
-            throws IOException {
-        requireKeys(options, Set.of("--registry", "--channel"),
-                Set.of("--id", "--check-on-open"));
-        // Parse every user value before reading or writing the registry.
-        FollowChannel channel = FollowChannel.parse(options.get("--channel"));
-        boolean checkOnOpen = false;
-        if (options.containsKey("--check-on-open")) {
-            String value = options.get("--check-on-open");
-            if (!"true".equals(value) && !"false".equals(value)) {
-                throw new IllegalArgumentException("--check-on-open must be true or false");
-            }
-            checkOnOpen = Boolean.parseBoolean(value);
-        }
-        Path registry = path(options, "--registry");
-        RegistryStore store = new RegistryStore();
-        InstallationRecord record = store.resolve(store.read(registry), options.get("--id"));
-        ChannelPreference preference = new ChannelPreferenceStore().set(registry, record,
-                channel, checkOnOpen);
-        out.printf("CHANNEL-SAVED id=%s channel=%s checkOnOpen=%s%n",
-                preference.installationId(), preference.channel().cliName(),
-                preference.checkOnOpen());
-        out.println("LOCAL-SETTING-ONLY: installed files, provenance, Java, pin, and default "
-                + "selection were unchanged.");
-        return 0;
+    private static int rejectChannelMutation() throws IOException {
+        throw new IOException("Channel is fixed; install another managed copy");
     }
 
     private static int checkUpdates(Map<String, String> options, PrintStream out,
@@ -563,10 +535,9 @@ public final class Main {
                   mm-launcher java-discover
                   mm-launcher java-select --registry <json> --id <uuid> --java <java-home-or-executable>
                   mm-launcher launch --registry <json> [--id <uuid>] --product <megamek|mekhq|lab> [--dry-run true]
-                  mm-launcher channel-set --registry <json> [--id <uuid>] --channel <milestone|development> [--check-on-open <true|false>]
                   mm-launcher check-updates --registry <json> [--id <uuid>]
                   mm-launcher releases --application <megamek|mekhq|lab> [--page <1-1000>] [--per-page <1-50>]
-                  mm-launcher install-release --application <megamek|mekhq|lab> --tag <exact-tag> --destination <new-dir> --registry <json> --name <name> [--channel <milestone|development>]
+                  mm-launcher install-release --application <megamek|mekhq|lab> --tag <exact-tag> --destination <new-dir> --registry <json> --name <name> --channel <milestone|development>
                   mm-launcher preview-update --registry <json> [--id <uuid>] --tag <exact-tag>
                   mm-launcher apply-update --registry <json> [--id <uuid>] --from-tag <current-tag> --tag <exact-tag> --size <bytes> --digest <sha256:hex> --confirm CLOSE-ALL-SUITE-APPS-AND-APPLY
                   mm-launcher recover-update --registry <json> [--id <uuid>] --confirm CLOSE-ALL-SUITE-APPS-AND-APPLY

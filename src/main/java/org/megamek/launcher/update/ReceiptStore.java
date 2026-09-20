@@ -147,6 +147,28 @@ public class ReceiptStore {
         return receipt;
     }
 
+    /**
+     * Removes only the exact create-new receipt published by a failed metadata transaction.
+     * A changed or unreadable file is never treated as attempt-owned.
+     */
+    void rollbackPublication(Path registry, InstallationRecord record,
+                             OwnershipReceipt expected) throws IOException {
+        Path file = receiptPath(registry, record.id());
+        if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) return;
+        requireRealPath(file, false);
+        final OwnershipReceipt actual;
+        try (InputStream input = new LimitedInputStream(Files.newInputStream(file),
+                MAX_RECEIPT_BYTES)) {
+            actual = mapper.readValue(input, OwnershipReceipt.class);
+        } catch (IOException | RuntimeException error) {
+            throw new IOException("refusing to remove unreadable ownership receipt", error);
+        }
+        if (!actual.equals(expected)) {
+            throw new IOException("external ownership receipt edit blocks rollback");
+        }
+        Files.delete(file);
+    }
+
     void validate(OwnershipReceipt receipt, InstallationRecord record)
             throws IOException, ManifestException {
         if (receipt == null || receipt.schemaVersion() != SCHEMA_VERSION) {

@@ -59,17 +59,28 @@ classpath/main-class invocation and supported memory/open/disable-grab options. 
 Java and layout but does not start the game. Actual launch is the only application execution and
 is foreground/waiting; direct process-start errors and the child's exit code are returned.
 
-The GUI's visible first-launch and Installations import actions use one flow. Before confirmation,
-static inspection and current-Java validation are read-only. Confirmation names the detected build,
-actual programs, canonical root, Java feature, and no-move behavior. Immediately before one atomic
-registry mutation, current Java is revalidated; under the registry lock RegistryStore re-inspects
-the root, compares the captured canonical inspection, rechecks validated Java file identity and
-external placement, and applies duplicate/overlap rules. It never holds that lock while executing
-a process. First registration supplies the compatibility default only if locked current state has
-none and initializes only unset preferences for its included applications. Existing or
-concurrently added preferences win, and all existing record fields are retained. Imported records
-have no ownership receipt, channel sidecar, or provenance and remain launch-only; Home includes
-their detected programs in the application union.
+The GUI's visible first-launch and Installations import actions use one flow. The folder chooser is
+the only pre-operation prompt. One styled progress window performs static inspection, default-game-
+Java validation, and direct registration; there is no separate name, confirmation, or completion
+dialog. The record name is derived from detected product and version without inferring a channel.
+Immediately before one atomic registry mutation, Java is revalidated; under the registry lock
+RegistryStore re-inspects the root, compares the captured canonical inspection, rechecks validated
+Java file identity and external placement, and applies duplicate/overlap rules. It never holds that
+lock while executing a process. First registration supplies the compatibility default only if
+locked current state has none and initializes only unset preferences for its included applications.
+Existing or concurrently added preferences win, and all existing record fields are retained.
+Imported records have no ownership receipt, channel sidecar, or provenance and remain launch-only;
+Home includes their detected programs in the application union. Installations labels each one
+**Imported copy · Launch only · Updates unavailable** and exposes launch/preference, Java,
+location, removal, and a separate **Enable managed updates…** control, but no check, Preview,
+Update, or Recover action. Import itself never prompts for a channel and never starts adoption or
+a download.
+
+An official package folder copied without its launcher registry, ownership receipt, and
+fixed-channel sidecar may still identify its build during static inspection, but that identity
+does not recreate installation provenance or update eligibility. Version, title, prerelease state,
+and current canonical channel membership are never used to infer which track that copied folder
+was created to follow.
 
 The existing-copy commands themselves perform no network, download, or archive extraction. The
 separate `releases` and `install-release` flow is bounded by
@@ -103,3 +114,48 @@ Then use the README's common external-Java selection, preview, and explicit laun
 Inspection may report
 `confidence=recognized-packaging-optional-transitive-missing`; that is normal for supported suite
 packages which relocate a shared JAR. Registration neither modifies nor launches the application.
+
+## Explicit adoption
+
+Adoption is a GUI/backend operation separate from import. It is offered only when the exact
+registered record is still a genuine import: no ownership receipt, current state, adoption
+publication, fixed-channel sidecar, sidecar staging, or pending update/recovery exists. Any
+managed-incomplete or corrupt combination is an attention/repair state and cannot be overwritten
+by adoption. Before network access the backend re-reads the exact UUID/root/`registeredAt`
+binding, re-inspects the product/build, checks canonical non-link/non-overlapping placement,
+acquires the shared root gate, and rejects a live launcher-tracked application or pending update.
+Network work is refused on the Swing event thread.
+
+The observed products choose one fixed official repository and the observed version may suggest
+an exact tag, but neither is authority. The user may instead choose one exact release through the
+bounded official release browser. Milestone is the default future channel and Development is the
+only alternative; Nightly is unsupported. `ReleaseCatalog` must return one supported full
+`tar.gz` asset with a published valid SHA-256 and bounded size. The verified fetcher downloads it
+once and the safe extractor opens it in an attempt-owned external workspace. Official static
+inspection must reproduce the record's exact product set, build, root JAR manifests, and
+classpaths.
+
+The comparison inventories the complete local root without following links, rejects
+case/Unicode/file-parent conflicts, and hashes all regular files while checking stable identity.
+Every official runtime path (root application executable/JAR/script and all `lib/` dependencies)
+must be present and byte-identical. Missing managed paths are currently unsupported and block
+adoption. Modified non-runtime managed paths are allowed only as explicit `MODIFIED` overrides
+seeded with the pristine official ancestor hash. Unknown regular files are retained. Protected
+saves, campaigns, userdata, custom content, configuration, logs, and backups remain excluded and
+unmanaged.
+
+The opaque prepared handle is one-use, process-local, non-serializable, and bound to its creating
+service, registry, exact record, root snapshot, repository/tag/asset/size/digest, fixed channel,
+and pristine package inventory. Confirmation acquires the root gate again, rechecks every local
+and provenance precondition, refreshes exact metadata, re-hashes and re-extracts the retained
+archive without a second download, and compares the new official evidence with the prepared
+evidence. Drift discards the attempt.
+
+Publication writes only launcher metadata outside the application root: immutable ownership
+receipt, explicit current ancestor and override history, adoption binding, then fixed channel as
+the final eligibility barrier. Exact-value rollback removes only attempt-owned publications after
+an injected or ordinary failure. A cancelled, ineligible, or failed attempt removes its owned
+temporary workspace and remains launch-only; application bytes and timestamps are never changed.
+Success makes the existing Check/Preview/Update services available but performs no update and no
+launch. Normal result UI contains only the safe/ineligible statement; bounded
+exact/modified/missing/protected/unknown/conflict details are local diagnostics only.

@@ -52,7 +52,8 @@ import java.util.function.Consumer;
 final class FirstLaunchSplitButton extends JPanel {
     static final String PRIMARY_NAME = "downloadAndInstallButton";
     static final String OPTIONS_NAME = "downloadOptionsButton";
-    static final String PRIMARY_LABEL = "Install latest MekHQ Milestone";
+    static final String PRIMARY_LABEL =
+            VersionDisplay.installLatest("MekHQ", "Milestone", null);
     static final Color POPUP_BACKGROUND = new Color(22, 36, 40);
     static final Color POPUP_FOREGROUND = new Color(237, 243, 237);
     static final Color POPUP_MUTED = new Color(166, 186, 181);
@@ -67,10 +68,10 @@ final class FirstLaunchSplitButton extends JPanel {
     private final SegmentButton optionsButton;
     private final JPopupMenu popupMenu;
     private final Map<QuickInstallOption.Key, JMenuItem> optionItems = new LinkedHashMap<>();
+    private final JMenuItem retryItem;
     private final Runnable unavailableRetryAction;
     private Set<QuickInstallOption.Key> availableOptions = Set.of();
-    private boolean optionsUnavailable;
-    private boolean unavailableViewed;
+    private OptionState optionState = OptionState.LOADING;
     private boolean disposed;
 
     FirstLaunchSplitButton(GuiScale scale, Runnable primaryAction,
@@ -115,13 +116,21 @@ final class FirstLaunchSplitButton extends JPanel {
                 "Five validated official Milestone or Development choices. "
                         + "Opening this menu performs no network request.");
         for (QuickInstallOption.Key key : QuickInstallSnapshot.MENU_KEYS) {
-            JMenuItem item = menuItem(menuLabel(key) + " (Loading…)", menuItemName(key),
+            JMenuItem item = menuItem(menuLabel(key, "Loading…"), menuItemName(key),
                     menuLabel(key) + " version metadata is loading.", palette());
             item.setEnabled(false);
             item.addActionListener(event -> invokeMenuAction(key, optionAction));
             optionItems.put(key, item);
             popupMenu.add(item);
         }
+        retryItem = menuItem("Retry version check", "retryQuickInstallMetadataMenuItem",
+                "Retry loading the six official current install choices.", palette());
+        retryItem.addActionListener(event -> {
+            closePopup();
+            if (!disposed && isEnabled() && optionState == OptionState.FAILED) {
+                unavailableRetryAction.run();
+            }
+        });
 
         installOpenBindings(primaryButton);
         installOpenBindings(optionsButton);
@@ -138,6 +147,7 @@ final class FirstLaunchSplitButton extends JPanel {
         optionsButton.getModel().addChangeListener(event -> repaint());
         add(primaryButton, BorderLayout.CENTER);
         add(optionsButton, BorderLayout.EAST);
+        setOptionsLoading();
     }
 
     private JMenuItem menuItem(String text, String name, String description, Palette palette) {
@@ -181,14 +191,19 @@ final class FirstLaunchSplitButton extends JPanel {
 
     void setOptions(QuickInstallSnapshot snapshot) {
         if (disposed) return;
-        setPrimaryLabel(PRIMARY_LABEL + " ("
-                + snapshot.option(QuickInstallSnapshot.DEFAULT_KEY).version() + ")");
-        optionsUnavailable = false;
-        unavailableViewed = false;
+        setPrimaryLabel(menuLabel(QuickInstallSnapshot.DEFAULT_KEY,
+                snapshot.option(QuickInstallSnapshot.DEFAULT_KEY).version()));
+        optionState = OptionState.READY;
+        popupMenu.remove(retryItem);
+        primaryButton.getAccessibleContext().setAccessibleDescription(
+                "Review and install this captured official Milestone MekHQ bundle containing "
+                        + "MegaMek, MekHQ, and MegaMekLab.");
+        getAccessibleContext().setAccessibleDescription(
+                "Install one of the six ready, validated official application choices.");
         setNormalOptionsDescription();
         Map<QuickInstallOption.Key, String> labels = new LinkedHashMap<>();
         for (QuickInstallOption.Key key : QuickInstallSnapshot.MENU_KEYS) {
-            labels.put(key, menuLabel(key) + " (" + snapshot.option(key).version() + ")");
+            labels.put(key, menuLabel(key, snapshot.option(key).version()));
         }
         availableOptions = Set.copyOf(labels.keySet());
         for (Map.Entry<QuickInstallOption.Key, String> entry : labels.entrySet()) {
@@ -198,24 +213,32 @@ final class FirstLaunchSplitButton extends JPanel {
             item.getAccessibleContext().setAccessibleName(entry.getValue());
             item.getAccessibleContext().setAccessibleDescription(
                     entry.getValue() + ". Review this exact normal-install choice.");
-            item.setEnabled(isEnabled());
         }
         popupMenu.getAccessibleContext().setAccessibleDescription(
                 "Five validated official choices with versions. "
                         + "Opening this menu performs no network request.");
+        applyEnabledState();
         popupMenu.revalidate();
         popupMenu.repaint();
     }
 
     void setOptionsLoading() {
         if (disposed) return;
-        setPrimaryLabel(PRIMARY_LABEL);
-        optionsUnavailable = false;
-        unavailableViewed = false;
-        setNormalOptionsDescription();
+        setPrimaryLabel(menuLabel(QuickInstallSnapshot.DEFAULT_KEY, "Loading…"));
+        optionState = OptionState.LOADING;
+        popupMenu.remove(retryItem);
+        primaryButton.getAccessibleContext().setAccessibleDescription(
+                "Install version metadata is loading. This action is unavailable.");
+        optionsButton.setToolTipText("Official install choices are loading.");
+        optionsButton.getAccessibleContext().setAccessibleName(
+                "Install choices loading");
+        optionsButton.getAccessibleContext().setAccessibleDescription(
+                "Official install choices are loading. This action is unavailable.");
+        getAccessibleContext().setAccessibleDescription(
+                "Official install choices are loading; both install segments are unavailable.");
         availableOptions = Set.of();
         for (Map.Entry<QuickInstallOption.Key, JMenuItem> entry : optionItems.entrySet()) {
-            String label = menuLabel(entry.getKey()) + " (Loading…)";
+            String label = menuLabel(entry.getKey(), "Loading…");
             JMenuItem item = entry.getValue();
             item.setText(label);
             item.setToolTipText("Official channel and release metadata is loading.");
@@ -227,21 +250,27 @@ final class FirstLaunchSplitButton extends JPanel {
         popupMenu.getAccessibleContext().setAccessibleDescription(
                 "Five official choices are loading. Opening this menu performs no "
                         + "network request.");
+        applyEnabledState();
         popupMenu.revalidate();
         popupMenu.repaint();
     }
 
     void setOptionsUnavailable(String detail) {
         if (disposed) return;
-        setPrimaryLabel(PRIMARY_LABEL);
-        optionsUnavailable = true;
-        unavailableViewed = popupMenu.isVisible();
+        closePopup();
+        setPrimaryLabel(menuLabel(QuickInstallSnapshot.DEFAULT_KEY, "Unavailable"));
+        optionState = OptionState.FAILED;
+        primaryButton.getAccessibleContext().setAccessibleDescription(
+                "Install version metadata is unavailable. This action is unavailable.");
+        getAccessibleContext().setAccessibleDescription(
+                "Install choices are unavailable; open the Retry install version check "
+                        + "segment to retry.");
         availableOptions = Set.of();
         String explanation = detail == null || detail.isBlank()
-                ? "Version unavailable. Close and reopen this menu to retry."
+                ? "Install versions are unavailable. Choose Retry version check."
                 : detail;
         for (Map.Entry<QuickInstallOption.Key, JMenuItem> entry : optionItems.entrySet()) {
-            String label = menuLabel(entry.getKey()) + " (Unavailable)";
+            String label = menuLabel(entry.getKey(), "Unavailable");
             JMenuItem item = entry.getValue();
             item.setText(label);
             item.setToolTipText(explanation);
@@ -250,13 +279,19 @@ final class FirstLaunchSplitButton extends JPanel {
             item.setEnabled(false);
         }
         popupMenu.getAccessibleContext().setAccessibleDescription(
-                "Five official choices are unavailable. Close and reopen this menu to "
-                        + "explicitly retry their metadata.");
+                "Five official choices are unavailable. Retry version check is the only "
+                        + "available menu command.");
+        if (retryItem.getParent() != popupMenu) popupMenu.add(retryItem);
+        retryItem.setToolTipText(explanation);
+        retryItem.getAccessibleContext().setAccessibleDescription(
+                "Explicitly retry loading the official current install choices. "
+                        + explanation);
         optionsButton.setToolTipText(
-                "Open the unavailable choices; close and reopen the menu to retry metadata.");
+                "Open the unavailable choices and select Retry version check.");
+        optionsButton.getAccessibleContext().setAccessibleName("Retry install version check");
         optionsButton.getAccessibleContext().setAccessibleDescription(
-                "Open the five-choice quick-install menu and explicitly retry unavailable "
-                        + "version metadata.");
+                "Open the unavailable quick-install choices and explicit Retry command.");
+        applyEnabledState();
         popupMenu.revalidate();
         popupMenu.repaint();
     }
@@ -272,14 +307,6 @@ final class FirstLaunchSplitButton extends JPanel {
         if (disposed || !isEnabled() || !optionsButton.isEnabled() || popupMenu.isVisible()
                 || !isShowing()) {
             return;
-        }
-        if (optionsUnavailable && unavailableViewed) {
-            setOptionsLoading();
-            unavailableRetryAction.run();
-        } else if (optionsUnavailable) {
-            unavailableViewed = true;
-            optionsButton.setToolTipText(
-                    "Close and reopen the choices to retry unavailable version metadata.");
         }
         int x = Math.max(0, getWidth() - popupMenu.getPreferredSize().width);
         popupMenu.show(this, x, Math.max(0, getHeight() - scale.scaleForGUI(3)));
@@ -302,6 +329,8 @@ final class FirstLaunchSplitButton extends JPanel {
     }
 
     private void setNormalOptionsDescription() {
+        optionsButton.getAccessibleContext().setAccessibleName(
+                "Choose another application and channel");
         optionsButton.setToolTipText(
                 "Choose another official application and Milestone or Development channel.");
         optionsButton.getAccessibleContext().setAccessibleDescription(
@@ -336,23 +365,45 @@ final class FirstLaunchSplitButton extends JPanel {
     @Override
     public void setEnabled(boolean enabled) {
         super.setEnabled(enabled);
-        if (primaryButton != null) primaryButton.setEnabled(enabled);
-        if (optionsButton != null) optionsButton.setEnabled(enabled);
-        if (optionItems != null) {
-            optionItems.forEach((key, item) ->
-                    item.setEnabled(enabled && availableOptions.contains(key)));
-        }
+        applyEnabledState();
         if (!enabled && popupMenu != null) closePopup();
         repaint();
     }
 
+    private void applyEnabledState() {
+        if (primaryButton == null || optionsButton == null || optionItems == null) return;
+        boolean ready = isEnabled() && optionState == OptionState.READY;
+        boolean retry = isEnabled() && optionState == OptionState.FAILED;
+        primaryButton.setEnabled(ready);
+        primaryButton.setFocusable(ready);
+        optionsButton.setEnabled(ready || retry);
+        optionsButton.setFocusable(ready || retry);
+        optionItems.forEach((key, item) ->
+                item.setEnabled(ready && availableOptions.contains(key)));
+        if (retryItem != null) retryItem.setEnabled(retry);
+        if (!ready && !retry && popupMenu != null) closePopup();
+    }
+
+    private enum OptionState {
+        LOADING,
+        READY,
+        FAILED
+    }
+
     private static String menuLabel(QuickInstallOption.Key key) {
-        String product = switch (key.repository()) {
+        return VersionDisplay.installLatest(productName(key), key.channel().toString(), null);
+    }
+
+    private static String menuLabel(QuickInstallOption.Key key, String version) {
+        return VersionDisplay.installLatest(productName(key), key.channel().toString(), version);
+    }
+
+    private static String productName(QuickInstallOption.Key key) {
+        return switch (key.repository()) {
             case MEKHQ -> "MekHQ";
             case MEGAMEK -> "MegaMek";
             case LAB -> "MegaMekLab";
         };
-        return "Install latest " + product + " " + key.channel();
     }
 
     private static String menuItemName(QuickInstallOption.Key key) {

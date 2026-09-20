@@ -43,23 +43,24 @@ class HomeLaunchSplitButtonTest {
         try {
             SwingUtilities.invokeAndWait(() -> {
                 holder[0] = new HomeLaunchSplitButton(GuiScale.DEFAULT, "megamek", "MegaMek",
-                        "1.0.0", () -> launched.set(main), List.of(
+                        "1.0.0", "Milestone", () -> launched.set(main), List.of(
                         new HomeLaunchSplitButton.Option(
-                                "Campaign copy · 0.49.20 · Milestone",
+                                "Campaign copy · MegaMek Milestone (0.49.20)",
                                 () -> launched.set(older)),
                         new HomeLaunchSplitButton.Option(
-                                "Development · 0.51.0 · Development",
+                                "Development · MegaMek Development (0.51.0)",
                                 () -> launched.set(development))));
                 frame.setContentPane(holder[0]);
                 frame.pack();
                 frame.setVisible(true);
             });
             HomeLaunchSplitButton split = holder[0];
-            assertEquals("Launch MegaMek 1.0.0", split.primaryButton().getText());
+            assertEquals("Launch MegaMek Milestone (1.0.0)",
+                    split.primaryButton().getText());
             assertFalse(split.primaryButton().isContentAreaFilled());
             assertFalse(split.optionsButton().isContentAreaFilled());
-            assertEquals(List.of("Campaign copy · 0.49.20 · Milestone",
-                            "Development · 0.51.0 · Development"),
+            assertEquals(List.of("Campaign copy · MegaMek Milestone (0.49.20)",
+                            "Development · MegaMek Development (0.51.0)"),
                     java.util.Arrays.stream(split.popupMenu().getComponents())
                             .map(JMenuItem.class::cast).map(JMenuItem::getText).toList());
             assertEquals(HomeLaunchSplitButton.POPUP_BACKGROUND,

@@ -2,6 +2,7 @@ package org.megamek.launcher.gui;
 
 import org.megamek.launcher.channel.ChannelCatalog;
 import org.megamek.launcher.channel.FollowChannel;
+import org.megamek.launcher.channel.OfficialYamlChannelCatalog;
 import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.channel.QuickInstallSnapshot;
 import org.megamek.launcher.release.OfficialRepository;
@@ -31,7 +32,8 @@ final class QuickInstallTestData {
                     URI.create("https://github.com/" + repository.slug()
                             + "/releases/tag/" + tag), List.of(asset));
             ChannelCatalog.Target target = new ChannelCatalog.Target(key.channel(), version,
-                    repository, release, asset, "fixture:official-channels");
+                    repository, release, asset,
+                    OfficialYamlChannelCatalog.SOURCE.toString());
             options.add(new QuickInstallOption(key, target));
         }
         return new QuickInstallSnapshot(options);

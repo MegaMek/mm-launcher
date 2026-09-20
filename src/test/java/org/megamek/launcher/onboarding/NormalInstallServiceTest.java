@@ -8,6 +8,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.FollowChannel;
+import org.megamek.launcher.channel.QuickInstallOption;
+import org.megamek.launcher.channel.QuickInstallSnapshot;
 import org.megamek.launcher.gui.LauncherServices;
 import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.launch.ApplicationLauncher;
@@ -142,6 +144,137 @@ class NormalInstallServiceTest {
                         .preference().channel());
         assertTrue(new ChannelPreferenceStore().read(fixture.registry, data, main)
                 .preference().checkOnOpen());
+    }
+
+    @Test
+    void capturedCurrentPlanNeverRereadsPointerAndInstallsOnlyCapturedTarget()
+            throws Exception {
+        Fixture fixture = fixture("1.2.3");
+        QuickInstallSnapshot snapshot = fixture.launcherServices.quickInstallSnapshot();
+        QuickInstallOption captured = snapshot.option(QuickInstallSnapshot.DEFAULT_KEY);
+        int yamlAfterSnapshot = fixture.transport.yamlRequests;
+        int apiAfterSnapshot = fixture.transport.apiRequests;
+
+        NormalInstallService.Plan plan =
+                fixture.launcherServices.prepareCapturedNormalInstall(
+                        captured, fixture.destination, null);
+
+        assertTrue(plan.currentChannelTarget());
+        assertTrue(plan.capturedCurrentTarget());
+        assertEquals(NormalInstallService.TargetKind.CAPTURED_CURRENT, plan.targetKind());
+        assertEquals(yamlAfterSnapshot, fixture.transport.yamlRequests);
+        assertEquals(apiAfterSnapshot, fixture.transport.apiRequests,
+                "captured planning performs only fresh local validation");
+
+        fixture.transport.version = "8.8.8";
+        NormalInstallService.Result result = fixture.launcherServices.installNormal(
+                plan, quiet(), OperationContext.none(OperationType.FRESH_INSTALL));
+
+        assertEquals("v1.2.3", result.release().tag());
+        assertEquals(yamlAfterSnapshot, fixture.transport.yamlRequests,
+                "install-time validation must not reread the moving current pointer");
+        assertEquals(apiAfterSnapshot + 2, fixture.transport.apiRequests,
+                "the exact quoted release is checked before transfer and by the fetcher");
+        assertEquals(1, fixture.transport.binaryRequests);
+    }
+
+    @Test
+    void capturedTargetReplanningRefreshesLocalDestinationAndSettingsOnly()
+            throws Exception {
+        Fixture fixture = fixture("1.3.0");
+        QuickInstallOption captured = fixture.launcherServices.quickInstallSnapshot()
+                .option(QuickInstallSnapshot.DEFAULT_KEY);
+        int yamlAfterSnapshot = fixture.transport.yamlRequests;
+        int apiAfterSnapshot = fixture.transport.apiRequests;
+        Path occupied = Files.createDirectory(fixture.state.resolve("occupied"));
+        assertThrows(IOException.class,
+                () -> fixture.launcherServices.prepareCapturedNormalInstall(
+                        captured, occupied, null));
+        assertEquals(yamlAfterSnapshot, fixture.transport.yamlRequests);
+        assertEquals(apiAfterSnapshot, fixture.transport.apiRequests,
+                "a local planning failure does not refresh the captured target");
+        NormalInstallService.Plan initial =
+                fixture.launcherServices.prepareCapturedNormalInstall(
+                        captured, fixture.destination, null);
+        Path changedDestination = fixture.state.resolve("installations")
+                .resolve("Changed MekHQ Milestone");
+        fixture.launcherServices.setCheckNewInstallsOnOpen(false);
+
+        NormalInstallService.Plan changed =
+                fixture.launcherServices.prepareCapturedNormalInstall(
+                        captured, changedDestination, null);
+
+        assertEquals(fixture.destination, initial.destination());
+        assertTrue(initial.checkConfiguration().checkOnOpen());
+        assertEquals(changedDestination, changed.destination());
+        assertFalse(changed.checkConfiguration().checkOnOpen());
+        assertFalse(initial.checkConfiguration().revision()
+                .equals(changed.checkConfiguration().revision()));
+        assertEquals(initial.release(), changed.release());
+        assertEquals(initial.asset(), changed.asset());
+        assertEquals(yamlAfterSnapshot, fixture.transport.yamlRequests);
+        assertEquals(apiAfterSnapshot, fixture.transport.apiRequests);
+        assertEquals(0, fixture.transport.binaryRequests);
+    }
+
+    @Test
+    void capturedCurrentAssetOrReleaseDriftFailsBeforeBytesOrRootWrites()
+            throws Exception {
+        int sequence = 0;
+        for (MetadataDrift drift : List.of(
+                MetadataDrift.NAME, MetadataDrift.SIZE, MetadataDrift.DIGEST,
+                MetadataDrift.URL, MetadataDrift.REMOVED, MetadataDrift.TAG)) {
+            Fixture fixture = fixture("2.4." + sequence++);
+            QuickInstallOption captured = fixture.launcherServices.quickInstallSnapshot()
+                    .option(QuickInstallSnapshot.DEFAULT_KEY);
+            NormalInstallService.Plan plan =
+                    fixture.launcherServices.prepareCapturedNormalInstall(
+                            captured, fixture.destination, null);
+            int yamlAfterSnapshot = fixture.transport.yamlRequests;
+            fixture.transport.metadataDrift = drift;
+
+            assertThrows(IOException.class,
+                    () -> fixture.launcherServices.installNormal(plan, quiet(),
+                            OperationContext.none(OperationType.FRESH_INSTALL)));
+
+            assertEquals(yamlAfterSnapshot, fixture.transport.yamlRequests);
+            assertEquals(0, fixture.transport.binaryRequests);
+            assertFalse(Files.exists(fixture.destination, LinkOption.NOFOLLOW_LINKS));
+            assertFalse(Files.exists(fixture.destination.getParent(), LinkOption.NOFOLLOW_LINKS));
+            assertFalse(Files.exists(fixture.registry, LinkOption.NOFOLLOW_LINKS));
+        }
+    }
+
+    @Test
+    void historicalExactPlanSkipsYamlAndFixesChannelOnlyForCreatedInstallation()
+            throws Exception {
+        Fixture fixture = fixture("1.2.3");
+
+        NormalInstallService.Plan plan = fixture.service.prepareExact(
+                OfficialRepository.MEKHQ, FollowChannel.MILESTONE, "v9.9.9",
+                fixture.destination, null);
+
+        assertFalse(plan.currentChannelTarget());
+        assertEquals("9.9.9", plan.version());
+        assertEquals("v9.9.9", plan.release().tag());
+        assertEquals(FollowChannel.MILESTONE, plan.channel());
+        assertTrue(plan.source().endsWith("/releases/tags/v9.9.9"));
+        assertEquals(0, fixture.transport.yamlRequests,
+                "history selection must not be mislabeled through a current channel pointer");
+        assertEquals(1, fixture.transport.apiRequests);
+        assertEquals(0, fixture.transport.binaryRequests);
+
+        NormalInstallService.Result result = fixture.service.install(
+                plan, quiet(), OperationContext.none(OperationType.FRESH_INSTALL));
+
+        assertEquals(0, fixture.transport.yamlRequests);
+        assertEquals(3, fixture.transport.apiRequests,
+                "the planner and package fetch each revalidate the exact tag before transfer");
+        assertEquals(1, fixture.transport.binaryRequests);
+        RegistryData data = fixture.registries.read(fixture.registry);
+        assertEquals(FollowChannel.MILESTONE,
+                new ChannelPreferenceStore().read(fixture.registry, data, result.record())
+                        .preference().channel());
     }
 
     @Test
@@ -417,7 +550,7 @@ class NormalInstallServiceTest {
     }
 
     @Test
-    void persistedFalseAppliesToNormalInstallAndLeavesExistingFalseCopyUnchanged()
+    void persistedFalseAppliesToNormalInstallAndLeavesImportedCopyWithoutChannel()
             throws Exception {
         Fixture fixture = fixture("1.2.3");
         Path imported = createSuite(fixture.state.resolve("Imported"), "8.0.0");
@@ -425,7 +558,6 @@ class NormalInstallServiceTest {
                 fixture.registry, "Existing", imported, "keep-pin");
         fixture.registries.selectJava(fixture.registry, old.id(), planJava().toString());
         old = fixture.registries.resolve(fixture.registries.read(fixture.registry), old.id());
-        new ChannelPreferenceStore().set(fixture.registry, old, FollowChannel.DEVELOPMENT, false);
         InstallationRecord expectedOld = old;
         fixture.launcherServices.setCheckNewInstallsOnOpen(false);
 
@@ -445,14 +577,15 @@ class NormalInstallServiceTest {
                 "normal install must make Main only when the captured default is empty");
         assertFalse(result.becameMain(),
                 "the result reports the actual locked Main outcome, not the plan-time default");
-        assertFalse(new ChannelPreferenceStore().read(fixture.registry, data, unchanged)
-                .preference().checkOnOpen());
+        assertEquals(ChannelPreferenceStore.Status.UNKNOWN,
+                new ChannelPreferenceStore().read(fixture.registry, data, unchanged).status());
         assertFalse(new ChannelPreferenceStore().read(fixture.registry, data, result.record())
                 .preference().checkOnOpen());
         int metadataRequests = fixture.transport.apiRequests;
         LauncherServices.HomeState home = fixture.launcherServices.loadHome();
         assertEquals(expectedOld.id(), home.preferred().id());
-        assertFalse(home.channelPreference().preference().checkOnOpen());
+        assertEquals(ChannelPreferenceStore.Status.UNKNOWN,
+                home.channelPreference().status());
         assertFalse(fixture.launcherServices.canCheckOnOpen(result.record()));
         assertEquals(metadataRequests, fixture.transport.apiRequests,
                 "an off copy must not request update metadata on open");
@@ -712,6 +845,7 @@ class NormalInstallServiceTest {
         private int yamlRequests;
         private boolean malformedFeed;
         private boolean driftOnThirdApi;
+        private MetadataDrift metadataDrift = MetadataDrift.NONE;
         private Runnable onBinary = () -> {
         };
 
@@ -741,6 +875,7 @@ class NormalInstallServiceTest {
                     OfficialRepository repository = repository(uri);
                     return response(releaseJson(repository, requested,
                                     archiveFor(repository, requested),
+                                    metadataDrift,
                                     driftOnThirdApi && apiRequests >= 3)
                                     .getBytes(StandardCharsets.UTF_8),
                             "application/json");
@@ -784,19 +919,31 @@ class NormalInstallServiceTest {
         }
 
         private String releaseJson(OfficialRepository repository, String requested,
-                                   byte[] requestedArchive, boolean drift)
+                                   byte[] requestedArchive, MetadataDrift metadataDrift,
+                                   boolean timedDrift)
                 throws Exception {
             String currentName = repository.assetPrefix() + requested + ".tar.gz";
+            String tag = metadataDrift == MetadataDrift.TAG
+                    ? "v" + requested + "-changed" : "v" + requested;
+            String assetName = metadataDrift == MetadataDrift.NAME
+                    ? "Other-" + currentName : currentName;
+            String urlName = metadataDrift == MetadataDrift.URL
+                    ? "different-" + currentName : currentName;
+            boolean sizeDrift = timedDrift || metadataDrift == MetadataDrift.SIZE;
+            boolean digestDrift = timedDrift || metadataDrift == MetadataDrift.DIGEST;
+            String assets = metadataDrift == MetadataDrift.REMOVED ? "[]" : """
+                    [{"name":"%s","size":%d,"digest":"sha256:%s",
+                    "browser_download_url":"https://github.com/%s/releases/download/v%s/%s"}]
+                    """.formatted(assetName,
+                    requestedArchive.length + (sizeDrift ? 1 : 0),
+                    digestDrift ? "0".repeat(64) : sha(requestedArchive),
+                    repository.slug(), requested, urlName);
             return """
-                    {"tag_name":"v%s","name":"Milestone %s","draft":false,
+                    {"tag_name":"%s","name":"Milestone %s","draft":false,
                     "prerelease":false,
                     "html_url":"https://github.com/%s/releases/tag/v%s",
-                    "assets":[{"name":"%s","size":%d,"digest":"sha256:%s",
-                    "browser_download_url":"https://github.com/%s/releases/download/v%s/%s"}]}
-                    """.formatted(requested, requested, repository.slug(), requested, currentName,
-                    requestedArchive.length + (drift ? 1 : 0),
-                    drift ? "0".repeat(64) : sha(requestedArchive),
-                    repository.slug(), requested, currentName);
+                    "assets":%s}
+                    """.formatted(tag, requested, repository.slug(), requested, assets);
         }
 
         private static Response response(byte[] bytes, String type) {
@@ -804,5 +951,15 @@ class NormalInstallServiceTest {
                     "content-length", List.of(Integer.toString(bytes.length)),
                     "content-type", List.of(type)), new ByteArrayInputStream(bytes));
         }
+    }
+
+    private enum MetadataDrift {
+        NONE,
+        NAME,
+        SIZE,
+        DIGEST,
+        URL,
+        REMOVED,
+        TAG
     }
 }

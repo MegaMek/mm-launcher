@@ -5,6 +5,8 @@ import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.megamek.launcher.channel.ChannelPreferenceStore;
+import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.registry.RegistryStore;
 import org.megamek.launcher.release.FreshInstaller;
 import org.megamek.launcher.release.OfficialRepository;
@@ -117,6 +119,8 @@ class PreviewFailureMaterialTest {
         byte[] baseline = megamekArchive("MegaMek-old");
         var result = new FreshInstaller(transportFor("v-old", baseline, sha(baseline))).install(
                 OfficialRepository.MEGAMEK, "v-old", root, registry, "Official", quiet());
+        new ChannelPreferenceStore().initializeManaged(registry, result.record(),
+                result.ownershipReceipt(), FollowChannel.MILESTONE, false);
         assertFalse(result.record().updateEligible());
         return new Fixture(area, root, registry, result.record(), result.ownershipReceipt());
     }

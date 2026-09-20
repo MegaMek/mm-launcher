@@ -61,12 +61,19 @@ final class HomeLaunchSplitButton extends JPanel {
 
     HomeLaunchSplitButton(GuiScale scale, String productKey, String productName,
                           Runnable primaryAction, List<Option> alternatives) {
-        this(scale, productKey, productName, null, primaryAction, alternatives);
+        this(scale, productKey, productName, null, null, primaryAction, alternatives);
     }
 
     HomeLaunchSplitButton(GuiScale scale, String productKey, String productName,
                           String preferredVersion, Runnable primaryAction,
                           List<Option> alternatives) {
+        this(scale, productKey, productName, preferredVersion, null,
+                primaryAction, alternatives);
+    }
+
+    HomeLaunchSplitButton(GuiScale scale, String productKey, String productName,
+                          String preferredVersion, String preferredChannel,
+                          Runnable primaryAction, List<Option> alternatives) {
         this.scale = scale;
         List<Option> capturedOptions = List.copyOf(alternatives);
         hasOptions = !capturedOptions.isEmpty();
@@ -80,15 +87,16 @@ final class HomeLaunchSplitButton extends JPanel {
                 + ", or choose another registered installation."
                 : "Launch preferred " + productName + ".");
 
-        String primaryLabel = "Launch " + productName
-                + (preferredVersion == null || preferredVersion.isBlank()
-                ? "" : " " + preferredVersion);
+        String primaryLabel =
+                VersionDisplay.launch(productName, preferredChannel, preferredVersion);
         primaryButton = new SegmentButton(primaryLabel,
                 "launch-" + productKey + "-button", false);
         primaryButton.getAccessibleContext().setAccessibleDescription(
                 "Launch " + productName + " from its preferred installation"
                         + (preferredVersion == null || preferredVersion.isBlank()
-                        ? "." : ", version " + preferredVersion + "."));
+                        ? "" : ", version " + preferredVersion)
+                        + (preferredChannel == null || preferredChannel.isBlank()
+                        ? "." : ", " + preferredChannel + " channel."));
         primaryButton.addActionListener(event -> {
             if (!disposed && primaryButton.isEnabled()) primaryAction.run();
         });

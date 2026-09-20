@@ -6,6 +6,8 @@ import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.megamek.launcher.Main;
+import org.megamek.launcher.channel.ChannelPreferenceStore;
+import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.plan.Action;
 import org.megamek.launcher.plan.Decision;
 import org.megamek.launcher.release.FreshInstaller;
@@ -56,6 +58,7 @@ class UpdatePreviewTest {
         FreshInstaller.Result installedResult = new FreshInstaller(transportFor("v-old", baseline))
                 .install(OfficialRepository.MEGAMEK, "v-old", installed, registry, "Official",
                         new PrintStream(new ByteArrayOutputStream()));
+        initializeChannel(registry, installedResult);
         Path localArcher = installed.resolve("data/images/units/meks/Archer_5CS.png");
         Files.writeString(localArcher, "locally customized archer");
 
@@ -130,6 +133,7 @@ class UpdatePreviewTest {
         FreshInstaller.Result installedResult = new FreshInstaller(installing).install(
                 OfficialRepository.MEGAMEK, "v-old", installed, registry, "Official",
                 new PrintStream(new ByteArrayOutputStream()));
+        initializeChannel(registry, installedResult);
         assertFalse(installedResult.record().updateEligible());
         assertTrue(installedResult.ownershipReceipt().excludedOfficialPaths()
                 .contains("campaigns/sample.cpnx.gz"));
@@ -198,7 +202,7 @@ class UpdatePreviewTest {
     }
 
     @Test
-    void missingReceiptFailsBeforeNetworkAndExistingRegistrationRemainsUsable() throws Exception {
+    void importedCopyWithoutFixedChannelFailsBeforeNetworkAndRemainsUsable() throws Exception {
         Path root = Files.createDirectory(temp.resolve("existing"));
         Files.write(root.resolve("MegaMek.jar"), jar());
         Files.createDirectories(root.resolve("data"));
@@ -212,11 +216,36 @@ class UpdatePreviewTest {
         IOException error = assertThrows(IOException.class, () ->
                 new UpdatePreviewService(network).preview(registry, record.id(), "v-new",
                         new PrintStream(new ByteArrayOutputStream())));
-        assertTrue(error.getMessage().contains("receipt is absent"));
-        assertTrue(error.getMessage().contains(record.id()));
+        assertTrue(error.getMessage().contains("fixed channel provenance"));
+        assertTrue(error.getMessage().contains("launch-only"));
         assertTrue(network.uris.isEmpty());
         assertEquals(record.id(), new org.megamek.launcher.registry.RegistryStore()
                 .read(registry).installations().getFirst().id());
+    }
+
+    @Test
+    void receiptWithoutFixedChannelIsLaunchOnlyAndCannotPreview() throws Exception {
+        byte[] baseline = archive("MegaMek-old", Map.of(
+                "MegaMek.jar", jar(), "data/file.txt", bytes("official"),
+                "lib/file.txt", bytes("official"),
+                "mmconf/clientsettings.xml", bytes("preferences")));
+        Path registry = temp.resolve("incomplete-registry.json");
+        Path installed = temp.resolve("incomplete-installed");
+        FreshInstaller.Result published = new FreshInstaller(transportFor("v-old", baseline))
+                .install(OfficialRepository.MEGAMEK, "v-old", installed, registry, "Incomplete",
+                        new PrintStream(new ByteArrayOutputStream()));
+        QueueTransport network = new QueueTransport();
+
+        UpdatePreviewService.Eligibility eligibility =
+                new UpdatePreviewService(network).eligibility(registry, published.record().id());
+        assertFalse(eligibility.available());
+        assertEquals(published.ownershipReceipt(), eligibility.receipt());
+        assertTrue(eligibility.reason().contains("Fixed channel provenance"));
+        IOException failure = assertThrows(IOException.class, () ->
+                new UpdatePreviewService(network).preview(registry, published.record().id(),
+                        "v-new", new PrintStream(new ByteArrayOutputStream())));
+        assertTrue(failure.getMessage().contains("fixed channel provenance"));
+        assertTrue(network.uris.isEmpty());
     }
 
     @Test
@@ -241,6 +270,12 @@ class UpdatePreviewTest {
                 registry, id, "v-new", new PrintStream(new ByteArrayOutputStream()));
         assertEquals(2, network.uris.size(), "one metadata request and one target fetch");
         return preview;
+    }
+
+    private static void initializeChannel(Path registry, FreshInstaller.Result installed)
+            throws IOException {
+        new ChannelPreferenceStore().initializeManaged(registry, installed.record(),
+                installed.ownershipReceipt(), FollowChannel.MILESTONE, false);
     }
 
     private static void assertCaseRenameReport(UpdatePreviewService.Preview preview) {

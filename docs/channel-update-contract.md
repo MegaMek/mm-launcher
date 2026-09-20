@@ -1,19 +1,31 @@
-# Channel selection and update-check contract
+# Fixed-channel and update-check contract
 
-Each registered installation has an independent, explicit **Milestone** or **Development**
-preference. Milestone maps only to the official website's `stable` scalar and Development maps
-only to `dev`. Nightlies, Core Rules, extras, GitHub titles, prerelease flags, “latest” ordering,
-tag parity, and a manually selected install tag are not channels and never infer user intent.
-Pre-existing and legacy-CLI records remain Unknown until explicitly configured.
+Each official managed installation receives exactly one immutable **Milestone** or
+**Development** channel when its verified fresh-install or adoption transaction publishes it.
+Milestone maps
+only to the official website's `stable` scalar and Development maps only to `dev`. A future
+Nightly channel will likewise require a separate managed installation. Core Rules, extras, GitHub
+titles, prerelease flags, “latest” ordering, tag parity, and a manually selected install tag never
+infer a channel. To use another channel, the user chooses **Install another version** and creates a
+separate root; an existing installation is never retargeted or cross-channel downgraded.
 
-The preference is schema-versioned JSON beside ownership receipts, outside every application root.
-It is bound to installation UUID, canonical root, and registration time. Strict JSON parsing rejects
-unknown, duplicate, missing, and null fields. Publication uses a per-record try-lock, create-new
-staging, flush, and atomic replacement. A corrupt, unreadable, interrupted, or stale sidecar is
-Unavailable rather than absent and is not reset. This metadata is not provenance: selecting a
-channel neither authorizes an imported copy nor changes registry schema 2 application
-preferences, selected Java, pin, compatibility default, receipt, current provenance, or installed
-bytes. Apply/recovery leave it alone.
+The fixed track is schema-versioned launcher provenance beside ownership receipts, outside every
+application root. It is bound to installation UUID, canonical root, and registration time. Strict
+JSON parsing rejects unknown, duplicate, missing, and null fields. Initialization requires the
+exact current ownership receipt and happens once under a per-record lock with create-new staging,
+flush, and atomic publication. An idempotent retry may accept only the same binding and channel;
+a different channel fails with an instruction to install another managed copy. Existing valid
+sidecars retain their exact semantics and bytes on read. Corrupt, unreadable, interrupted, stale,
+missing, and unavailable state is never reset, inferred, or manually assigned.
+
+The only mutable field is `checkOnOpen`. Its separate setter requires the exact previously read
+preference, revalidates registry binding under the same lock, and atomically changes only that
+boolean. It fails closed for missing/corrupt/stale state. Imported and pre-launcher folders have
+neither ownership receipt nor fixed channel, remain launch-only, and cannot gain update
+eligibility through a channel setting alone. The separate explicit adoption transaction must
+first reconstruct and verify one exact official ancestor; it is not a channel mutation API.
+Registry application preferences, Java, pin, compatibility default, receipt, current provenance,
+and installed bytes are unchanged by the check toggle. Apply/recovery preserve the fixed channel.
 
 ## Fixed official source
 
@@ -36,6 +48,19 @@ malformed/oversized YAML, unavailable exact tags, invalid/missing digests, unsaf
 errors are explicit Unavailable results. Metadata and packages are both obtained from GitHub over
 HTTPS; the same-source digest detects corruption but is **not independent signing**.
 
+Successful imported-copy adoption chooses Milestone (default) or Development exactly once and
+publishes that fixed preference only after the local copy has matched one exact official
+ancestor. The ancestor release is not classified into a historical channel from its title,
+version, or prerelease flag; the chosen channel is only future local policy. Failed or cancelled
+adoption publishes no channel. Nightly adoption remains disabled until the durable Nightly
+identity/history contract exists, and there is no adoption-based channel switching.
+
+The source hierarchy is one-directional: the canonical release index is authoritative for release
+identity and historical/current channel membership; a build-produced embedded manifest is an
+identity projection used to find or check a candidate; and the launcher's receipt/adoption record
+and fixed-channel sidecar are local ownership and policy. A marker, filename, displayed build, or
+local sidecar alone never proves an official ancestor.
+
 ## Comparison and action
 
 The installed side is the latest verified `CurrentUpdateState.tag`, not the original receipt or
@@ -46,14 +71,25 @@ Equal numeric values with different tag identities, suffixes, and unsupported fo
 Non-comparable rather than silently current or downgraded. Unconfigured and check failures are
 never “up to date.”
 
-Changing channel only changes what is watched. Recommended Update captures installation binding,
-preference, fixed source, repository, target tag, asset name, size, digest, and notes URL. Preview
+Recommended Update captures installation binding, fixed channel provenance, fixed source,
+repository, target tag, asset name, size, digest, and notes URL. Preview
 and Apply revalidate the captured source and metadata; a change requires a new attempt and consent.
 The route downloads its exact full package once, retains it only for that active attempt, shows the
 read-only report, then uses a separate explicit Apply confirmation. Under the captured root gate,
 Apply refreshes the channel/preference/target metadata and re-verifies/re-extracts the retained
 archive; it never silently downloads a second package or retargets. The advanced exact-release path
-remains available without changing the preference.
+remains available without changing the fixed channel.
+
+For a new installation, **Fetch channel release** resolves only the current authoritative target
+for the selected product/channel: one fixed YAML read plus one exact repository/tag lookup, with no
+history enumeration or package transfer. **Browse all releases…** is a separate explicit GitHub
+history mode. Those historical rows are unclassified because title and `prerelease` are mutable
+and do not record later promotion (including the known 0.51.0 promotion case). The selected Channel in history mode becomes only the created installation's fixed update
+channel; it is not evidence that the selected historical release belonged to that channel. Both
+paths re-enter the normal planner
+for exact metadata, Java, destination, registry, Settings, asset, and digest validation before
+consent and revalidate again before package transfer. See `../ci.md` for the immutable channel
+history target state.
 
 Channel metadata checks remain outside the package-operation gate and retain their existing
 startup/manual behavior. A package download started from a recommendation uses the shared typed
@@ -63,7 +99,8 @@ or retarget the recommendation.
 
 Check failures are eligible for asynchronous sanitized local error logging in
 `<registry-name>.launcher-logs/`; showing a failure never waits for disk I/O. No check or log is
-uploaded, opened in a browser, attached to an issue/project, or used to change channel metadata.
+uploaded, opened in a browser, attached to an issue/project, or used to change fixed-channel
+metadata.
 An unsafe/corrupt registry prevents log creation and reports that logging failure without changing
 the original **Unable to check** result.
 
@@ -72,21 +109,23 @@ repository. Its five split-menu routes cover MegaMek/MegaMekLab Milestone and
 MekHQ/MegaMek/MegaMekLab Development; each persists exactly its displayed channel while sharing
 the same verified normal installer. The menu has no redundant MekHQ Milestone or exact-picker row.
 Opening the styled menu while versions are loading or available starts no request and changes no
-channel, Main selection, or preference. Closing and reopening after unavailable rows have been
-viewed is the explicit snapshot retry and still changes no installation state. The deferred exact
-picker remains on Installations after a copy exists or in relevant problem navigation. Normal and
-advanced new GUI installs use one launcher Settings check-on-open default: it is true while
+channel, Main selection, or setting. Closing and reopening after unavailable rows have been
+viewed is the explicit snapshot retry and still changes no installation state. The deferred
+current-or-history picker remains on Installations after a copy exists or in relevant problem
+navigation. Normal and exact new GUI installs use one launcher Settings check-on-open default: it is true while
 initially absent, and a user's explicit false is preserved for later new copies. The normal quote
 binds its exact repository/product set/channel/source version, Settings revision,
 registry/default snapshot, and On or Off state without displaying a passive update row or
 technical pane. A changed, corrupt, or unavailable settings configuration blocks transfer and
 publication until a fresh quote is accepted. This is not a migration: every existing explicit
-false remains false, and absent/corrupt/unknown legacy channels remain Unknown or Unavailable with
-no inferred choice. The CLI remains false when its legacy option is omitted.
+false remains false, and valid existing channels are preserved without a read-time rewrite.
+Absent/corrupt/unknown legacy channels remain Unknown or Unavailable and launch-only with no
+inference or assignment path. The CLI fresh installer requires a channel and initializes its
+check-on-open value to false.
 
 Eligible opt-in checks run serially and independently off the event-dispatch thread, do not disable
 healthy launch or page navigation, are cancelled on disposal/mutation, and discard results after
-Main, record, preference, or package changes. Off, unknown, corrupt, and launch-only copies are not
+Main, record, fixed-track setting, or package changes. Off, unknown, corrupt, and launch-only copies are not
 reported as checked. Manual Installations checks may inspect the selected copy regardless of its
 on-open switch. There is no automatic Apply, automatic downgrade, launcher self-update, Nightly
 support, component download, game launch, or website/game CI change in this contract.

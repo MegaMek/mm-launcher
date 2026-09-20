@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import org.megamek.launcher.registry.InstallationRecord;
 import org.megamek.launcher.registry.RegistryData;
 import org.megamek.launcher.registry.RegistryStore;
+import org.megamek.launcher.update.OwnershipReceipt;
 import org.megamek.launcher.update.ReceiptStore;
 import org.megamek.launcher.update.StrictPathSafety;
 
@@ -25,8 +26,9 @@ import java.nio.file.StandardOpenOption;
 import java.util.UUID;
 
 /**
- * Atomic sidecar storage for a user's per-installation channel choice. Absence is UNKNOWN;
- * unreadable, stale, or malformed data is UNAVAILABLE and is never silently reset.
+ * Atomic sidecar storage for an installation's immutable update channel and mutable
+ * check-on-open flag. Absence is UNKNOWN; unreadable, stale, or malformed data is UNAVAILABLE
+ * and is never silently reset.
  */
 public final class ChannelPreferenceStore {
     public static final int SCHEMA = 1;
@@ -59,13 +61,27 @@ public final class ChannelPreferenceStore {
         }
     }
 
-    public ChannelPreference set(Path registry, InstallationRecord expected,
-                                 FollowChannel channel, boolean checkOnOpen) throws IOException {
-        if (channel == null) throw new IOException("channel is required");
+    /**
+     * Initializes the fixed channel for a freshly published managed installation.
+     *
+     * <p>The caller must provide the exact ownership receipt returned by verified package
+     * publication. This method re-reads both registry and receipt state before writing, so an
+     * imported or otherwise receipt-less copy cannot acquire managed-update provenance through
+     * this API. A retry for the same binding and channel is idempotent; retargeting is refused.
+     */
+    public ChannelPreference initializeManaged(Path registry, InstallationRecord expected,
+                                               OwnershipReceipt publishedReceipt,
+                                               FollowChannel channel, boolean checkOnOpen)
+            throws IOException {
+        if (expected == null || publishedReceipt == null || channel == null) {
+            throw new IOException("managed installation, ownership receipt, and channel "
+                    + "are required");
+        }
         Path registryPath = registry.toAbsolutePath().normalize();
         RegistryData initial = registries.read(registryPath);
         InstallationRecord initialRecord = registries.resolve(initial, expected.id());
         requireBinding(initialRecord, expected);
+        requirePublishedReceipt(registryPath, initial, initialRecord, publishedReceipt);
         Path directory = receipts.metadataDirectory(registryPath);
         ReceiptStore.validateMetadataPlacement(directory, initial);
         ensureDirectory(directory);
@@ -79,6 +95,7 @@ public final class ChannelPreferenceStore {
             InstallationRecord currentRecord = registries.resolve(current, expected.id());
             requireBinding(currentRecord, expected);
             ReceiptStore.validateMetadataPlacement(directory, current);
+            requirePublishedReceipt(registryPath, current, currentRecord, publishedReceipt);
 
             if (Files.exists(staging, LinkOption.NOFOLLOW_LINKS)) {
                 throw new IOException("interrupted channel setting publication requires review");
@@ -88,36 +105,96 @@ public final class ChannelPreferenceStore {
                 if (existing.status() != Status.CONFIGURED) {
                     throw new IOException(existing.reason());
                 }
+                if (existing.preference().channel() != channel) {
+                    throw new IOException("Channel is fixed; install another managed copy");
+                }
+                return existing.preference();
             }
 
             ChannelPreference preference = new ChannelPreference(SCHEMA, expected.id(),
                     expected.canonicalRoot(), expected.registeredAt(), channel, checkOnOpen);
-            byte[] bytes = mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(preference);
-            if (bytes.length <= 0 || bytes.length > MAX_BYTES) {
-                throw new IOException("channel setting exceeds size limit");
-            }
-            try (FileChannel output = FileChannel.open(staging, StandardOpenOption.CREATE_NEW,
-                    StandardOpenOption.WRITE)) {
-                ByteBuffer buffer = ByteBuffer.wrap(bytes);
-                while (buffer.hasRemaining()) output.write(buffer);
-                output.force(true);
-            }
-            try {
-                Files.move(staging, file, StandardCopyOption.ATOMIC_MOVE,
-                        StandardCopyOption.REPLACE_EXISTING);
-            } catch (AtomicMoveNotSupportedException error) {
-                Files.deleteIfExists(staging);
-                throw new IOException("atomic channel setting publication is unsupported", error);
-            } catch (IOException error) {
-                Files.deleteIfExists(staging);
-                throw error;
-            }
+            publish(preference, staging, file, false);
             return preference;
+        }
+    }
+
+    /**
+     * Changes only the check-on-open flag of an existing, valid fixed-channel sidecar.
+     * Missing, corrupt, stale, or concurrently changed state is never recreated or repaired.
+     */
+    public ChannelPreference setCheckOnOpen(Path registry, InstallationRecord expected,
+                                            ChannelPreference expectedPreference,
+                                            boolean checkOnOpen) throws IOException {
+        if (expected == null || expectedPreference == null) {
+            throw new IOException("existing fixed channel setting is required");
+        }
+        Path registryPath = registry.toAbsolutePath().normalize();
+        RegistryData initial = registries.read(registryPath);
+        InstallationRecord initialRecord = registries.resolve(initial, expected.id());
+        requireBinding(initialRecord, expected);
+        validate(expectedPreference, initialRecord);
+        ReadResult initialPreference = readStrict(registryPath, initial, initialRecord);
+        requireExpectedPreference(initialPreference, expectedPreference);
+
+        Path directory = receipts.metadataDirectory(registryPath);
+        Path file = preferencePath(directory, expected.id());
+        Path staging = stagingPath(file);
+        Path lockPath = lockPath(directory, expected.id());
+        rejectUnexpectedExisting(lockPath, "channel setting lock");
+        try (FileChannel channelFile = FileChannel.open(lockPath, StandardOpenOption.CREATE,
+                StandardOpenOption.WRITE); FileLock ignored = lock(channelFile, lockPath)) {
+            RegistryData current = registries.read(registryPath);
+            InstallationRecord currentRecord = registries.resolve(current, expected.id());
+            requireBinding(currentRecord, expected);
+            ReceiptStore.validateMetadataPlacement(directory, current);
+            if (Files.exists(staging, LinkOption.NOFOLLOW_LINKS)) {
+                throw new IOException("interrupted channel setting publication requires review");
+            }
+            ReadResult selected = readStrict(registryPath, current, currentRecord);
+            requireExpectedPreference(selected, expectedPreference);
+            ChannelPreference existing = selected.preference();
+            if (existing.checkOnOpen() == checkOnOpen) return existing;
+
+            ChannelPreference changed = new ChannelPreference(existing.schemaVersion(),
+                    existing.installationId(), existing.canonicalRoot(),
+                    existing.registeredAt(), existing.channel(), checkOnOpen);
+            publish(changed, staging, file, true);
+            return changed;
         }
     }
 
     public Path path(Path registry, String id) throws IOException {
         return preferencePath(receipts.metadataDirectory(registry), id);
+    }
+
+    /**
+     * Best-effort inverse used only by a failed multi-file metadata publication. It removes the
+     * final channel setting only when its full value still equals the attempt-owned value.
+     */
+    public void rollbackInitialization(Path registry, InstallationRecord expected,
+                                       ChannelPreference expectedPreference)
+            throws IOException {
+        if (expected == null || expectedPreference == null) return;
+        Path registryPath = registry.toAbsolutePath().normalize();
+        Path directory = receipts.metadataDirectory(registryPath);
+        Path file = preferencePath(directory, expected.id());
+        Path staging = stagingPath(file);
+        if (Files.exists(staging, LinkOption.NOFOLLOW_LINKS)) {
+            StrictPathSafety.requireFile(staging, "channel setting staging");
+            Files.delete(staging);
+        }
+        if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) return;
+        StrictPathSafety.requireFile(file, "channel setting");
+        ChannelPreference actual;
+        try {
+            actual = mapper.readValue(Files.readAllBytes(file), ChannelPreference.class);
+        } catch (IOException | RuntimeException error) {
+            throw new IOException("refusing to remove unreadable channel setting", error);
+        }
+        if (!actual.equals(expectedPreference)) {
+            throw new IOException("external channel setting edit blocks rollback");
+        }
+        Files.delete(file);
     }
 
     private ReadResult readStrict(Path registry, RegistryData data, InstallationRecord record)
@@ -128,7 +205,7 @@ public final class ChannelPreferenceStore {
             StrictPathSafety.requireDirectory(directory, "channel metadata directory");
         } catch (NoSuchFileException error) {
             return new ReadResult(Status.UNKNOWN, null,
-                    "Choose Milestone or Development before checking for updates.");
+                    "No fixed channel provenance is recorded; this copy is launch-only.");
         }
         Path file = preferencePath(directory, record.id());
         Path staging = stagingPath(file);
@@ -139,7 +216,7 @@ public final class ChannelPreferenceStore {
             StrictPathSafety.requireFile(file, "channel setting");
         } catch (NoSuchFileException error) {
             return new ReadResult(Status.UNKNOWN, null,
-                    "Choose Milestone or Development before checking for updates.");
+                    "No fixed channel provenance is recorded; this copy is launch-only.");
         }
         long size = Files.size(file);
         if (size <= 0 || size > MAX_BYTES) throw new IOException("channel setting size is invalid");
@@ -174,6 +251,55 @@ public final class ChannelPreferenceStore {
                 || !actual.canonicalRoot().equals(expected.canonicalRoot())
                 || !actual.registeredAt().equals(expected.registeredAt())) {
             throw new IOException("installation identity changed before channel setting was saved");
+        }
+    }
+
+    private void requirePublishedReceipt(Path registry, RegistryData data,
+                                         InstallationRecord record,
+                                         OwnershipReceipt publishedReceipt)
+            throws IOException {
+        OwnershipReceipt current = receipts.read(registry, data, record);
+        if (!current.equals(publishedReceipt)) {
+            throw new IOException("ownership receipt changed before fixed channel publication");
+        }
+    }
+
+    private static void requireExpectedPreference(ReadResult selected,
+                                                  ChannelPreference expected)
+            throws IOException {
+        if (selected.status() != Status.CONFIGURED || selected.preference() == null) {
+            throw new IOException(selected.reason());
+        }
+        if (!selected.preference().equals(expected)) {
+            throw new IOException("fixed channel setting changed; reopen Update checks");
+        }
+    }
+
+    private void publish(ChannelPreference preference, Path staging, Path file,
+                         boolean replace) throws IOException {
+        byte[] bytes = mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(preference);
+        if (bytes.length <= 0 || bytes.length > MAX_BYTES) {
+            throw new IOException("channel setting exceeds size limit");
+        }
+        try {
+            try (FileChannel output = FileChannel.open(staging, StandardOpenOption.CREATE_NEW,
+                    StandardOpenOption.WRITE)) {
+                ByteBuffer buffer = ByteBuffer.wrap(bytes);
+                while (buffer.hasRemaining()) output.write(buffer);
+                output.force(true);
+            }
+            if (replace) {
+                Files.move(staging, file, StandardCopyOption.ATOMIC_MOVE,
+                        StandardCopyOption.REPLACE_EXISTING);
+            } else {
+                Files.move(staging, file, StandardCopyOption.ATOMIC_MOVE);
+            }
+        } catch (AtomicMoveNotSupportedException error) {
+            Files.deleteIfExists(staging);
+            throw new IOException("atomic channel setting publication is unsupported", error);
+        } catch (IOException error) {
+            Files.deleteIfExists(staging);
+            throw error;
         }
     }
 

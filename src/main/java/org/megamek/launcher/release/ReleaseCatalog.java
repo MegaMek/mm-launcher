@@ -52,15 +52,25 @@ public final class ReleaseCatalog {
 
     public Release exact(OfficialRepository repository, String tag)
             throws IOException, InterruptedException {
-        requireTag(tag);
-        String encoded = URLEncoder.encode(tag, StandardCharsets.UTF_8).replace("+", "%20");
-        JsonNode root = requestJson(API.resolve("/repos/" + repository.slug()
-                + "/releases/tags/" + encoded));
+        URI source = exactMetadataUri(repository, tag);
+        JsonNode root = requestJson(source);
         Release release = parseRelease(repository, root, true);
         if (!tag.equals(release.tag())) {
             throw new IOException("GitHub returned a different tag than requested");
         }
         return release;
+    }
+
+    /**
+     * Returns the one fixed official API location used to revalidate an exact historical choice.
+     * This is metadata identity only; package URLs remain separately constrained and verified.
+     */
+    public static URI exactMetadataUri(OfficialRepository repository, String tag)
+            throws IOException {
+        if (repository == null) throw new IOException("official repository is required");
+        requireTag(tag);
+        String encoded = URLEncoder.encode(tag, StandardCharsets.UTF_8).replace("+", "%20");
+        return API.resolve("/repos/" + repository.slug() + "/releases/tags/" + encoded);
     }
 
     public Asset selectInstallAsset(OfficialRepository repository, Release release)

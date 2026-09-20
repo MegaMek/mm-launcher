@@ -20,6 +20,7 @@ import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
 import org.megamek.launcher.update.UpdatePreviewService;
 
+import javax.imageio.ImageIO;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
@@ -34,11 +35,14 @@ import javax.swing.JTextArea;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.GraphicsEnvironment;
+import java.awt.Graphics2D;
 import java.awt.Rectangle;
+import java.awt.RenderingHints;
 import java.awt.event.ActionEvent;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.WindowEvent;
+import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.net.URI;
@@ -61,6 +65,107 @@ class SimpleHomeSwingTest {
     @TempDir Path temp;
 
     @Test
+    void firstLaunchMetadataLoadingIsNonBlockingDisabledAndSessionDeduplicated()
+            throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        FakeServices services = new FakeServices(temp.resolve("loading-metadata.json"));
+        services.snapshotStarted = new CountDownLatch(1);
+        services.releaseSnapshot = new CountDownLatch(1);
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            assertTrue(services.snapshotStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            JButton primary = waitButton(frame, "downloadAndInstallButton");
+            JButton options = waitButton(frame, "downloadOptionsButton");
+            JButton existing = waitButton(frame, "useExistingCopyButton");
+            assertFalse(primary.isEnabled());
+            assertFalse(primary.isFocusable());
+            assertFalse(options.isEnabled());
+            assertFalse(options.isFocusable());
+            assertTrue(existing.isEnabled());
+            SwingUtilities.invokeAndWait(() -> {
+                primary.doClick();
+                options.doClick();
+                frame.showWindow();
+            });
+            invokeKeyBinding(primary, KeyStroke.getKeyStroke(
+                    KeyEvent.VK_DOWN, InputEvent.ALT_DOWN_MASK));
+            waitButton(frame, "downloadAndInstallButton");
+            assertEquals(1, services.catalogRequests.get());
+            assertEquals(0, services.plans.get());
+            FirstLaunchSplitButton loadingSplit =
+                    find(frame, "firstLaunchSplitButton");
+            assertFalse(loadingSplit.popupMenu().isVisible());
+
+            services.releaseSnapshot.countDown();
+            JButton ready = waitFor(() -> {
+                JButton button = find(frame, "downloadAndInstallButton");
+                return button != null && button.isEnabled()
+                        && button.getText().endsWith("(1.2.3)") ? button : null;
+            });
+            assertTrue(ready.isFocusable());
+            assertEquals(1, services.catalogRequests.get());
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            waitFor(() -> {
+                JButton button = find(frame, "downloadAndInstallButton");
+                return button != null && button.isEnabled()
+                        && button.getText().endsWith("(1.2.3)") ? button : null;
+            });
+            assertEquals(1, services.catalogRequests.get(),
+                    "READY is rebound without another snapshot");
+        } finally {
+            services.releaseSnapshot.countDown();
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void failedMetadataRequiresOneExplicitDeduplicatedRetry() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        FakeServices services = new FakeServices(temp.resolve("retry-metadata.json"));
+        services.snapshotFailures.set(1);
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            JButton primary = waitFor(() -> {
+                JButton button = find(frame, "downloadAndInstallButton");
+                return button != null && button.getText().endsWith("(Unavailable)")
+                        ? button : null;
+            });
+            JButton options = waitButton(frame, "downloadOptionsButton");
+            assertFalse(primary.isEnabled());
+            assertTrue(options.isEnabled());
+            assertEquals(1, services.catalogRequests.get());
+
+            FirstLaunchSplitButton split = waitFor(
+                    () -> find(frame, "firstLaunchSplitButton"));
+            SwingUtilities.invokeAndWait(options::doClick);
+            waitUntil(() -> split.popupMenu().isVisible());
+            JMenuItem retry = java.util.Arrays.stream(split.popupMenu().getComponents())
+                    .filter(JMenuItem.class::isInstance)
+                    .map(JMenuItem.class::cast)
+                    .filter(item -> "retryQuickInstallMetadataMenuItem".equals(item.getName()))
+                    .findFirst().orElseThrow();
+            SwingUtilities.invokeAndWait(() -> {
+                retry.doClick();
+                retry.doClick();
+            });
+
+            waitUntil(() -> {
+                JButton button = find(frame, "downloadAndInstallButton");
+                return button != null && button.isEnabled()
+                        && button.getText().endsWith("(1.2.3)");
+            });
+            assertEquals(2, services.catalogRequests.get());
+            assertEquals(0, services.plans.get());
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
     void firstHomeSplitRoutesExplicitChoicesWithoutOpeningNetworkOrChangingDefault()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
@@ -79,8 +184,11 @@ class SimpleHomeSwingTest {
             assertNull(find(frame, "downloadProductCombo"));
             assertNull(find(frame, "manageDownloadMegaMekButton"),
                     "the exact picker is deferred to Installations");
-            waitUntil(() -> "1.2.3".equals(
-                    ((JLabel) find(frame, "releaseChannelLabel")).getText()));
+            waitUntil(() -> {
+                JButton button = find(frame, "downloadAndInstallButton");
+                return button != null
+                        && button.getText().endsWith("(1.2.3)");
+            });
             int catalogRequests = services.catalogRequests.get();
 
             invokeKeyBinding(primary, KeyStroke.getKeyStroke(
@@ -115,8 +223,10 @@ class SimpleHomeSwingTest {
                 invokeMenuSelection((JMenuItem) popup.getComponent(index));
                 String version = key.channel() == FollowChannel.MILESTONE
                         ? "1.2.3" : "1.2.4";
-                JDialog alternate = waitDialog(frame, "Install latest "
-                        + display(key.repository()) + " " + key.channel());
+                JDialog alternate = waitDialog(frame, VersionDisplay.installLatest(
+                        display(key.repository()), key.channel().toString(), version));
+                assertEquals("", ((JLabel) find(frame, "homeStatusLabel")).getText(),
+                        "a visible quote must not retain a checking status");
                 assertEquals(key, services.plannedChoices.get(index));
                 assertEquals(index + 1, services.plans.get());
                 assertEquals(0, services.installs.get());
@@ -147,10 +257,13 @@ class SimpleHomeSwingTest {
                 }
                 waitUntil(() -> !alternate.isDisplayable());
             }
-            assertEquals(catalogRequests + 5, services.catalogRequests.get(),
-                    "cancelling a quote refreshes Home; menu opening itself does not");
-            assertEquals("1.2.3", onEdt(() ->
-                    ((JLabel) find(frame, "releaseChannelLabel")).getText()));
+            assertEquals(catalogRequests, services.catalogRequests.get(),
+                    "quote cancellation and reopening reuse the one session snapshot");
+            assertEquals("", ((JLabel) find(frame, "homeStatusLabel")).getText());
+            waitUntil(() -> {
+                JButton button = find(frame, "downloadAndInstallButton");
+                return button != null && button.getText().endsWith("(1.2.3)");
+            });
             assertEquals(0, services.releaseFetches.get());
             assertFalse(Files.exists(temp.resolve("registry.json")));
 
@@ -161,7 +274,8 @@ class SimpleHomeSwingTest {
             assertFalse(onEdt(primary::isEnabled));
             assertFalse(onEdt(options::isEnabled));
             services.releasePlan.countDown();
-            JDialog confirmation = waitDialog(frame, "Install latest MekHQ Milestone");
+            JDialog confirmation =
+                    waitDialog(frame, "Install latest MekHQ Milestone (1.2.3)");
             assertEquals(FollowChannel.MILESTONE, services.lastPlannedChannel);
             assertEquals(OfficialRepository.MEKHQ, services.lastPlannedRepository);
             assertEquals(6, services.plans.get());
@@ -186,7 +300,10 @@ class SimpleHomeSwingTest {
             });
             assertTrue(services.installStarted.await(
                     5, java.util.concurrent.TimeUnit.SECONDS));
-            JDialog progress = waitDialog(frame, "Installing MekHQ 1.2.3");
+            JDialog progress =
+                    waitDialog(frame, "Installing MekHQ Milestone (1.2.3)");
+            assertEquals("", ((JLabel) find(frame, "homeStatusLabel")).getText(),
+                    "the progress dialog is the only active-operation status surface");
             assertEquals("Cancel",
                     ((JButton) find(progress, "operationCancelButton")).getText());
             assertTrue(find(progress, "operationCancelButton").isVisible());
@@ -195,12 +312,12 @@ class SimpleHomeSwingTest {
             assertNull(find(progress, "operationViewLogsButton"));
             assertNull(find(progress, "copyOperationDetailsButton"));
             assertNull(find(progress, "normalInstallProgressLog"));
+            saveReviewImage("install-progress.png", progress);
             services.releaseInstall.countDown();
-            JLabel notice = waitFor(() -> find(frame, "installationReadyNotice"));
-            assertEquals("MekHQ 1.2.3 is ready", notice.getText());
+            assertNotNull(waitButton(frame, "launch-megamek-button"));
+            assertNull(find(frame, "installationReadyNotice"));
             assertNoShowingDialog(frame, "Install complete");
             assertNoDisplayableProgress(frame);
-            assertNotNull(waitButton(frame, "launch-megamek-button"));
             assertNotNull(waitButton(frame, "launch-mekhq-button"));
             assertNotNull(waitButton(frame, "launch-lab-button"));
             HomeLaunchSplitButton megamekSplit =
@@ -213,10 +330,14 @@ class SimpleHomeSwingTest {
             assertTrue(megamekSplit.hasOptions());
             assertTrue(mekhqSplit.hasOptions());
             assertTrue(labSplit.hasOptions());
-            for (HomeLaunchSplitButton split
-                    : List.of(megamekSplit, mekhqSplit, labSplit)) {
-                assertEquals(List.of("Other copy · 1.2.3"),
-                        java.util.Arrays.stream(split.popupMenu().getComponents())
+            List<HomeLaunchSplitButton> launchControls =
+                    List.of(megamekSplit, mekhqSplit, labSplit);
+            List<String> productNames = List.of("MegaMek", "MekHQ", "MegaMekLab");
+            for (int index = 0; index < launchControls.size(); index++) {
+                assertEquals(List.of("Other copy · " + productNames.get(index)
+                                + " (1.2.3)"),
+                        java.util.Arrays.stream(launchControls.get(index)
+                                        .popupMenu().getComponents())
                                 .map(JMenuItem.class::cast).map(JMenuItem::getText).toList(),
                         "every actual Main product gets its matching alternate menu");
             }
@@ -234,22 +355,37 @@ class SimpleHomeSwingTest {
             assertEquals(mekhqSplit.getWidth(), labSplit.getWidth());
             assertFalse(megamekSplit.primaryButton().isContentAreaFilled(),
                     "managed launch controls use vector painting rather than OS white buttons");
+            assertNull(find(frame, "installationUpdateSummary"));
+            SwingUtilities.invokeAndWait(() -> {
+                frame.setSize(1180, 760);
+                frame.validate();
+            });
+            saveReviewImage("managed-home.png", frame);
 
             int selections = services.selections.get();
             SwingUtilities.invokeAndWait(megamekSplit.optionsButton()::doClick);
             waitUntil(() -> megamekSplit.popupMenu().isVisible());
             invokeMenuSelection((JMenuItem) megamekSplit.popupMenu().getComponent(0));
-            JDialog alternateLaunch = waitDialog(frame, "Confirm launch");
-            assertEquals(services.second, services.previewedRecord);
-            assertEquals("megamek", services.previewedProduct);
+            waitUntil(() -> services.launched);
+            assertEquals(services.second, services.launchedRecord);
+            assertEquals("megamek", services.launchedProduct);
+            assertNull(services.previewedRecord,
+                    "direct alternate launch does not build a visible command preview");
             assertEquals(selections, services.selections.get(),
                     "alternate launch performs no preference mutation");
             assertEquals(services.first.id(), services.main.id());
-            SwingUtilities.invokeAndWait(alternateLaunch::dispose);
+            assertTrue((onEdt(frame::getExtendedState) & javax.swing.JFrame.ICONIFIED) != 0);
+            assertNoShowingDialog(frame, "Confirm launch");
+            assertNoShowingDialog(frame, "Game finished");
+            waitUntil(() -> services.launchAttempts.get() == 1
+                    && find(frame, "launch-megamek-button") != null
+                    && ((JButton) find(frame, "launch-megamek-button")).isEnabled());
+            SwingUtilities.invokeAndWait(() ->
+                    frame.setExtendedState(javax.swing.JFrame.NORMAL));
 
             assertEquals(1, services.installs.get());
             assertEquals(FollowChannel.MILESTONE, services.installedChannel);
-            assertFalse(services.launched);
+            assertTrue(services.launched);
 
             JButton installations = waitButton(frame, "manageInstallationsButton");
             SwingUtilities.invokeAndWait(installations::doClick);
@@ -259,9 +395,11 @@ class SimpleHomeSwingTest {
             SwingUtilities.invokeAndWait(exactPicker::doClick);
             JDialog picker = waitDialog(frame, "Download an official release");
             assertEquals(0, services.releaseFetches.get(),
-                    "the deferred exact picker waits for Fetch releases");
+                    "the deferred picker waits for an explicit fetch or browse action");
+            saveReviewImage("release-picker.png", picker);
             SwingUtilities.invokeAndWait(picker::dispose);
             assertNotNull(find(frame, "installationCardsScrollPane"));
+            saveReviewImage("installations.png", frame);
             JPanel cards = find(frame, "installationCards");
             assertEquals(FirstLaunchPanel.BACKGROUND, cards.getBackground());
             JPanel firstCard = find(frame, "installationCard-" + services.first.id());
@@ -293,11 +431,11 @@ class SimpleHomeSwingTest {
             JButton settings = waitButton(frame, "settingsButton");
             SwingUtilities.invokeAndWait(settings::doClick);
             assertNotNull(waitButton(frame, "viewOperationLogsButton"));
+            saveReviewImage("settings.png", frame);
             JButton home = waitButton(frame, "homeButton");
             waitUntil(home::isEnabled);
             SwingUtilities.invokeAndWait(home::doClick);
-            assertNull(find(frame, "installationReadyNotice"),
-                    "navigation clears the low-prominence success notice");
+            assertNull(find(frame, "installationReadyNotice"));
         } finally {
             dispose(frame);
         }
@@ -315,8 +453,10 @@ class SimpleHomeSwingTest {
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             JButton primary = waitButton(frame, "downloadAndInstallButton");
+            waitUntil(primary::isEnabled);
             SwingUtilities.invokeAndWait(primary::doClick);
-            JDialog firstQuote = waitDialog(frame, "Install latest MekHQ Milestone");
+            JDialog firstQuote =
+                    waitDialog(frame, "Install latest MekHQ Milestone (1.2.3)");
             int catalogBeforeChange = services.catalogRequests.get();
             assertEquals(services.destination.toString(),
                     ((JTextArea) find(firstQuote, "normalInstallDestination")).getText());
@@ -327,7 +467,9 @@ class SimpleHomeSwingTest {
                 change.doClick();
             });
             waitUntil(() -> !firstQuote.isDisplayable());
-            JDialog changedQuote = waitDialog(frame, "Install latest MekHQ Milestone");
+            JDialog changedQuote =
+                    waitDialog(frame, "Install latest MekHQ Milestone (1.2.3)");
+            assertEquals("", ((JLabel) find(frame, "homeStatusLabel")).getText());
             assertEquals(2, services.plans.get(), "Change location prepares one fresh plan");
             assertEquals(List.of(services.destination, changed),
                     services.plannedDestinations);
@@ -344,7 +486,9 @@ class SimpleHomeSwingTest {
                 changedQuote.dispose();
             });
             waitUntil(() -> !changedQuote.isDisplayable());
-            waitUntil(() -> services.catalogRequests.get() == catalogBeforeChange + 1);
+            assertEquals(catalogBeforeChange, services.catalogRequests.get(),
+                    "cancelling the changed quote retains the session snapshot");
+            assertEquals("", ((JLabel) find(frame, "homeStatusLabel")).getText());
             assertEquals(0, services.installs.get());
         } finally {
             dispose(frame);
@@ -379,12 +523,14 @@ class SimpleHomeSwingTest {
             JButton options = waitButton(frame, "downloadOptionsButton");
             FirstLaunchSplitButton split = waitFor(
                     () -> find(frame, "firstLaunchSplitButton"));
+            waitUntil(options::isEnabled);
             SwingUtilities.invokeAndWait(options::doClick);
             waitUntil(() -> split.popupMenu().isVisible());
             waitUntil(() -> split.popupMenu().getComponent(2).isEnabled());
             invokeMenuSelection((JMenuItem) split.popupMenu().getComponent(2));
 
-            JDialog confirmation = waitDialog(frame, "Install latest MekHQ Development");
+            JDialog confirmation =
+                    waitDialog(frame, "Install latest MekHQ Development (1.2.4)");
             assertNormalInstallQuote(confirmation, OfficialRepository.MEKHQ,
                     FollowChannel.DEVELOPMENT, "1.2.4",
                     services.quickInstallSnapshot.option(new QuickInstallOption.Key(
@@ -395,12 +541,12 @@ class SimpleHomeSwingTest {
             SwingUtilities.invokeAndWait(
                     () -> ((JButton) find(confirmation,
                             "confirmNormalInstallButton")).doClick());
-            JLabel notice = waitFor(() -> find(frame, "installationReadyNotice"));
-            assertEquals("MekHQ 1.2.4 is ready", notice.getText());
+            assertNotNull(waitButton(frame, "launch-mekhq-button"));
+            assertNull(find(frame, "installationReadyNotice"));
             assertNoShowingDialog(frame, "Install complete");
             assertNoDisplayableProgress(frame);
 
-            assertEquals("Launch MekHQ 1.2.4",
+            assertEquals("Launch MekHQ Development (1.2.4)",
                     waitButton(frame, "launch-mekhq-button").getText());
             assertEquals(FollowChannel.DEVELOPMENT, services.lastPlannedChannel);
             assertEquals(FollowChannel.DEVELOPMENT, services.installedChannel);
@@ -421,14 +567,16 @@ class SimpleHomeSwingTest {
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             JButton primary = waitButton(frame, "downloadAndInstallButton");
+            waitUntil(primary::isEnabled);
             SwingUtilities.invokeAndWait(primary::doClick);
-            JDialog confirmation = waitDialog(frame, "Install latest MekHQ Milestone");
+            JDialog confirmation =
+                    waitDialog(frame, "Install latest MekHQ Milestone (1.2.3)");
             SwingUtilities.invokeAndWait(
                     () -> ((JButton) find(confirmation,
                             "confirmNormalInstallButton")).doClick());
 
-            JLabel notice = waitFor(() -> find(frame, "installationReadyNotice"));
-            assertEquals("MekHQ 1.2.3 is ready", notice.getText());
+            assertNotNull(waitButton(frame, "launch-megamek-button"));
+            assertNull(find(frame, "installationReadyNotice"));
             assertNull(find(frame, "mainInstallationName"),
                     "managed Home has no visible global Main block");
             assertNotNull(find(frame, "launch-megamek-button"),
@@ -451,9 +599,11 @@ class SimpleHomeSwingTest {
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
-            SwingUtilities.invokeAndWait(
-                    () -> ((JButton) find(frame, "downloadAndInstallButton")).doClick());
-            JDialog confirmation = waitDialog(frame, "Install latest MekHQ Milestone");
+            JButton download = waitButton(frame, "downloadAndInstallButton");
+            waitUntil(download::isEnabled);
+            SwingUtilities.invokeAndWait(download::doClick);
+            JDialog confirmation =
+                    waitDialog(frame, "Install latest MekHQ Milestone (1.2.3)");
             SwingUtilities.invokeAndWait(
                     () -> ((JButton) find(confirmation,
                             "confirmNormalInstallButton")).doClick());
@@ -467,7 +617,7 @@ class SimpleHomeSwingTest {
             assertTrue(find(failure, "operationViewDetailsButton").isVisible());
             assertNull(find(failure, "operationViewLogsButton"));
             assertNull(find(failure, "copyOperationDetailsButton"));
-            assertNoShowingDialog(frame, "Installing MekHQ 1.2.3 failed");
+            assertNoShowingDialog(frame, "Installing MekHQ Milestone (1.2.3) failed");
             assertNoShowingDialog(frame, "Install complete");
 
             SwingUtilities.invokeAndWait(repair::doClick);
@@ -521,16 +671,100 @@ class SimpleHomeSwingTest {
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
-            assertEquals("Launch MegaMek 1.2.3",
+            assertEquals("Launch MegaMek (1.2.3)",
                     waitButton(frame, "launch-megamek-button").getText());
-            assertEquals("Launch MekHQ 1.2.3",
+            assertEquals("Launch MekHQ (1.2.3)",
                     waitButton(frame, "launch-mekhq-button").getText());
-            assertEquals("Launch MegaMekLab 1.2.3",
+            assertEquals("Launch MegaMekLab (1.2.3)",
                     waitButton(frame, "launch-lab-button").getText());
             HomeLaunchSplitButton split = find(frame, "launch-megamek-split-button");
             assertTrue(split.hasOptions(),
                     "matching alternate copies remain one-off launch choices");
         } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void directLaunchMinimizesSafelyAndOnlyRestoresForFailureOrBusyGate()
+            throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual frame state and dialogs require a display");
+        FakeServices services = new FakeServices(temp.resolve("direct-launch.json"));
+        services.installed = true;
+        services.main = services.first;
+        services.installedRecord = services.first;
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            JButton primary = waitButton(frame, "launch-megamek-button");
+
+            services.launchStarted = new CountDownLatch(1);
+            services.releaseLaunch = new CountDownLatch(1);
+            SwingUtilities.invokeAndWait(primary::doClick);
+            assertTrue(services.launchStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            assertEquals(services.first, services.launchedRecord);
+            assertEquals("megamek", services.launchedProduct);
+            assertTrue((onEdt(frame::getExtendedState) & javax.swing.JFrame.ICONIFIED) != 0);
+            assertNoShowingDialog(frame, "Confirm launch");
+            services.releaseLaunch.countDown();
+            waitUntil(() -> services.launchAttempts.get() == 1
+                    && find(frame, "launch-megamek-button") != null
+                    && ((JButton) find(frame, "launch-megamek-button")).isEnabled());
+            assertTrue((onEdt(frame::getExtendedState) & javax.swing.JFrame.ICONIFIED) != 0,
+                    "zero exit stays minimized for manual restoration");
+            assertNoShowingDialog(frame, "Game finished");
+
+            SwingUtilities.invokeAndWait(() ->
+                    frame.setExtendedState(javax.swing.JFrame.NORMAL));
+            services.launchExit = 7;
+            services.launchStarted = new CountDownLatch(1);
+            services.releaseLaunch = new CountDownLatch(1);
+            SwingUtilities.invokeAndWait(
+                    () -> ((JButton) find(frame, "launch-megamek-button")).doClick());
+            assertTrue(services.launchStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            assertTrue((onEdt(frame::getExtendedState) & javax.swing.JFrame.ICONIFIED) != 0);
+            services.releaseLaunch.countDown();
+            JDialog nonzero = waitDialog(frame, "Game exited with code 7");
+            assertEquals(javax.swing.JFrame.NORMAL,
+                    onEdt(frame::getExtendedState) & ~javax.swing.JFrame.MAXIMIZED_BOTH);
+            SwingUtilities.invokeAndWait(nonzero::dispose);
+
+            services.launchExit = 0;
+            services.launchFailure = new IOException("fixture start failure");
+            services.launchStarted = new CountDownLatch(1);
+            services.releaseLaunch = new CountDownLatch(1);
+            SwingUtilities.invokeAndWait(
+                    () -> ((JButton) find(frame, "launch-megamek-button")).doClick());
+            assertTrue(services.launchStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            services.releaseLaunch.countDown();
+            JDialog failed = waitDialog(frame, "Launching MegaMek failed");
+            assertEquals(javax.swing.JFrame.NORMAL,
+                    onEdt(frame::getExtendedState) & ~javax.swing.JFrame.MAXIMIZED_BOTH);
+            SwingUtilities.invokeAndWait(failed::dispose);
+
+            services.launchFailure = null;
+            services.launchStarted = new CountDownLatch(1);
+            services.releaseLaunch = new CountDownLatch(1);
+            SwingUtilities.invokeAndWait(
+                    () -> ((JButton) find(frame, "launch-megamek-button")).doClick());
+            assertTrue(services.launchStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            SwingUtilities.invokeAndWait(() ->
+                    frame.setExtendedState(javax.swing.JFrame.NORMAL));
+            int attempts = services.launchAttempts.get();
+            SwingUtilities.invokeLater(
+                    () -> frame.launchDirectly(services.second, "megamek"));
+            JDialog busy = waitDialog(frame, "Please wait");
+            assertEquals(javax.swing.JFrame.NORMAL,
+                    onEdt(frame::getExtendedState) & ~javax.swing.JFrame.MAXIMIZED_BOTH);
+            assertEquals(attempts, services.launchAttempts.get(),
+                    "a busy gate neither starts nor minimizes another launch");
+            SwingUtilities.invokeAndWait(busy::dispose);
+            services.releaseLaunch.countDown();
+            assertEquals(0, services.selections.get(),
+                    "neither primary nor alternate direct launch mutates preferences");
+        } finally {
+            if (services.releaseLaunch != null) services.releaseLaunch.countDown();
             dispose(frame);
         }
     }
@@ -549,6 +783,7 @@ class SimpleHomeSwingTest {
         private final AtomicInteger releaseFetches = new AtomicInteger();
         private final AtomicInteger catalogRequests = new AtomicInteger();
         private final AtomicInteger selections = new AtomicInteger();
+        private final AtomicInteger launchAttempts = new AtomicInteger();
         private final List<QuickInstallOption.Key> plannedChoices =
                 new java.util.concurrent.CopyOnWriteArrayList<>();
         private final List<Path> plannedDestinations =
@@ -556,18 +791,28 @@ class SimpleHomeSwingTest {
         private final QuickInstallSnapshot quickInstallSnapshot =
                 QuickInstallTestData.snapshot("1.2.3", "1.2.4");
         private volatile boolean installed;
+        private volatile InstallationRecord installedRecord;
         private volatile boolean pending;
         private volatile boolean launched;
         private volatile InstallationRecord previewedRecord;
         private volatile String previewedProduct;
+        private volatile InstallationRecord launchedRecord;
+        private volatile String launchedProduct;
         private volatile InstallationRecord main;
         private volatile OfficialRepository lastPlannedRepository;
         private volatile FollowChannel lastPlannedChannel;
         private volatile FollowChannel installedChannel;
         private volatile CountDownLatch planStarted;
         private volatile CountDownLatch releasePlan;
+        private volatile CountDownLatch snapshotStarted;
+        private volatile CountDownLatch releaseSnapshot;
+        private final AtomicInteger snapshotFailures = new AtomicInteger();
         private volatile CountDownLatch installStarted;
         private volatile CountDownLatch releaseInstall;
+        private volatile CountDownLatch launchStarted;
+        private volatile CountDownLatch releaseLaunch;
+        private volatile int launchExit;
+        private volatile IOException launchFailure;
         private volatile boolean checkOnOpen;
         private volatile boolean installBecameMain = true;
         private volatile IOException installFailure;
@@ -602,8 +847,16 @@ class SimpleHomeSwingTest {
             main = first;
         }
 
-        @Override public QuickInstallSnapshot quickInstallSnapshot() {
+        @Override public QuickInstallSnapshot quickInstallSnapshot()
+                throws IOException, InterruptedException {
             catalogRequests.incrementAndGet();
+            CountDownLatch started = snapshotStarted;
+            CountDownLatch release = releaseSnapshot;
+            if (started != null) started.countDown();
+            if (release != null) release.await();
+            if (snapshotFailures.getAndUpdate(value -> Math.max(0, value - 1)) > 0) {
+                throw new IOException("fixture metadata unavailable");
+            }
             return quickInstallSnapshot;
         }
 
@@ -616,13 +869,30 @@ class SimpleHomeSwingTest {
         @Override
         public NormalInstallService.Plan prepareNormalInstall(OfficialRepository repository,
                                                               FollowChannel channel, Path target,
-                                                              Path java)
+                                                                  Path javaExecutable)
+                throws InterruptedException {
+            return plan(new QuickInstallOption.Key(repository, channel), target,
+                    NormalInstallService.TargetKind.CURRENT_CHANNEL);
+        }
+
+        @Override
+        public NormalInstallService.Plan prepareCapturedNormalInstall(QuickInstallOption option,
+                                                                      Path target,
+                                                                      Path javaExecutable)
+                throws InterruptedException {
+            return plan(option.key(), target,
+                    NormalInstallService.TargetKind.CAPTURED_CURRENT);
+        }
+
+        private NormalInstallService.Plan plan(QuickInstallOption.Key key, Path target,
+                                               NormalInstallService.TargetKind targetKind)
                 throws InterruptedException {
             plans.incrementAndGet();
-            lastPlannedRepository = repository;
-            lastPlannedChannel = channel;
+            OfficialRepository repository = key.repository();
+            FollowChannel channel = key.channel();
+            lastPlannedRepository = key.repository();
+            lastPlannedChannel = key.channel();
             plannedDestinations.add(target.toAbsolutePath().normalize());
-            QuickInstallOption.Key key = new QuickInstallOption.Key(repository, channel);
             plannedChoices.add(key);
             CountDownLatch started = planStarted;
             CountDownLatch releasePlanning = releasePlan;
@@ -640,10 +910,10 @@ class SimpleHomeSwingTest {
                     List.of(), Path.of(System.getProperty("java.home"), "bin", "java.exe"),
                     21, channel, repository, option.version(), expectedProducts,
                     option.release(), option.asset(),
-                    "https://raw.githubusercontent.com/MegaMek/megamek.github.io/main/"
-                            + "_data/current_releases.yml",
+                    option.target().source(),
                     new NormalInstallService.CheckConfiguration(checkOnOpen,
-                            "fixture:" + checkOnOpen));
+                            "fixture:" + checkOnOpen),
+                    targetKind);
         }
 
         @Override
@@ -661,7 +931,7 @@ class SimpleHomeSwingTest {
             installs.incrementAndGet();
             installed = true;
             installedChannel = plan.channel();
-            InstallationRecord installedRecord = new InstallationRecord(
+            installedRecord = new InstallationRecord(
                     first.id(), first.name(), first.canonicalRoot(), plan.version(),
                     first.products(), first.javaExecutable(), first.pin(),
                     first.updateEligible(), first.registeredAt());
@@ -677,16 +947,18 @@ class SimpleHomeSwingTest {
                         null, null, null, null, false, null);
             }
             InstallationRecord current = main;
+            List<InstallationRecord> currentRecords = installedRecord == null
+                    ? records : List.of(installedRecord, second);
             Inspection inspection = new Inspection(current.canonicalRoot(), current.products(),
                     current.observedBuild(), "fixture");
             ChannelPreference preference = new ChannelPreference(1, current.id(),
                     current.canonicalRoot(), current.registeredAt(),
                     installedChannel == null ? FollowChannel.MILESTONE : installedChannel, true);
             return new HomeState(new RegistryData(
-                    RegistryStore.SCHEMA, current.id(), records), current,
+                    RegistryStore.SCHEMA, current.id(), currentRecords), current,
                     inspection, null,
-                    new UpdatePreviewService.Eligibility(current, false,
-                            "fixture imported copy", null, null),
+                    new UpdatePreviewService.Eligibility(current, true,
+                            "fixture managed copy", null, null),
                     pending && current.id().equals(first.id()),
                     new ChannelPreferenceStore.ReadResult(
                             ChannelPreferenceStore.Status.CONFIGURED,
@@ -713,9 +985,18 @@ class SimpleHomeSwingTest {
         }
 
         @Override
-        public int launch(InstallationRecord record, String product) {
+        public int launch(InstallationRecord record, String product)
+                throws IOException, InterruptedException {
+            launchAttempts.incrementAndGet();
             launched = true;
-            return 0;
+            launchedRecord = record;
+            launchedProduct = product;
+            CountDownLatch started = launchStarted;
+            CountDownLatch release = releaseLaunch;
+            if (started != null) started.countDown();
+            if (release != null) release.await();
+            if (launchFailure != null) throw launchFailure;
+            return launchExit;
         }
 
         private static InstallationRecord record(String suffix, String name, Path root,
@@ -771,16 +1052,18 @@ class SimpleHomeSwingTest {
             JDialog dialog, OfficialRepository repository, FollowChannel channel,
             String version, ReleaseCatalog.Asset asset, Path destination) throws Exception {
         String product = display(repository);
-        assertEquals("Install latest " + product + " " + channel, dialog.getTitle());
-        assertEquals("Install latest " + product + " " + channel,
-                ((JLabel) find(dialog, "normalInstallHeading")).getText());
-        assertEquals("Version " + version,
-                ((JLabel) find(dialog, "normalInstallVersion")).getText());
+        String releaseLabel =
+            VersionDisplay.installLatest(product, channel.toString(), version);
+        assertEquals(releaseLabel, dialog.getTitle());
+        assertEquals(releaseLabel,
+            ((JLabel) find(dialog, "normalInstallHeading")).getText());
+        assertNull(find(dialog, "normalInstallVersion"));
         assertEquals(expectedIncludes(repository),
                 ((JLabel) find(dialog, "normalInstallIncludes")).getText());
         assertEquals("Download: "
                         + NormalInstallConfirmationDialog.formatBinaryBytes(asset.size()),
                 ((JLabel) find(dialog, "normalInstallDownloadSize")).getText());
+        assertNull(find(dialog, "normalInstallChannelMeaning"));
 
         JTextArea location = find(dialog, "normalInstallDestination");
         String exactDestination = destination.toAbsolutePath().normalize().toString();
@@ -940,6 +1223,27 @@ class SimpleHomeSwingTest {
             popup.getActionMap().get(key).actionPerformed(
                     new ActionEvent(popup, ActionEvent.ACTION_PERFORMED, key.toString()));
         });
+    }
+
+    private static void saveReviewImage(String name, Container component) throws Exception {
+        String directory = System.getenv("MM_LAUNCHER_REVIEW_IMAGES");
+        if (directory == null) return;
+        BufferedImage image = onEdt(() -> {
+            BufferedImage rendered = new BufferedImage(component.getWidth(),
+                    component.getHeight(), BufferedImage.TYPE_INT_ARGB);
+            Graphics2D graphics = rendered.createGraphics();
+            try {
+                graphics.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
+                        RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                component.printAll(graphics);
+            } finally {
+                graphics.dispose();
+            }
+            return rendered;
+        });
+        Path path = Path.of(directory);
+        Files.createDirectories(path);
+        ImageIO.write(image, "PNG", path.resolve(name).toFile());
     }
 
     private static void invokeDialogEscape(JDialog dialog) throws Exception {

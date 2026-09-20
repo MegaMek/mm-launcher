@@ -53,27 +53,26 @@ To install MegaMek or MegaMekLab independently, use `--application megamek` or
 `--application lab` consistently in both commands. A new registration becomes default only if the
 registry was empty.
 
-`--channel milestone|development` is optional for legacy CLI compatibility. If omitted, the new
-copy remains explicitly unknown until `channel-set`; the exact manually selected tag is never used
-to infer intent. Nightly is not supported.
+`--channel milestone|development` is required. It becomes this new installation's immutable
+update track after the exact ownership receipt is published. The manually selected tag does not
+classify the release; it only supplies the new copy's initial bytes. To follow another channel,
+run `install-release` again with another nonexistent destination. Nightly is not yet supported.
 
-## 2a. Choose a channel and perform a metadata-only check
+## 2a. Perform a metadata-only check
 
 For a receipt-backed copy:
 
 ```powershell
 $installationId = Read-Host "Installation UUID printed by install-release (without id=)"
-& $cli channel-set --registry $registry --id $installationId `
-    --channel milestone --check-on-open false
 & $cli check-updates --registry $registry --id $installationId
 ```
 
-`channel-set` changes only a strictly bound external sidecar. `check-updates` reports `currentTag`,
-`channel`, `target`, `status`, `reason`, notes, size, and digest where available. It reads the fixed
-official website YAML and exact release API metadata; it downloads zero package bytes. An
-unconfigured, malformed, offline, or otherwise unavailable check is never reported as current.
-If the installed verified package is newer than the channel target, no recommended downgrade is
-offered.
+`check-updates` reports `currentTag`, fixed `channel`, `target`, `status`, `reason`, notes, size,
+and digest where available. It reads canonical channel and exact release API metadata; it
+downloads zero package bytes. An unconfigured, malformed, offline, or otherwise unavailable check
+is never reported as current. If the installed verified package is newer than its own channel
+target, no downgrade is offered. The former `channel-set` compatibility command rejects with
+`Channel is fixed; install another managed copy` and performs no write.
 
 ## 3. Select external Java and preview
 
@@ -107,8 +106,9 @@ extracted, follow the [existing-copy registration walkthrough](existing-copy-con
 
 ## 5. Preview and explicitly update a receipt-backed copy
 
-Only a copy installed by this launcher's `install-release` flow has update provenance. Preview is
-read-only and prints the exact target size/digest:
+Only a copy installed by this launcher's `install-release` flow with its fixed-channel sidecar has
+managed update provenance. Imported or copied folders remain launch-only. Preview is read-only and
+prints the exact target size/digest:
 
 ```powershell
 & $cli preview-update --registry $registry --id $installationId --tag $targetTag
@@ -135,6 +135,12 @@ If Apply is interrupted or reports pending recovery, keep all suite applications
 The launcher coordinates its own current launches but cannot universally detect applications
 started by old launchers or external commands. It never kills them. See the
 [real-update contract](real-update-contract.md) before a first trial.
+
+The graphical launcher also has an explicit **Enable managed updates…** flow for a genuine
+launch-only import. It verifies one exact official package and publishes only external launcher
+metadata; it does not replace this CLI fresh-install procedure, modify the imported root, add a
+channel-switching command, or enable Nightly. Old releases without a valid published package
+SHA-256 remain launch-only.
 
 ## Technical reference
 

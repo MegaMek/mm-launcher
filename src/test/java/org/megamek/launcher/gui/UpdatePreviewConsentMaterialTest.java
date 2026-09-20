@@ -2,6 +2,8 @@ package org.megamek.launcher.gui;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.megamek.launcher.channel.ChannelPreferenceStore;
+import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.launch.ApplicationLauncher;
 import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.onboarding.InstallationInspector;
@@ -20,6 +22,9 @@ import org.megamek.launcher.update.UpdatePreviewService;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JList;
+import javax.swing.JMenuItem;
+import javax.swing.JPopupMenu;
+import javax.swing.MenuSelectionManager;
 import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
@@ -60,9 +65,11 @@ class UpdatePreviewConsentMaterialTest {
             JButton installations = waitFor(
                     () -> find(frame, "manageInstallationsButton"));
             SwingUtilities.invokeAndWait(installations::doClick);
-            JButton homePreview = waitFor(() -> find(frame, "previewUpdateButton"));
-            assertTrue(homePreview.isEnabled());
-            SwingUtilities.invokeAndWait(homePreview::doClick);
+            JPopupMenu menu = openInstallationMenu(frame, fixture.first.id());
+            JMenuItem preview = findMenuItem(menu, "Preview update");
+            assertNotNull(preview);
+            assertTrue(preview.isEnabled());
+            SwingUtilities.invokeAndWait(preview::doClick);
             JDialog picker = waitForDialog(frame, "Preview update");
             assertFalse(picker.isModal(), "release picker must remain modeless");
 
@@ -132,9 +139,15 @@ class UpdatePreviewConsentMaterialTest {
                 "sha256:" + "a".repeat(64), firstBuild);
         var secondBuild = new OwnershipPolicy().build(Path.of(second.canonicalRoot()),
                 OfficialRepository.MEGAMEK, "v-second");
-        receipts.write(registry, store.read(registry), second, OfficialRepository.MEGAMEK,
+        OwnershipReceipt secondReceipt = receipts.write(
+                registry, store.read(registry), second, OfficialRepository.MEGAMEK,
                 "v-second", "MegaMek-v-second.tar.gz", 10,
                 "sha256:" + "b".repeat(64), secondBuild);
+        ChannelPreferenceStore channels = new ChannelPreferenceStore();
+        channels.initializeManaged(
+                registry, first, firstReceipt, FollowChannel.MILESTONE, false);
+        channels.initializeManaged(
+                registry, second, secondReceipt, FollowChannel.DEVELOPMENT, false);
         FakeServices services = new FakeServices(registry, store);
         return new Fixture(services, first, second, firstReceipt);
     }
@@ -205,6 +218,25 @@ class UpdatePreviewConsentMaterialTest {
             Thread.sleep(20);
         }
         throw new AssertionError("timed out waiting for Swing state");
+    }
+
+    private static JPopupMenu openInstallationMenu(Container root, String recordId)
+            throws Exception {
+        JButton button = waitFor(() -> find(root, "installationMenuButton-" + recordId));
+        SwingUtilities.invokeAndWait(button::doClick);
+        return waitFor(() -> {
+            for (var element : MenuSelectionManager.defaultManager().getSelectedPath()) {
+                if (element instanceof JPopupMenu menu) return menu;
+            }
+            return null;
+        });
+    }
+
+    private static JMenuItem findMenuItem(JPopupMenu menu, String text) {
+        for (Component component : menu.getComponents()) {
+            if (component instanceof JMenuItem item && text.equals(item.getText())) return item;
+        }
+        return null;
     }
 
     @SuppressWarnings("unchecked")

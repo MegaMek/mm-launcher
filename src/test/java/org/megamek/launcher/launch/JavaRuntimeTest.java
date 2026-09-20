@@ -93,7 +93,7 @@ class JavaRuntimeTest {
         IOException error = assertThrows(IOException.class, () -> service.prepare(root,
                 OperationContext.none(OperationType.IMPORT_EXISTING)));
 
-        assertTrue(error.getMessage().contains("inside the selected application folder"));
+        assertTrue(error.getMessage().contains("inside the application folder"));
         assertFalse(Files.exists(registry));
         assertTrue(runner.commands.isEmpty(),
                 "contained Java is rejected before executing even java -version");
@@ -115,7 +115,7 @@ class JavaRuntimeTest {
         IOException error = assertThrows(IOException.class,
                 () -> service.register(plan, "Changed runtime", context));
 
-        assertTrue(error.getMessage().contains("Java runtime running MM Launcher changed"));
+        assertTrue(error.getMessage().contains("selected default game Java changed"));
         assertFalse(Files.exists(registry));
         assertEquals(2, runner.commands.size());
     }

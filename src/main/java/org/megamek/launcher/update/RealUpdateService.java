@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.ChannelUpdateChecker;
 import org.megamek.launcher.launch.RootCoordinator;
 import org.megamek.launcher.manifest.FileEntry;
@@ -71,6 +72,7 @@ public final class RealUpdateService {
     private final RegistryStore registries;
     private final ReceiptStore receipts;
     private final CurrentStateStore states;
+    private final ChannelPreferenceStore channelPreferences;
     private final RootCoordinator coordinator;
     private final FailureHook failureHook;
     private final ObjectMapper mapper = JsonMapper.builder()
@@ -93,6 +95,7 @@ public final class RealUpdateService {
         this.registries = registries;
         this.receipts = receipts;
         this.states = new CurrentStateStore(receipts);
+        this.channelPreferences = new ChannelPreferenceStore();
         this.coordinator = coordinator;
         this.failureHook = failureHook;
     }
@@ -101,9 +104,18 @@ public final class RealUpdateService {
         Path registryPath = registry.toAbsolutePath().normalize();
         RegistryData data = registries.read(registryPath);
         InstallationRecord record = registries.resolve(data, id);
+        ChannelPreferenceStore.ReadResult fixed =
+                channelPreferences.read(registryPath, data, record);
+        if (fixed.status() != ChannelPreferenceStore.Status.CONFIGURED
+                || fixed.preference() == null) {
+            throw new IOException("fixed channel provenance is unavailable; this copy is "
+                    + "launch-only: " + fixed.reason());
+        }
         Path root = validateBoundary(registryPath, data, record);
         OwnershipReceipt receipt = receipts.read(registryPath, data, record);
         CurrentUpdateState state = states.read(registryPath, data, record, receipt);
+        new AdoptionStateStore(receipts).validateForUse(
+                registryPath, record, receipt, state, fixed.preference());
         return new Snapshot(registryPath, record, receipt, state, root);
     }
 

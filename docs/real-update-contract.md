@@ -11,13 +11,16 @@ apply-update --registry <json> [--id <uuid>] --from-tag <current-tag>
   --confirm CLOSE-ALL-SUITE-APPS-AND-APPLY
 ```
 
-are available only for a copy freshly downloaded and registered by this launcher. Eligibility
-comes from the immutable create-new receipt bound to installation UUID, canonical root,
-`registeredAt`, fixed official repository, package identity, ownership policy, and original
-manifest. An imported, manually registered, pre-receipt, stale, corrupt, or incorrectly bound copy
-remains launch-only. The launcher never creates update provenance from current local hashes.
-Registry schema remains 1; legacy `updateEligible=false` continues to mean that registry membership
-alone is not authority and is not the source of real-update eligibility.
+are available only for a copy with both a valid ownership receipt and fixed-channel sidecar,
+created either by a fresh install or successful exact-ancestor adoption. Eligibility comes from the immutable create-new
+receipt bound to installation UUID, canonical root, `registeredAt`, fixed official repository,
+package identity, ownership policy, and original manifest, together with the equally bound channel
+chosen during publication. An imported, manually registered, pre-receipt, missing-channel, stale,
+corrupt, or incorrectly bound copy remains launch-only. Adoption is the sole explicit exception:
+it constructs provenance from one verified official package and a full read-only comparison, not
+from current local hashes. Legacy
+`updateEligible=false` continues to mean that registry membership alone is not authority and is
+not the source of real-update eligibility.
 
 The preview report is still observational and is never write authority. Standalone CLI Apply keeps
 its existing independent one-package-download behavior. A normal GUI Update attempt instead creates
@@ -96,6 +99,14 @@ history. A missing current file means the immutable receipt is still current; an
 interrupted publication is a blocker, not success-shaped absence. Restoring a recorded older
 official data file allows a later update to recognize that hash without treating arbitrary local
 content as official.
+
+For an adopted copy, the initial current state names the exact verified ancestor and seeds every
+allowed pre-existing modified managed path as `MODIFIED` with only its official ancestor hash.
+Runtime modifications and missing managed paths block adoption, so the first later preview cannot
+mistake mixed executable bytes for pristine content or silently restore an intentional omission.
+Unknown and protected files remain outside the manifest. Adoption publishes no root transaction
+and performs no application mutation; the first post-adoption update remains an ordinary,
+separately requested Check/Preview/Apply.
 
 ## Transaction and recovery
 

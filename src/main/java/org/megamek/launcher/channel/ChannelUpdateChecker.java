@@ -97,7 +97,7 @@ public final class ChannelUpdateChecker {
         }
         if (comparison == Status.UPDATE_AVAILABLE) {
             return result(Status.UPDATE_AVAILABLE, record, preference, currentTag, recommendation,
-                    "A newer release is available on the followed channel.");
+                    "A newer release is available on this installation's fixed channel.");
         }
         if (comparison == Status.INSTALLED_AHEAD) {
             return result(Status.INSTALLED_AHEAD, record, preference, currentTag, recommendation,

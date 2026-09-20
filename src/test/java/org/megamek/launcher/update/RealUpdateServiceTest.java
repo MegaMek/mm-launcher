@@ -751,7 +751,9 @@ class RealUpdateServiceTest {
         InstallationRecord before = store.resolve(beforeData, fixture.id);
         InstallationRecord unrelatedBefore = store.resolve(beforeData, unrelated.id());
         ChannelPreferenceStore channels = new ChannelPreferenceStore();
-        channels.set(fixture.registry, before, FollowChannel.DEVELOPMENT, true);
+        var fixedChannel = channels.read(
+                fixture.registry, beforeData, before).preference();
+        channels.setCheckOnOpen(fixture.registry, before, fixedChannel, true);
         assertEquals(java.toRealPath().toString(), before.javaExecutable());
         assertEquals("keep-main-pin", before.pin());
         assertEquals("keep-unrelated-pin", unrelatedBefore.pin());
@@ -764,7 +766,7 @@ class RealUpdateServiceTest {
         assertIdentityAndPreferences(before, firstOnDisk);
         assertEquals(beforeData.defaultInstallationId(), firstData.defaultInstallationId());
         assertEquals(unrelatedBefore, store.resolve(firstData, unrelated.id()));
-        assertEquals(FollowChannel.DEVELOPMENT,
+        assertEquals(FollowChannel.MILESTONE,
                 channels.read(fixture.registry, firstData, firstOnDisk).preference().channel());
         assertTrue(channels.read(fixture.registry, firstData, firstOnDisk)
                 .preference().checkOnOpen());
@@ -777,7 +779,7 @@ class RealUpdateServiceTest {
         assertIdentityAndPreferences(before, secondOnDisk);
         assertEquals(beforeData.defaultInstallationId(), secondData.defaultInstallationId());
         assertEquals(unrelatedBefore, store.resolve(secondData, unrelated.id()));
-        assertEquals(FollowChannel.DEVELOPMENT,
+        assertEquals(FollowChannel.MILESTONE,
                 channels.read(fixture.registry, secondData, secondOnDisk).preference().channel());
 
         LauncherServices reloadedServices = launcherServices(fixture.registry, benign);
@@ -1234,6 +1236,8 @@ class RealUpdateServiceTest {
         byte[] archive = archive("MegaMek-" + tag, files);
         FreshInstaller.Result result = new FreshInstaller(transport(tag, archive)).install(
                 OfficialRepository.MEGAMEK, tag, root, registry, name, quiet());
+        new ChannelPreferenceStore().initializeManaged(registry, result.record(),
+                result.ownershipReceipt(), FollowChannel.MILESTONE, false);
         return new Fixture(registry, root, result.record().id());
     }
 
@@ -1246,10 +1250,13 @@ class RealUpdateServiceTest {
         RegistryStore store = new RegistryStore();
         InstallationRecord record = store.register(registry, name, root, pin);
         byte[] sourceArchive = archive("MegaMek-" + tag, files);
-        new ReceiptStore().write(registry, store.read(registry), record,
+        OwnershipReceipt receipt = new ReceiptStore().write(
+                registry, store.read(registry), record,
                 OfficialRepository.MEGAMEK, tag, "MegaMek-" + tag + ".tar.gz",
                 sourceArchive.length, "sha256:" + sha(sourceArchive),
                 new OwnershipPolicy().build(root, OfficialRepository.MEGAMEK, tag));
+        new ChannelPreferenceStore().initializeManaged(
+                registry, record, receipt, FollowChannel.MILESTONE, false);
         return new Fixture(registry, root, record.id());
     }
 

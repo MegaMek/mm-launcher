@@ -65,6 +65,7 @@ import java.util.jar.Manifest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class UpdateApplySwingTest {
@@ -78,7 +79,7 @@ class UpdateApplySwingTest {
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             navigateToInstallations(frame);
-            JButton update = waitFor(() -> find(frame, "applyUpdateButton"));
+            JButton update = checkAndWaitForUpdate(frame);
             assertTrue(update.isEnabled());
 
             SwingUtilities.invokeLater(update::doClick);
@@ -155,7 +156,7 @@ class UpdateApplySwingTest {
             });
             JButton home = waitFor(() -> find(frame, "homeButton"));
             SwingUtilities.invokeAndWait(home::doClick);
-            assertEquals(null, find(frame, "mainInstallationName"));
+            assertNull(find(frame, "mainInstallationName"));
         } finally {
             dispose(frame);
         }
@@ -168,9 +169,7 @@ class UpdateApplySwingTest {
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             navigateToInstallations(frame);
-            JButton check = waitFor(() -> find(frame, "checkUpdatesButton"));
-            SwingUtilities.invokeAndWait(check::doClick);
-            JButton recommended = waitFor(() -> find(frame, "applyUpdateButton"));
+            JButton recommended = checkAndWaitForUpdate(frame);
 
             SwingUtilities.invokeLater(recommended::doClick);
             JDialog firstConsent = waitForDialog("Confirm recommended preview download");
@@ -217,7 +216,7 @@ class UpdateApplySwingTest {
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             navigateToInstallations(frame);
-            JButton update = waitFor(() -> find(frame, "applyUpdateButton"));
+            JButton update = checkAndWaitForUpdate(frame);
             SwingUtilities.invokeLater(update::doClick);
             click(waitForDialog("Confirm recommended preview download"), "OK");
             assertTrue(fixture.services.network.binaryStarted.await(5, TimeUnit.SECONDS));
@@ -266,22 +265,24 @@ class UpdateApplySwingTest {
     }
 
     @Test
-    void recommendedChannelDriftAfterPreparationFailsWithoutSecondPackageOrRootWrite()
+    void recommendedPreferenceDriftAfterPreparationFailsWithoutSecondPackageOrRootWrite()
             throws Exception {
         Fixture fixture = fixture(false);
         LauncherFrame frame = onEdt(() -> new LauncherFrame(fixture.services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             navigateToInstallations(frame);
-            JButton check = waitFor(() -> find(frame, "checkUpdatesButton"));
-            SwingUtilities.invokeAndWait(check::doClick);
-            JButton recommended = waitFor(() -> find(frame, "applyUpdateButton"));
+            JButton recommended = checkAndWaitForUpdate(frame);
             SwingUtilities.invokeLater(recommended::doClick);
             click(waitForDialog("Confirm recommended preview download"), "OK");
             JDialog applyConsent = waitForDialog("Authorize update Apply");
 
-            new ChannelPreferenceStore().set(fixture.services.registry(), fixture.first,
-                    FollowChannel.DEVELOPMENT, false);
+            ChannelPreferenceStore channels = new ChannelPreferenceStore();
+            RegistryData data = new RegistryStore().read(fixture.services.registry());
+            var selected = channels.read(
+                    fixture.services.registry(), data, fixture.first).preference();
+            channels.setCheckOnOpen(
+                    fixture.services.registry(), fixture.first, selected, true);
             click(applyConsent, "OK");
             JDialog failed = waitForDialog("Update failed — recovery may be required");
             assertTrue(componentText(failed).contains("channel source")
@@ -299,7 +300,7 @@ class UpdateApplySwingTest {
     }
 
     @Test
-    void applyFailureKeepsRecoveryReachableWhenInspectionStateIsUnavailable()
+    void applyFailureBeforeMutationDoesNotInventRecovery()
             throws Exception {
         Fixture fixture = fixture(true);
         fixture.services.failApply = true;
@@ -307,21 +308,18 @@ class UpdateApplySwingTest {
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             navigateToInstallations(frame);
-            JButton update = waitFor(() -> find(frame, "applyUpdateButton"));
+            JButton update = checkAndWaitForUpdate(frame);
             SwingUtilities.invokeLater(update::doClick);
             click(waitForDialog("Confirm recommended preview download"), "OK");
             click(waitForDialog("Authorize update Apply"), "OK");
             waitUntil(() -> fixture.services.applyCalls == 1);
 
             JDialog failed = waitForDialog("Update failed — recovery may be required");
-            assertTrue(componentText(failed).contains("UPDATE ATTEMPT FAILED"));
-            assertTrue(componentText(failed).contains("recovery"));
-            JButton recovery = waitFor(() -> find(frame, "recoverUpdateButton"));
-            assertNotNull(recovery);
-            assertTrue(recovery.isEnabled());
-            SwingUtilities.invokeAndWait(
-                    () -> ((JButton) find(frame, "homeButton")).doClick());
-            assertNotNull(find(frame, "resolveHomeBlockerButton"));
+            assertTrue(failed.getTitle().contains("recovery"));
+            assertNotNull(find(failed, "operationViewDetailsButton"));
+            waitUntil(() -> fixture.services.loadHomeCalls >= 2);
+            assertNull(find(frame, "recoverUpdateButton"),
+                    "a failure before mutation must not invent a pending recovery");
         } finally {
             dispose(frame);
         }
@@ -350,7 +348,8 @@ class UpdateApplySwingTest {
                 secondBuild.excludedPaths());
         CurrentUpdateState firstCurrent = CurrentUpdateState.initial(firstReceipt);
         CurrentUpdateState secondCurrent = CurrentUpdateState.initial(secondReceipt);
-        new ChannelPreferenceStore().set(registry, first, FollowChannel.MILESTONE, false);
+        new ChannelPreferenceStore().initializeManaged(
+                registry, first, firstReceipt, FollowChannel.MILESTONE, false);
         byte[] targetArchive = targetArchive();
         PreparedTransport transport = new PreparedTransport(targetArchive);
         FakeServices services = new FakeServices(registry, store, transport,
@@ -364,6 +363,12 @@ class UpdateApplySwingTest {
         JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
         SwingUtilities.invokeAndWait(installations::doClick);
         waitFor(() -> find(frame, "installationCards"));
+    }
+
+    private static JButton checkAndWaitForUpdate(LauncherFrame frame) throws Exception {
+        JButton check = waitFor(() -> find(frame, "checkUpdatesButton"));
+        SwingUtilities.invokeAndWait(check::doClick);
+        return waitFor(() -> find(frame, "applyUpdateButton"));
     }
 
     private static void click(Container dialog, String text) throws Exception {

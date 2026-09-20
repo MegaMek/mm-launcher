@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.megamek.launcher.channel.ChannelPreferenceStore;
+import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.registry.RegistryStore;
 import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseTransport;
@@ -175,8 +177,11 @@ class ReceiptMaterialTest {
         var data = store.read(registry);
         var build = new OwnershipPolicy().build(root, OfficialRepository.MEGAMEK, "v-old");
         ReceiptStore receipts = new ReceiptStore();
-        receipts.write(registry, data, record, OfficialRepository.MEGAMEK, "v-old",
+        OwnershipReceipt receipt = receipts.write(
+                registry, data, record, OfficialRepository.MEGAMEK, "v-old",
                 "MegaMek-v-old.tar.gz", 123, "sha256:" + "a".repeat(64), build);
+        new ChannelPreferenceStore().initializeManaged(
+                registry, record, receipt, FollowChannel.MILESTONE, false);
         return new Fixture(root, registry, receipts.receiptPath(registry, record.id()),
                 record, data, build, receipts);
     }

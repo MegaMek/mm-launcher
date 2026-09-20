@@ -18,6 +18,7 @@ import org.megamek.launcher.update.UpdatePreviewService;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
+import javax.swing.JLabel;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
@@ -42,7 +43,7 @@ class ChannelSwingIntegrationTest {
     @TempDir Path temp;
 
     @Test
-    void channelChoiceIsLocalAndSlowManualCheckLeavesLaunchAndManageUsable()
+    void fixedChannelCheckPreferenceIsLocalAndSlowManualCheckLeavesActionsUsable()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing channel integration requires a display");
@@ -50,20 +51,31 @@ class ChannelSwingIntegrationTest {
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
+            assertEquals("Launch MegaMek Milestone (0.51.0)",
+                    waitFor(() -> find(frame, "launch-megamek-button")).getText());
             JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
             SwingUtilities.invokeAndWait(installations::doClick);
-            JButton choose = waitFor(() -> find(frame, "chooseChannelButton"));
-            SwingUtilities.invokeLater(choose::doClick);
-            JDialog choice = waitForDialog("Choose update channel");
-            JComboBox<?> combo = findCombo(choice, "channelChoiceCombo");
-            assertNotNull(combo);
-            SwingUtilities.invokeAndWait(() -> combo.setSelectedItem(FollowChannel.DEVELOPMENT));
-            click(choice, "OK");
+            JLabel provenance = waitFor(() -> (JLabel) findNamed(frame,
+                    "installationProvenance-" + services.record.id()));
+            assertTrue(provenance.getText().startsWith("Channel: Milestone"));
+            assertNull(onEdt(() -> find(frame, "chooseChannelButton")));
+            assertNull(onEdt(() -> find(frame, "channelChoiceCombo")));
+            JButton checks = waitFor(() -> find(frame, "updateChecksButton"));
+            SwingUtilities.invokeLater(checks::doClick);
+            JDialog choice = waitForDialog("Update checks");
+            assertNull(findNamed(choice, "fixedChannelLabel"));
+            assertNull(findCombo(choice, "channelChoiceCombo"));
+            click(choice, "Save");
             waitUntil(() -> services.saved.get() == 1);
             assertEquals(0, services.checks.get(),
-                    "pure local channel choice must not fetch metadata");
+                    "saving a local check preference must not fetch metadata");
+            assertEquals(FollowChannel.MILESTONE,
+                    services.preference.preference().channel());
 
-            JButton check = waitFor(() -> find(frame, "checkUpdatesButton"));
+            JButton check = waitFor(() -> {
+                JButton button = find(frame, "checkUpdatesButton");
+                return button != null && button.isEnabled() ? button : null;
+            });
             SwingUtilities.invokeLater(check::doClick);
             assertTrue(services.started.await(5, TimeUnit.SECONDS));
             JButton home = waitFor(() -> find(frame, "homeButton"));
@@ -73,6 +85,14 @@ class ChannelSwingIntegrationTest {
             services.release.countDown();
             waitUntil(() -> services.checks.get() == 1);
             assertEquals(1, services.checks.get());
+            JLabel information = waitFor(() -> {
+                Component found = findNamed(frame, "homeInformationMessage");
+                return found instanceof JLabel label
+                        && "All installations are up to date".equals(label.getText())
+                        ? label : null;
+            });
+            assertEquals("All installations are up to date", information.getText());
+            assertNull(onEdt(() -> findNamed(frame, "homeStatusLabel")));
 
             SwingUtilities.invokeAndWait(
                     () -> find(frame, "manageInstallationsButton").doClick());
@@ -81,8 +101,8 @@ class ChannelSwingIntegrationTest {
             JDialog download = waitForDialog("Download an official release");
             JComboBox<?> freshChannel = findCombo(download, "downloadChannelCombo");
             assertNotNull(freshChannel);
-            assertNull(onEdt(freshChannel::getSelectedItem),
-                    "fresh download must require an explicit independent channel choice");
+            assertEquals(FollowChannel.MILESTONE, onEdt(freshChannel::getSelectedItem),
+                    "the install picker defaults to the authoritative Milestone channel");
             assertEquals(1, services.checks.get(),
                     "opening a fresh download picker must not perform a hidden check");
         } finally {
@@ -107,10 +127,14 @@ class ChannelSwingIntegrationTest {
             assertTrue(onEdt(() -> find(frame, "launch-megamek-button").isEnabled()));
             assertTrue(onEdt(() -> find(frame, "manageInstallationsButton").isEnabled()));
             services.release.countDown();
-            Component result = waitFor(() -> findNamed(frame, "channelCheckResult"));
-            assertEquals("Up to date", ((javax.swing.JLabel) result).getText());
+            JButton installations = waitFor(() -> {
+                JButton found = find(frame, "manageInstallationsButton");
+                return found != null && "Installations".equals(found.getText())
+                        ? found : null;
+            });
+            assertEquals("Installations", installations.getText());
             assertNull(onEdt(() -> find(frame, "checkUpdatesButton")),
-                    "an exact-current result has no redundant Check again action");
+                    "Home has no per-installation Check again action");
             assertNull(onEdt(() -> find(frame, "recoverUpdateButton")),
                     "a healthy receipt alone does not expose Home recovery");
         } finally {
@@ -130,14 +154,11 @@ class ChannelSwingIntegrationTest {
             SwingUtilities.invokeAndWait(frame::showWindow);
             assertTrue(services.started.await(5, TimeUnit.SECONDS));
             services.release.countDown();
-            Component result = waitFor(() -> {
-                Component found = findNamed(frame, "channelCheckResult");
-                return found instanceof javax.swing.JLabel label
-                        && "Could not check".equals(label.getText()) ? found : null;
-            });
-            assertNotNull(result);
+            JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
+            assertEquals("Installations", installations.getText());
+            SwingUtilities.invokeAndWait(installations::doClick);
             JButton retry = waitFor(() -> find(frame, "checkUpdatesButton"));
-            assertEquals("Retry", retry.getText());
+            assertEquals("Retry check", retry.getText());
         } finally {
             services.release.countDown();
             SwingUtilities.invokeAndWait(frame::dispose);
@@ -280,13 +301,11 @@ class ChannelSwingIntegrationTest {
             receipt = new OwnershipReceipt(1, OwnershipPolicy.VERSION, record.id(),
                     record.canonicalRoot(), record.registeredAt(), "megamek", "v0.51.0",
                     "MegaMek-v0.51.0.tar.gz", 123, "a".repeat(64), null, List.of());
-            if (checkOnOpen) {
-                ChannelPreference selected = new ChannelPreference(1, record.id(),
-                        record.canonicalRoot(), record.registeredAt(),
-                        FollowChannel.MILESTONE, true);
-                preference = new ChannelPreferenceStore.ReadResult(
-                        ChannelPreferenceStore.Status.CONFIGURED, selected, "Configured");
-            }
+            ChannelPreference selected = new ChannelPreference(1, record.id(),
+                    record.canonicalRoot(), record.registeredAt(),
+                    FollowChannel.MILESTONE, checkOnOpen);
+            preference = new ChannelPreferenceStore.ReadResult(
+                    ChannelPreferenceStore.Status.CONFIGURED, selected, "Configured");
         }
 
         @Override
@@ -300,10 +319,13 @@ class ChannelSwingIntegrationTest {
         }
 
         @Override
-        public ChannelPreference setChannel(InstallationRecord expected, FollowChannel channel,
-                                            boolean checkOnOpen) {
+        public ChannelPreference setCheckOnOpen(InstallationRecord expected,
+                                                ChannelPreference expectedPreference,
+                                                boolean checkOnOpen) {
+            assertEquals(preference.preference(), expectedPreference);
             ChannelPreference selected = new ChannelPreference(1, expected.id(),
-                    expected.canonicalRoot(), expected.registeredAt(), channel, checkOnOpen);
+                    expected.canonicalRoot(), expected.registeredAt(),
+                    expectedPreference.channel(), checkOnOpen);
             preference = new ChannelPreferenceStore.ReadResult(
                     ChannelPreferenceStore.Status.CONFIGURED, selected, "Configured");
             saved.incrementAndGet();

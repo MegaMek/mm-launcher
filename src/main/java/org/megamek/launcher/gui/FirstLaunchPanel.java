@@ -92,7 +92,10 @@ final class FirstLaunchPanel extends JPanel {
         controls.add(Box.createVerticalStrut(scale.scaleForGUI(12)));
         status.setForeground(MUTED);
         status.setFont(scale.font(base, Font.PLAIN, 11));
-        status.setAlignmentX(LEFT_ALIGNMENT);
+        status.setHorizontalAlignment(SwingConstants.CENTER);
+        status.setAlignmentX(CENTER_ALIGNMENT);
+        status.setMaximumSize(new Dimension(Integer.MAX_VALUE,
+                status.getPreferredSize().height));
         status.setName("homeStatusLabel");
         status.setVisible(status.getText() != null && !status.getText().isBlank());
         controls.add(status);

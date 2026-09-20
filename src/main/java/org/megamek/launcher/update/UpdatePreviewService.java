@@ -1,6 +1,7 @@
 package org.megamek.launcher.update;
 
 import org.megamek.launcher.channel.ChannelUpdateChecker;
+import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.manifest.ManifestException;
 import org.megamek.launcher.manifest.Manifest;
 import org.megamek.launcher.manifest.ManifestReader;
@@ -37,6 +38,7 @@ public final class UpdatePreviewService {
     private final RegistryStore registryStore;
     private final ReceiptStore receiptStore;
     private final CurrentStateStore currentStateStore;
+    private final ChannelPreferenceStore channelPreferences;
 
     public UpdatePreviewService(ReleaseTransport transport) {
         this(transport, new RegistryStore(), new ReceiptStore());
@@ -48,19 +50,33 @@ public final class UpdatePreviewService {
         this.registryStore = registryStore;
         this.receiptStore = receiptStore;
         this.currentStateStore = new CurrentStateStore(receiptStore);
+        this.channelPreferences = new ChannelPreferenceStore();
     }
 
     public Eligibility eligibility(Path registry, String id) throws IOException {
         RegistryData data = registryStore.read(registry);
         InstallationRecord record = registryStore.resolve(data, id);
+        OwnershipReceipt receipt = null;
+        CurrentUpdateState current = null;
         try {
+            receipt = receiptStore.read(registry, data, record);
+            current = currentStateStore.read(registry, data, record, receipt);
+            ChannelPreferenceStore.ReadResult fixed =
+                    channelPreferences.read(registry, data, record);
+            if (fixed.status() != ChannelPreferenceStore.Status.CONFIGURED
+                    || fixed.preference() == null) {
+                return new Eligibility(record, false,
+                        "Fixed channel provenance is unavailable; this copy is launch-only: "
+                                + fixed.reason(),
+                        receipt, current);
+            }
+            new AdoptionStateStore(receiptStore).validateForUse(
+                    registry, record, receipt, current, fixed.preference());
             validateLocalBoundary(record, registry, data);
-            OwnershipReceipt receipt = receiptStore.read(registry, data, record);
-            CurrentUpdateState current = currentStateStore.read(registry, data, record, receipt);
             return new Eligibility(record, true, "Verified update provenance is valid", receipt,
                     current);
         } catch (IOException e) {
-            return new Eligibility(record, false, e.getMessage(), null, null);
+            return new Eligibility(record, false, e.getMessage(), receipt, current);
         }
     }
 
@@ -70,6 +86,7 @@ public final class UpdatePreviewService {
         RegistryData data = registryStore.read(registryPath);
         InstallationRecord record = registryStore.resolve(data, id);
         // All local provenance and placement checks deliberately precede any network request.
+        requireFixedChannel(registryPath, data, record);
         Path root = validateLocalBoundary(record, registryPath, data);
         OwnershipReceipt receipt = receiptStore.read(registryPath, data, record);
         CurrentUpdateState current = currentStateStore.read(
@@ -87,6 +104,7 @@ public final class UpdatePreviewService {
         if (!current.equals(expectedRecord)) {
             throw new IOException("selected preview source changed after the dialog opened");
         }
+        requireFixedChannel(registryPath, data, current);
         Path root = validateLocalBoundary(current, registryPath, data);
         OwnershipReceipt receipt = receiptStore.read(registryPath, data, current);
         if (!receipt.equals(expectedReceipt)) {
@@ -111,6 +129,7 @@ public final class UpdatePreviewService {
             if (!current.equals(expectedRecord)) {
                 throw new IOException("selected preview source changed after the dialog opened");
             }
+            requireFixedChannel(registryPath, data, current);
             Path root = validateLocalBoundary(current, registryPath, data);
             OwnershipReceipt receipt = receiptStore.read(registryPath, data, current);
             if (!receipt.equals(expectedReceipt)) {
@@ -134,6 +153,7 @@ public final class UpdatePreviewService {
         if (!current.equals(expectedRecord)) {
             throw new IOException("selected recommended-update source changed after consent");
         }
+        requireFixedChannel(registryPath, data, current);
         Path root = validateLocalBoundary(current, registryPath, data);
         OwnershipReceipt receipt = receiptStore.read(registryPath, data, current);
         if (!receipt.equals(expectedReceipt)) {
@@ -190,6 +210,7 @@ public final class UpdatePreviewService {
             if (!currentRecord.equals(expectedRecord)) {
                 throw new IOException("selected update source changed after download consent");
             }
+            requireFixedChannel(registryPath, data, currentRecord);
             Path root = validateLocalBoundary(currentRecord, registryPath, data);
             OwnershipReceipt receipt = receiptStore.read(registryPath, data, currentRecord);
             if (!receipt.equals(expectedReceipt)) {
@@ -294,6 +315,21 @@ public final class UpdatePreviewService {
             }
         }
         return root;
+    }
+
+    private void requireFixedChannel(Path registry, RegistryData data,
+                                     InstallationRecord record) throws IOException {
+        ChannelPreferenceStore.ReadResult fixed =
+                channelPreferences.read(registry, data, record);
+        if (fixed.status() != ChannelPreferenceStore.Status.CONFIGURED
+                || fixed.preference() == null) {
+            throw new IOException("fixed channel provenance is unavailable; this copy is "
+                    + "launch-only: " + fixed.reason());
+        }
+        OwnershipReceipt receipt = receiptStore.read(registry, data, record);
+        CurrentUpdateState current = currentStateStore.read(registry, data, record, receipt);
+        new AdoptionStateStore(receiptStore).validateForUse(
+                registry, record, receipt, current, fixed.preference());
     }
 
     private static Preview copyPreview(Preview preview) {

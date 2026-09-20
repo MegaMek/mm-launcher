@@ -163,6 +163,14 @@ final class LauncherSettingsStore {
         }
     }
 
+    private static void requireBoolean(com.fasterxml.jackson.databind.JsonNode tree,
+                                       String field) throws IOException {
+        com.fasterxml.jackson.databind.JsonNode value = tree.get(field);
+        if (value == null || !value.isBoolean()) {
+            throw new IOException(field + " must be boolean");
+        }
+    }
+
     private static void validate(Settings settings) throws IOException {
         if (settings == null || settings.schemaVersion() != SCHEMA
                 || (settings.defaultJavaExecutable() == null)
@@ -170,13 +178,6 @@ final class LauncherSettingsStore {
             throw new IOException("unsupported launcher settings schema");
         }
 
-        private static void requireBoolean(com.fasterxml.jackson.databind.JsonNode tree,
-                                           String field) throws IOException {
-            com.fasterxml.jackson.databind.JsonNode value = tree.get(field);
-            if (value == null || !value.isBoolean()) {
-                throw new IOException(field + " must be boolean");
-            }
-        }
         if (settings.defaultJavaExecutable() == null) return;
         if (settings.defaultJavaExecutable().isBlank()
                 || settings.defaultJavaExecutable().length() > 2048

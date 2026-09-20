@@ -68,7 +68,8 @@ public final class FreshInstaller {
 
     /**
      * Installs only the asset and product layout captured by an earlier metadata-only plan.
-     * Existing callers deliberately use the overload above, preserving the CLI/fresh behavior.
+     * Low-level callers deliberately use the overload above; product-facing flows must complete
+     * fixed-channel publication from the returned receipt before reporting managed success.
      */
     public Result install(OfficialRepository repository, String tag, Path destination,
                           Path registry, String name, PrintStream progress,

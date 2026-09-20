@@ -4,6 +4,7 @@ import org.megamek.launcher.channel.ChannelCatalog;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.channel.OfficialYamlChannelCatalog;
+import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.diagnostics.OperationLogStore;
 import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.operation.OperationContext;
@@ -166,6 +167,64 @@ public final class NormalInstallService {
             throws IOException, InterruptedException {
         OfficialRepository repository = requireAllowedRepository(requestedRepository);
         FollowChannel channel = requireAllowedChannel(requestedChannel);
+        return prepareTarget(repository, channel, requestedDestination, selectedJava,
+                TargetKind.CURRENT_CHANNEL,
+                () -> channels.target(channel, repository));
+    }
+
+    /**
+     * Plans from one immutable current-channel option already captured for this launcher
+     * session. No channel pointer or release endpoint is read while building the local quote.
+     */
+    public Plan prepareCapturedCurrent(QuickInstallOption requestedOption,
+                                       Path requestedDestination, Path selectedJava)
+            throws IOException, InterruptedException {
+        if (requestedOption == null) {
+            throw new IOException("a captured quick-install option is required");
+        }
+        QuickInstallOption.Key key = requestedOption.key();
+        OfficialRepository repository = requireAllowedRepository(key.repository());
+        FollowChannel channel = requireAllowedChannel(key.channel());
+        ChannelCatalog.Target target = requestedOption.target();
+        if (!OfficialYamlChannelCatalog.SOURCE.toString().equals(target.source())) {
+            throw new IOException("captured quick-install target must come from the official "
+                    + "current-channel snapshot");
+        }
+        return prepareTarget(repository, channel, requestedDestination, selectedJava,
+                TargetKind.CAPTURED_CURRENT, () -> target);
+    }
+
+    /**
+     * Plans one exact release selected from explicitly requested, unclassified GitHub history.
+     * The channel is the new installation's immutable update track; it does not classify the
+     * historical release.
+     */
+    public Plan prepareExact(OfficialRepository requestedRepository,
+                             FollowChannel requestedFutureChannel, String requestedTag,
+                             Path requestedDestination, Path selectedJava)
+            throws IOException, InterruptedException {
+        OfficialRepository repository = requireAllowedRepository(requestedRepository);
+        FollowChannel futureChannel = requireAllowedChannel(requestedFutureChannel);
+        return prepareTarget(repository, futureChannel, requestedDestination, selectedJava,
+                TargetKind.HISTORICAL_EXACT, () -> {
+            ReleaseCatalog catalog = new ReleaseCatalog(transport);
+            ReleaseCatalog.Release release = catalog.exact(repository, requestedTag);
+            ReleaseCatalog.Assessment assessment = catalog.assess(repository, release);
+            if (!assessment.eligible()) {
+                throw new IOException("official exact " + repository.key()
+                        + " release is unavailable: " + assessment.reason());
+            }
+            return new ChannelCatalog.Target(futureChannel, displayVersion(release.tag()),
+                    repository, release, assessment.asset(),
+                    ReleaseCatalog.exactMetadataUri(repository, release.tag()).toString());
+        });
+    }
+
+    private Plan prepareTarget(OfficialRepository repository, FollowChannel channel,
+                               Path requestedDestination, Path selectedJava,
+                               TargetKind targetKind,
+                               TargetResolver targetResolver)
+            throws IOException, InterruptedException {
         if (requestedDestination == null) {
             throw new IOException("normal install destination is required");
         }
@@ -179,13 +238,13 @@ public final class NormalInstallService {
         }
         Path workingDirectory = nearestExistingDirectory(destination);
         int javaFeature = javaRuntime.validate(executable, workingDirectory);
-        ChannelCatalog.Target target = channels.target(channel, repository);
+        ChannelCatalog.Target target = targetResolver.resolve();
         requireTarget(target, repository, channel);
         CheckConfiguration checkConfiguration = checkConfiguration();
         return new Plan(registry, snapshot, destination, List.copyOf(missingParents), executable,
                 javaFeature, target.channel(), target.repository(), target.version(),
                 requiredProducts(repository), target.release(), target.asset(), target.source(),
-                checkConfiguration);
+                checkConfiguration, targetKind);
     }
 
     /**
@@ -222,7 +281,7 @@ public final class NormalInstallService {
                 nearestExistingDirectory(plan.destination())) != plan.javaFeature()) {
             throw new IOException("selected Java changed; review a fresh install confirmation");
         }
-        ChannelCatalog.Target fresh = channels.target(channel, repository);
+        ChannelCatalog.Target fresh = freshTarget(plan);
         requireTarget(fresh, repository, channel);
         if (!sameQuote(plan, fresh)) {
             throw new IOException("official release or asset metadata changed; review and consent "
@@ -265,8 +324,8 @@ public final class NormalInstallService {
             }
             registries.selectJava(registry, configured.id(), java.toString());
             configured = resolve(configured.id());
-            preferences.set(registry, configured, plan.channel(),
-                    plan.checkConfiguration().checkOnOpen());
+            preferences.initializeManaged(registry, configured, installed.ownershipReceipt(),
+                    plan.channel(), plan.checkConfiguration().checkOnOpen());
             boolean becameMain = requireExpectedPostInstall(plan, configured.id());
             configured = resolve(configured.id());
             return new Result(configured, installed.release(), installed.asset(),
@@ -274,9 +333,10 @@ public final class NormalInstallService {
         } catch (IOException | InterruptedException error) {
             throw new PublishedInstallationException(installed.destination(), configured.id(),
                     "The downloaded copy is valid and registered, but Java, "
-                            + plan.channel() + " " + plan.repository().key() + " update "
-                            + "checks, or default selection still needs repair in Installations. "
-                            + "Do not download over the retained copy. " + detail(error), error);
+                            + plan.channel() + " " + plan.repository().key() + " fixed-channel "
+                            + "provenance, or default selection still needs repair in "
+                            + "Installations. Do not download over the retained copy or assign "
+                            + "it another channel. " + detail(error), error);
         }
     }
 
@@ -454,7 +514,10 @@ public final class NormalInstallService {
         if (target == null || target.channel() != requestedChannel
                 || target.repository() != requestedRepository
                 || target.release() == null || target.asset() == null
-                || !target.release().tag().equals("v" + target.version())
+                || target.version() == null || target.version().isBlank()
+                || !target.version().equals(displayVersion(target.release().tag()))
+                || OfficialYamlChannelCatalog.SOURCE.toString().equals(target.source())
+                && !target.release().tag().equals("v" + target.version())
                 || !target.release().assets().contains(target.asset())
                 || target.source() == null || target.source().isBlank()) {
             throw new IOException("official " + requestedChannel + " "
@@ -493,6 +556,55 @@ public final class NormalInstallService {
                 && plan.source().equals(target.source());
     }
 
+    private ChannelCatalog.Target freshTarget(Plan plan)
+            throws IOException, InterruptedException {
+        if (plan.targetKind() == TargetKind.CURRENT_CHANNEL) {
+            return channels.target(plan.channel(), plan.repository());
+        }
+        String exactSource = ReleaseCatalog.exactMetadataUri(
+                plan.repository(), plan.release().tag()).toString();
+        if (plan.targetKind() == TargetKind.HISTORICAL_EXACT
+                && !exactSource.equals(plan.source())) {
+            throw new IOException("normal install metadata source is not an approved exact "
+                    + "official release endpoint");
+        }
+        if (plan.targetKind() == TargetKind.CAPTURED_CURRENT
+                && !OfficialYamlChannelCatalog.SOURCE.toString().equals(plan.source())) {
+            throw new IOException("captured current install metadata source is not the "
+                    + "official channel snapshot");
+        }
+        ReleaseCatalog catalog = new ReleaseCatalog(transport);
+        ReleaseCatalog.Release release = catalog.exact(
+                plan.repository(), plan.release().tag());
+        ReleaseCatalog.Assessment assessment = catalog.assess(plan.repository(), release);
+        if (!assessment.eligible()) {
+            throw new IOException("official exact " + plan.repository().key()
+                    + " release is unavailable: " + assessment.reason());
+        }
+        return new ChannelCatalog.Target(plan.channel(), displayVersion(release.tag()),
+                plan.repository(), release, assessment.asset(), plan.source());
+    }
+
+    private static String displayVersion(String tag) {
+        return tag != null && tag.length() > 1
+                && (tag.charAt(0) == 'v' || tag.charAt(0) == 'V')
+                ? tag.substring(1) : tag;
+    }
+
+    private static boolean isExactSource(OfficialRepository repository, String tag,
+                                         String source) {
+        try {
+            return ReleaseCatalog.exactMetadataUri(repository, tag).toString().equals(source);
+        } catch (IOException invalid) {
+            return false;
+        }
+    }
+
+    @FunctionalInterface
+    private interface TargetResolver {
+        ChannelCatalog.Target resolve() throws IOException, InterruptedException;
+    }
+
     private static boolean overlaps(Path first, Path second) {
         Path a = first.toAbsolutePath().normalize();
         Path b = second.toAbsolutePath().normalize();
@@ -513,11 +625,26 @@ public final class NormalInstallService {
                        FollowChannel channel, OfficialRepository repository, String version,
                        Set<String> requiredProducts, ReleaseCatalog.Release release,
                        ReleaseCatalog.Asset asset,
-                       String source, CheckConfiguration checkConfiguration) {
+                       String source, CheckConfiguration checkConfiguration,
+                       TargetKind targetKind) {
+        public Plan(Path registry, RegistrySnapshot registrySnapshot, Path destination,
+                    List<Path> missingParents, Path javaExecutable, int javaFeature,
+                    FollowChannel channel, OfficialRepository repository, String version,
+                    Set<String> requiredProducts, ReleaseCatalog.Release release,
+                    ReleaseCatalog.Asset asset, String source,
+                    CheckConfiguration checkConfiguration) {
+            this(registry, registrySnapshot, destination, missingParents, javaExecutable,
+                    javaFeature, channel, repository, version, requiredProducts, release, asset,
+                    source, checkConfiguration,
+                    OfficialYamlChannelCatalog.SOURCE.toString().equals(source)
+                            ? TargetKind.CURRENT_CHANNEL : TargetKind.HISTORICAL_EXACT);
+        }
+
         public Plan {
             java.util.Objects.requireNonNull(registrySnapshot, "registrySnapshot");
             java.util.Objects.requireNonNull(requiredProducts, "requiredProducts");
             java.util.Objects.requireNonNull(checkConfiguration, "checkConfiguration");
+            java.util.Objects.requireNonNull(targetKind, "targetKind");
             registry = registry.toAbsolutePath().normalize();
             destination = destination.toAbsolutePath().normalize();
             javaExecutable = javaExecutable.toAbsolutePath().normalize();
@@ -543,7 +670,9 @@ public final class NormalInstallService {
                 throw new IllegalArgumentException(impossible.getMessage(), impossible);
             }
             if (version == null || version.isBlank() || release == null || asset == null
-                    || !release.tag().equals("v" + version)
+                    || !version.equals(displayVersion(release.tag()))
+                    || OfficialYamlChannelCatalog.SOURCE.toString().equals(source)
+                    && !release.tag().equals("v" + version)
                     || !release.assets().contains(asset)
                     || source == null || source.isBlank()) {
                 throw new IllegalArgumentException(
@@ -552,7 +681,37 @@ public final class NormalInstallService {
             if (checkConfiguration == null) {
                 throw new IllegalArgumentException("check configuration is required");
             }
+            boolean currentSource =
+                    OfficialYamlChannelCatalog.SOURCE.toString().equals(source);
+            if ((targetKind == TargetKind.CURRENT_CHANNEL
+                    || targetKind == TargetKind.CAPTURED_CURRENT) && !currentSource) {
+                throw new IllegalArgumentException(
+                        "current normal install must use the official channel source");
+            }
+            if (targetKind == TargetKind.HISTORICAL_EXACT
+                    && !isExactSource(repository, release.tag(), source)) {
+                throw new IllegalArgumentException(
+                        "historical normal install must use its exact release source");
+            }
         }
+
+        /**
+         * True only when the release itself came from the authoritative current channel pointer.
+         */
+        public boolean currentChannelTarget() {
+            return targetKind != TargetKind.HISTORICAL_EXACT;
+        }
+
+        /** True when Home captured the current pointer once for this frame session. */
+        public boolean capturedCurrentTarget() {
+            return targetKind == TargetKind.CAPTURED_CURRENT;
+        }
+    }
+
+    public enum TargetKind {
+        CURRENT_CHANNEL,
+        CAPTURED_CURRENT,
+        HISTORICAL_EXACT
     }
 
     @FunctionalInterface

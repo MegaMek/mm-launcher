@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.megamek.launcher.channel.FollowChannel;
+import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.release.FreshInstaller;
 import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
@@ -12,10 +14,12 @@ import org.megamek.launcher.operation.OperationPhase;
 import org.megamek.launcher.operation.OperationType;
 import org.megamek.launcher.operation.ProgressUnit;
 
+import javax.imageio.ImageIO;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
 import javax.swing.SwingUtilities;
@@ -23,6 +27,9 @@ import javax.swing.JTextArea;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.GraphicsEnvironment;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Path;
@@ -158,16 +165,41 @@ class LauncherSwingSmokeTest {
                     "settings are persisted immediately without a save workflow");
             JPanel settingsSections = component(frame, "settingsSections");
             assertEquals(FirstLaunchPanel.BACKGROUND, settingsSections.getBackground());
-            assertNotNull(component(frame, "settingsUpdatesSection"));
-            assertNotNull(component(frame, "settingsGameJavaSection"));
-            assertNotNull(component(frame, "settingsDiagnosticsSection"));
+            JPanel updates = component(frame, "settingsUpdatesSection");
+            JPanel gameJava = component(frame, "settingsGameJavaSection");
+            JPanel diagnostics = component(frame, "settingsDiagnosticsSection");
+            assertFalse(updates.isOpaque());
+            assertFalse(gameJava.isOpaque());
+            assertFalse(diagnostics.isOpaque());
             assertNotNull(component(frame, "defaultJavaPath"));
-            assertNotNull(waitForButton(frame, "changeDefaultJavaButton"));
+            assertEquals("Java 21",
+                    ((JLabel) component(frame, "defaultJavaStatus")).getText());
+            JButton changeDefaultJava = waitForButton(frame, "changeDefaultJavaButton");
+            SwingUtilities.invokeAndWait(changeDefaultJava::doClick);
+            JDialog javaSelector = owned(frame, "Change default game Java");
+            assertEquals(FirstLaunchPanel.BACKGROUND,
+                    component(javaSelector, "javaSelectionDialogContent").getBackground());
+            assertTrue(component(javaSelector, "defaultJavaCandidateCombo")
+                    instanceof StyledComboBox<?>);
+            assertNotNull(find(javaSelector, "styledComboArrowButton"));
+            assertTrue(find(javaSelector, "confirmJavaSelectionButton")
+                    instanceof FirstLaunchButton);
+            assertTrue(find(javaSelector, "cancelJavaSelectionButton")
+                    instanceof FirstLaunchButton);
+            assertNull(find(javaSelector, "downloadJavaButton"),
+                    "Java acquisition remains explicitly deferred");
+            saveReviewImage("java-selector.png", javaSelector);
+            SwingUtilities.invokeAndWait(javaSelector::dispose);
             JButton logs = waitForButton(frame, "viewOperationLogsButton");
             SwingUtilities.invokeAndWait(logs::doClick);
             JDialog logViewer = owned(frame, "Local operation logs");
+            JPanel logContent = component(logViewer, "operationLogDialogContent");
+            assertEquals(FirstLaunchPanel.BACKGROUND, logContent.getBackground());
+            assertTrue(find(logViewer, "copyOperationLogButton") instanceof FirstLaunchButton);
+            assertTrue(find(logViewer, "closeOperationLogButton") instanceof FirstLaunchButton);
             waitFor(() -> findText(logViewer, "operationLogViewer").getText()
                     .contains("No local operation logs"));
+            saveReviewImage("logs.png", logViewer);
             SwingUtilities.invokeAndWait(logViewer::dispose);
             JButton installations = waitForButton(frame, "installationsButton");
             SwingUtilities.invokeAndWait(installations::doClick);
@@ -197,23 +229,90 @@ class LauncherSwingSmokeTest {
             });
             JDialog dialog = owned(frame, "Download an official release");
             JButton next = find(dialog, "nextReleasePageButton");
-            JButton fetch = find(dialog, "fetchReleasesButton");
+            JButton browse = find(dialog, "browseAllReleasesButton");
             JComboBox<?> product = findCombo(dialog, "downloadProductCombo");
             assertFalse(next.isEnabled());
             SwingUtilities.invokeAndWait(() -> product.setSelectedIndex(1));
             assertFalse(next.isEnabled());
 
-            SwingUtilities.invokeAndWait(fetch::doClick);
+            SwingUtilities.invokeAndWait(browse::doClick);
             waitFor(() -> next.isEnabled());
             assertEquals(List.of(1), services.pages);
 
             SwingUtilities.invokeAndWait(next::doClick);
             waitFor(() -> services.pages.size() == 2);
             waitFor(next::isEnabled);
-            closeOwned(frame, "Fetching official releases failed");
+            closeOwned(frame, "Fetching unclassified release history failed");
             SwingUtilities.invokeAndWait(next::doClick);
             waitFor(() -> services.pages.size() == 3);
             assertEquals(List.of(1, 2, 2), services.pages);
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void installPickerDefaultsAndCurrentFetchStaySeparateFromUnclassifiedHistory()
+            throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        PagingServices services = new PagingServices(temp.resolve("selected-target.json"));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                frame.setVisible(true);
+                frame.downloadDialog();
+            });
+            JDialog dialog = owned(frame, "Download an official release");
+            JComboBox<?> product = findCombo(dialog, "downloadProductCombo");
+            JComboBox<?> channel = findCombo(dialog, "downloadChannelCombo");
+            assertTrue(product instanceof StyledComboBox<?>);
+            assertTrue(channel instanceof StyledComboBox<?>);
+            assertNotNull(find(dialog, "styledComboArrowButton"));
+            assertEquals(OfficialRepository.MEKHQ, onEdt(product::getSelectedItem));
+            assertEquals(FollowChannel.MILESTONE, onEdt(channel::getSelectedItem));
+            assertEquals("Product", product.getAccessibleContext().getAccessibleName());
+            assertEquals("Channel", channel.getAccessibleContext().getAccessibleName());
+
+            JButton fetch = find(dialog, "fetchReleasesButton");
+            assertEquals("Fetch channel release", fetch.getText());
+            SwingUtilities.invokeAndWait(fetch::doClick);
+            waitFor(() -> {
+                JList<?> found = findList(dialog, "releaseList");
+                return found != null && found.getModel().getSize() == 1;
+            });
+            JList<?> list = findList(dialog, "releaseList");
+            assertEquals(1, services.currentFetches);
+            assertEquals(OfficialRepository.MEKHQ, services.currentRepository);
+            assertEquals(FollowChannel.MILESTONE, services.currentChannel);
+            assertTrue(services.pages.isEmpty(),
+                    "selected-channel fetch must not enumerate release history");
+            assertTrue(list.getModel().getElementAt(0).toString()
+                    .contains("MekHQ Milestone (0.51.0)"));
+            assertEquals(0, list.getSelectedIndex());
+
+            SwingUtilities.invokeAndWait(
+                    () -> channel.setSelectedItem(FollowChannel.DEVELOPMENT));
+            assertEquals(0, list.getModel().getSize(),
+                    "changing the channel invalidates the current target");
+
+            SwingUtilities.invokeAndWait(
+                    () -> find(dialog, "browseAllReleasesButton").doClick());
+            waitFor(() -> !services.pages.isEmpty()
+                    && findList(dialog, "releaseList").getModel().getSize() == 1);
+            assertEquals(List.of(1), services.pages);
+            assertTrue(findLabel(dialog, "releasePickerSourceExplanation").getText()
+                    .contains("Older releases are not labeled by channel"));
+            assertTrue(findList(dialog, "releaseList").getModel().getElementAt(0)
+                    .toString().contains("channel unclassified"));
+            SwingUtilities.invokeAndWait(
+                    () -> product.setSelectedItem(OfficialRepository.LAB));
+            assertEquals(0, findList(dialog, "releaseList").getModel().getSize(),
+                    "changing product invalidates historical results");
+            assertEquals("Selection changed; fetch a new result.",
+                    findLabel(dialog, "releasePickerStatus").getText());
+            assertFalse(find(dialog, "nextReleasePageButton").isEnabled());
+            assertFalse(find(dialog, "installReleaseButton").isEnabled());
         } finally {
             dispose(frame);
         }
@@ -229,7 +328,7 @@ class LauncherSwingSmokeTest {
             SwingUtilities.invokeAndWait(() -> {
                 frame.setVisible(true);
                 frame.install(OfficialRepository.MEGAMEK, "v-test", temp.resolve("destination"),
-                        "Test");
+                        "Test", FollowChannel.MILESTONE);
             });
             assertTrue(services.started.await(5, TimeUnit.SECONDS));
             assertFalse(services.wasEdt);
@@ -288,7 +387,8 @@ class LauncherSwingSmokeTest {
             SwingUtilities.invokeAndWait(() -> {
                 frame.setVisible(true);
                 frame.install(OfficialRepository.MEGAMEK, "v-test",
-                        temp.resolve("cancel-destination"), "Cancel test");
+                        temp.resolve("cancel-destination"), "Cancel test",
+                        FollowChannel.MILESTONE);
             });
             assertTrue(services.started.await(5, TimeUnit.SECONDS));
             JDialog progress = owned(frame, "Downloading and installing");
@@ -380,6 +480,7 @@ class LauncherSwingSmokeTest {
             assertFalse(bar.getString().contains("282000000"));
             assertTrue(bar.getAccessibleContext().getAccessibleDescription()
                     .contains("Downloaded 282 MB of 690 MB"));
+            saveReviewImage("download-progress.png", dialog);
 
             context.progress(OperationPhase.EXTRACT, 4_218, -1, ProgressUnit.FILES,
                     "Extracted 4218 archive entries");
@@ -464,6 +565,9 @@ class LauncherSwingSmokeTest {
         JButton fetch = onEdt(() -> find(picker, "fetchReleasesButton"));
         assertNotNull(fetch);
         assertTrue(onEdt(fetch::isEnabled));
+        JButton browse = onEdt(() -> find(picker, "browseAllReleasesButton"));
+        assertNotNull(browse);
+        assertEquals("Browse all releases…", browse.getText());
         assertFalse(onEdt(() -> find(picker, "installReleaseButton").isEnabled()));
         return picker;
     }
@@ -494,6 +598,17 @@ class LauncherSwingSmokeTest {
             if (child instanceof JComboBox<?> combo && name.equals(combo.getName())) return combo;
             if (child instanceof Container container) {
                 JComboBox<?> found = findCombo(container, name);
+                if (found != null) return found;
+            }
+        }
+        return null;
+    }
+
+    private static JList<?> findList(Container root, String name) {
+        for (Component child : root.getComponents()) {
+            if (child instanceof JList<?> list && name.equals(list.getName())) return list;
+            if (child instanceof Container container) {
+                JList<?> found = findList(container, name);
                 if (found != null) return found;
             }
         }
@@ -605,6 +720,27 @@ class LauncherSwingSmokeTest {
         return cast;
     }
 
+    private static void saveReviewImage(String name, Container component) throws Exception {
+        String directory = System.getenv("MM_LAUNCHER_REVIEW_IMAGES");
+        if (directory == null) return;
+        BufferedImage image = onEdt(() -> {
+            BufferedImage rendered = new BufferedImage(component.getWidth(),
+                    component.getHeight(), BufferedImage.TYPE_INT_ARGB);
+            Graphics2D graphics = rendered.createGraphics();
+            try {
+                graphics.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
+                        RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                component.printAll(graphics);
+            } finally {
+                graphics.dispose();
+            }
+            return rendered;
+        });
+        Path path = Path.of(directory);
+        java.nio.file.Files.createDirectories(path);
+        ImageIO.write(image, "PNG", path.resolve(name).toFile());
+    }
+
     private static Path createSuite(Path root) throws Exception {
         java.nio.file.Files.createDirectory(root);
         java.nio.file.Files.createDirectories(root.resolve("data"));
@@ -622,9 +758,22 @@ class LauncherSwingSmokeTest {
 
     private static final class PagingServices extends LauncherServices {
         final List<Integer> pages = java.util.Collections.synchronizedList(new ArrayList<>());
+        volatile int currentFetches;
+        volatile OfficialRepository currentRepository;
+        volatile FollowChannel currentChannel;
 
         PagingServices(Path registry) {
             super(registry);
+        }
+
+        @Override
+        public QuickInstallOption quickInstallOption(OfficialRepository repository,
+                                                     FollowChannel channel) {
+            currentFetches++;
+            currentRepository = repository;
+            currentChannel = channel;
+            return QuickInstallTestData.snapshot("0.51.0", "0.52.0")
+                    .option(new QuickInstallOption.Key(repository, channel));
         }
 
         @Override public ReleaseCatalog.Page releases(OfficialRepository repository, int page)
@@ -633,7 +782,18 @@ class LauncherSwingSmokeTest {
             if (page == 2 && pages.stream().filter(value -> value == 2).count() == 1) {
                 throw new IOException("fixture page failure");
             }
-            return new ReleaseCatalog.Page(page, 10, List.of(), true);
+            String tag = "v0.50." + page;
+            ReleaseCatalog.Asset asset = new ReleaseCatalog.Asset(
+                    repository.assetPrefix() + tag + ".tar.gz", 4096,
+                    "sha256:" + "b".repeat(64),
+                    java.net.URI.create("https://github.com/" + repository.slug()
+                            + "/releases/download/" + tag + "/"
+                            + repository.assetPrefix() + tag + ".tar.gz"));
+            ReleaseCatalog.Release release = new ReleaseCatalog.Release(tag,
+                    "Mutable title must not classify this row", false, false,
+                    java.net.URI.create("https://github.com/" + repository.slug()
+                            + "/releases/tag/" + tag), List.of(asset));
+            return new ReleaseCatalog.Page(page, 10, List.of(release), true);
         }
     }
 
@@ -648,9 +808,7 @@ class LauncherSwingSmokeTest {
             super(registry);
         }
 
-        @Override public FreshInstaller.Result install(OfficialRepository repository, String tag,
-                                                       Path destination, String name,
-                                                       PrintStream progress)
+        private FreshInstaller.Result failInstall(PrintStream progress)
                 throws IOException, InterruptedException {
             attempts++;
             streams.add(progress);
@@ -661,12 +819,11 @@ class LauncherSwingSmokeTest {
             throw new IOException("fixture install failure");
         }
 
-        @Override public FreshInstaller.Result install(OfficialRepository repository, String tag,
-                                                       Path destination, String name,
-                                                       PrintStream progress,
-                                                       OperationContext context)
+        @Override public FreshInstaller.Result install(
+                OfficialRepository repository, String tag, Path destination, String name,
+                FollowChannel channel, PrintStream progress, OperationContext context)
                 throws IOException, InterruptedException {
-            return install(repository, tag, destination, name, progress);
+            return failInstall(progress);
         }
     }
 }

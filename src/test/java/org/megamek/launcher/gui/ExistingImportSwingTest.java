@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.launch.ApplicationLauncher;
 import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.launch.ProcessRunner;
@@ -11,6 +12,7 @@ import org.megamek.launcher.onboarding.InstallationInspector;
 import org.megamek.launcher.registry.RegistryData;
 import org.megamek.launcher.registry.RegistryStore;
 import org.megamek.launcher.release.ReleaseTransport;
+import org.megamek.launcher.update.ReceiptStore;
 
 import javax.swing.JButton;
 import javax.swing.JLabel;
@@ -27,7 +29,11 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
+import java.util.function.Supplier;
 import java.util.jar.Attributes;
 import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
@@ -43,6 +49,58 @@ class ExistingImportSwingTest {
     @TempDir Path temp;
 
     @Test
+    void directImportRemainsAvailableWhileQuickInstallMetadataIsLoading()
+            throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        Path existing = suite("loading-import", List.of("megamek"));
+        Path registry = temp.resolve("loading-import-registry.json");
+        CountDownLatch snapshotStarted = new CountDownLatch(1);
+        CountDownLatch releaseSnapshot = new CountDownLatch(1);
+        AtomicInteger snapshots = new AtomicInteger();
+        LauncherServices services = services(registry, new RecordingRunner(), () -> {
+            snapshots.incrementAndGet();
+            snapshotStarted.countDown();
+            try {
+                releaseSnapshot.await();
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(interrupted);
+            }
+            return QuickInstallTestData.snapshot("0.51.0", "0.52.0");
+        });
+        RecordingPrompts prompts = new RecordingPrompts(List.of(existing));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, prompts));
+        try {
+            onEdt(() -> {
+                frame.showWindow();
+                return null;
+            });
+            assertTrue(snapshotStarted.await(5, TimeUnit.SECONDS));
+            JButton importButton = waitFor(() -> findButton(frame, "useExistingCopyButton"));
+            assertTrue(importButton.isEnabled());
+            assertFalse(waitFor(() -> findButton(
+                    frame, "downloadAndInstallButton")).isEnabled());
+
+            onEdt(() -> {
+                importButton.doClick();
+                return null;
+            });
+
+            assertNotNull(waitFor(() -> findButton(frame, "launch-megamek-button")));
+            releaseSnapshot.countDown();
+            Thread.sleep(100);
+            assertNotNull(onEdt(() -> findButton(frame, "launch-megamek-button")));
+            assertNull(onEdt(() -> find(frame, "firstLaunchSplitButton")));
+            assertEquals(1, snapshots.get());
+            assertEquals(1, prompts.folderRequests);
+        } finally {
+            releaseSnapshot.countDown();
+            dispose(frame);
+        }
+    }
+
+    @Test
     void visibleAndAdvancedActionsShareAtomicImportAndHomeShowsActualProducts()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
@@ -52,9 +110,7 @@ class ExistingImportSwingTest {
         Path registry = temp.resolve("registry.json");
         RecordingRunner runner = new RecordingRunner();
         LauncherServices services = services(registry, runner);
-        RecordingPrompts prompts = new RecordingPrompts(
-                List.of(megaMek, full), List.of("Imported MegaMek", "Imported MekHQ"),
-                List.of(true, true));
+        RecordingPrompts prompts = new RecordingPrompts(List.of(megaMek, full));
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services, prompts));
         try {
             onEdt(() -> {
@@ -71,17 +127,14 @@ class ExistingImportSwingTest {
                 visibleImport.doClick();
                 return null;
             });
-            waitUntil(() -> prompts.completed.size() == 1);
-            assertTrue(prompts.confirmations.getFirst().contains("Programs: MegaMek"));
-            assertFalse(prompts.confirmations.getFirst().contains("MegaMekLab"));
-            assertTrue(prompts.confirmations.getFirst().contains("Java 21 detected"));
-            assertTrue(prompts.confirmations.getFirst().contains(
-                    "Existing files will stay where they are and will not be moved"));
             assertNotNull(waitFor(() -> findButton(frame, "launch-megamek-button")));
             assertNull(onEdt(() -> findButton(frame, "launch-mekhq-button")));
             assertNull(onEdt(() -> findButton(frame, "launch-lab-button")));
-            assertTrue(prompts.completed.getFirst().contains(
-                    "included applications as preferred"));
+            assertFalse(hasShowingDialog(frame, "Input"));
+            assertFalse(hasShowingDialog(frame, "Confirm existing installation"));
+            assertFalse(hasShowingDialog(frame, "Import complete"));
+            assertEquals("MegaMek existing installation",
+                    services.loadHome().preferred().name());
 
             JButton installations =
                     waitFor(() -> findButton(frame, "manageInstallationsButton"));
@@ -95,37 +148,64 @@ class ExistingImportSwingTest {
                 advancedImport.doClick();
                 return null;
             });
-            waitUntil(() -> prompts.completed.size() == 2);
-            assertTrue(prompts.confirmations.get(1).contains(
-                    "Programs: MegaMek, MegaMekLab, MekHQ"));
-            assertTrue(prompts.completed.get(1).contains(
-                    "Existing application preferences were not changed"));
-            assertNotNull(waitFor(() -> find(frame, "installationCards")),
-                    "advanced import remains on Installations");
+            assertNotNull(waitFor(() -> findButton(frame, "manageInstallationsButton")),
+                    "successful import follows the normal install flow back to Home");
+            assertFalse(hasShowingDialog(frame, "Input"));
+            assertFalse(hasShowingDialog(frame, "Confirm existing installation"));
+            assertFalse(hasShowingDialog(frame, "Import complete"));
 
             RegistryData data = services.readRegistry();
             String launcherJava = currentJava();
             assertEquals(2, data.installations().size());
-            assertEquals("Imported MegaMek", services.loadHome().preferred().name());
+            assertEquals("MegaMek existing installation",
+                    services.loadHome().preferred().name());
+            assertTrue(data.installations().stream().anyMatch(record ->
+                    "MekHQ existing installation".equals(record.name())));
             assertTrue(data.installations().stream().allMatch(record ->
                     record.javaExecutable().equals(launcherJava)));
             assertEquals(2, prompts.folderRequests);
             assertTrue(runner.commands.stream().allMatch(command ->
                     command.equals(List.of(launcherJava, "-version"))));
+            ChannelPreferenceStore channels = new ChannelPreferenceStore();
+            for (var record : data.installations()) {
+                assertFalse(Files.exists(channels.path(registry, record.id())),
+                        "an imported folder must not acquire a channel sidecar");
+                assertFalse(Files.exists(new ReceiptStore().receiptPath(registry, record.id())),
+                        "an imported folder must remain receipt-less");
+            }
+
+            JButton manageAgain = waitFor(() -> findButton(frame,
+                    "manageInstallationsButton"));
+            onEdt(() -> {
+                manageAgain.doClick();
+                return null;
+            });
+            for (var record : data.installations()) {
+                JLabel provenance = waitFor(() -> (JLabel) find(frame,
+                        "installationProvenance-" + record.id()));
+                assertEquals("Imported copy · Launch only · Updates unavailable",
+                        provenance.getText());
+                assertNotNull(waitFor(() -> findButton(frame,
+                        "enableManagedUpdatesButton-" + record.id())));
+            }
+            assertNull(onEdt(() -> findButton(frame, "chooseChannelButton")));
+            assertNull(onEdt(() -> findButton(frame, "updateChecksButton")));
+            assertNull(onEdt(() -> findButton(frame, "checkUpdatesButton")));
+            assertNull(onEdt(() -> findButton(frame, "applyUpdateButton")));
+            assertNull(onEdt(() -> findButton(frame, "recoverUpdateButton")));
         } finally {
             dispose(frame);
         }
     }
 
     @Test
-    void cancellingRealConfirmationLeavesRegistryAndSelectedFilesUntouched() throws Exception {
+    void cancellingFolderChoiceLeavesRegistryAndSelectedFilesUntouched() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
         Path root = suite("cancelled", List.of("megamek"));
         Map<Path, Long> before = inventory(root);
         Path registry = temp.resolve("cancelled-registry.json");
-        RecordingPrompts prompts = new RecordingPrompts(List.of(root), List.of("Cancelled"),
-                List.of(false));
+        RecordingPrompts prompts = new RecordingPrompts(List.of());
         LauncherFrame frame = onEdt(() -> new LauncherFrame(
                 services(registry, new RecordingRunner()), prompts));
         try {
@@ -138,11 +218,9 @@ class ExistingImportSwingTest {
                 importButton.doClick();
                 return null;
             });
-            waitUntil(() -> prompts.confirmations.size() == 1);
-            waitUntil(() -> !hasShowingDialog(frame, "Inspecting existing installation"));
             assertFalse(Files.exists(registry));
             assertEquals(before, inventory(root));
-            assertTrue(prompts.completed.isEmpty());
+            assertEquals(1, prompts.folderRequests);
             assertNotNull(waitFor(() -> findButton(frame, "useExistingCopyButton")));
         } finally {
             dispose(frame);
@@ -150,6 +228,13 @@ class ExistingImportSwingTest {
     }
 
     private LauncherServices services(Path registry, RecordingRunner runner) {
+        return services(registry, runner,
+                () -> QuickInstallTestData.snapshot("0.51.0", "0.52.0"));
+    }
+
+    private LauncherServices services(
+            Path registry, RecordingRunner runner,
+            Supplier<org.megamek.launcher.channel.QuickInstallSnapshot> snapshots) {
         ReleaseTransport noNetwork = new ReleaseTransport() {
             @Override
             public Response get(URI uri, String accept) {
@@ -160,7 +245,7 @@ class ExistingImportSwingTest {
                 noNetwork, new JavaRuntime(runner), new ApplicationLauncher(runner)) {
             @Override public org.megamek.launcher.channel.QuickInstallSnapshot
                     quickInstallSnapshot() {
-                return QuickInstallTestData.snapshot("0.51.0", "0.52.0");
+                return snapshots.get();
             }
         };
     }
@@ -300,43 +385,17 @@ class ExistingImportSwingTest {
 
     private static final class RecordingPrompts implements LauncherFrame.ExistingImportPrompts {
         private final Deque<Path> folders;
-        private final Deque<String> names;
-        private final Deque<Boolean> answers;
-        private final List<String> confirmations = new ArrayList<>();
-        private final List<String> completed = new ArrayList<>();
         private int folderRequests;
 
-        private RecordingPrompts(List<Path> folders, List<String> names, List<Boolean> answers) {
+        private RecordingPrompts(List<Path> folders) {
             this.folders = new ArrayDeque<>(folders);
-            this.names = new ArrayDeque<>(names);
-            this.answers = new ArrayDeque<>(answers);
         }
 
         @Override
         public Path chooseFolder(Component parent) {
             assertTrue(SwingUtilities.isEventDispatchThread());
             folderRequests++;
-            return folders.removeFirst();
-        }
-
-        @Override
-        public String chooseName(Component parent, String defaultName) {
-            assertTrue(SwingUtilities.isEventDispatchThread());
-            assertFalse(defaultName.isBlank());
-            return names.removeFirst();
-        }
-
-        @Override
-        public boolean confirm(Component parent, String details) {
-            assertTrue(SwingUtilities.isEventDispatchThread());
-            confirmations.add(details);
-            return answers.removeFirst();
-        }
-
-        @Override
-        public void completed(Component parent, String message) {
-            assertTrue(SwingUtilities.isEventDispatchThread());
-            completed.add(message);
+            return folders.isEmpty() ? null : folders.removeFirst();
         }
     }
 }

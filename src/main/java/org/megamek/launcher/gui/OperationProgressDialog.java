@@ -395,6 +395,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         if (supplied == null || supplied.isBlank()) return null;
         String singleLine = supplied.replaceAll("\\s+", " ").trim();
         String lower = singleLine.toLowerCase(java.util.Locale.ROOT);
+        if (lower.startsWith("adoption detail:")) return null;
         boolean pathOrAddress = singleLine.contains("\\") || singleLine.contains("/")
                 || lower.contains("://") || lower.startsWith("file:")
                 || lower.matches("^[a-z]:.*");
@@ -409,10 +410,14 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         return switch (current) {
             case METADATA -> type == OperationType.IMPORT_EXISTING
                     ? "Checking the selected installation…"
+                    : type == OperationType.ADOPT_EXISTING
+                    ? "Checking the imported copy…"
                     : "Checking release information…";
             case DOWNLOAD -> "Downloading the verified package…";
             case VERIFY -> type == OperationType.IMPORT_EXISTING
                     ? "Checking installation compatibility…"
+                    : type == OperationType.ADOPT_EXISTING
+                    ? "Comparing the existing files safely…"
                     : "Checking the downloaded package…";
             case EXTRACT -> "Processing application files…";
             case PLAN -> "Reviewing the planned changes…";
@@ -435,6 +440,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         String operation = switch (type) {
             case FRESH_INSTALL -> "installation";
             case IMPORT_EXISTING -> "import";
+            case ADOPT_EXISTING -> "verification";
             case UPDATE_PREVIEW -> "preview";
             case UPDATE_APPLY -> "update";
             case RECOVERY -> "recovery";

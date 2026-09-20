@@ -6,6 +6,8 @@ import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.megamek.launcher.Main;
+import org.megamek.launcher.channel.ChannelPreferenceStore;
+import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.registry.RegistryData;
 import org.megamek.launcher.registry.RegistryStore;
 
@@ -58,7 +60,8 @@ class FreshInstallTest {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         int result = Main.run(new String[]{"install-release", "--application", "megamek",
                         "--tag", "v1.2.3", "--destination", destination.toString(),
-                        "--registry", registry.toString(), "--name", "Downloaded"},
+                        "--registry", registry.toString(), "--name", "Downloaded",
+                        "--channel", "milestone"},
                 new PrintStream(output), new PrintStream(new ByteArrayOutputStream()), installing);
 
         assertEquals(0, result);
@@ -69,7 +72,28 @@ class FreshInstallTest {
         assertFalse(data.installations().getFirst().updateEligible());
         assertTrue(data.installations().getFirst().products().stream()
                 .anyMatch(product -> product.key().equals("megamek")));
+        assertEquals(FollowChannel.MILESTONE, new ChannelPreferenceStore()
+                .read(registry, data, data.installations().getFirst()).preference().channel());
         assertTrue(output.toString(StandardCharsets.UTF_8).contains("NOT LAUNCHED"));
+    }
+
+    @Test
+    void cliRequiresFixedChannelBeforeAnyInstallRequestOrWrite() {
+        Path registry = temp.resolve("missing-channel-registry.json");
+        Path destination = temp.resolve("missing-channel-install");
+        QueueTransport network = new QueueTransport();
+        ByteArrayOutputStream errors = new ByteArrayOutputStream();
+
+        int result = Main.run(new String[]{"install-release", "--application", "megamek",
+                        "--tag", "v1.2.3", "--destination", destination.toString(),
+                        "--registry", registry.toString(), "--name", "Downloaded"},
+                new PrintStream(new ByteArrayOutputStream()), new PrintStream(errors), network);
+
+        assertEquals(2, result);
+        assertTrue(errors.toString(StandardCharsets.UTF_8).contains("--channel"));
+        assertTrue(network.uris.isEmpty());
+        assertFalse(Files.exists(registry));
+        assertFalse(Files.exists(destination));
     }
 
     @Test
@@ -144,7 +168,8 @@ class FreshInstallTest {
         ByteArrayOutputStream duplicateError = new ByteArrayOutputStream();
         int duplicate = Main.run(new String[]{"install-release", "--application", "megamek",
                         "--tag", "v1.2.3", "--destination", temp.resolve("duplicate").toString(),
-                        "--registry", registry.toString(), "--name", "Existing"},
+                        "--registry", registry.toString(), "--name", "Existing",
+                        "--channel", "milestone"},
                 new PrintStream(new ByteArrayOutputStream()), new PrintStream(duplicateError),
                 duplicateUnused);
         assertEquals(2, duplicate);
@@ -229,7 +254,8 @@ class FreshInstallTest {
                            String name, ByteArrayOutputStream errors) {
         return Main.run(new String[]{"install-release", "--application", "megamek",
                         "--tag", "v1.2.3", "--destination", destination.toString(),
-                        "--registry", registry.toString(), "--name", name},
+                        "--registry", registry.toString(), "--name", name,
+                        "--channel", "milestone"},
                 new PrintStream(new ByteArrayOutputStream()), new PrintStream(errors), transport);
     }
 

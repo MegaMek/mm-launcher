@@ -49,12 +49,14 @@ class OtherCopyCheckSwingTest {
             Component originalHome = waitFor(() -> find(frame, "managedHomePanel"));
             services.release.countDown();
             waitUntil(() -> services.calls.get() == 1);
-            JButton summary = waitFor(
-                    () -> find(frame, "installationUpdateSummary"));
-            waitUntil(() -> "1 installation has updates".equals(summary.getText()));
+            JButton installations = waitFor(
+                    () -> find(frame, "manageInstallationsButton"));
+            waitUntil(() -> "Installations (1 update)".equals(installations.getText()));
+            JLabel information = waitFor(() -> find(frame, "homeInformationMessage"));
+            waitUntil(() -> "1 installation has an update".equals(information.getText()));
             assertSame(originalHome, onEdt(() -> find(frame, "managedHomePanel")),
-                    "late other-copy checks update the summary without replacing Home");
-            SwingUtilities.invokeAndWait(summary::doClick);
+                    "late other-copy checks update navigation without replacing Home");
+            SwingUtilities.invokeAndWait(installations::doClick);
             JLabel status = waitFor(() -> find(frame,
                     "installationStatus-" + services.opted.id()));
             waitUntil(() -> status.getText().contains("Update available"));
@@ -90,25 +92,25 @@ class OtherCopyCheckSwingTest {
             services.release.countDown();
             dispose(frame);
         }
+    }
 
-        @Test
-        void globalMasterOffGatesOptedInCopiesWithoutChangingTheirPreference() throws Exception {
-            Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
-            FakeServices services = new FakeServices(temp.resolve("master-off.json"));
-            services.automaticChecks = false;
-            LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
-            try {
-                SwingUtilities.invokeAndWait(frame::showWindow);
-                JButton summary = waitFor(() -> find(frame, "installationUpdateSummary"));
-                assertEquals("Some versions could not be checked", summary.getText(),
-                        "unchecked/unknown copies never produce an all-current summary");
-                assertEquals(0, services.calls.get());
-                assertTrue(services.preferences.get(services.opted.id())
-                        .preference().checkOnOpen(),
-                        "the master gate does not rewrite an installation's explicit opt-in");
-            } finally {
-                dispose(frame);
-            }
+    @Test
+    void globalMasterOffGatesOptedInCopiesWithoutChangingTheirPreference() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
+        FakeServices services = new FakeServices(temp.resolve("master-off.json"));
+        services.automaticChecks = false;
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
+            assertEquals("Installations", installations.getText(),
+                    "unknown checks do not produce a false update count");
+            assertEquals(0, services.calls.get());
+            assertTrue(services.preferences.get(services.opted.id())
+                    .preference().checkOnOpen(),
+                    "the master gate does not rewrite an installation's explicit opt-in");
+        } finally {
+            dispose(frame);
         }
     }
 
@@ -152,14 +154,22 @@ class OtherCopyCheckSwingTest {
         @Override
         public HomeState loadHome() {
             ChannelPreferenceStore.ReadResult channel = preferences.get(main.id());
+            Map<String, InstallationStatus> statuses = new LinkedHashMap<>();
+            for (InstallationRecord record : records) {
+                ChannelPreferenceStore.ReadResult fixed = preferences.get(record.id());
+                boolean managed = fixed.status() == ChannelPreferenceStore.Status.CONFIGURED;
+                statuses.put(record.id(), new InstallationStatus(fixed,
+                        new UpdatePreviewService.Eligibility(record, managed,
+                                managed ? "fixture managed" : "fixture imported",
+                                null, null), false, null));
+            }
             return new HomeState(new RegistryData(
                     org.megamek.launcher.registry.RegistryStore.SCHEMA,
                     main.id(), records), main,
                     new Inspection(main.canonicalRoot(), main.products(),
                             main.observedBuild(), "fixture"),
-                    null, new UpdatePreviewService.Eligibility(main, false,
-                    "fixture imported", null, null), false, channel,
-                    Map.of("megamek", main), Map.of(), automaticChecks);
+                    null, statuses.get(main.id()).previewEligibility(), false, channel,
+                    Map.of("megamek", main), Map.copyOf(statuses), automaticChecks);
         }
 
         @Override

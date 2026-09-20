@@ -61,7 +61,7 @@ final class NormalInstallConfirmationDialog extends JDialog {
                                     String product, List<String> programs, GuiScale scale,
                                     TransitionAction changeAction,
                                     TransitionAction installAction) {
-        super(owner, "Install latest " + product + " " + plan.channel(), false);
+        super(owner, releaseLabel(plan, product), false);
         this.scale = java.util.Objects.requireNonNull(scale, "scale");
         this.changeAction = java.util.Objects.requireNonNull(changeAction, "changeAction");
         this.installAction = java.util.Objects.requireNonNull(installAction, "installAction");
@@ -140,10 +140,8 @@ final class NormalInstallConfirmationDialog extends JDialog {
 
         Font base = UIManager.getFont("Label.font");
         if (base == null) base = new Font(Font.DIALOG, Font.PLAIN, 12);
-        JLabel heading = label("Install latest " + product + " " + plan.channel(),
+        JLabel heading = label(releaseLabel(plan, product),
                 "normalInstallHeading", scale.font(base, Font.BOLD, 23f), TEXT);
-        JLabel version = label("Version " + plan.version(), "normalInstallVersion",
-                scale.font(base, Font.BOLD, 15f), TEXT);
         JLabel includes = label("Includes: " + String.join(", ", programs),
                 "normalInstallIncludes", scale.font(base, Font.PLAIN, 14f), TEXT);
         JLabel size = label("Download: " + formatBinaryBytes(plan.asset().size()),
@@ -179,8 +177,6 @@ final class NormalInstallConfirmationDialog extends JDialog {
         destinationRow.add(changeLocation, BorderLayout.EAST);
 
         summary.add(heading);
-        summary.add(Box.createVerticalStrut(scale.scaleForGUI(5)));
-        summary.add(version);
         summary.add(Box.createVerticalStrut(scale.scaleForGUI(10)));
         summary.add(includes);
         summary.add(Box.createVerticalStrut(scale.scaleForGUI(4)));
@@ -191,6 +187,14 @@ final class NormalInstallConfirmationDialog extends JDialog {
         summary.add(destinationRow);
         alignLeft(summary);
         return summary;
+    }
+
+    private static String releaseLabel(NormalInstallService.Plan plan, String product) {
+        return plan.currentChannelTarget()
+                ? VersionDisplay.installLatest(
+                product, plan.channel().toString(), plan.version())
+                : "Install " + VersionDisplay.programChannelVersion(
+                product, null, plan.version());
     }
 
     private JLabel label(String text, String name, Font font, Color color) {

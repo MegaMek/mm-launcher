@@ -14,6 +14,7 @@ import javax.swing.JLabel;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.accessibility.AccessibleRole;
@@ -78,6 +79,11 @@ class FirstLaunchPanelTest {
                 FirstLaunchSplitButton split = (FirstLaunchSplitButton)
                         findComponent(panel, "firstLaunchSplitButton");
                 assertEquals(5, split.popupMenu().getComponentCount());
+                assertFalse(find(panel, "downloadAndInstallButton").isEnabled());
+                assertFalse(find(panel, "downloadAndInstallButton").isFocusable());
+                assertFalse(find(panel, "downloadOptionsButton").isEnabled());
+                assertFalse(find(panel, "downloadOptionsButton").isFocusable());
+                assertTrue(find(panel, "useExistingCopyButton").isEnabled());
                 for (Component component : split.popupMenu().getComponents()) {
                     JMenuItem item = (JMenuItem) component;
                     assertFalse(item.isEnabled());
@@ -130,9 +136,9 @@ class FirstLaunchPanelTest {
                 assertTrue(find(panel, "useExistingCopyButton").isFocusable());
                 assertEquals("Use existing installation",
                         find(panel, "useExistingCopyButton").getText());
-                assertEquals("Install latest MekHQ Milestone",
+                assertEquals("Install latest MekHQ Milestone (0.51.0)",
                         find(panel, "downloadAndInstallButton").getText());
-                assertEquals("Install latest MekHQ Milestone",
+                assertEquals("Install latest MekHQ Milestone (0.51.0)",
                         find(panel, "downloadAndInstallButton").getAccessibleContext()
                                 .getAccessibleName());
                 assertNull(find(panel, "downloadAndInstallButton").getToolTipText());
@@ -229,11 +235,17 @@ class FirstLaunchPanelTest {
                     assertTrue(component.isEnabled());
                 }
                 split.setOptionsUnavailable("Offline fixture");
-                for (Component component : split.popupMenu().getComponents()) {
+                assertEquals(6, split.popupMenu().getComponentCount());
+                for (int index = 0; index < 5; index++) {
+                    Component component = split.popupMenu().getComponent(index);
                     assertFalse(component.isEnabled());
                     assertTrue(((JMenuItem) component).getAccessibleContext()
                             .getAccessibleDescription().contains("Offline fixture"));
                 }
+                JMenuItem retry = (JMenuItem) split.popupMenu().getComponent(5);
+                assertTrue(retry.isEnabled());
+                assertTrue(retry.getAccessibleContext().getAccessibleDescription()
+                        .contains("Offline fixture"));
             } finally {
                 if (previous == null) UIManager.getDefaults().remove("Theme.highContrast");
                 else UIManager.put("Theme.highContrast", previous);
@@ -282,7 +294,6 @@ class FirstLaunchPanelTest {
                     Files.newOutputStream(root.resolve("MegaMek.jar")), manifest)) {
             }
             var record = services.register("Test copy", root);
-            services.setChannel(record, org.megamek.launcher.channel.FollowChannel.DEVELOPMENT, false);
             byte[] before = Files.readAllBytes(registry);
             onEdt(() -> { frame.showWindow(); return null; });
             waitFor(() -> find(frame, "launch-megamek-button") != null);
@@ -294,8 +305,9 @@ class FirstLaunchPanelTest {
             assertNotNull(managed);
             assertNotNull(artwork);
             assertNotNull(deck);
-            assertEquals("Version unknown · Development", onEdt(() ->
-                    ((JLabel) findComponent(frame, "releaseChannelLabel")).getText()));
+            assertEquals("Launch MegaMek (unknown)", onEdt(() ->
+                    find(frame, "launch-megamek-button").getText()));
+            assertNull(onEdt(() -> findComponent(frame, "releaseChannelLabel")));
             onEdt(() -> {
                 frame.setSize(820, 560);
                 frame.validate();
@@ -331,6 +343,8 @@ class FirstLaunchPanelTest {
             JLabel status = (JLabel) onEdt(() -> findComponent(frame, "homeStatusLabel"));
             assertNotNull(status);
             assertEquals(FirstLaunchPanel.MUTED, status.getForeground());
+            assertEquals(SwingConstants.CENTER, status.getHorizontalAlignment());
+            assertEquals(Component.CENTER_ALIGNMENT, status.getAlignmentX());
         } finally {
             onEdt(() -> {
                 for (var window : frame.getOwnedWindows()) window.dispose();
@@ -341,7 +355,7 @@ class FirstLaunchPanelTest {
     }
 
     @Test
-    void sixChoiceLookupContinuesWhileStyledMenuOpensWithoutStartingAnotherRequest()
+    void sixChoiceLookupDisablesInstallSegmentsWithoutBlockingExistingImport()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         CountDownLatch started = new CountDownLatch(1);
@@ -367,9 +381,12 @@ class FirstLaunchPanelTest {
             onEdt(() -> { frame.showWindow(); return null; });
             waitFor(() -> findComponent(frame, "firstLaunchPanel") != null);
             assertTrue(started.await(5, TimeUnit.SECONDS));
-            assertEquals("Install latest MekHQ Milestone", onEdt(() ->
+            assertEquals("Install latest MekHQ Milestone (Loading…)", onEdt(() ->
                     find(frame, "downloadAndInstallButton").getText()));
-            assertTrue(onEdt(() -> find(frame, "downloadAndInstallButton").isEnabled()));
+            assertFalse(onEdt(() -> find(frame, "downloadAndInstallButton").isEnabled()));
+            assertFalse(onEdt(() -> find(frame, "downloadAndInstallButton").isFocusable()));
+            assertFalse(onEdt(() -> find(frame, "downloadOptionsButton").isEnabled()));
+            assertFalse(onEdt(() -> find(frame, "downloadOptionsButton").isFocusable()));
             assertTrue(onEdt(() -> find(frame, "useExistingCopyButton").isEnabled()));
             onEdt(() -> {
                 find(frame, "downloadOptionsButton").doClick();
@@ -377,7 +394,7 @@ class FirstLaunchPanelTest {
             });
             FirstLaunchSplitButton split = (FirstLaunchSplitButton) onEdt(
                     () -> findComponent(frame, "firstLaunchSplitButton"));
-            assertTrue(onEdt(() -> split.popupMenu().isVisible()));
+            assertFalse(onEdt(() -> split.popupMenu().isVisible()));
             assertEquals(1, requests.get(), "menu opening must start zero new requests");
             for (Component component : split.popupMenu().getComponents()) {
                 assertFalse(component.isEnabled());
@@ -387,6 +404,8 @@ class FirstLaunchPanelTest {
             waitFor(() -> "Install latest MekHQ Milestone (9.9.9)".equals(
                     find(frame, "downloadAndInstallButton").getText()));
             assertFalse(interrupted.get());
+            assertTrue(onEdt(() -> find(frame, "downloadAndInstallButton").isEnabled()));
+            assertTrue(onEdt(() -> find(frame, "downloadOptionsButton").isEnabled()));
             assertEquals("Install latest MekHQ Development (9.10.0)", onEdt(() ->
                     ((JMenuItem) split.popupMenu().getComponent(2)).getText()));
             onEdt(() -> {
@@ -404,7 +423,7 @@ class FirstLaunchPanelTest {
     }
 
     @Test
-    void unavailableSnapshotKeepsTruthfulCaptionAndDisabledFiveChoiceMenu() throws Exception {
+    void unavailableSnapshotDisablesInstallAndRetriesOnlyFromExplicitCommand() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         AtomicInteger requests = new AtomicInteger();
         LauncherServices services = new LauncherServices(temp.resolve("offline.json")) {
@@ -417,18 +436,24 @@ class FirstLaunchPanelTest {
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             onEdt(() -> { frame.showWindow(); return null; });
-            waitFor(() -> menuItem(frame, "latestMegaMekMilestoneMenuItem").getText()
-                    .endsWith("(Unavailable)"));
-            assertEquals("Install latest MekHQ Milestone", onEdt(() ->
+            waitFor(() -> {
+                JMenuItem item = menuItem(frame, "latestMegaMekMilestoneMenuItem");
+                return item != null && item.getText().endsWith("(Unavailable)");
+            });
+            assertEquals("Install latest MekHQ Milestone (Unavailable)", onEdt(() ->
                     find(frame, "downloadAndInstallButton").getText()));
-            assertTrue(onEdt(() -> find(frame, "downloadAndInstallButton").isEnabled()));
+            assertFalse(onEdt(() -> find(frame, "downloadAndInstallButton").isEnabled()));
             FirstLaunchSplitButton split = (FirstLaunchSplitButton) onEdt(
                     () -> findComponent(frame, "firstLaunchSplitButton"));
-            assertEquals(5, split.popupMenu().getComponentCount());
-            for (Component component : split.popupMenu().getComponents()) {
+            assertEquals(6, split.popupMenu().getComponentCount());
+            for (int index = 0; index < 5; index++) {
+                Component component = split.popupMenu().getComponent(index);
                 assertFalse(component.isEnabled());
                 assertTrue(((JMenuItem) component).getText().endsWith("(Unavailable)"));
             }
+            JMenuItem retry = (JMenuItem) split.popupMenu().getComponent(5);
+            assertEquals("Retry version check", retry.getText());
+            assertTrue(retry.isEnabled());
             onEdt(() -> {
                 find(frame, "downloadOptionsButton").doClick();
                 return null;
@@ -436,8 +461,7 @@ class FirstLaunchPanelTest {
             assertEquals(1, requests.get(),
                     "first opening only shows unavailable rows");
             onEdt(() -> {
-                split.closePopup();
-                find(frame, "downloadOptionsButton").doClick();
+                retry.doClick();
                 return null;
             });
             waitFor(() -> requests.get() == 2);
@@ -452,7 +476,7 @@ class FirstLaunchPanelTest {
     }
 
     @Test
-    void staleCancelledSnapshotCannotOverwriteReloadedFirstLaunch() throws Exception {
+    void reloadedFirstLaunchReusesTheInFlightSessionSnapshot() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         CountDownLatch firstStarted = new CountDownLatch(1);
         CountDownLatch holdFirst = new CountDownLatch(1);
@@ -460,12 +484,10 @@ class FirstLaunchPanelTest {
         LauncherServices services = new LauncherServices(temp.resolve("stale.json")) {
             @Override public org.megamek.launcher.channel.QuickInstallSnapshot
                     quickInstallSnapshot() throws InterruptedException {
-                if (requests.incrementAndGet() == 1) {
-                    firstStarted.countDown();
-                    holdFirst.await();
-                    return QuickInstallTestData.snapshot("1.0.0", "1.1.0");
-                }
-                return QuickInstallTestData.snapshot("2.0.0", "2.1.0");
+                requests.incrementAndGet();
+                firstStarted.countDown();
+                holdFirst.await();
+                return QuickInstallTestData.snapshot("1.0.0", "1.1.0");
             }
         };
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
@@ -473,12 +495,15 @@ class FirstLaunchPanelTest {
             onEdt(() -> { frame.showWindow(); return null; });
             assertTrue(firstStarted.await(5, TimeUnit.SECONDS));
             onEdt(() -> { frame.showWindow(); return null; });
-            waitFor(() -> "Install latest MekHQ Milestone (2.0.0)".equals(
-                    find(frame, "downloadAndInstallButton").getText()));
+            waitFor(() -> find(frame, "downloadAndInstallButton") != null);
+            assertEquals(1, requests.get());
             holdFirst.countDown();
-            Thread.sleep(100);
-            assertEquals("Install latest MekHQ Milestone (2.0.0)", onEdt(() ->
+            waitFor(() -> "Install latest MekHQ Milestone (1.0.0)".equals(
                     find(frame, "downloadAndInstallButton").getText()));
+            Thread.sleep(100);
+            assertEquals("Install latest MekHQ Milestone (1.0.0)", onEdt(() ->
+                    find(frame, "downloadAndInstallButton").getText()));
+            assertEquals(1, requests.get());
         } finally {
             holdFirst.countDown();
             onEdt(() -> {
@@ -592,6 +617,18 @@ class FirstLaunchPanelTest {
     private static JButton find(Container root, String name) {
         Component found = findComponent(root, name);
         return found instanceof JButton button ? button : null;
+    }
+
+    private static JMenuItem menuItem(Container root, String name) {
+        Component split = findComponent(root, "firstLaunchSplitButton");
+        if (split instanceof FirstLaunchSplitButton button) {
+            for (Component component : button.popupMenu().getComponents()) {
+                if (name.equals(component.getName()) && component instanceof JMenuItem item) {
+                    return item;
+                }
+            }
+        }
+        return null;
     }
 
     private static Component findComponent(Container root, String name) {
