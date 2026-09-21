@@ -1559,7 +1559,8 @@ public final class LauncherFrame extends JFrame {
         JDialog dialog = new JDialog(this, "Enable managed updates", false);
         dialog.setName("adoptionCandidateDialog");
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-        JPanel actions = new JPanel(new BorderLayout());
+        JPanel actions = new JPanel(new java.awt.FlowLayout(
+                java.awt.FlowLayout.RIGHT, guiScale.scaleForGUI(8), 0));
         actions.setBackground(FirstLaunchPanel.BACKGROUND);
         JButton cancel = homeButton("Cancel", "cancelAdoptionButton");
         JButton continueButton = homeButton("Continue", "continueAdoptionButton");
@@ -1571,8 +1572,8 @@ public final class LauncherFrame extends JFrame {
         cancel.setMnemonic(KeyEvent.VK_A);
         cancel.getAccessibleContext().setAccessibleDescription(
                 "Close without contacting the release service.");
-        actions.add(cancel, BorderLayout.WEST);
-        actions.add(continueButton, BorderLayout.EAST);
+        actions.add(cancel);
+        actions.add(continueButton);
         JPanel body = new JPanel(new BorderLayout(0, guiScale.scaleForGUI(12)));
         body.setBackground(FirstLaunchPanel.BACKGROUND);
         body.add(details, BorderLayout.CENTER);
