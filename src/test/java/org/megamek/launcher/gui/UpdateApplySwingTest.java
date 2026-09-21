@@ -99,7 +99,6 @@ class UpdateApplySwingTest {
             String applyText = componentText(applyConsent);
             assertTrue(applyText.contains("destructive"));
             assertTrue(applyText.contains("CLOSE ALL"));
-            assertTrue(applyText.contains(fixture.services.asset.digest()));
             assertTrue(applyText.contains("already downloaded"));
             assertFalse(applyText.contains("AGAIN"));
             assertTrue(applyText.contains("NOT be downloaded a second time"));

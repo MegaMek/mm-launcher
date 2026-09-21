@@ -103,13 +103,19 @@ reuse, destination, and Main-if-empty selection are shared by all six.
 Each immutable quote uses the first-launch dark-teal/gold visual language without restyling other
 dialogs. The normal summary names the selected application/channel, validated version, actual
 program set, human-readable binary download size, and full selectable destination.
-**Change location** retains the existing-parent/safe-new-subfolder flow and builds a fresh quote
-for the same repository and channel; the validated launcher Java has no happy-path chooser in this
+**Change location** retains the existing-parent/safe-new-subfolder flow and builds a fresh quote.
+The native parent chooser is followed by a styled dark-teal/gold folder-name dialog with a
+preselected friendly `Program Channel (Version)` value, inline validation, Cancel/Escape, and no
+separate installation-name prompt; the same friendly value is registered automatically.
+The fresh quote remains for the same repository and channel; the validated launcher Java has no
+happy-path chooser in this
 dialog. The simple confirmation has no passive update-behavior row and no technical-details
 toggle or pane. Source/tag/asset/digest, destination, and registry/Main bindings remain in the
 immutable backend plan and are revalidated before transfer. For a captured-current quote,
 install-time validation re-fetches the exact repository/tag release and requires the same asset
-name, size, SHA-256, and URL; it never rereads the moving current pointer or retargets the quote.
+name, size, and URL. A quoted digest cannot disappear or change; quoted absence may adopt a valid
+digest newly present at that refresh, or compute SHA-256 from the one exact bounded transfer. It
+never rereads the moving current pointer or retargets the quote.
 Historical exact plans and the existing current/history picker retain distinct provenance.
 Every successful managed publication initializes its per-installation check-on-open value to
 true; first launch has no global or new-install update-check default.

@@ -205,6 +205,23 @@ class FreshInstallTest {
     }
 
     @Test
+    void malformedPublishedDigestFailsWithoutDowngradingToAbsent() throws Exception {
+        byte[] archive = suiteArchive("MegaMek-1.2.3");
+        String malformed = releaseJson(archive, sha(archive))
+                .replace("sha256:" + sha(archive), "sha256:not-hex");
+        Path registry = temp.resolve("malformed-registry.json");
+        Path destination = temp.resolve("malformed-install");
+        QueueTransport transport = new QueueTransport(response(200, malformed));
+        ByteArrayOutputStream errors = new ByteArrayOutputStream();
+
+        assertEquals(2, runInstall(transport, registry, destination, errors));
+        assertEquals(1, transport.uris.size(), "malformed metadata prevents binary transfer");
+        assertTrue(errors.toString(StandardCharsets.UTF_8).contains(
+                "Published SHA-256 checksum is invalid"));
+        assertFalse(Files.exists(destination));
+    }
+
+    @Test
     void archiveRejectsTraversalAliasesLinksBoundsAndTruncation() throws Exception {
         SafeTarExtractor extractor = new SafeTarExtractor();
         assertThrows(IOException.class, () -> extractor.extract(

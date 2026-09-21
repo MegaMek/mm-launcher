@@ -204,6 +204,12 @@ public final class NormalInstallService {
         List<Path> missingParents = validateProposedDestination(destination, snapshot.data());
         ChannelCatalog.Target target = targetResolver.resolve();
         requireTarget(target, repository, channel);
+        String automaticName = friendlyName(repository, channel, target.version());
+        if (snapshot.data().installations().stream()
+                .anyMatch(record -> record.name().equals(automaticName))) {
+            throw new IOException("an installation named " + automaticName
+                    + " is already registered");
+        }
         return new Plan(registry, snapshot, destination, List.copyOf(missingParents),
                 target.channel(), target.repository(), target.version(),
                 requiredProducts(repository), target.release(), target.asset(), target.source(),
@@ -247,8 +253,8 @@ public final class NormalInstallService {
         context.checkpoint();
         createPlannedParents(plan);
         VerifiedPackageFetcher.ExpectedAsset expected =
-                new VerifiedPackageFetcher.ExpectedAsset(plan.asset().name(),
-                        plan.asset().size(), plan.asset().digest(), plan.asset().url());
+                new VerifiedPackageFetcher.ExpectedAsset(fresh.asset().name(),
+                        fresh.asset().size(), fresh.asset().digest(), fresh.asset().url());
         final FreshInstaller.Result installed;
         try {
             installed = new FreshInstaller(transport).installMatchingProducts(plan.repository(),

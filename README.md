@@ -224,7 +224,11 @@ treatment and high-contrast fallback as the rest of the launcher.
 Before consent, the picker sends the exact choice through the normal-install planner. Current
 and unknown choices both re-fetch the selected exact repository/tag rather than retargeting from a
 current pointer. Before transfer the planner repeats registry/destination checks and revalidates
-the same source, tag, asset URL, name, size, and digest. Unknown classification is accepted only
+the same source, tag, asset URL, name, size, and published-digest state. A digest quoted by the
+plan may not disappear or change. If the plan quoted no digest, a valid digest newly present at
+that exact refresh is adopted; otherwise the one bounded official body is hashed while streaming
+and that computed SHA-256 becomes the installed copy's local package identity. Unknown
+classification is accepted only
 because successful installation creates a new fixed local track. Every successfully published graphical managed installation
 starts with its per-install check-on-open value enabled. See
 [`ci.md`](ci.md) for the canonical release index needed to classify old releases safely.
@@ -250,7 +254,10 @@ folders receive no channel sidecar or ownership receipt unless the separate exac
 adoption succeeds. A check reads canonical channel and exact release metadata
 only; it downloads no package and changes no installed files. If an update is recommended,
 **Update** binds both consent steps to that exact installation, fixed channel, repository, tag,
-asset name, size, and digest and uses one full-package transfer for the attempt. Update continues to use the same read-only plan internally before its separate Apply consent.
+asset name, size, URL, and optional published digest and uses one full-package transfer for the
+attempt. Older official assets without a published digest remain eligible: the exact bounded body
+is hashed during that transfer and the computed value is retained in receipt/current state.
+Update continues to use the same read-only plan internally before its separate Apply consent.
 There is no standalone GUI preview picker; the CLI diagnostic preview remains available.
 
 Prepared package data is process-local and attempt-scoped, not a persistent/offline cache or
@@ -341,7 +348,11 @@ and does not claim that Windows file locks prove closure. It never kills a proce
 There are no automatic Applies, launcher self-updates, Nightly channel, bundled Java, elevation,
 or administrator requirement. A channel cannot be changed: another channel always means another
 managed copy/root, so there is no cross-channel in-place downgrade or retarget path. Advanced
-downloads need an existing writable parent and always create a new subfolder. The normal
+downloads need an existing writable parent and always create a new subfolder. A styled
+dark-teal/gold folder-name dialog validates the preselected friendly
+`Program Channel (Version)` suggestion inline; Cancel or Escape changes no state. The same dialog
+is used by **Change location**, and the registered name is derived automatically from that
+friendly label. The normal
 destination can create at most four individually quoted real parent directories after consent;
 the product/channel target itself must be wholly absent.
 
@@ -355,7 +366,9 @@ record with no receipt, current provenance, fixed channel, or pending transactio
 The opt-in flow shows the statically detected applications/version and a fixed future channel
 (Milestone by default, or Development). It treats that information only as a candidate. Before
 offering Enable, the launcher resolves one exact release in the matching fixed official
-repository, requires its published bounded asset name/size/SHA-256, downloads that package once,
+repository, requires its bounded asset name/size and validated official URL, downloads that
+package once, verifies a valid published SHA-256 when present (or records the SHA-256 computed
+from that one exact body when absent),
 safely extracts it outside the application root, and compares its static product/build identity
 and ownership inventory with the imported copy. If automatic version lookup is unavailable, the
 user may explicitly choose an exact version from the bounded official release browser. Release

@@ -1266,22 +1266,6 @@ public final class RealUpdateService {
         if (!CONFIRM.equals(confirmation)) {
             throw new IOException("--confirm must be exactly " + CONFIRM);
         }
-
-        private static boolean sameRecommendationExceptDigest(
-                ChannelUpdateChecker.Recommendation first,
-                ChannelUpdateChecker.Recommendation second) {
-            return second != null
-                    && first.installationId().equals(second.installationId())
-                    && first.canonicalRoot().equals(second.canonicalRoot())
-                    && first.registeredAt().equals(second.registeredAt())
-                    && first.preference().equals(second.preference())
-                    && first.repository() == second.repository()
-                    && first.source().equals(second.source())
-                    && first.targetTag().equals(second.targetTag())
-                    && first.assetName().equals(second.assetName())
-                    && first.assetSize() == second.assetSize()
-                    && first.notesUrl().equals(second.notesUrl());
-        }
         if (fromTag == null || !TAG.matcher(fromTag).matches()
                 || targetTag == null || !TAG.matcher(targetTag).matches()) {
             throw new IOException("source and target must be explicit valid release tags");
@@ -1291,6 +1275,22 @@ public final class RealUpdateService {
             throw new IOException("consent must bind the exact target byte size and any "
                     + "published SHA-256");
         }
+    }
+
+    private static boolean sameRecommendationExceptDigest(
+            ChannelUpdateChecker.Recommendation first,
+            ChannelUpdateChecker.Recommendation second) {
+        return second != null
+                && first.installationId().equals(second.installationId())
+                && first.canonicalRoot().equals(second.canonicalRoot())
+                && first.registeredAt().equals(second.registeredAt())
+                && first.preference().equals(second.preference())
+                && first.repository() == second.repository()
+                && first.source().equals(second.source())
+                && first.targetTag().equals(second.targetTag())
+                && first.assetName().equals(second.assetName())
+                && first.assetSize() == second.assetSize()
+                && first.notesUrl().equals(second.notesUrl());
     }
 
     private static Map<String, Set<String>> trustedHashes(CurrentUpdateState state) {

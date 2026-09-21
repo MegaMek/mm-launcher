@@ -127,7 +127,8 @@ The observed products choose one fixed official repository and the observed vers
 an exact tag, but neither is authority. The user may instead choose one exact release through the
 bounded official release browser. Milestone is the default future channel and Development is the
 only alternative; Nightly is unsupported. `ReleaseCatalog` must return one supported full
-`tar.gz` asset with a published valid SHA-256 and bounded size. The verified fetcher downloads it
+`tar.gz` asset with a bounded size and either a valid published SHA-256 or no published digest.
+The verified fetcher downloads it
 once and the safe extractor opens it in an attempt-owned external workspace. Official static
 inspection must reproduce the record's exact product set, build, root JAR manifests, and
 classpaths.
@@ -142,7 +143,7 @@ saves, campaigns, userdata, custom content, configuration, logs, and backups rem
 unmanaged.
 
 The opaque prepared handle is one-use, process-local, non-serializable, and bound to its creating
-service, registry, exact record, root snapshot, repository/tag/asset/size/digest, fixed channel,
+service, registry, exact record, root snapshot, repository/tag/asset/size/resolved digest, fixed channel,
 and pristine package inventory. Confirmation acquires the root gate again, rechecks every local
 and provenance precondition, refreshes exact metadata, re-hashes and re-extracts the retained
 archive without a second download, and compares the new official evidence with the prepared

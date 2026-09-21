@@ -161,7 +161,10 @@ version/tag, full release/asset identity, product/channel-specific per-user dest
 and compatibility-default snapshot, and validated game Java. Its dedicated
 dark-teal/gold confirmation has no release, channel, Java, or editable update-setting picker. The
 summary displays only the product/channel, validated version, actual programs, binary download
-size, full selectable destination with **Change location**, and Cancel/Install actions. There is no
+size, full selectable destination with **Change location**, and Cancel/Install actions. Parent
+selection is followed by a styled folder-name dialog with a friendly preselected
+`Program Channel (Version)` value, inline validation, Cancel/Escape behavior, and no separate
+installation-name prompt. The friendly value is also the automatic registered name. There is no
 passive update-behavior row or technical-details toggle/pane. Captured-current plans skip a second
 channel-pointer lookup; exact release revalidation plus the installer's expected-asset check still
 reject tag/name/URL/size/digest drift before binary transfer without retargeting. Java,
@@ -206,19 +209,22 @@ unknown. A distinct identity known only as the other channel's current target is
 shared current pointer is included for either channel. No title, `prerelease`, version, or ordering
 inference is allowed. Page one contains the selected current identity exactly once, with stable
 repository/tag deduplication. **Previous page**, a non-button **Page N**, **Next page**, and
-**Choose destination…** share a stable footer. Previous is disabled on page one; Next follows the
+**Install** share a stable footer. Previous is disabled on page one; Next follows the
 API's bounded may-have-next signal. Product or channel changes clear selection/results/page
 controls and invalidate in-flight work. Page requests retain their exact product/channel snapshot
 and discard stale or closed-dialog results. The reserved status line is blank after success and
 shows only loading/errors.
 
-Eligible rows read **Program Channel (Version) — human binary size** with no Available suffix.
+Eligible rows, including older official assets without a published digest, read
+**Program Channel (Version) — human binary size** with no Available or checksum suffix.
 Ineligible rows are disabled and end only in **— Unavailable**; a sanitized accessible
 description may retain the reason. Destination is enabled only for an eligible exact row. Before
 consent, every row is re-fetched by exact repository/tag through the normal planner with the
 selected channel as the new copy's immutable track. It binds destination, registry/default,
-product set, source, release, asset URL/name/size/digest, and fixed channel, then repeats its exact
-metadata check before transfer. Unknown historical membership is not channel evidence.
+product set, source, release, asset URL/name/size/optional published digest, and fixed channel,
+then repeats its exact metadata check before transfer. A quoted digest cannot disappear or change;
+quoted absence may become a valid digest at that refresh, or remain absent and use the SHA-256
+computed from the one exact retained body. Unknown historical membership is not channel evidence.
 The long-term immutable cross-repository history requirement and current workaround are documented
 in `../ci.md`.
 

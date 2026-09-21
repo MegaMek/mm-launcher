@@ -25,7 +25,8 @@ not the source of real-update eligibility.
 The preview report is still observational and is never write authority. Standalone CLI Apply keeps
 its existing independent one-package-download behavior. A normal GUI Update attempt instead creates
 an opaque process-local prepared handle after the first consent. It captures the exact
-record/receipt/current-provenance snapshot, target tag, asset name/full byte size/GitHub SHA-256 and
+record/receipt/current-provenance snapshot, target tag, asset name/full byte size/optional
+published GitHub SHA-256 and
 URL identity, pristine target manifest/excluded inventory/static inspection, and owns the verified
 archive plus extraction. It is neither serialized nor a public path token.
 
@@ -33,7 +34,8 @@ Under the root update gate, prepared Apply re-reads the registry, immutable rece
 current provenance and requires exact equality with the captured source/root. It refreshes the
 exact fixed-repository tag and asset metadata (and the captured channel/preference recommendation
 when applicable), rejecting drift with a restart message and no second package transfer. It
-rechecks the retained compressed archive's stable file identity, exact size, and SHA-256, safely
+rechecks the retained compressed archive's stable file identity, exact size, and resolved
+SHA-256 (published when available, otherwise computed during the one bounded transfer), safely
 extracts it into another owned area, and requires that extraction's static inspection and complete
 ownership inventory to equal the pristine captured target. A changed observational extraction is
 therefore reconstructed from verified bytes, never blessed. Apply then replans against fresh

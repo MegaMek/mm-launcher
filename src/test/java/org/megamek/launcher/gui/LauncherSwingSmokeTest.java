@@ -24,6 +24,7 @@ import javax.swing.JPanel;
 import javax.swing.JProgressBar;
 import javax.swing.SwingUtilities;
 import javax.swing.JTextArea;
+import javax.swing.JTextField;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.GraphicsEnvironment;
@@ -98,6 +99,45 @@ class LauncherSwingSmokeTest {
                     () -> LauncherFrame.safeSubfolder(unsafe), unsafe);
             assertFalse(error.getMessage().isBlank(), "UI error detail for " + unsafe);
         }
+    }
+
+    @Test
+    void styledSubfolderDialogValidatesInlineAndSupportsContinueCancelAndEscape()
+            throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        SubfolderDialog valid = onEdt(() ->
+                new SubfolderDialog(null, "MekHQ Milestone (0.51.0)", GuiScale.DEFAULT));
+        try {
+            JTextField field = component(valid, "subfolderNameField");
+            JButton continueButton = find(valid, "continueSubfolderButton");
+            SwingUtilities.invokeAndWait(() -> {
+                field.setText("../escape");
+                continueButton.doClick();
+            });
+            assertTrue(valid.isDisplayable(), "invalid input stays in the same dialog");
+            assertFalse(findLabel(valid, "subfolderValidationError").getText().isBlank());
+            SwingUtilities.invokeAndWait(() -> {
+                field.setText("MekHQ Milestone (0.51.0)");
+                continueButton.doClick();
+            });
+            assertEquals(Path.of("MekHQ Milestone (0.51.0)"), valid.result());
+        } finally {
+            SwingUtilities.invokeAndWait(valid::dispose);
+        }
+
+        SubfolderDialog cancelled = onEdt(() ->
+                new SubfolderDialog(null, "MekHQ Milestone (0.51.0)", GuiScale.DEFAULT));
+        SwingUtilities.invokeAndWait(
+                () -> find(cancelled, "cancelSubfolderButton").doClick());
+        assertEquals(null, cancelled.result());
+
+        SubfolderDialog escaped = onEdt(() ->
+                new SubfolderDialog(null, "MekHQ Milestone (0.51.0)", GuiScale.DEFAULT));
+        SwingUtilities.invokeAndWait(() -> escaped.getRootPane().getActionMap()
+                .get("cancelSubfolder").actionPerformed(
+                        new java.awt.event.ActionEvent(escaped, 0, "escape")));
+        assertEquals(null, escaped.result());
     }
 
     @Test

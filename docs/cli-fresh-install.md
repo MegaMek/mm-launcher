@@ -46,10 +46,12 @@ if ($LASTEXITCODE -ne 0) {
 ```
 
 The installer re-fetches that exact tag, accepts one official `MekHQ-*.tar.gz`, and requires the
-GitHub size and SHA-256 digest. It streams and verifies the download before safely extracting,
-statically inspects the application, and registers it with `updateEligible=false`. GitHub HTTPS
-plus a digest published by the same GitHub source detects corruption, but is not an independent
-signature. Nothing downloaded is executed.
+GitHub positive bounded size and validated official URL. It streams and verifies the download
+before safely extracting, statically inspects the application, and registers it with
+`updateEligible=false`. A valid published SHA-256 is required when present. For an older official
+asset without one, the launcher computes SHA-256 during the one exact transfer and stores that
+local package identity. This does not provide independent authenticity. Nothing downloaded is
+executed.
 
 To install MegaMek or MegaMekLab independently, use `--application megamek` or
 `--application lab` consistently in both commands. A new registration becomes default only if the

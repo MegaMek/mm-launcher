@@ -119,7 +119,8 @@ Each product release workflow should:
 - reject case differences or disagreement among the tag, application version, archive root, and
   expected asset name;
 - generate the install asset and its SHA-256 digest as one release transaction;
-- make digest presence mandatory before a release is eligible for index publication;
+- make digest presence mandatory for every new release before index publication (the launcher's
+  digest-less path exists only for compatible older official assets);
 - publish asset size, digest, platform, and compatibility-suite ID as signed or otherwise
   integrity-protected workflow output;
 - reject duplicate asset names, case/Unicode aliases, conflicting product identities, and
@@ -151,7 +152,9 @@ The website publication workflow should:
 - A website deployment failure must leave the previous pointer and history generation intact.
 - Rollback of a bad pointer should be a new audited pointer event; it must not delete the failed
   release identity or silently rewrite its prior channel history.
-- Missing or mismatched digest data is a hard failure, not a warning or a title-based fallback.
+- Missing digest data is a hard CI failure for new publication, and malformed or mismatched
+  published digest data is always a launcher failure. The launcher's older-release compatibility
+  path is not a title-based or independent-authenticity fallback.
 - Concurrent promotions must use generation/compare-and-swap protection or an equivalent atomic
   publication mechanism.
 
@@ -297,8 +300,9 @@ identity has verified history. During migration:
 Adoption consumes that same hierarchy rather than defining another authority. The canonical index
 is authoritative; the embedded package manifest is its build-time identity projection; and a
 launcher adoption receipt plus fixed track is local policy. CI must retain enough package/digest
-history to verify supported ancestors and must mark unbackfilled or digest-less releases
-unsupported. This requirement does not introduce cross-channel switching. Nightly adoption stays
+history to verify supported ancestors. An unbackfilled digest-less historical release is eligible
+only through the launcher's exact official URL/name/size, one-transfer computed-identity path;
+other unsupported releases remain unavailable. This requirement does not introduce cross-channel switching. Nightly adoption stays
 disabled until the immutable Nightly publication, retention, and history contract above is
 deployed and validated.
 

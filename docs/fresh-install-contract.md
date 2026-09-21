@@ -11,7 +11,8 @@ than claiming to list everything.
 Install requires an exact syntactically bounded tag and re-fetches `/releases/tags/{tag}`. Unknown
 JSON fields are tolerated for API evolution, while duplicate keys, trailing JSON, malformed
 required field types, duplicate assets, and metadata over 8 MiB fail closed. Drafts and missing,
-ambiguous, non-`tar.gz`, zero/oversized, or digest-less selected assets are rejected. Prerelease is
+ambiguous, non-`tar.gz`, zero/oversized, or malformed-digest selected assets are rejected.
+Digest-less assets from this exact official boundary remain eligible. Prerelease is
 reported but never interpreted as a version ordering signal. GitHub-generated source archives are
 not assets and do not match the product-specific asset names.
 
@@ -20,7 +21,9 @@ asset URL. At most five redirects are followed, only to a small fixed set of HTT
 hosts, with no userinfo, custom port, fragment, cookies, or credentials. Signed redirect URLs are
 never printed. Connection, request/read, and two-hour overall limits apply. Downloads stream to an
 operation-owned file, are capped at 2 GiB, report typed byte progress coalesced by the GUI, and must
-exactly match both metadata size and SHA-256 before extraction. Streams close on all error and
+exactly match metadata size before extraction. A valid published SHA-256 is enforced when present;
+otherwise SHA-256 is computed while streaming that one exact body and retained as the attempt and
+installed copy's authoritative local package identity. Streams close on all error and
 interruption paths.
 API HTTP and rate-limit failures are explicit. HTTPS plus GitHub's same-source digest is useful
 integrity checking, not an independent signature.
@@ -28,8 +31,9 @@ integrity checking, not an independent signature.
 Imported-copy adoption reuses these exact repository, release metadata, asset-name, size,
 SHA-256, transport, and safe-extraction boundaries, but it is not a fresh install: it stages the
 package outside the registered root only for comparison and never publishes package files into
-that root. It performs one package download per prepared attempt. Missing digests and historical
-archives that no longer satisfy this contract remain unsupported and launch-only.
+that root. It performs one package download per prepared attempt. Historical archives without a
+published digest use the same computed local identity; archives that otherwise fail this contract
+remain unsupported and launch-only.
 
 The GUI's single **Fetch releases** action reads both bounded website
 `current_releases.yml` pointers once and calls one bounded history page for only the selected
@@ -77,7 +81,10 @@ records, install a payload directly as the shared `MegaMek` support root, or pla
 include the selected product and channel, such as
 `MekHQ Milestone`, `MegaMek Development`, or `MegaMekLab Milestone`, so different quick choices
 do not collide or misdescribe their contents.
-The destination must be wholly
+After the native parent chooser, a styled folder-name dialog preselects the friendly
+`Program Channel (Version)` name and keeps invalid input in place with an inline error. Cancel or
+Escape changes no state. There is no separate installation-name prompt: the same friendly value
+is registered automatically. The destination must be wholly
 nonexistent—even an empty directory is refused. Registry/destination/registered-root
 overlaps, duplicate names, and linked or special ancestors fail preflight. Extraction occurs in a
 random create-new sibling staging directory. Final move has no replace option and refuses a target

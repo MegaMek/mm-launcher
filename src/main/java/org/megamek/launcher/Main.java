@@ -206,7 +206,7 @@ public final class Main {
         out.printf("TARGET repository=%s tag=%s asset=%s size=%d digest=%s%n",
                 preview.baseline().repository(), preview.targetRelease().tag(),
                 preview.targetAsset().name(), preview.targetAsset().size(),
-                preview.targetAsset().digest());
+                preview.resolvedAssetDigest());
         out.printf("POLICY version=%d managedBaseline=%d managedTarget=%d%n",
                 preview.baseline().ownershipPolicyVersion(),
                 preview.baseline().officialManifest().files().size(),

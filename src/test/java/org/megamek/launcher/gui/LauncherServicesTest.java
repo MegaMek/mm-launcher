@@ -133,7 +133,8 @@ class LauncherServicesTest {
     @Test
     void missingPublishedDigestRemainsEligibleForOfficialExactTransfer() throws Exception {
         ReleaseCatalog.Asset asset = new ReleaseCatalog.Asset("MekHQ-v0.50.02.tar.gz", 42,
-                null, URI.create("https://github.com/MegaMek/mekhq/releases/download/"
+                java.util.Optional.empty(),
+                URI.create("https://github.com/MegaMek/mekhq/releases/download/"
                 + "v0.50.02/MekHQ-v0.50.02.tar.gz"));
         ReleaseCatalog.Release release = new ReleaseCatalog.Release("v0.50.02", "0.50.02",
                 false, false, URI.create("https://github.com/MegaMek/mekhq/releases/tag/v0.50.02"),

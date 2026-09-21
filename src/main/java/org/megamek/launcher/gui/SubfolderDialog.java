@@ -37,7 +37,7 @@ final class SubfolderDialog extends JDialog {
     private final JLabel error = new JLabel(" ");
     private Path result;
 
-    private SubfolderDialog(Window owner, String suggestion, GuiScale scale) {
+    SubfolderDialog(Window owner, String suggestion, GuiScale scale) {
         super(owner, "Choose install folder", Dialog.ModalityType.APPLICATION_MODAL);
         this.scale = scale;
         setName("subfolderDialog");
@@ -161,6 +161,10 @@ final class SubfolderDialog extends JDialog {
         SubfolderDialog dialog = new SubfolderDialog(owner, suggestion, scale);
         dialog.setVisible(true);
         return dialog.result;
+    }
+
+    Path result() {
+        return result;
     }
 
     private void accept() {

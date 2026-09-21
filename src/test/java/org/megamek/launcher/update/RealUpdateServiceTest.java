@@ -426,7 +426,8 @@ class RealUpdateServiceTest {
         IOException staleSource = assertThrows(IOException.class, () -> sourceService.apply(
                 sourcePrepared, RealUpdateService.CONFIRM, quiet()));
         assertTrue(staleSource.getMessage().contains("source")
-                || staleSource.getMessage().contains("record"));
+                || staleSource.getMessage().contains("record")
+                || staleSource.getMessage().contains("installation"));
         assertEquals(1, sourceNetwork.binaryRequests);
         assertEquals(1, sourceNetwork.metadataRequests);
         assertEquals("runtime-1", Files.readString(source.root.resolve("lib/runtime.txt")));

@@ -102,7 +102,9 @@ the retained compressed bytes and stable file identity, safely extracts again, a
 result with the pristine captured manifest/inventory/inspection before a fresh local plan. This is
 not a persistent cache, resume facility, offline authority, or path token, and separate Preview/CLI
 operations cannot share it. Real Apply details are documented in
-[real-update-contract.md](real-update-contract.md). A missing GitHub digest is unsupported.
+[real-update-contract.md](real-update-contract.md). For an older exact official asset with no
+GitHub digest, the one bounded transfer computes and retains SHA-256 in the prepared handle.
+A malformed published digest still fails closed.
 
 GUI preview reports typed metadata/download/verification/extraction/planning phases. Package bytes
 use the exact metadata total; archive-entry progress remains indeterminate when no truthful total

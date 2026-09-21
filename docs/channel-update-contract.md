@@ -38,15 +38,17 @@ four-component numeric `stable` value and one `dev` value, rejects duplicates, a
 custom objects, excessive nesting/size, and structured fields, and tolerates unrelated scalar
 fields. It constructs the exact `v` + version tag and asks the existing `ReleaseCatalog` for that
 tag in the installation's already verified repository. Existing assessment rules require one
-correctly named full-bundle asset with a positive bounded size, SHA-256 digest, and exact official
+correctly named full-bundle asset with a positive bounded size, an optional valid SHA-256, and exact official
 URL. A MekHQ receipt therefore checks only the MekHQ bundle; Core Rules never becomes a channel or
 a mixed bundle.
 
 A check makes metadata requests only. It never requests package bytes or writes installed files,
 registry, receipts, or current provenance. HTTP errors and redirects from the fixed YAML endpoint,
-malformed/oversized YAML, unavailable exact tags, invalid/missing digests, unsafe URLs, and API
+malformed/oversized YAML, unavailable exact tags, malformed digests, unsafe URLs, and API
 errors are explicit Unavailable results. Metadata and packages are both obtained from GitHub over
-HTTPS; the same-source digest detects corruption but is **not independent signing**.
+HTTPS. A published digest remains preferred but is **not independent signing**. For an older
+official asset without one, the launcher computes local identity only from the one exact,
+size-bounded transfer; this does not add independent authenticity.
 
 Successful imported-copy adoption chooses Milestone (default) or Development exactly once and
 publishes that fixed preference only after the local copy has matched one exact official
