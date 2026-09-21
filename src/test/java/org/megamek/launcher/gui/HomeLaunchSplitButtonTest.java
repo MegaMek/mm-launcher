@@ -127,7 +127,7 @@ class HomeLaunchSplitButtonTest {
     private static InstallationRecord record(String id, String name, String version,
                                              Product product) {
         return new InstallationRecord(id, name, "C:\\fixture\\" + id, version,
-                List.of(product), "C:\\java\\bin\\java.exe", null, false,
+                List.of(product), null, false,
                 "2026-09-18T00:00:00Z");
     }
 

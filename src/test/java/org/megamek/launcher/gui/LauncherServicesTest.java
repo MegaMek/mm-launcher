@@ -5,6 +5,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.megamek.launcher.launch.ApplicationLauncher;
 import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.launch.ProcessRunner;
+import org.megamek.launcher.launch.RootCoordinator;
 import org.megamek.launcher.onboarding.InstallationInspector;
 import org.megamek.launcher.registry.InstallationRecord;
 import org.megamek.launcher.registry.RegistryStore;
@@ -58,13 +59,15 @@ class LauncherServicesTest {
 
     @Test
     void homePreservesValidPreferredAndReportsMissingOrChangedPreferred() throws Exception {
-        LauncherServices services = services(temp.resolve("registry.json"), new RecordingRunner());
+        RecordingRunner runner = new RecordingRunner();
+        LauncherServices services = services(temp.resolve("registry.json"), runner);
         Path root = suite("preferred");
         services.register("Preferred", root);
 
         LauncherServices.HomeState valid = services.loadHome();
         assertEquals("Preferred", valid.preferred().name());
         assertEquals(null, valid.preferredError());
+        assertTrue(runner.commands.isEmpty(), "Home rendering must not execute Java");
 
         Files.delete(root.resolve("MegaMek.jar"));
         LauncherServices.HomeState missing = services.loadHome();
@@ -105,7 +108,7 @@ class LauncherServicesTest {
 
         services.select(second);
         assertEquals(second.id(), services.readRegistry().defaultInstallationId());
-        services.remove(second);
+        services.removeFromLauncher(second);
         assertEquals(first.id(), services.readRegistry().defaultInstallationId());
         assertTrue(Files.isRegularFile(secondRoot.resolve("MegaMek.jar")));
     }
@@ -128,7 +131,7 @@ class LauncherServicesTest {
     }
 
     @Test
-    void missingChecksumUsesSharedEligibilityAndCannotSelectAsset() throws Exception {
+    void missingPublishedDigestRemainsEligibleForOfficialExactTransfer() throws Exception {
         ReleaseCatalog.Asset asset = new ReleaseCatalog.Asset("MekHQ-v0.50.02.tar.gz", 42,
                 null, URI.create("https://github.com/MegaMek/mekhq/releases/download/"
                 + "v0.50.02/MekHQ-v0.50.02.tar.gz"));
@@ -138,11 +141,10 @@ class LauncherServicesTest {
         ReleaseCatalog catalog = new ReleaseCatalog(new UnusedTransport());
 
         ReleaseCatalog.Assessment assessment = catalog.assess(OfficialRepository.MEKHQ, release);
-        assertFalse(assessment.eligible());
-        assertEquals("No SHA-256 checksum published", assessment.reason());
-        assertTrue(assertThrows(IOException.class,
-                () -> catalog.selectInstallAsset(OfficialRepository.MEKHQ, release))
-                .getMessage().contains("No SHA-256 checksum published"));
+        assertTrue(assessment.eligible());
+        assertEquals("Available", assessment.reason());
+        assertEquals(asset,
+                catalog.selectInstallAsset(OfficialRepository.MEKHQ, release));
     }
 
     @Test
@@ -153,16 +155,12 @@ class LauncherServicesTest {
         LauncherServices services = services(registry, runner);
         InstallationRecord initialRecord = services.register("Launch", root);
         Path containedJava = Files.writeString(root.resolve("java.exe"), "fixture");
-        assertThrows(IOException.class, () -> services.selectJava(initialRecord, containedJava));
+        assertThrows(IOException.class, () -> services.selectDefaultJava(containedJava));
         assertTrue(runner.commands.isEmpty());
 
         Path externalJava = Files.writeString(temp.resolve("java.exe"), "fixture");
-        assertEquals(21, services.selectJava(initialRecord, externalJava));
+        services.selectDefaultJava(externalJava);
         InstallationRecord record = services.readRegistry().installations().getFirst();
-        assertTrue(assertThrows(IOException.class,
-                () -> services.preview(initialRecord, "megamek"))
-                .getMessage().contains("record changed"),
-                "a menu snapshot with a changed record cannot silently launch Main");
         int afterSelection = runner.commands.size();
         List<String> preview = services.preview(record, "megamek");
         assertTrue(preview.contains("megamek.MegaMek"));
@@ -172,11 +170,63 @@ class LauncherServicesTest {
         assertEquals(0, services.launch(record, "megamek"));
         assertTrue(runner.inheritIO.getLast());
 
-        services.remove(record);
+        services.removeFromLauncher(record);
         assertTrue(assertThrows(IOException.class,
                 () -> services.launch(record, "megamek"))
                 .getMessage().contains("no longer registered"),
                 "a removed captured record cannot fall back to another copy");
+    }
+
+    @Test
+    void oneGameJavaSettingImmediatelyControlsEveryInstallation() throws Exception {
+        Path registry = temp.resolve("global-java.json");
+        RecordingRunner runner = new RecordingRunner();
+        LauncherServices services = services(registry, runner);
+        InstallationRecord first = services.register("First", suite("global-first"));
+        InstallationRecord second = services.register("Second", suite("global-second"));
+
+        LauncherServices.SettingsView fallback = services.settingsView();
+        assertFalse(fallback.persisted());
+        assertEquals(new JavaRuntime(runner).currentExecutable(), fallback.defaultJava());
+        assertEquals(new JavaRuntime(runner).currentExecutable().toString(),
+                services.preview(first, "megamek").getFirst());
+
+        Path javaOne = Files.writeString(
+                Files.createDirectories(temp.resolve("jdk-one").resolve("bin"))
+                        .resolve("java.exe"), "one");
+        services.selectDefaultJava(javaOne);
+        assertEquals(javaOne.toRealPath().toString(),
+                services.preview(first, "megamek").getFirst());
+        assertEquals(javaOne.toRealPath().toString(),
+                services.preview(second, "megamek").getFirst());
+
+        Path javaTwo = Files.writeString(
+                Files.createDirectories(temp.resolve("jdk-two").resolve("bin"))
+                        .resolve("java.exe"), "two");
+        services.selectDefaultJava(javaTwo);
+        assertEquals(javaTwo.toRealPath().toString(),
+                services.preview(first, "megamek").getFirst());
+        assertEquals(javaTwo.toRealPath().toString(),
+                services.preview(second, "megamek").getFirst());
+        Files.delete(javaTwo);
+        assertTrue(assertThrows(IOException.class,
+                () -> services.preview(first, "megamek"))
+                .getMessage().contains("Java"));
+    }
+
+    @Test
+    void corruptExplicitSettingsFailSettingsAndLaunchButNotRegistration() throws Exception {
+        Path registry = temp.resolve("corrupt-settings.json");
+        RecordingRunner runner = new RecordingRunner();
+        LauncherServices services = services(registry, runner);
+        InstallationRecord record = services.register("Existing", suite("corrupt-copy"));
+        Files.writeString(new LauncherSettingsStore(registry).path(), "{broken");
+
+        assertThrows(IOException.class, services::settingsView);
+        assertThrows(IOException.class, () -> services.preview(record, "megamek"));
+        assertTrue(runner.commands.isEmpty(),
+                "corrupt settings fail before any Java process is executed");
+        assertEquals(1, services.readRegistry().installations().size());
     }
 
     @Test
@@ -204,7 +254,8 @@ class LauncherServicesTest {
 
     private LauncherServices services(Path registry, RecordingRunner runner) {
         return new LauncherServices(registry, new RegistryStore(), new InstallationInspector(),
-                new UnusedTransport(), new JavaRuntime(runner), new ApplicationLauncher(runner));
+                new UnusedTransport(), new JavaRuntime(runner), new ApplicationLauncher(runner),
+                new RootCoordinator(temp.resolve("coord-" + registry.getFileName())));
     }
 
     private Path suite(String name) throws Exception {

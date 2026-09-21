@@ -20,6 +20,7 @@ import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.GraphicsEnvironment;
+import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -155,17 +156,14 @@ class ExistingImportSwingTest {
             assertFalse(hasShowingDialog(frame, "Import complete"));
 
             RegistryData data = services.readRegistry();
-            String launcherJava = currentJava();
             assertEquals(2, data.installations().size());
             assertEquals("MegaMek existing installation",
                     services.loadHome().preferred().name());
             assertTrue(data.installations().stream().anyMatch(record ->
                     "MekHQ existing installation".equals(record.name())));
-            assertTrue(data.installations().stream().allMatch(record ->
-                    record.javaExecutable().equals(launcherJava)));
+            assertFalse(Files.readString(registry).contains("javaExecutable"));
             assertEquals(2, prompts.folderRequests);
-            assertTrue(runner.commands.stream().allMatch(command ->
-                    command.equals(List.of(launcherJava, "-version"))));
+            assertTrue(runner.commands.isEmpty(), "import must not execute Java");
             ChannelPreferenceStore channels = new ChannelPreferenceStore();
             for (var record : data.installations()) {
                 assertFalse(Files.exists(channels.path(registry, record.id())),
@@ -187,6 +185,7 @@ class ExistingImportSwingTest {
                         provenance.getText());
                 assertNotNull(waitFor(() -> findButton(frame,
                         "enableManagedUpdatesButton-" + record.id())));
+                assertNull(find(frame, "checkOnOpenCheckbox-" + record.id()));
             }
             assertNull(onEdt(() -> findButton(frame, "chooseChannelButton")));
             assertNull(onEdt(() -> findButton(frame, "updateChecksButton")));
@@ -241,7 +240,8 @@ class ExistingImportSwingTest {
                 throw new AssertionError("existing import must not use the network");
             }
         };
-        return new LauncherServices(registry, new RegistryStore(), new InstallationInspector(),
+        return new LauncherServices(
+                registry, new RegistryStore(), new InstallationInspector(),
                 noNetwork, new JavaRuntime(runner), new ApplicationLauncher(runner)) {
             @Override public org.megamek.launcher.channel.QuickInstallSnapshot
                     quickInstallSnapshot() {
@@ -272,10 +272,6 @@ class ExistingImportSwingTest {
             }
         }
         return root;
-    }
-
-    private static String currentJava() throws Exception {
-        return new JavaRuntime(new RecordingRunner()).currentExecutable().toString();
     }
 
     private static Map<Path, Long> inventory(Path root) throws Exception {
@@ -377,7 +373,7 @@ class ExistingImportSwingTest {
         public Result run(List<String> command, Path workingDirectory, Duration timeout,
                           boolean inheritIo) {
             assertFalse(SwingUtilities.isEventDispatchThread(),
-                    "Java validation and registration preparation must run off the EDT");
+                    "any Java process must run off the EDT");
             commands.add(List.copyOf(command));
             return new Result(0, "openjdk version \"21.0.8\"", false);
         }

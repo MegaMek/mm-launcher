@@ -14,7 +14,6 @@ import java.util.List;
 
 public final class ApplicationLauncher {
     private final ProcessRunner runner;
-    private final JavaRuntime javaRuntime;
     private final RootCoordinator coordinator;
 
     public ApplicationLauncher() {
@@ -27,14 +26,14 @@ public final class ApplicationLauncher {
 
     public ApplicationLauncher(ProcessRunner runner, RootCoordinator coordinator) {
         this.runner = runner;
-        this.javaRuntime = new JavaRuntime(runner);
         this.coordinator = coordinator;
     }
 
-    public List<String> command(InstallationRecord record, String productKey)
+    public List<String> command(InstallationRecord record, String productKey,
+                                JavaRuntime.CurrentJava gameJava)
             throws IOException, InterruptedException {
-        if (record.javaExecutable() == null) {
-            throw new IOException("no Java selected; run java-select explicitly");
+        if (gameJava == null) {
+            throw new IOException("effective Game Java was not resolved");
         }
         Path root = Path.of(record.canonicalRoot());
         Inspection current = new InstallationInspector().inspect(root);
@@ -55,11 +54,10 @@ public final class ApplicationLauncher {
         if (!product.equals(registered)) {
             throw new IOException("registered product layout changed; inspect and register again");
         }
-        Path java = javaRuntime.resolve(record.javaExecutable());
+        Path java = gameJava.requireUnchanged();
         if (java.startsWith(root)) {
-            throw new IOException("selected Java must be external to the application directory");
+            throw new IOException("Game Java must be external to the application directory");
         }
-        javaRuntime.validate(java, root);
         List<String> command = new ArrayList<>();
         command.add(java.toString());
         command.add("-Xmx" + InstallationInspector.heapMb(productKey) + "m");
@@ -75,12 +73,13 @@ public final class ApplicationLauncher {
         return List.copyOf(command);
     }
 
-    public int launch(InstallationRecord record, String product)
+    public int launch(InstallationRecord record, String product,
+                      JavaRuntime.CurrentJava gameJava)
             throws IOException, InterruptedException {
         Path root = Path.of(record.canonicalRoot());
         try (RootCoordinator.Lease lease = coordinator.acquire(root, false)) {
             lease.requireNoPendingUpdate();
-            List<String> command = command(record, product);
+            List<String> command = command(record, product, gameJava);
             lease.markLaunchStarting();
             boolean childCompleted = false;
             try {

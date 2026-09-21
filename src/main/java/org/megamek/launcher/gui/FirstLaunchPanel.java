@@ -97,7 +97,7 @@ final class FirstLaunchPanel extends JPanel {
         status.setMaximumSize(new Dimension(Integer.MAX_VALUE,
                 status.getPreferredSize().height));
         status.setName("homeStatusLabel");
-        status.setVisible(status.getText() != null && !status.getText().isBlank());
+        status.setVisible(true);
         controls.add(status);
         verticalCenterAfter = flexibleSpace();
         controls.add(verticalCenterAfter);

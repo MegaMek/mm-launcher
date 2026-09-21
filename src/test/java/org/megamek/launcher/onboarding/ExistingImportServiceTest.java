@@ -2,7 +2,6 @@ package org.megamek.launcher.onboarding;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.launch.ProcessRunner;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationType;
@@ -33,7 +32,7 @@ class ExistingImportServiceTest {
     @TempDir Path temp;
 
     @Test
-    void importsMegaMekOnlyAndFullBundleWithExactCurrentJavaAndNoSidecars() throws Exception {
+    void importsMegaMekOnlyAndFullBundleWithoutRunningJavaOrCreatingSidecars() throws Exception {
         Path registry = temp.resolve("registry.json");
         RecordingRunner runner = new RecordingRunner(
                 new ProcessRunner.Result(0, "openjdk version \"21.0.8\"", false));
@@ -50,8 +49,6 @@ class ExistingImportServiceTest {
         assertEquals(List.of("megamek"),
                 first.record().products().stream().map(Product::key).toList());
         assertFalse(first.record().updateEligible());
-        assertEquals(new JavaRuntime(runner).currentExecutable().toString(),
-                first.record().javaExecutable());
         assertFalse(Files.exists(maliciousMarker), "static JAR metadata must not load classes");
 
         Path full = suite("MekHQ-bundle", List.of("megamek", "mekhq", "lab"), true);
@@ -64,9 +61,7 @@ class ExistingImportServiceTest {
         assertEquals(List.of("lab", "megamek", "mekhq"),
                 second.record().products().stream().map(Product::key).sorted().toList());
         assertEquals(2, data.installations().size());
-        assertTrue(runner.commands.stream().allMatch(command -> command.equals(
-                List.of(first.record().javaExecutable(), "-version"))));
-        assertFalse(runner.commands.isEmpty());
+        assertTrue(runner.commands.isEmpty(), "import must never execute Java");
         assertFalse(Files.exists(new ReceiptStore().metadataDirectory(registry)),
                 "import must not create receipt or channel metadata");
     }
@@ -78,8 +73,6 @@ class ExistingImportServiceTest {
         Path originalRoot = suite("original", List.of("megamek"), false);
         InstallationRecord original = store.register(registry, "Pinned original", originalRoot,
                 "keep-build");
-        Path explicitJava = Files.writeString(temp.resolve("explicit-java.exe"), "fixture");
-        store.selectJava(registry, original.id(), explicitJava.toString());
         InstallationRecord configured = store.read(registry).installations().getFirst();
 
         ExistingImportService service = service(registry, goodRunner());
@@ -91,12 +84,13 @@ class ExistingImportServiceTest {
         assertFalse(imported.becameMain());
         assertEquals(original.id(), after.defaultInstallationId());
         assertEquals(configured, after.installations().getFirst(),
-                "name, pin, Java, registration time and products must be retained");
+                "name, pin, registration time and products must be retained");
 
         Path racingRegistry = temp.resolve("racing.json");
         ExistingImportService racing = service(racingRegistry, goodRunner());
         Path quotedRoot = suite("quoted-first", List.of("megamek"), false);
-        ExistingImportService.Plan staleUiQuote = racing.prepare(quotedRoot, context());
+        ExistingImportService.Plan staleUiQuote =
+                racing.prepare(quotedRoot, context());
         Path winnerRoot = suite("concurrent-winner", List.of("megamek"), false);
         InstallationRecord winner = store.register(racingRegistry, "Concurrent Main", winnerRoot,
                 null);
@@ -131,7 +125,8 @@ class ExistingImportServiceTest {
         assertEquals(2, store.read(registry).installations().size());
 
         Path changed = suite("changed", List.of("megamek"), false);
-        ExistingImportService.Plan changedPlan = service.prepare(changed, context());
+        ExistingImportService.Plan changedPlan =
+                service.prepare(changed, context());
         jar(changed.resolve("MekHQ.jar"), "mekhq.MekHQ", false);
         assertThrows(IOException.class,
                 () -> service.register(changedPlan, "Changed", context()));
@@ -146,7 +141,7 @@ class ExistingImportServiceTest {
     }
 
     @Test
-    void javaVersionTimeoutFailureAndUnrecognizedOutputNeverRegister() throws Exception {
+    void corruptOrUnusableJavaRunnerDoesNotAffectImport() throws Exception {
         List<ProcessRunner.Result> failures = List.of(
                 new ProcessRunner.Result(0, "openjdk version \"17.0.12\"", false),
                 new ProcessRunner.Result(7, "failed", false),
@@ -154,19 +149,21 @@ class ExistingImportServiceTest {
                 new ProcessRunner.Result(-1, "", true));
         for (int index = 0; index < failures.size(); index++) {
             Path registry = temp.resolve("java-failure-" + index + ".json");
-            ExistingImportService service = service(registry,
-                    new RecordingRunner(failures.get(index)));
+            RecordingRunner runner = new RecordingRunner(failures.get(index));
+            ExistingImportService service = service(registry, runner);
             Path root = suite("java-failure-root-" + index, List.of("megamek"), false);
 
-            assertThrows(IOException.class, () -> service.prepare(root, context()));
-            assertFalse(Files.exists(registry));
+            ExistingImportService.Result result = service.register(
+                    service.prepare(root, context()), "Imported", context());
+            assertEquals(root.toRealPath().toString(), result.record().canonicalRoot());
+            assertTrue(runner.commands.isEmpty());
             assertFalse(Files.exists(new ReceiptStore().metadataDirectory(registry)));
         }
     }
 
     private ExistingImportService service(Path registry, ProcessRunner runner) {
         return new ExistingImportService(registry, new RegistryStore(),
-                new InstallationInspector(), new JavaRuntime(runner));
+                new InstallationInspector());
     }
 
     private static OperationContext context() {

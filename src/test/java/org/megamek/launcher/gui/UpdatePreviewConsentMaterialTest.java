@@ -50,13 +50,14 @@ import java.util.jar.Manifest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class UpdatePreviewConsentMaterialTest {
     @TempDir Path temp;
 
     @Test
-    void modelessDialogCancelDoesNotPreviewAndOkUsesCapturedSourceAndShowsReadOnlyReport()
+    void standalonePreviewActionIsAbsent()
             throws Exception {
         Fixture fixture = fixture();
         LauncherFrame frame = onEdt(() -> new LauncherFrame(fixture.services));
@@ -66,54 +67,9 @@ class UpdatePreviewConsentMaterialTest {
                     () -> find(frame, "manageInstallationsButton"));
             SwingUtilities.invokeAndWait(installations::doClick);
             JPopupMenu menu = openInstallationMenu(frame, fixture.first.id());
-            JMenuItem preview = findMenuItem(menu, "Preview update");
-            assertNotNull(preview);
-            assertTrue(preview.isEnabled());
-            SwingUtilities.invokeAndWait(preview::doClick);
-            JDialog picker = waitForDialog(frame, "Preview update");
-            assertFalse(picker.isModal(), "release picker must remain modeless");
-
-            JButton fetch = find(picker, "fetchPreviewReleasesButton");
-            SwingUtilities.invokeAndWait(fetch::doClick);
-            JList<?> releases = waitFor(() -> findList(picker, "previewReleaseList"));
-            waitUntil(() -> releases.getModel().getSize() == 1);
-            SwingUtilities.invokeAndWait(() -> releases.setSelectedIndex(0));
-            JButton inspect = find(picker, "runPreviewButton");
-            waitUntil(inspect::isEnabled);
-
-            SwingUtilities.invokeLater(inspect::doClick);
-            JDialog confirm = waitForDialog(frame, "Confirm read-only preview download");
-            JButton cancel = findButtonText(confirm, "Cancel");
-            assertNotNull(cancel);
-            SwingUtilities.invokeAndWait(cancel::doClick);
-            waitUntil(() -> !confirm.isDisplayable());
+            assertNull(findMenuItem(menu, "Preview update"));
             assertEquals(0, fixture.services.previewCalls,
-                    "Cancel must cause zero target package previews/downloads");
-
-            // Change the preference after opening: consent remains bound to the captured record,
-            // receipt, repository, and tag displayed by this already-open picker.
-            fixture.services.select(fixture.second);
-            SwingUtilities.invokeLater(inspect::doClick);
-            JDialog secondConfirm = waitForDialog(frame, "Confirm read-only preview download");
-            JButton ok = findButtonText(secondConfirm, "OK");
-            assertNotNull(ok);
-            SwingUtilities.invokeAndWait(ok::doClick);
-            waitUntil(() -> fixture.services.previewCalls == 1);
-
-            JDialog result = waitForDialog(frame, "Read-only update preview");
-            JTextArea details = findTextArea(result);
-            assertNotNull(details);
-            assertTrue(details.getText().contains("READ-ONLY point-in-time preview"));
-            assertTrue(details.getText().contains("Baseline: v-source / MegaMek-v-source.tar.gz"));
-            assertTrue(details.getText().contains("Target: v-target / MegaMek-v-target.tar.gz"));
-            assertTrue(findButtonText(result, "Apply") == null, "preview must expose no Apply");
-            assertEquals("v-target", fixture.services.capturedTag);
-            assertEquals(fixture.first, fixture.services.capturedRecord);
-            assertEquals(fixture.firstReceipt, fixture.services.capturedReceipt);
-            assertEquals("megamek", fixture.services.capturedReceipt.repository());
-            assertEquals(fixture.second.id(),
-                    fixture.services.readRegistry().defaultInstallationId());
-            assertEquals(1, fixture.services.releaseCalls);
+                    "the GUI must not expose standalone preview");
         } finally {
             SwingUtilities.invokeAndWait(() -> {
                 for (Window window : Window.getWindows()) {

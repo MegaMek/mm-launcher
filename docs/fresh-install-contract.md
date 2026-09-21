@@ -31,14 +31,17 @@ package outside the registered root only for comparison and never publishes pack
 that root. It performs one package download per prepared attempt. Missing digests and historical
 archives that no longer satisfy this contract remain unsupported and launch-only.
 
-The GUI keeps two metadata sources visibly separate. **Fetch channel release** reads the bounded
-website `current_releases.yml` pointer once and performs one exact release lookup for only the
-selected product/channel; it returns one row and never lists history. **Browse all releases…**
-alone calls the paged releases endpoint. Historical rows are explicitly unclassified and are not
-filtered or labeled from GitHub title/`prerelease`, because those mutable values do not preserve
-promotion history. The selected channel in that mode becomes the created installation's fixed
-update track and does not classify the selected historical release.
-No picker metadata action downloads package bytes.
+The GUI's single **Fetch releases** action reads both bounded website
+`current_releases.yml` pointers once and calls one bounded history page for only the selected
+product repository. It combines the selected channel's known current target with releases whose
+historical membership is unknown, excludes a distinct current target known only to the other
+channel, and treats a shared stable/dev identity as current in either selection. Page one contains
+the selected target exactly once; an exact lookup is added only when needed to obtain its
+canonical eligible metadata. Identity is deduplicated by fixed repository/tag, and titles,
+versions, ordering, and `prerelease` never infer a channel. Most historical rows currently remain
+unknown and therefore appear for either channel. The selected channel becomes the created
+installation's fixed update track and does not classify an unknown historical release. No picker
+metadata action downloads package bytes.
 
 Empty Home has a separate frame-scoped current snapshot contract. One background attempt resolves
 all six fixed quick-install choices while both install segments are disabled and **Use existing
@@ -95,30 +98,28 @@ Only after final static validation does `RegistryStore.register` run. Existing l
 selection is preserved by registration; the first record supplies that compatibility field for an
 empty registry. Independently, registration initializes only still-unset per-application
 preferences for products actually in the new static record and never overwrites an explicit
-preference. The normal
-GUI setup then revalidates and stores the exact external Java from its quote, initializes the exact
-planned Milestone or Development channel once with the quoted Settings check default, rechecks that no
+preference. The normal GUI setup does not inspect Java. It initializes the exact
+planned Milestone or Development channel once with check-on-open enabled, rechecks that no
 unrelated registry/default drift occurred, and updates the compatibility default only for the
 still-empty registry captured by the quote. The primary first-run route defaults to
 `(MEKHQ, MILESTONE)`; the five popup routes bind their displayed fixed repository/channel pairs and
 cannot silently alter the primary default or an existing installation's track. The same installer
 requires exact product matching for
 normal quotes: MekHQ is the three-program suite, while MegaMek and MegaMekLab are standalone.
-Repository titles and extra/missing products cannot substitute for that binding. Normal and
-advanced GUI installs initially use true, but preserve a user's later explicit false default for
-each new copy. The normal backend re-reads the exact settings configuration before transfer or
-parent creation; change, corruption, or an unknown result requires a fresh quote. The simple
+Repository titles and extra/missing products cannot substitute for that binding. Normal, exact historical, and CLI managed installs always initialize check-on-open to true; there
+is no global or new-install default. The normal backend does not read launcher Settings while
+planning or installing. The simple
 summary keeps the exact planned destination visible but has no passive update-behavior row and no
-technical-details toggle or pane. Raw source, asset, digest, Java, registry, and Settings bindings
+technical-details toggle or pane. Raw source, asset, digest, Java, and registry bindings
 remain validated backend state, and operation logs retain errors. Existing per-copy channels are never rewritten. The CLI requires an explicit channel for each
-fresh install and initializes check-on-open to false; its former channel mutation command is
+fresh install and initializes check-on-open to true; its former channel mutation command is
 rejected without writing.
 Every record remains `updateEligible=false`; no Java is bundled and no game is automatically
 launched.
 
 A quick-install plan is explicitly marked as captured-current rather than historical. Its local
 quote preparation accepts only the exact validated snapshot option and freshly captures
-destination, configured Java, registry/default, and Settings revision without another network
+destination and registry/default state without another network
 lookup. Before creating parents or requesting package bytes, installation re-fetches the exact
 official repository/tag release metadata and requires release/tag plus asset
 name/size/SHA-256/URL identity to match the quote. It does not re-read the channel pointer: pointer
@@ -128,17 +129,17 @@ before transfer and requires fresh consent. The package body remains a single do
 Current-channel picker results go through the same normal planner, which refreshes the website
 pointer and exact tag before displaying consent. A Browse-all selection uses the planner's exact
 historical mode: it re-fetches only that repository/tag, applies the same asset/digest/product,
-destination, Java, registry, and Settings checks, and records the chosen channel solely as that
+destination and registry checks, and records the chosen channel solely as that
 new installation's immutable track. Install repeats the matching current-pointer or exact-tag lookup before any
 binary transfer. Product/channel/source-mode changes invalidate stale picker objects rather than
 retargeting them. The canonical historical-channel metadata needed to replace the unclassified
 workaround is specified in `../ci.md`.
 
-The normal planner and existing-copy importer use the validated launcher-level default game Java
-when configured. With no saved default they lazily validate the current compatible launcher
-runtime and do not write a setting. A successful explicit default change is canonical, Java 21+,
-and atomic; invalid/old Java leaves the previous setting intact. Existing installations retain
-their record-level Java override.
+Normal installation and existing-copy import do not read, resolve, execute, or validate Java.
+Missing or corrupt launcher settings therefore cannot invalidate an installation quote or prevent
+package publication. Java is resolved only for launch or explicit launch preview. With no saved
+default, the exact Java runtime executing MM Launcher is validated and used automatically without
+being persisted; an explicit default remains launcher-wide and has no per-copy override.
 
 Before publication, policy-version-1 hashes are made only from the pristine verified extracted
 package. After registration generates its UUID, a receipt bound to that UUID, canonical root,
@@ -173,8 +174,9 @@ does not touch existing game copies, migrate saves, update installations, select
 
 Receipt publication is a later bounded step. If it fails after registration, the valid
 installation and registry record are retained and the error says **REGISTERED** and
-**PREVIEW UNAVAILABLE**, never **NOT REGISTERED**. Removing a registry entry leaves its receipt;
-the stale UUID/root/time binding cannot authorize a later registration.
+**PREVIEW UNAVAILABLE**, never **NOT REGISTERED**. **Remove from launcher…** removes its receipt and other launcher-owned sidecars while retaining
+every application-root file. The stale UUID/root/time binding cannot authorize a later
+registration.
 
 Fixed-channel publication follows receipt publication. If it fails, the valid registered copy is
 also retained with explicit incomplete-setup/repair wording and remains launch-only; it is never

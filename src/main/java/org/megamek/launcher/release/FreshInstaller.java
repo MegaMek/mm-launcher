@@ -177,7 +177,8 @@ public final class FreshInstaller {
                 try {
                     RegistryData registered = registryStore.read(registryPath);
                     OwnershipReceipt receipt = receiptStore.write(registryPath, registered, record,
-                            repository, release.tag(), asset.name(), asset.size(), asset.digest(),
+                            repository, release.tag(), asset.name(), asset.size(),
+                            workspace.resolvedDigest().canonical(),
                             ownership);
                     context.cleanupPhase("Removing the downloaded package workspace");
                     return new Result(record, release, asset, target, receipt);

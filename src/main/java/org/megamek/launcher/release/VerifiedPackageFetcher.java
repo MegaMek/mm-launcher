@@ -72,12 +72,13 @@ public final class VerifiedPackageFetcher {
             Path staging = createOwnedStaging(safeParent, stagingPrefix);
             try {
                 Path archive = staging.resolve("package.tar.gz");
-                download(repository, release.tag(), asset, archive, progress, context);
+                PackageDigest.Sha256 resolvedDigest =
+                        download(repository, release.tag(), asset, archive, progress, context);
                 context.phase(OperationPhase.EXTRACT, "Opening verified package archive");
                 Path extracted = extractor.extract(archive, staging.resolve("expanded"), context,
                         OperationPhase.EXTRACT);
                 return new Workspace(staging, archive, extracted, release, asset,
-                        FileIdentity.read(archive));
+                        resolvedDigest, FileIdentity.read(archive));
             } catch (IOException | InterruptedException | RuntimeException e) {
                 context.cleanupPhase("Removing the operation-owned package workspace");
                 try {
@@ -119,7 +120,7 @@ public final class VerifiedPackageFetcher {
         ReleaseCatalog.Asset freshAsset = catalog.selectInstallAsset(repository, freshRelease);
         requireExpected(freshAsset, expected);
         if (!workspace.release().tag().equals(tag)
-                || !workspace.asset().equals(freshAsset)) {
+                || !sameTransferMetadata(workspace.asset(), freshAsset)) {
             throw new IOException("target release or asset metadata changed; restart the update "
                     + "attempt (the retained package was not applied)");
         }
@@ -134,7 +135,8 @@ public final class VerifiedPackageFetcher {
                 context, OperationPhase.PREPARE_INSTALL);
     }
 
-    private void download(OfficialRepository repository, String tag, ReleaseCatalog.Asset asset,
+    private PackageDigest.Sha256 download(
+                          OfficialRepository repository, String tag, ReleaseCatalog.Asset asset,
                           Path output, PrintStream progress, OperationContext context)
             throws IOException, InterruptedException {
         ReleaseCatalog.validateInitialAssetUri(repository, tag, asset);
@@ -212,11 +214,20 @@ public final class VerifiedPackageFetcher {
                         + " bytes, received " + count);
             }
             String actual = HexFormat.of().formatHex(digest.digest());
-            String expected = asset.digest().substring("sha256:".length()).toLowerCase();
-            if (!actual.equals(expected)) throw new IOException("download SHA-256 mismatch");
+            PackageDigest.Sha256 resolved;
+            if (asset.publishedDigest().orElse(null)
+                    instanceof PackageDigest.ValidPublished published) {
+                if (!actual.equals(published.value().hex())) {
+                    throw new IOException("download SHA-256 mismatch");
+                }
+                resolved = published.value();
+            } else {
+                resolved = PackageDigest.computed(actual);
+            }
             context.progress(OperationPhase.VERIFY, count, count, ProgressUnit.BYTES,
                     "Package size and SHA-256 verified");
             progress.printf("VERIFIED %,d bytes SHA-256 %s%n", count, actual);
+            return resolved;
         } catch (IOException | InterruptedException | RuntimeException error) {
             failure = error;
             throw error;
@@ -273,13 +284,31 @@ public final class VerifiedPackageFetcher {
 
     private static void requireExpected(ReleaseCatalog.Asset asset, ExpectedAsset expected)
             throws IOException {
-        if (expected != null && (expected.name() != null && !asset.name().equals(expected.name())
+        if (expected == null) return;
+        boolean identityChanged = expected.name() != null && !asset.name().equals(expected.name())
                 || asset.size() != expected.size()
-                || !asset.digest().equalsIgnoreCase(expected.digest())
-                || expected.url() != null && !asset.url().equals(expected.url()))) {
+                || expected.url() != null && !asset.url().equals(expected.url());
+        boolean digestChanged = false;
+        if (expected.publishedDigest().isPresent()) {
+            PackageDigest.Published current = asset.publishedDigest().orElse(null);
+            digestChanged = !(current instanceof PackageDigest.ValidPublished valid)
+                    || !valid.value().hex().equals(
+                    expected.publishedDigest().get().value().hex());
+        }
+        // A plan which quoted absence may adopt a newly published valid digest at this exact
+        // pre-transfer refresh. Malformed metadata was already rejected by catalog selection.
+        if (identityChanged || digestChanged) {
             throw new IOException("target asset name, URL, size, or digest changed since explicit "
                     + "consent; restart the update attempt");
         }
+    }
+
+    private static boolean sameTransferMetadata(ReleaseCatalog.Asset first,
+                                                ReleaseCatalog.Asset second) {
+        return first.name().equals(second.name())
+                && first.size() == second.size()
+                && first.url().equals(second.url())
+                && first.publishedDigest().equals(second.publishedDigest());
     }
 
     public static final class Workspace implements AutoCloseable {
@@ -288,16 +317,18 @@ public final class VerifiedPackageFetcher {
         private final Path extracted;
         private final ReleaseCatalog.Release release;
         private final ReleaseCatalog.Asset asset;
+        private final PackageDigest.Sha256 resolvedDigest;
         private final FileIdentity archiveIdentity;
 
         private Workspace(Path staging, Path archive, Path extracted,
                           ReleaseCatalog.Release release, ReleaseCatalog.Asset asset,
-                          FileIdentity archiveIdentity) {
+                          PackageDigest.Sha256 resolvedDigest, FileIdentity archiveIdentity) {
             this.staging = staging;
             this.archive = archive;
             this.extracted = extracted;
             this.release = release;
             this.asset = asset;
+            this.resolvedDigest = resolvedDigest;
             this.archiveIdentity = archiveIdentity;
         }
 
@@ -315,6 +346,11 @@ public final class VerifiedPackageFetcher {
 
         public ReleaseCatalog.Asset asset() {
             return asset;
+        }
+
+        /** Authoritative identity of the exact retained bytes, published or locally computed. */
+        public PackageDigest.Sha256 resolvedDigest() {
+            return resolvedDigest;
         }
 
         private void verifyArchive(ExpectedAsset expected, OperationContext context)
@@ -347,8 +383,7 @@ public final class VerifiedPackageFetcher {
                 throw new IOException("retained package changed while it was being verified");
             }
             String actual = HexFormat.of().formatHex(digest.digest());
-            String expectedHash = asset.digest().substring("sha256:".length()).toLowerCase();
-            if (count != asset.size() || !actual.equals(expectedHash)) {
+            if (count != asset.size() || !actual.equals(resolvedDigest.hex())) {
                 throw new IOException("retained package no longer matches consented size/SHA-256");
             }
         }
@@ -370,7 +405,22 @@ public final class VerifiedPackageFetcher {
         }
     }
 
-    public record ExpectedAsset(String name, long size, String digest, URI url) {
+    public record ExpectedAsset(String name, long size,
+                                java.util.Optional<PackageDigest.ValidPublished> publishedDigest,
+                                URI url) {
+        public ExpectedAsset {
+            publishedDigest = publishedDigest == null
+                    ? java.util.Optional.empty() : publishedDigest;
+        }
+
+        public String digest() {
+            return publishedDigest.map(PackageDigest.ValidPublished::raw).orElse(null);
+        }
+
+        public ExpectedAsset(String name, long size, String digest, URI url) {
+            this(name, size, PackageDigest.expectedPublished(digest), url);
+        }
+
         public ExpectedAsset(String name, long size, String digest) {
             this(name, size, digest, null);
         }

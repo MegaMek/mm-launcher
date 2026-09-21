@@ -67,6 +67,16 @@ public final class OfficialYamlChannelCatalog implements ChannelCatalog {
     }
 
     /**
+     * Reads the fixed source once and returns both authoritative current pointers without
+     * resolving release metadata. Historical membership is intentionally not synthesized.
+     */
+    public CurrentPointers currentPointers() throws IOException, InterruptedException {
+        Map<FollowChannel, String> versions = versions();
+        return new CurrentPointers(versions.get(FollowChannel.MILESTONE),
+                versions.get(FollowChannel.DEVELOPMENT));
+    }
+
+    /**
      * Fetches stable/dev once, then resolves the complete six-choice first-launch snapshot.
      * Exact metadata is shared when stable and dev currently point at the same repository/tag.
      */
@@ -117,6 +127,22 @@ public final class OfficialYamlChannelCatalog implements ChannelCatalog {
     }
 
     private record ResolvedRelease(ReleaseCatalog.Release release, ReleaseCatalog.Asset asset) {
+    }
+
+    public record CurrentPointers(String milestoneVersion, String developmentVersion) {
+        public CurrentPointers {
+            if (milestoneVersion == null || developmentVersion == null) {
+                throw new IllegalArgumentException("both current channel pointers are required");
+            }
+        }
+
+        public String version(FollowChannel channel) {
+            if (channel == null) throw new IllegalArgumentException("channel is required");
+            return switch (channel) {
+                case MILESTONE -> milestoneVersion;
+                case DEVELOPMENT -> developmentVersion;
+            };
+        }
     }
 
     Map<FollowChannel, String> versions() throws IOException, InterruptedException {

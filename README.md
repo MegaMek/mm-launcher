@@ -63,21 +63,23 @@ nonzero exit restores the window and shows the explicit sanitized error. A busy 
 minimize and retains the **Please wait** response. This is normal window minimization, not tray
 integration, disposal, detachment, or launcher exit.
 
-Registry schema 2 stores those targets by application key and stable installation UUID while
-retaining the legacy default field and CLI APIs. Reading schema 1 derives preferences only for
-applications actually contained by the old default and performs no write. Missing or stale
+Registry schema 3 stores those targets by application key and stable installation UUID. It is a
+clean pre-release schema: older shapes, including records containing per-copy Java, are rejected
+without migration. Missing or stale
 targets use the first matching record as a side-effect-free runtime fallback. Registration fills
-only still-unset application preferences; removal clears only preferences that pointed to the
-removed record. Strict parsing, canonical roots, locked mutation, and atomic replacement remain
-required.
+only still-unset application preferences; removal safely retargets affected preferences to the
+first remaining compatible copy. Strict parsing, canonical roots, locked mutation, and atomic
+replacement remain required.
 
 Home has no visible global “Main” block, per-copy update buttons, or a second navigation control
 for update status. Its single **Installations** button gains a known count such as
 **Installations (2 updates)** when checked installations have updates; unknown and launch-only
-copies never create a false count. Update, retry, recovery, Java, channel, location, removal, and explicit
+copies never create a false count. Update, retry, recovery, channel, location, removal, and explicit
 **Use as preferred for …** actions live on dark-teal installation cards. A managed card shows its
-read-only **Channel: Milestone/Development** identity and offers **Update checks…** only to toggle
-check-on-open. An imported card says **Imported copy · Launch only · Updates unavailable** and has
+read-only **Channel: Milestone/Development** identity and directly shows
+**Check for updates when the launcher opens**. This per-card checkbox is the sole automatic-check
+setting and saves immediately without changing the fixed channel. An imported card says
+**Imported copy · Launch only · Updates unavailable** and has
 no channel, check, preview, update, or recovery action; only its separate opt-in
 **Enable managed updates…** action is available. There is no bulk update.
 Managed Home has one top-left information area for useful aggregate update state:
@@ -85,14 +87,18 @@ Managed Home has one top-left information area for useful aggregate update state
 **N installations have updates**, or **Some installations could not be checked**. It does not
 repeat an obvious post-install “ready” message or place status text above navigation.
 
-Settings are immediate. **Check installed versions when the launcher opens** is a launcher-wide
-master gate, defaulting on when absent; it does not rewrite any per-installation channel or
-check-on-open choice, so explicit Off stays Off. **Change default Java** validates and atomically
-stores one external Java 21+ executable for new normal installs and imports. Existing records keep
-their own Java choices. Settings presents unboxed, left-aligned sections; the Java version and
+Settings contains only **Game Java** and **Diagnostics**. **Change default Java** validates and
+atomically stores the sole external Java 21+ executable for every installation. Launch and
+explicit launch preview resolve and revalidate this setting; installation records contain no Java
+path or feature. With no saved default, the exact Java runtime executing MM Launcher is the
+automatic effective runtime and is not persisted. An invalid or corrupt explicit setting fails
+visibly instead of silently falling back. The
+pre-release settings schema contains no global update
+fields and deliberately does not migrate older settings schemas. Settings presents unboxed,
+left-aligned sections; the Java version and
 regular-font path share a row with the change action, and **View logs** opens a styled local viewer.
-When the setting is absent, the compatible launcher runtime is used lazily without
-being persisted. Java-selection dialogs use the same dark-teal/gold controls. No JRE is
+Settings displays the effective runtime whether it is automatic or explicitly selected. The
+selector uses the same dark-teal/gold controls. No JRE is
 downloaded, installed, or bundled; Java acquisition remains deferred.
 
 Determinate download bars show only a localized percentage; the detail line uses human-readable
@@ -125,8 +131,8 @@ deduplicated. The first successful immutable snapshot is retained for the frame 
 reloads, confirmation cancellation, location changes, and repeated quote opens preserve the same
 labels without another current-channel request. A visible secondary
 **Use existing installation** action, captioned **MegaMek, MekHQ, or MegaMekLab**, imports a
-portable copy without moving it. After the folder chooser, static inspection, Java validation,
-and atomic registration run in one styled progress window; there is no separate name,
+portable copy without moving it. After the folder chooser, static inspection and atomic
+registration run in one styled progress window; there is no separate name,
 confirmation, or completion dialog. The first page has no Java prerequisite/download control and no
 healthy-first-launch advanced picker. The exact product/release/channel picker remains on
 Installations after a copy exists or when repair/recovery navigation is relevant.
@@ -141,7 +147,8 @@ mode toggle. The layout adapts to narrow windows and Java's per-monitor HiDPI sc
 Managed Home keeps that composition: full-width cover artwork on top and a compact, scrollable
 dark control deck below, with no duplicate header/footer or left artwork rail. It renders the
 per-application split controls and aggregate installation-level update summary described above.
-Missing Java, a missing root, or pending recovery is routed to the exact installation card.
+A missing root or pending recovery is routed to the exact installation card. An absent saved Java
+default is healthy and never blocks Home; Java is resolved by the launch worker.
 Imported/no-receipt copies remain launch-only and are never offered impossible update actions.
 
 The existing `application`/`installDist` entry point remains the CLI. Requires Java 21. From the
@@ -155,7 +162,7 @@ if ($LASTEXITCODE -ne 0) { throw "Build failed with exit code $LASTEXITCODE." }
 ```
 
 Review Home, Installations, Settings, the split **Install latest MekHQ Milestone** control,
-**Use existing installation**, **Install another version**, Preview, Update, recovery, Java
+**Use existing installation**, **Install another version**, Update, recovery, Game Java
 selection, and direct launch behavior. The primary normal first install resolves only the fixed website `stable`
 value for the MekHQ repository. Each popup item binds its displayed official repository and
 `stable` or `dev` channel; no selection can substitute a different product, channel, title, or
@@ -164,15 +171,15 @@ Before package transfer it shows a dedicated dark-teal/gold confirmation headed 
 product and channel. Its concise summary gives the validated version, actual included programs,
 binary download size, and full selectable destination.
 **Change location** chooses an existing parent and safe new subfolder, then produces a fresh
-immutable quote for that same product/channel pair. The already-validated launcher Java is not a
-happy-path choice here. There is no update-behavior row or technical-details toggle in this
+immutable quote for that same product/channel pair. Java is not part of installation planning or
+confirmation. There is no update-behavior row or technical-details toggle in this
 simple confirmation. The backend still binds and revalidates the exact repository, source, tag,
-asset identity/digest, Java, Settings revision, registry, and Main snapshot; operation logs retain
+asset identity/digest, destination, registry, and Main snapshot; operation logs retain
 failures.
 
 Ready first-launch actions plan from the exact cached option, not from another
-`current_releases.yml` lookup. Local planning still freshly captures destination, configured
-Java, registry/default state, and Settings revision off the EDT. Before package bytes or parent
+`current_releases.yml` lookup. Local planning still freshly captures destination and
+registry/default state off the EDT. Before package bytes or parent
 creation, install re-fetches the quoted exact repository/tag metadata and requires the same asset
 name, size, SHA-256, and URL. A moved channel pointer cannot silently retarget the quoted install;
 exact metadata drift requires fresh consent.
@@ -197,23 +204,29 @@ three-program suite; standalone MegaMek and MegaMekLab packages must inspect as 
 product, so managed Home never gains launch buttons from a mixed or title-inferred bundle.
 
 The Installations page's dark **Install another version** dialog defaults to MekHQ and Milestone.
-**Fetch channel release** reads the fixed website pointer once and resolves only that selected
-product/channel's exact tag; it does not enumerate GitHub history or fetch a package. The result is
-exactly one **Program Channel (Version)** row. Changing product or channel invalidates it.
-**Browse all releases…** is the separate explicit paged-history mode. Historical rows are
-unclassified because GitHub titles and prerelease flags are not durable channel truth; they are
-never labeled or filtered as Milestone/Development. In history mode, the selected Channel is only
-the newly created installation's fixed update channel, not a classification of that historical
-release; changing product invalidates the page. Both modes use
-the same styled product/channel combo treatment as Java selection, including a vector-painted
-dark arrow segment and system high-contrast fallback.
+Its one Product/Channel/**Fetch releases** row reads both current pointers from the fixed website
+YAML once and requests one page from only the selected product's GitHub history. Page one contains
+the selected channel's authoritative current target exactly once plus rows whose historical
+channel membership is unknown. A distinct current target known only to the other channel is
+excluded; if both pointers name the same identity, that release is valid for either selection.
+Titles, versions, ordering, and `prerelease` flags never supply classification. Most historical
+rows therefore appear for both channels today. The selected Channel becomes the new
+installation's immutable update track; it is not a claim about an unknown row's historical
+origin. No picker metadata action fetches package bytes.
+
+Previous/next use the exact loaded product/channel snapshot and a bounded GitHub page. Changing
+either combo clears the rows, selection, and page controls and invalidates late results. Eligible
+rows use **Program Channel (Version) — human size**; unavailable rows contain only
+**— Unavailable** after the identity. A separate **Page N** indicator remains in the footer, while
+the reserved status line is blank after success. The controls use the same styled combo/button
+treatment and high-contrast fallback as the rest of the launcher.
 
 Before consent, the picker sends the exact choice through the normal-install planner. Current
-channel choices re-read the authoritative pointer and exact release; historical choices re-fetch
-the exact repository/tag. Before transfer the planner repeats registry/destination/Java/settings
-checks and revalidates the same source, tag, asset, size, and digest. Historical selection never
-becomes inferred channel evidence. Graphical installs use the Settings default for background checks, initially on; changing that
-default never rewrites an existing copy's check-on-open value or fixed channel. See
+and unknown choices both re-fetch the selected exact repository/tag rather than retargeting from a
+current pointer. Before transfer the planner repeats registry/destination checks and revalidates
+the same source, tag, asset URL, name, size, and digest. Unknown classification is accepted only
+because successful installation creates a new fixed local track. Every successfully published graphical managed installation
+starts with its per-install check-on-open value enabled. See
 [`ci.md`](ci.md) for the canonical release index needed to classify old releases safely.
 Preview asks to fetch official releases and shows the exact package and full size before download.
 Preview itself remains read-only and has no Apply control. **Update…** is a separate workflow:
@@ -227,8 +240,9 @@ downloaded by this launcher or successfully adopted from one exact official ance
 valid immutable ownership receipt. Unadopted, pre-receipt, and corrupt/incomplete copies remain
 launch-only; local hashes alone are never converted into provenance.
 
-For a managed receipt-backed copy, the installation card displays its fixed channel. Open
-**Update checks…** to toggle only **Check this copy on open**.
+For a managed receipt-backed copy, the installation card displays its fixed channel and a direct
+**Check for updates when the launcher opens** checkbox. Toggling it immediately writes only that
+copy's boolean using the exact displayed record/preference binding.
 Use **Install another version** to create a separate root on another channel. Existing valid
 channel sidecars are read without migration writes; missing, corrupt, stale, or unavailable
 channel state remains launch-only and cannot be assigned through channel settings. Imported
@@ -236,20 +250,30 @@ folders receive no channel sidecar or ownership receipt unless the separate exac
 adoption succeeds. A check reads canonical channel and exact release metadata
 only; it downloads no package and changes no installed files. If an update is recommended,
 **Update** binds both consent steps to that exact installation, fixed channel, repository, tag,
-asset name, size, and digest and uses one full-package transfer for the attempt. The advanced
-exact-release Preview/Update picker remains available and never changes the fixed channel.
+asset name, size, and digest and uses one full-package transfer for the attempt. Update continues to use the same read-only plan internally before its separate Apply consent.
+There is no standalone GUI preview picker; the CLI diagnostic preview remains available.
 
 Prepared package data is process-local and attempt-scoped, not a persistent/offline cache or
 filesystem token. Cancel, success, and ordinary failure remove only that attempt's random temporary
 workspace; no later GUI or CLI operation resumes or adopts it. A process crash can leave that exact
 temporary directory for manual diagnosis, and startup does not broadly delete such directories.
-Standalone **Preview update** and `preview-update` remain separate read-only operations that dispose
-their own workspaces. Standalone CLI `apply-update` keeps its independent one-download contract and
+CLI `preview-update` remains a separate read-only diagnostic that disposes its workspace.
+Standalone CLI `apply-update` keeps its independent one-download contract and
 does not share packages with an unrelated preview or arbitrary path.
+
+Every installation offers **Open location** and **Remove from launcher…**. Open location
+revalidates the exact root and asks the platform file manager to open it off the UI thread.
+Removal deletes only the exact registration and launcher-owned sidecars; application files stay.
+Managed/adopted copies with complete current provenance and a fixed channel additionally offer
+**Uninstall…**. Uninstall moves only byte-exact current official files into an external,
+same-filesystem recovery area, preserves modified/custom/protected files, removes only empty known
+package directories, and removes registration/metadata last. A durable strict journal makes every
+pre-commit failure recoverable; post-commit cleanup failures are successful uninstalls with a
+cleanup warning. Pending work blocks launch/update and exposes **Recover uninstall**.
 
 Fresh download, standalone Preview, prepared Update, and recovery use one functional operation
 dialog with a compact dark-teal/gold presentation and typed phases: metadata, download,
-verification, extraction, planning, consent, installation preparation, Apply/recovery, and
+verification, extraction, planning, consent, installation preparation, Apply/uninstall/recovery, and
 cleanup. Byte totals are shown for package transfer and retained-package verification. File totals
 are shown only when known; extraction remains indeterminate when the archive has no trustworthy
 total while its typed event supplies a localized **N files processed** detail under
@@ -299,13 +323,12 @@ Logging failure never changes the operation result, masks an original failure, o
 journals/backups. The current checkpoint adds these functional surfaces only; broader empty,
 imported, managed, and recovery-state visual polish remains a separate UI/UX checkpoint.
 
-The primary normal GUI install creates a fixed Milestone copy. Current-channel and exact-history
-new GUI installs use the Settings **check on open** default, initially enabled until the user
-explicitly changes it for future installs. The quoted choice remains bound to the backend plan but is not a passive row
-in the simple confirmation. A changed or unreadable setting requires a fresh confirmation before
-transfer or destination creation. Existing explicit false choices remain false, and
+The primary normal GUI install creates a fixed Milestone copy. Current-channel, exact-history,
+adopted, and CLI managed installations always initialize check-on-open to true. That value is not
+part of the install quote and there is no configurable new-install default. Existing explicit
+false choices remain false, and
 legacy/unknown/corrupt channel state is never inferred, assigned, or rewritten. The CLI requires a
-fixed channel for installation and initializes check-on-open to false. Only explicitly enabled
+fixed channel for installation and initializes check-on-open to true. Only explicitly enabled
 copies are checked, serially and in the background; slow or
 unavailable metadata does not disable healthy launch or page navigation. No check downloads or
 applies a package. A failed check is shown as “Could not check,” never as “Up to date.”
@@ -352,7 +375,7 @@ immutable local snapshot, revalidates the retained package and exact release met
 publishes receipt, current state/override history, adoption binding, and fixed channel outside the
 root. The channel is the final visibility barrier; failed publication rolls back only
 attempt-owned metadata and leaves the copy launch-only. Success reports **Managed updates
-enabled**, does not launch or update anything, and makes the normal Check/Preview/Update path
+enabled**, does not launch or update anything, and makes the normal Check/Update path
 available for later explicit use. There is no second package download and no Nightly adoption.
 
 The official source hierarchy is singular: the canonical release index is the long-term release
@@ -362,6 +385,7 @@ Adoption never trusts an embedded marker, local version string, or registry fiel
 
 See the [real-update contract](docs/real-update-contract.md), [GUI contract](docs/gui-contract.md),
 the [channel/check contract](docs/channel-update-contract.md), and
-[read-only preview contract](docs/update-preview-contract.md).
+[read-only CLI preview contract](docs/update-preview-contract.md), plus the
+[safe uninstall contract](docs/uninstall-contract.md).
 The archived command-line fresh-install walkthrough remains in
 [docs/cli-fresh-install.md](docs/cli-fresh-install.md).

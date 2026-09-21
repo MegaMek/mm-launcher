@@ -1,6 +1,5 @@
 package org.megamek.launcher.onboarding;
 
-import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationPhase;
 import org.megamek.launcher.registry.RegistryStore;
@@ -14,62 +13,43 @@ import java.util.Objects;
 /**
  * Shared backend for every GUI existing-copy entry point.
  *
- * <p>Preparation is read-only: it statically inspects the selected application and validates only
- * the exact Java runtime which started MM Launcher. Registration revalidates that runtime before
- * the cancellation cutoff, then delegates one locked record publication to {@link RegistryStore}.
+ * <p>Preparation is read-only and statically inspects the selected application. Registration
+ * delegates one locked record publication to {@link RegistryStore}. Java is launch-time state
+ * and is deliberately not read or executed by either operation.
  */
 public final class ExistingImportService {
     private final Path registry;
     private final RegistryStore registries;
     private final InstallationInspector inspector;
-    private final JavaRuntime javaRuntime;
 
     public ExistingImportService(Path registry, RegistryStore registries,
-                                 InstallationInspector inspector, JavaRuntime javaRuntime) {
+                                 InstallationInspector inspector) {
         this.registry = registry.toAbsolutePath().normalize();
         this.registries = Objects.requireNonNull(registries);
         this.inspector = Objects.requireNonNull(inspector);
-        this.javaRuntime = Objects.requireNonNull(javaRuntime);
     }
 
     /** Performs no write, classloading, application execution, download, or registry mutation. */
     public Plan prepare(Path selectedRoot, OperationContext context)
             throws IOException, InterruptedException {
-        return prepare(selectedRoot, null, context);
-    }
-
-    public Plan prepare(Path selectedRoot, Path selectedJava, OperationContext context)
-            throws IOException, InterruptedException {
         requireContext(context);
         context.phase(OperationPhase.METADATA,
                 "Statically inspecting the selected existing installation");
         Inspection inspection = inspector.inspect(selectedRoot);
-        context.phase(OperationPhase.VERIFY,
-                "Validating the default game Java runtime");
-        JavaRuntime.CurrentJava java = selectedJava == null
-                ? javaRuntime.validateCurrentExternal(Path.of(inspection.canonicalRoot()))
-                : javaRuntime.validateExternal(selectedJava,
-                Path.of(inspection.canonicalRoot()));
         context.checkpoint();
-        return new Plan(inspection, java);
+        return new Plan(inspection);
     }
 
     /**
-     * Revalidates the current JVM before finalization and publishes exactly one launch-only record.
-     * A concurrent registry default wins because Main selection is decided under the store lock.
+     * Revalidates the captured static inspection and publishes one launch-only record. A
+     * concurrent registry default wins because Main selection is decided under the store lock.
      */
     public Result register(Plan plan, String name, OperationContext context)
             throws IOException, InterruptedException {
         if (plan == null) throw new IOException("a confirmed existing-copy plan is required");
         requireContext(context);
         context.phase(OperationPhase.VERIFY,
-                "Revalidating the launcher Java and selected application");
-        JavaRuntime.CurrentJava current = javaRuntime.validateExternal(
-                plan.java().executable(), Path.of(plan.inspection().canonicalRoot()));
-        if (!plan.java().sameRuntime(current)) {
-            throw new IOException("the selected default game Java changed; inspect and "
-                    + "confirm the existing copy again");
-        }
+                "Revalidating the selected application");
         context.checkpoint();
         context.enterFinalization("Existing-copy registration has begun; cancellation can no "
                 + "longer be performed safely.");
@@ -77,7 +57,7 @@ public final class ExistingImportService {
                 "Atomically registering the confirmed launch-only copy");
         ensureRegistryParent();
         RegistryStore.ImportedRegistration registered = registries.registerImported(
-                registry, name, plan.inspection(), current);
+                registry, name, plan.inspection());
         return new Result(registered.record(), registered.becameMain());
     }
 
@@ -104,14 +84,15 @@ public final class ExistingImportService {
         if (context == null) throw new IOException("operation context is required");
     }
 
-    public record Plan(Inspection inspection, JavaRuntime.CurrentJava java) {
-        public Plan {
-            Objects.requireNonNull(inspection);
-            Objects.requireNonNull(java);
+    public static final class Plan {
+        private final Inspection inspection;
+
+        private Plan(Inspection inspection) {
+            this.inspection = Objects.requireNonNull(inspection);
         }
 
-        public int javaFeature() {
-            return java.feature();
+        public Inspection inspection() {
+            return inspection;
         }
     }
 

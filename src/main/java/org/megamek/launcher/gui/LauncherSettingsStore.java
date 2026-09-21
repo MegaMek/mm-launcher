@@ -18,17 +18,14 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.util.HexFormat;
 import java.util.function.UnaryOperator;
 
 /**
- * One launcher-level default for future graphical installs. Per-copy choices remain solely in
- * ChannelPreferenceStore; reading this setting never migrates or changes an existing copy.
+ * Launcher-level settings which are unrelated to a managed installation's fixed channel.
+ * Per-copy automatic-check choices live solely in ChannelPreferenceStore.
  */
 final class LauncherSettingsStore {
-    static final int SCHEMA = 2;
+    static final int SCHEMA = 3;
     private static final int MAX_BYTES = 4096;
     private final Path registry;
     private final ObjectMapper mapper = JsonMapper.builder()
@@ -43,16 +40,12 @@ final class LauncherSettingsStore {
     }
 
     Settings read() throws IOException {
-        return readCheckConfiguration().settings();
-    }
-
-    CheckConfiguration readCheckConfiguration() throws IOException {
         Path file = path();
         try {
             StrictPathSafety.requireFile(file, "launcher settings");
         } catch (NoSuchFileException missing) {
             verifyAbsent(file);
-            return new CheckConfiguration(Settings.DEFAULT, "absent");
+            return Settings.DEFAULT;
         }
         long size = Files.size(file);
         if (size <= 0 || size > MAX_BYTES) {
@@ -68,44 +61,25 @@ final class LauncherSettingsStore {
             if (version == null || !version.canConvertToInt()) {
                 throw new IOException("unsupported launcher settings schema");
             }
-            Settings settings;
-            if (version.intValue() == 1) {
-                requireBoolean(tree, "checkNewInstallsOnOpen");
-                LegacySettings legacy = mapper.treeToValue(tree, LegacySettings.class);
-                settings = new Settings(SCHEMA, true, legacy.checkNewInstallsOnOpen(),
-                        null, null);
-            } else {
-                requireBoolean(tree, "checkInstalledVersionsOnOpen");
-                requireBoolean(tree, "checkNewInstallsOnOpen");
-                com.fasterxml.jackson.databind.JsonNode java =
-                        tree.get("defaultJavaExecutable");
-                com.fasterxml.jackson.databind.JsonNode feature =
-                        tree.get("defaultJavaFeature");
-                if (java == null || feature == null
-                        || !(java.isNull() || java.isTextual())
-                        || !(feature.isNull() || feature.isIntegralNumber())) {
-                    throw new IOException("default Java settings have invalid types");
-                }
-                settings = mapper.treeToValue(tree, Settings.class);
+            if (version.intValue() != SCHEMA) {
+                throw new IOException("unsupported launcher settings schema");
             }
+            com.fasterxml.jackson.databind.JsonNode java =
+                    tree.get("defaultJavaExecutable");
+            com.fasterxml.jackson.databind.JsonNode feature =
+                    tree.get("defaultJavaFeature");
+            if (java == null || feature == null
+                    || !(java.isNull() || java.isTextual())
+                    || !(feature.isNull() || feature.isIntegralNumber())) {
+                throw new IOException("default Java settings have invalid types");
+            }
+            Settings settings = mapper.treeToValue(tree, Settings.class);
             validate(settings);
-            return new CheckConfiguration(settings, "sha256:" + sha256(bytes));
+            return settings;
         } catch (IOException error) {
             throw new IOException("launcher settings are invalid or unreadable (not reset): "
                     + error.getMessage(), error);
         }
-    }
-
-    Settings write(boolean checkNewInstallsOnOpen) throws IOException {
-        return update(settings -> new Settings(SCHEMA,
-                settings.checkInstalledVersionsOnOpen(), checkNewInstallsOnOpen,
-                settings.defaultJavaExecutable(), settings.defaultJavaFeature()));
-    }
-
-    Settings writeAutomaticChecks(boolean enabled) throws IOException {
-        return update(settings -> new Settings(SCHEMA, enabled,
-                settings.checkNewInstallsOnOpen(), settings.defaultJavaExecutable(),
-                settings.defaultJavaFeature()));
     }
 
     Settings writeDefaultJava(Path executable, int feature) throws IOException {
@@ -116,9 +90,7 @@ final class LauncherSettingsStore {
         if (!canonical.toString().equals(executable.toString())) {
             throw new IOException("default Java executable must be canonical");
         }
-        return update(settings -> new Settings(SCHEMA,
-                settings.checkInstalledVersionsOnOpen(),
-                settings.checkNewInstallsOnOpen(), canonical.toString(), feature));
+        return update(settings -> new Settings(SCHEMA, canonical.toString(), feature));
     }
 
     private Settings update(UnaryOperator<Settings> change) throws IOException {
@@ -163,14 +135,6 @@ final class LauncherSettingsStore {
         }
     }
 
-    private static void requireBoolean(com.fasterxml.jackson.databind.JsonNode tree,
-                                       String field) throws IOException {
-        com.fasterxml.jackson.databind.JsonNode value = tree.get(field);
-        if (value == null || !value.isBoolean()) {
-            throw new IOException(field + " must be boolean");
-        }
-    }
-
     private static void validate(Settings settings) throws IOException {
         if (settings == null || settings.schemaVersion() != SCHEMA
                 || (settings.defaultJavaExecutable() == null)
@@ -193,15 +157,6 @@ final class LauncherSettingsStore {
             }
         } catch (RuntimeException error) {
             throw new IOException("invalid default Java setting", error);
-        }
-    }
-
-    private static String sha256(byte[] bytes) {
-        try {
-            return HexFormat.of().formatHex(
-                    MessageDigest.getInstance("SHA-256").digest(bytes));
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException("SHA-256 is unavailable", impossible);
         }
     }
 
@@ -245,15 +200,8 @@ final class LauncherSettingsStore {
         }
     }
 
-    record Settings(int schemaVersion, boolean checkInstalledVersionsOnOpen,
-                    boolean checkNewInstallsOnOpen, String defaultJavaExecutable,
+    record Settings(int schemaVersion, String defaultJavaExecutable,
                     Integer defaultJavaFeature) {
-        static final Settings DEFAULT = new Settings(SCHEMA, true, true, null, null);
-    }
-
-    record CheckConfiguration(Settings settings, String revision) {
-    }
-
-    private record LegacySettings(int schemaVersion, boolean checkNewInstallsOnOpen) {
+        static final Settings DEFAULT = new Settings(SCHEMA, null, null);
     }
 }

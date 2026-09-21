@@ -25,6 +25,9 @@ import org.megamek.launcher.sandbox.OverrideEntry;
 import org.megamek.launcher.sandbox.SandboxState;
 import org.megamek.launcher.sandbox.SandboxUpdater;
 import org.megamek.launcher.gui.GuiLauncher;
+import org.megamek.launcher.gui.LauncherServices;
+import org.megamek.launcher.operation.OperationContext;
+import org.megamek.launcher.operation.OperationType;
 import org.megamek.launcher.update.OwnershipPolicy;
 import org.megamek.launcher.update.UpdatePreviewService;
 import org.megamek.launcher.update.RealUpdateService;
@@ -140,29 +143,18 @@ public final class Main {
             FollowChannel channel = FollowChannel.parse(options.get("--channel"));
             OfficialRepository repository = OfficialRepository.parse(options.get("--application"));
             Path registry = path(options, "--registry");
-            FreshInstaller.Result result = new FreshInstaller(transport).install(repository,
-                    options.get("--tag"), path(options, "--destination"), registry,
-                    options.get("--name"), out);
-            try {
-                new ChannelPreferenceStore().initializeManaged(registry, result.record(),
-                        result.ownershipReceipt(), channel, false);
-                out.printf("INSTALLED-AND-REGISTERED id=%s application=%s tag=%s asset=%s "
-                                + "root=%s fixedChannel=%s%n",
-                        result.record().id(), repository.key(), result.release().tag(),
-                        result.asset().name(), result.destination(), channel.cliName());
-                out.printf("FIXED-CHANNEL-SAVED id=%s channel=%s checkOnOpen=false%n",
-                        result.record().id(), channel.cliName());
-            } catch (IOException error) {
-                out.printf("FIXED-CHANNEL-NOT-PERSISTED id=%s channel=%s "
-                                + "retainedRegisteredCopy=true reason=%s%n",
-                        result.record().id(), channel.cliName(), oneLine(error.getMessage()));
-                out.println("NOT LAUNCHED: the valid registered copy was retained, but managed "
-                        + "updates remain unavailable until its interrupted setup is repaired.");
-                return 3;
-            }
-            out.println("NOT LAUNCHED: select an external Java 21+ runtime and preview explicitly.");
-            out.println("INTEGRITY NOTE: GitHub HTTPS plus GitHub's same-source SHA-256 digest "
-                    + "detects transfer corruption but is not an independent signature.");
+            LauncherServices services = new LauncherServices(registry, new RegistryStore(),
+                    new InstallationInspector(), transport, new JavaRuntime(),
+                    new ApplicationLauncher());
+            FreshInstaller.Result result = services.install(repository, options.get("--tag"),
+                    path(options, "--destination"), options.get("--name"), channel, out);
+            out.printf("INSTALLED-AND-REGISTERED id=%s application=%s tag=%s asset=%s "
+                            + "root=%s fixedChannel=%s%n",
+                    result.record().id(), repository.key(), result.release().tag(),
+                    result.asset().name(), result.destination(), channel.cliName());
+            out.printf("FIXED-CHANNEL-SAVED id=%s channel=%s checkOnOpen=true%n",
+                    result.record().id(), channel.cliName());
+            out.println("NOT LAUNCHED: effective Game Java is resolved only when launched.");
             return 0;
         }
 
@@ -309,14 +301,19 @@ public final class Main {
             return 0;
         }
 
-        private static int register(Map<String, String> options, PrintStream out) throws IOException {
-            requireKeys(options, Set.of("--registry", "--installation", "--name", "--confirm"),
-                    Set.of("--pin"));
+        private static int register(Map<String, String> options, PrintStream out)
+                throws IOException, InterruptedException {
+            requireExactly(options,
+                    Set.of("--registry", "--installation", "--name", "--confirm"));
             if (!RegistryStore.CONFIRM.equals(options.get("--confirm"))) {
                 throw new IllegalArgumentException("--confirm must be exactly " + RegistryStore.CONFIRM);
             }
-            InstallationRecord record = new RegistryStore().register(path(options, "--registry"),
-                    options.get("--name"), path(options, "--installation"), options.get("--pin"));
+            Path registry = path(options, "--registry");
+            LauncherServices services = new LauncherServices(registry);
+            OperationContext context = OperationContext.none(OperationType.IMPORT_EXISTING);
+            var plan = services.prepareExistingImport(path(options, "--installation"), context);
+            InstallationRecord record = services.importExisting(
+                    plan, options.get("--name"), context).record();
             out.printf("REGISTERED id=%s name=%s root=%s build=%s updateEligible=false%n",
                     record.id(), record.name(), record.canonicalRoot(), record.observedBuild());
             out.println("LAUNCH-ONLY: registration did not launch or modify the application.");
@@ -327,10 +324,9 @@ public final class Main {
             requireExactly(options, Set.of("--registry"));
             RegistryData data = new RegistryStore().read(path(options, "--registry"));
             for (InstallationRecord record : data.installations()) {
-                out.printf("%s id=%s name=%s root=%s build=%s java=%s pin=%s updateEligible=false%n",
+                out.printf("%s id=%s name=%s root=%s build=%s pin=%s updateEligible=false%n",
                         record.id().equals(data.defaultInstallationId()) ? "DEFAULT" : "INSTALL",
                         record.id(), record.name(), record.canonicalRoot(), record.observedBuild(),
-                        record.javaExecutable() == null ? "unselected" : record.javaExecutable(),
                         record.pin() == null ? "none" : record.pin());
             }
             return 0;
@@ -348,8 +344,11 @@ public final class Main {
             if (!"REMOVE-LAUNCH-ONLY".equals(options.get("--confirm"))) {
                 throw new IllegalArgumentException("--confirm must be exactly REMOVE-LAUNCH-ONLY");
             }
-            new RegistryStore().remove(path(options, "--registry"), options.get("--id"));
-            out.println("REMOVED registry metadata only; application files were unchanged.");
+            Path registry = path(options, "--registry");
+            RegistryStore store = new RegistryStore();
+            InstallationRecord record = store.resolve(store.read(registry), options.get("--id"));
+            new LauncherServices(registry).removeFromLauncher(record);
+            out.println("REMOVED from launcher; application files were unchanged.");
             return 0;
         }
 
@@ -364,37 +363,34 @@ public final class Main {
 
         private static int javaSelect(Map<String, String> options, PrintStream out)
                 throws IOException, InterruptedException {
-            requireExactly(options, Set.of("--registry", "--id", "--java"));
-            RegistryStore store = new RegistryStore();
+            requireExactly(options, Set.of("--registry", "--java"));
             Path registry = path(options, "--registry");
-            InstallationRecord record = store.resolve(store.read(registry), options.get("--id"));
-            Path executable = new JavaRuntime().resolve(options.get("--java"));
-            if (executable.startsWith(Path.of(record.canonicalRoot()))) {
-                throw new IOException("selected Java must be external to the application directory");
-            }
-            int feature = new JavaRuntime().validate(executable, Path.of(record.canonicalRoot()));
-            store.selectJava(registry, record.id(), executable.toString());
-            out.printf("JAVA-SELECTED id=%s executable=%s feature=%d%n",
-                    record.id(), executable, feature);
+            Path executable = path(options, "--java");
+            LauncherServices services = new LauncherServices(registry);
+            services.selectDefaultJava(executable);
+            LauncherServices.SettingsView selected = services.settingsView();
+            out.printf("GAME-JAVA-SELECTED executable=%s feature=%d%n",
+                    selected.defaultJava(), selected.defaultJavaFeature());
             return 0;
         }
 
         private static int launch(Map<String, String> options, PrintStream out)
                 throws IOException, InterruptedException {
             requireKeys(options, Set.of("--registry", "--product"), Set.of("--id", "--dry-run"));
+            Path registry = path(options, "--registry");
             RegistryStore store = new RegistryStore();
-            InstallationRecord record = store.resolve(store.read(path(options, "--registry")),
-                    options.get("--id"));
-            ApplicationLauncher launcher = new ApplicationLauncher();
+            InstallationRecord record = store.resolve(store.read(registry), options.get("--id"));
+            LauncherServices services = new LauncherServices(registry);
             if (options.containsKey("--dry-run")) {
                 if (!"true".equals(options.get("--dry-run"))) {
                     throw new IllegalArgumentException("--dry-run value must be true");
                 }
-                out.println("LAUNCH-PREVIEW argv=" + launcher.command(record, options.get("--product")));
+                out.println("LAUNCH-PREVIEW argv="
+                        + services.preview(record, options.get("--product")));
                 out.println("DRY-RUN ONLY: application was not started.");
                 return 0;
             }
-            return launcher.launch(record, options.get("--product"));
+            return services.launch(record, options.get("--product"));
         }
 
     private static void printInspection(PrintStream out, Inspection inspection) {
@@ -504,11 +500,17 @@ public final class Main {
 
     private static void requireKeys(Map<String, String> actual, Set<String> required,
                                     Set<String> optional) {
-            if (!actual.keySet().containsAll(required)
-                    || !java.util.stream.Stream.concat(required.stream(), optional.stream()).toList()
-                    .containsAll(actual.keySet())) {
-                throw new IllegalArgumentException("required options are " + required
-                        + "; optional options are " + optional);
+        Set<String> allowed = java.util.stream.Stream.concat(
+                required.stream(), optional.stream()).collect(
+                java.util.stream.Collectors.toUnmodifiableSet());
+        String unknown = actual.keySet().stream()
+                .filter(key -> !allowed.contains(key)).findFirst().orElse(null);
+        if (unknown != null) {
+            throw new IllegalArgumentException("unknown option: " + unknown);
+        }
+        if (!actual.keySet().containsAll(required)) {
+            throw new IllegalArgumentException("required options are " + required
+                    + "; optional options are " + optional);
         }
     }
 
@@ -528,12 +530,12 @@ public final class Main {
                   mm-launcher apply-test-sandbox --target <json> --payload <dir> --sandbox <dir> --acknowledge I-UNDERSTAND-THIS-IS-A-DISPOSABLE-TEST
                   mm-launcher recover-test-sandbox --sandbox <dir> --acknowledge I-UNDERSTAND-THIS-IS-A-DISPOSABLE-TEST
                   mm-launcher inspect --installation <portable-dir>
-                  mm-launcher register --registry <json> --installation <portable-dir> --name <name> --confirm REGISTER-LAUNCH-ONLY [--pin <metadata>]
+                  mm-launcher register --registry <json> --installation <portable-dir> --name <name> --confirm REGISTER-LAUNCH-ONLY
                   mm-launcher list --registry <json>
                   mm-launcher select --registry <json> --id <uuid>
                   mm-launcher remove --registry <json> --id <uuid> --confirm REMOVE-LAUNCH-ONLY
                   mm-launcher java-discover
-                  mm-launcher java-select --registry <json> --id <uuid> --java <java-home-or-executable>
+                  mm-launcher java-select --registry <json> --java <java-home-or-executable>
                   mm-launcher launch --registry <json> [--id <uuid>] --product <megamek|mekhq|lab> [--dry-run true]
                   mm-launcher check-updates --registry <json> [--id <uuid>]
                   mm-launcher releases --application <megamek|mekhq|lab> [--page <1-1000>] [--per-page <1-50>]

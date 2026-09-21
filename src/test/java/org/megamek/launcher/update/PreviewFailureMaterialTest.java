@@ -86,7 +86,7 @@ class PreviewFailureMaterialTest {
         for (boolean reregister : List.of(false, true)) {
             Fixture fixture = fixture(reregister ? "reregister" : "remove");
             RegistryStore store = new RegistryStore();
-            store.remove(fixture.registry, fixture.record.id());
+            store.remove(fixture.registry, fixture.record);
             if (reregister) {
                 var replacement = store.register(fixture.registry, "Replacement", fixture.root, null);
                 assertFalse(replacement.id().equals(fixture.record.id()));

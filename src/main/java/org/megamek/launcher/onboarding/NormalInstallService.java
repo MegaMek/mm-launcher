@@ -6,7 +6,6 @@ import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.channel.OfficialYamlChannelCatalog;
 import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.diagnostics.OperationLogStore;
-import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.registry.InstallationRecord;
 import org.megamek.launcher.registry.RegistryData;
@@ -36,8 +35,7 @@ import java.util.Set;
 /**
  * Metadata-only planning and explicitly confirmed installation for the simple first-run path.
  * A plan is an immutable consent quote: it binds registry path/state/default, product set,
- * destination, runtime, repository/channel/source version, tag, asset URL/name/size/digest, and
- * the revisioned automatic-check setting for the new copy.
+ * destination, repository/channel/source version, tag, asset URL/name/size/digest.
  */
 public final class NormalInstallService {
     public static final String NORMAL_NAME = "Default";
@@ -50,65 +48,40 @@ public final class NormalInstallService {
     private final Path registry;
     private final RegistryStore registries;
     private final ReleaseTransport transport;
-    private final JavaRuntime javaRuntime;
     private final ChannelCatalog channels;
     private final ChannelPreferenceStore preferences;
-    private final CheckConfigurationSource checkConfigurations;
     private final PlatformInstallLocations installLocations;
 
-    public NormalInstallService(Path registry, ReleaseTransport transport,
-                                JavaRuntime javaRuntime) {
-        this(registry, transport, javaRuntime, new RegistryStore(),
+    public NormalInstallService(Path registry, ReleaseTransport transport) {
+        this(registry, transport, new RegistryStore(),
                 new OfficialYamlChannelCatalog(transport), new ChannelPreferenceStore(),
-                () -> CheckConfiguration.DEFAULT, PlatformInstallLocations.customRegistry());
+                PlatformInstallLocations.customRegistry());
     }
 
     public NormalInstallService(Path registry, ReleaseTransport transport,
-                                JavaRuntime javaRuntime,
-                                CheckConfigurationSource checkConfigurations) {
-        this(registry, transport, javaRuntime, new RegistryStore(),
-                new OfficialYamlChannelCatalog(transport), new ChannelPreferenceStore(),
-                checkConfigurations, PlatformInstallLocations.customRegistry());
-    }
-
-    public NormalInstallService(Path registry, ReleaseTransport transport,
-                                JavaRuntime javaRuntime,
-                                CheckConfigurationSource checkConfigurations,
                                 PlatformInstallLocations installLocations) {
-        this(registry, transport, javaRuntime, new RegistryStore(),
+        this(registry, transport, new RegistryStore(),
                 new OfficialYamlChannelCatalog(transport), new ChannelPreferenceStore(),
-                checkConfigurations, installLocations);
+                installLocations);
     }
 
     public NormalInstallService(Path registry, ReleaseTransport transport,
-                                JavaRuntime javaRuntime, RegistryStore registries,
+                                RegistryStore registries,
                                 ChannelCatalog channels,
                                 ChannelPreferenceStore preferences) {
-        this(registry, transport, javaRuntime, registries, channels, preferences,
-                () -> CheckConfiguration.DEFAULT, PlatformInstallLocations.customRegistry());
+        this(registry, transport, registries, channels, preferences,
+                PlatformInstallLocations.customRegistry());
     }
 
     public NormalInstallService(Path registry, ReleaseTransport transport,
-                                JavaRuntime javaRuntime, RegistryStore registries,
+                                RegistryStore registries,
                                 ChannelCatalog channels, ChannelPreferenceStore preferences,
-                                CheckConfigurationSource checkConfigurations) {
-        this(registry, transport, javaRuntime, registries, channels, preferences,
-                checkConfigurations, PlatformInstallLocations.customRegistry());
-    }
-
-    public NormalInstallService(Path registry, ReleaseTransport transport,
-                                JavaRuntime javaRuntime, RegistryStore registries,
-                                ChannelCatalog channels, ChannelPreferenceStore preferences,
-                                CheckConfigurationSource checkConfigurations,
                                 PlatformInstallLocations installLocations) {
         this.registry = registry.toAbsolutePath().normalize();
         this.transport = transport;
-        this.javaRuntime = javaRuntime;
         this.registries = registries;
         this.channels = channels;
         this.preferences = preferences;
-        this.checkConfigurations = java.util.Objects.requireNonNull(
-                checkConfigurations, "checkConfigurations");
         this.installLocations = java.util.Objects.requireNonNull(
                 installLocations, "installLocations");
     }
@@ -142,20 +115,19 @@ public final class NormalInstallService {
     }
 
     /**
-     * Resolves current official metadata and validates Java, but performs no filesystem write and
-     * no package download. Passing null selects only the Java which is running the launcher.
+     * Resolves current official metadata, but performs no filesystem write or package download.
      */
-    public Plan prepare(Path requestedDestination, Path selectedJava)
+    public Plan prepare(Path requestedDestination)
             throws IOException, InterruptedException {
         return prepare(OfficialRepository.MEKHQ, FollowChannel.MILESTONE,
-                requestedDestination, selectedJava);
+                requestedDestination);
     }
 
     /** Compatibility overload for one of the two explicit official MekHQ channels. */
-    public Plan prepare(FollowChannel requestedChannel, Path requestedDestination,
-                        Path selectedJava) throws IOException, InterruptedException {
+    public Plan prepare(FollowChannel requestedChannel, Path requestedDestination)
+            throws IOException, InterruptedException {
         return prepare(OfficialRepository.MEKHQ, requestedChannel,
-                requestedDestination, selectedJava);
+                requestedDestination);
     }
 
     /**
@@ -163,11 +135,11 @@ public final class NormalInstallService {
      * inferred bundle, or channel fallback is accepted.
      */
     public Plan prepare(OfficialRepository requestedRepository, FollowChannel requestedChannel,
-                        Path requestedDestination, Path selectedJava)
+                        Path requestedDestination)
             throws IOException, InterruptedException {
         OfficialRepository repository = requireAllowedRepository(requestedRepository);
         FollowChannel channel = requireAllowedChannel(requestedChannel);
-        return prepareTarget(repository, channel, requestedDestination, selectedJava,
+        return prepareTarget(repository, channel, requestedDestination,
                 TargetKind.CURRENT_CHANNEL,
                 () -> channels.target(channel, repository));
     }
@@ -177,7 +149,7 @@ public final class NormalInstallService {
      * session. No channel pointer or release endpoint is read while building the local quote.
      */
     public Plan prepareCapturedCurrent(QuickInstallOption requestedOption,
-                                       Path requestedDestination, Path selectedJava)
+                                       Path requestedDestination)
             throws IOException, InterruptedException {
         if (requestedOption == null) {
             throw new IOException("a captured quick-install option is required");
@@ -190,23 +162,22 @@ public final class NormalInstallService {
             throw new IOException("captured quick-install target must come from the official "
                     + "current-channel snapshot");
         }
-        return prepareTarget(repository, channel, requestedDestination, selectedJava,
+        return prepareTarget(repository, channel, requestedDestination,
                 TargetKind.CAPTURED_CURRENT, () -> target);
     }
 
     /**
-     * Plans one exact release selected from explicitly requested, unclassified GitHub history.
-     * The channel is the new installation's immutable update track; it does not classify the
-     * historical release.
+     * Plans one exact release selected from the unified release browser. The channel is the new
+     * installation's immutable update track; it does not classify an otherwise unknown release.
      */
     public Plan prepareExact(OfficialRepository requestedRepository,
                              FollowChannel requestedFutureChannel, String requestedTag,
-                             Path requestedDestination, Path selectedJava)
+                             Path requestedDestination)
             throws IOException, InterruptedException {
         OfficialRepository repository = requireAllowedRepository(requestedRepository);
         FollowChannel futureChannel = requireAllowedChannel(requestedFutureChannel);
-        return prepareTarget(repository, futureChannel, requestedDestination, selectedJava,
-                TargetKind.HISTORICAL_EXACT, () -> {
+        return prepareTarget(repository, futureChannel, requestedDestination,
+                TargetKind.BROWSED_EXACT, () -> {
             ReleaseCatalog catalog = new ReleaseCatalog(transport);
             ReleaseCatalog.Release release = catalog.exact(repository, requestedTag);
             ReleaseCatalog.Assessment assessment = catalog.assess(repository, release);
@@ -221,7 +192,7 @@ public final class NormalInstallService {
     }
 
     private Plan prepareTarget(OfficialRepository repository, FollowChannel channel,
-                               Path requestedDestination, Path selectedJava,
+                               Path requestedDestination,
                                TargetKind targetKind,
                                TargetResolver targetResolver)
             throws IOException, InterruptedException {
@@ -231,25 +202,17 @@ public final class NormalInstallService {
         Path destination = requestedDestination.toAbsolutePath().normalize();
         RegistrySnapshot snapshot = snapshot();
         List<Path> missingParents = validateProposedDestination(destination, snapshot.data());
-        Path executable = selectedJava == null
-                ? javaRuntime.launcherJava() : javaRuntime.resolve(selectedJava.toString());
-        if (executable.startsWith(destination)) {
-            throw new IOException("Java must be outside the proposed application folder");
-        }
-        Path workingDirectory = nearestExistingDirectory(destination);
-        int javaFeature = javaRuntime.validate(executable, workingDirectory);
         ChannelCatalog.Target target = targetResolver.resolve();
         requireTarget(target, repository, channel);
-        CheckConfiguration checkConfiguration = checkConfiguration();
-        return new Plan(registry, snapshot, destination, List.copyOf(missingParents), executable,
-                javaFeature, target.channel(), target.repository(), target.version(),
+        return new Plan(registry, snapshot, destination, List.copyOf(missingParents),
+                target.channel(), target.repository(), target.version(),
                 requiredProducts(repository), target.release(), target.asset(), target.source(),
-                checkConfiguration, targetKind);
+                targetKind);
     }
 
     /**
      * Rechecks the complete quote before binary transfer, creates only consented parent
-     * directories, publishes atomically, and then configures Java/channel/Main selection.
+     * directories, publishes atomically, and then configures channel/Main selection.
      */
     public Result install(Plan plan, PrintStream progress, OperationContext context)
             throws IOException, InterruptedException {
@@ -275,24 +238,12 @@ public final class NormalInstallService {
             throw new IOException("proposed destination parent state changed; choose the location "
                     + "again");
         }
-        Path resolvedJava = javaRuntime.resolve(plan.javaExecutable().toString());
-        if (!resolvedJava.equals(plan.javaExecutable())
-                || javaRuntime.validate(resolvedJava,
-                nearestExistingDirectory(plan.destination())) != plan.javaFeature()) {
-            throw new IOException("selected Java changed; review a fresh install confirmation");
-        }
         ChannelCatalog.Target fresh = freshTarget(plan);
         requireTarget(fresh, repository, channel);
         if (!sameQuote(plan, fresh)) {
             throw new IOException("official release or asset metadata changed; review and consent "
                     + "to a fresh install confirmation");
         }
-        CheckConfiguration currentChecks = checkConfiguration();
-        if (!plan.checkConfiguration().equals(currentChecks)) {
-            throw new IOException("launcher automatic-check setting changed; review a fresh "
-                    + "install confirmation");
-        }
-
         context.checkpoint();
         createPlannedParents(plan);
         VerifiedPackageFetcher.ExpectedAsset expected =
@@ -301,7 +252,7 @@ public final class NormalInstallService {
         final FreshInstaller.Result installed;
         try {
             installed = new FreshInstaller(transport).installMatchingProducts(plan.repository(),
-                    plan.release().tag(), plan.destination(), registry, NORMAL_NAME, progress,
+                    plan.release().tag(), plan.destination(), registry, friendlyName(plan), progress,
                     context, Optional.of(expected), plan.requiredProducts());
         } catch (IOException error) {
             if (Files.exists(plan.destination(), LinkOption.NOFOLLOW_LINKS)) {
@@ -315,24 +266,15 @@ public final class NormalInstallService {
 
         InstallationRecord configured = installed.record();
         try {
-            // Revalidation here prevents a runtime changed during a long download from being
-            // persisted as ready.
-            Path java = javaRuntime.resolve(plan.javaExecutable().toString());
-            if (!java.equals(plan.javaExecutable())
-                    || javaRuntime.validate(java, plan.destination()) != plan.javaFeature()) {
-                throw new IOException("selected Java changed during installation");
-            }
-            registries.selectJava(registry, configured.id(), java.toString());
-            configured = resolve(configured.id());
             preferences.initializeManaged(registry, configured, installed.ownershipReceipt(),
-                    plan.channel(), plan.checkConfiguration().checkOnOpen());
+                    plan.channel(), true);
             boolean becameMain = requireExpectedPostInstall(plan, configured.id());
             configured = resolve(configured.id());
             return new Result(configured, installed.release(), installed.asset(),
                     installed.destination(), installed.ownershipReceipt(), becameMain);
-        } catch (IOException | InterruptedException error) {
+        } catch (IOException error) {
             throw new PublishedInstallationException(installed.destination(), configured.id(),
-                    "The downloaded copy is valid and registered, but Java, "
+                    "The downloaded copy is valid and registered, but "
                             + plan.channel() + " " + plan.repository().key() + " fixed-channel "
                             + "provenance, or default selection still needs repair in "
                             + "Installations. Do not download over the retained copy or assign "
@@ -441,15 +383,6 @@ public final class NormalInstallService {
         return List.copyOf(reversed);
     }
 
-    private static Path nearestExistingDirectory(Path target) throws IOException {
-        Path cursor = target.getParent();
-        while (cursor != null && !Files.exists(cursor, LinkOption.NOFOLLOW_LINKS)) {
-            cursor = cursor.getParent();
-        }
-        if (cursor == null) throw new IOException("destination has no existing parent ancestor");
-        return StrictPathSafety.requireDirectory(cursor, "Java validation working directory");
-    }
-
     private RegistrySnapshot snapshot() throws IOException {
         try {
             StrictPathSafety.requireFile(registry, "launcher registry");
@@ -532,28 +465,30 @@ public final class NormalInstallService {
         }
     }
 
-    private CheckConfiguration checkConfiguration() throws IOException {
-        final CheckConfiguration configuration;
-        try {
-            configuration = checkConfigurations.read();
-        } catch (IOException error) {
-            throw new IOException("launcher automatic-check setting is invalid or unreadable; "
-                    + "review a fresh install confirmation: " + detail(error), error);
-        }
-        if (configuration == null) {
-            throw new IOException("launcher automatic-check setting is unavailable; review a "
-                    + "fresh install confirmation");
-        }
-        return configuration;
-    }
-
     private static boolean sameQuote(Plan plan, ChannelCatalog.Target target) {
         return plan.channel() == target.channel()
                 && plan.repository() == target.repository()
                 && plan.version().equals(target.version())
-                && plan.release().equals(target.release())
-                && plan.asset().equals(target.asset())
+                && plan.release().tag().equals(target.release().tag())
+                && plan.asset().name().equals(target.asset().name())
+                && plan.asset().size() == target.asset().size()
+                && plan.asset().url().equals(target.asset().url())
+                && publishedDigestCompatible(plan.asset(), target.asset())
                 && plan.source().equals(target.source());
+    }
+
+    /**
+     * A quoted published digest is immutable. Quoted absence may become a valid published digest
+     * only at the exact pre-transfer refresh; all other selected-asset identity remains fixed.
+     */
+    private static boolean publishedDigestCompatible(ReleaseCatalog.Asset quoted,
+                                                     ReleaseCatalog.Asset refreshed) {
+        if (quoted.publishedDigest().isEmpty()) {
+            return refreshed.publishedDigest().isEmpty()
+                    || refreshed.publishedDigest().orElse(null)
+                    instanceof org.megamek.launcher.release.PackageDigest.ValidPublished;
+        }
+        return quoted.publishedDigest().equals(refreshed.publishedDigest());
     }
 
     private ChannelCatalog.Target freshTarget(Plan plan)
@@ -563,7 +498,7 @@ public final class NormalInstallService {
         }
         String exactSource = ReleaseCatalog.exactMetadataUri(
                 plan.repository(), plan.release().tag()).toString();
-        if (plan.targetKind() == TargetKind.HISTORICAL_EXACT
+        if (plan.targetKind() == TargetKind.BROWSED_EXACT
                 && !exactSource.equals(plan.source())) {
             throw new IOException("normal install metadata source is not an approved exact "
                     + "official release endpoint");
@@ -589,6 +524,26 @@ public final class NormalInstallService {
         return tag != null && tag.length() > 1
                 && (tag.charAt(0) == 'v' || tag.charAt(0) == 'V')
                 ? tag.substring(1) : tag;
+    }
+
+    /** Friendly registration/folder label with no repository slug or duplicated tag prefix. */
+    public static String friendlyName(OfficialRepository repository, FollowChannel channel,
+                                      String versionOrTag) throws IOException {
+        requireAllowedRepository(repository);
+        requireAllowedChannel(channel);
+        String product = switch (repository) {
+            case MEKHQ -> "MekHQ";
+            case MEGAMEK -> "MegaMek";
+            case LAB -> "MegaMekLab";
+        };
+        String version = displayVersion(versionOrTag);
+        return product + " " + channel + (version == null || version.isBlank()
+                ? "" : " (" + version + ")");
+    }
+
+    public static String friendlyName(Plan plan) throws IOException {
+        if (plan == null) throw new IOException("normal install plan is required");
+        return friendlyName(plan.repository(), plan.channel(), plan.version());
     }
 
     private static boolean isExactSource(OfficialRepository repository, String tag,
@@ -621,33 +576,29 @@ public final class NormalInstallService {
     }
 
     public record Plan(Path registry, RegistrySnapshot registrySnapshot, Path destination,
-                       List<Path> missingParents, Path javaExecutable, int javaFeature,
+                       List<Path> missingParents,
                        FollowChannel channel, OfficialRepository repository, String version,
                        Set<String> requiredProducts, ReleaseCatalog.Release release,
                        ReleaseCatalog.Asset asset,
-                       String source, CheckConfiguration checkConfiguration,
-                       TargetKind targetKind) {
+                       String source, TargetKind targetKind) {
         public Plan(Path registry, RegistrySnapshot registrySnapshot, Path destination,
-                    List<Path> missingParents, Path javaExecutable, int javaFeature,
+                    List<Path> missingParents,
                     FollowChannel channel, OfficialRepository repository, String version,
                     Set<String> requiredProducts, ReleaseCatalog.Release release,
-                    ReleaseCatalog.Asset asset, String source,
-                    CheckConfiguration checkConfiguration) {
-            this(registry, registrySnapshot, destination, missingParents, javaExecutable,
-                    javaFeature, channel, repository, version, requiredProducts, release, asset,
-                    source, checkConfiguration,
+                    ReleaseCatalog.Asset asset, String source) {
+            this(registry, registrySnapshot, destination, missingParents,
+                    channel, repository, version, requiredProducts, release, asset,
+                    source,
                     OfficialYamlChannelCatalog.SOURCE.toString().equals(source)
-                            ? TargetKind.CURRENT_CHANNEL : TargetKind.HISTORICAL_EXACT);
+                            ? TargetKind.CURRENT_CHANNEL : TargetKind.BROWSED_EXACT);
         }
 
         public Plan {
             java.util.Objects.requireNonNull(registrySnapshot, "registrySnapshot");
             java.util.Objects.requireNonNull(requiredProducts, "requiredProducts");
-            java.util.Objects.requireNonNull(checkConfiguration, "checkConfiguration");
             java.util.Objects.requireNonNull(targetKind, "targetKind");
             registry = registry.toAbsolutePath().normalize();
             destination = destination.toAbsolutePath().normalize();
-            javaExecutable = javaExecutable.toAbsolutePath().normalize();
             missingParents = List.copyOf(missingParents);
             requiredProducts = Set.copyOf(requiredProducts);
             if (channel != FollowChannel.MILESTONE
@@ -678,9 +629,6 @@ public final class NormalInstallService {
                 throw new IllegalArgumentException(
                         "normal install release target is incomplete or mismatched");
             }
-            if (checkConfiguration == null) {
-                throw new IllegalArgumentException("check configuration is required");
-            }
             boolean currentSource =
                     OfficialYamlChannelCatalog.SOURCE.toString().equals(source);
             if ((targetKind == TargetKind.CURRENT_CHANNEL
@@ -688,10 +636,10 @@ public final class NormalInstallService {
                 throw new IllegalArgumentException(
                         "current normal install must use the official channel source");
             }
-            if (targetKind == TargetKind.HISTORICAL_EXACT
+            if (targetKind == TargetKind.BROWSED_EXACT
                     && !isExactSource(repository, release.tag(), source)) {
                 throw new IllegalArgumentException(
-                        "historical normal install must use its exact release source");
+                        "browsed normal install must use its exact release source");
             }
         }
 
@@ -699,7 +647,7 @@ public final class NormalInstallService {
          * True only when the release itself came from the authoritative current channel pointer.
          */
         public boolean currentChannelTarget() {
-            return targetKind != TargetKind.HISTORICAL_EXACT;
+            return targetKind != TargetKind.BROWSED_EXACT;
         }
 
         /** True when Home captured the current pointer once for this frame session. */
@@ -711,23 +659,7 @@ public final class NormalInstallService {
     public enum TargetKind {
         CURRENT_CHANNEL,
         CAPTURED_CURRENT,
-        HISTORICAL_EXACT
-    }
-
-    @FunctionalInterface
-    public interface CheckConfigurationSource {
-        CheckConfiguration read() throws IOException;
-    }
-
-    public record CheckConfiguration(boolean checkOnOpen, String revision) {
-        private static final CheckConfiguration DEFAULT =
-                new CheckConfiguration(true, "built-in:true");
-
-        public CheckConfiguration {
-            if (revision == null || revision.isBlank()) {
-                throw new IllegalArgumentException("check configuration revision is required");
-            }
-        }
+        BROWSED_EXACT
     }
 
     public record Result(InstallationRecord record, ReleaseCatalog.Release release,

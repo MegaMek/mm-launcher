@@ -22,6 +22,7 @@ import org.megamek.launcher.update.UpdatePreviewService;
 
 import javax.imageio.ImageIO;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JList;
@@ -50,6 +51,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CountDownLatch;
 import java.util.function.BooleanSupplier;
@@ -405,11 +407,33 @@ class SimpleHomeSwingTest {
             JPanel firstCard = find(frame, "installationCard-" + services.first.id());
             assertEquals(FirstLaunchPanel.PANEL, firstCard.getBackground());
             assertNotNull(firstCard.getAccessibleContext().getAccessibleName());
+            JCheckBox automatic = find(frame,
+                    "checkOnOpenCheckbox-" + services.first.id());
+            assertNotNull(automatic);
+            assertTrue(automatic.isSelected());
+            assertNotNull(automatic.getAccessibleContext().getAccessibleName());
+            assertNotNull(automatic.getAccessibleContext().getAccessibleDescription());
+            assertEquals(KeyEvent.VK_C, automatic.getMnemonic());
             JButton firstMenu = waitButton(frame,
                     "installationMenuButton-" + services.first.id());
             assertNotNull(firstMenu);
+            JButton manualCheck = waitButton(frame, "checkUpdatesButton");
+            SwingUtilities.invokeAndWait(() -> {
+                frame.setSize(680, 470);
+                frame.validate();
+            });
+            Rectangle automaticBounds = SwingUtilities.convertRectangle(
+                    automatic.getParent(), automatic.getBounds(), firstCard);
+            Rectangle menuBounds = SwingUtilities.convertRectangle(
+                    firstMenu.getParent(), firstMenu.getBounds(), firstCard);
+            Rectangle manualBounds = SwingUtilities.convertRectangle(
+                    manualCheck.getParent(), manualCheck.getBounds(), firstCard);
+            assertFalse(automaticBounds.intersects(menuBounds));
+            assertFalse(automaticBounds.intersects(manualBounds));
             assertNotNull(waitButton(frame,
                     "installationMenuButton-" + services.second.id()));
+            assertNull(find(frame, "checkOnOpenCheckbox-" + services.second.id()),
+                    "managed-incomplete cards must not expose automatic checks");
             SwingUtilities.invokeAndWait(firstMenu::doClick);
             waitUntil(() -> java.util.Arrays.stream(
                             javax.swing.MenuSelectionManager.defaultManager().getSelectedPath())
@@ -516,7 +540,6 @@ class SimpleHomeSwingTest {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
         FakeServices services = new FakeServices(temp.resolve("development.json"));
-        services.checkOnOpen = true;
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
@@ -666,7 +689,7 @@ class SimpleHomeSwingTest {
         services.installed = true;
         services.main = new InstallationRecord(services.first.id(), "MegaMek Main",
                 services.first.canonicalRoot(), services.first.observedBuild(),
-                List.of(megamek), services.first.javaExecutable(), services.first.pin(),
+                List.of(megamek), services.first.pin(),
                 services.first.updateEligible(), services.first.registeredAt());
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
@@ -813,7 +836,6 @@ class SimpleHomeSwingTest {
         private volatile CountDownLatch releaseLaunch;
         private volatile int launchExit;
         private volatile IOException launchFailure;
-        private volatile boolean checkOnOpen;
         private volatile boolean installBecameMain = true;
         private volatile IOException installFailure;
 
@@ -839,10 +861,10 @@ class SimpleHomeSwingTest {
             first = record("1", "Main", destination, products,
                     Path.of(System.getProperty("java.home"), "bin", "java.exe").toString());
             firstWithoutJava = new InstallationRecord(first.id(), first.name(),
-                    first.canonicalRoot(), first.observedBuild(), first.products(), null,
+                    first.canonicalRoot(), first.observedBuild(), first.products(),
                     first.pin(), false, first.registeredAt());
             second = record("2", "Other copy", registry.getParent().resolve("Other"),
-                    products, first.javaExecutable());
+                    products, null);
             records = List.of(firstWithoutJava, second);
             main = first;
         }
@@ -868,8 +890,7 @@ class SimpleHomeSwingTest {
 
         @Override
         public NormalInstallService.Plan prepareNormalInstall(OfficialRepository repository,
-                                                              FollowChannel channel, Path target,
-                                                                  Path javaExecutable)
+                                                              FollowChannel channel, Path target)
                 throws InterruptedException {
             return plan(new QuickInstallOption.Key(repository, channel), target,
                     NormalInstallService.TargetKind.CURRENT_CHANNEL);
@@ -877,8 +898,7 @@ class SimpleHomeSwingTest {
 
         @Override
         public NormalInstallService.Plan prepareCapturedNormalInstall(QuickInstallOption option,
-                                                                      Path target,
-                                                                      Path javaExecutable)
+                                                                      Path target)
                 throws InterruptedException {
             return plan(option.key(), target,
                     NormalInstallService.TargetKind.CAPTURED_CURRENT);
@@ -907,12 +927,9 @@ class SimpleHomeSwingTest {
             };
             return new NormalInstallService.Plan(
                     registry, new NormalInstallService.RegistrySnapshot(false, empty), target,
-                    List.of(), Path.of(System.getProperty("java.home"), "bin", "java.exe"),
-                    21, channel, repository, option.version(), expectedProducts,
+                    List.of(), channel, repository, option.version(), expectedProducts,
                     option.release(), option.asset(),
                     option.target().source(),
-                    new NormalInstallService.CheckConfiguration(checkOnOpen,
-                            "fixture:" + checkOnOpen),
                     targetKind);
         }
 
@@ -933,7 +950,7 @@ class SimpleHomeSwingTest {
             installedChannel = plan.channel();
             installedRecord = new InstallationRecord(
                     first.id(), first.name(), first.canonicalRoot(), plan.version(),
-                    first.products(), first.javaExecutable(), first.pin(),
+                    first.products(), first.pin(),
                     first.updateEligible(), first.registeredAt());
             main = installBecameMain ? installedRecord : second;
             return new NormalInstallService.Result(installedRecord, release, asset,
@@ -962,7 +979,7 @@ class SimpleHomeSwingTest {
                     pending && current.id().equals(first.id()),
                     new ChannelPreferenceStore.ReadResult(
                             ChannelPreferenceStore.Status.CONFIGURED,
-                            preference, "Configured"));
+                            preference, "Configured"), Map.of(), Map.of());
         }
 
         @Override
@@ -1003,7 +1020,7 @@ class SimpleHomeSwingTest {
                                                  List<Product> products, String java) {
             return new InstallationRecord("00000000-0000-0000-0000-00000000000" + suffix,
                     name, root.toAbsolutePath().normalize().toString(), "1.2.3", products,
-                    java, null, false, "2026-09-17T00:00:0" + suffix + "Z");
+                    null, false, "2026-09-17T00:00:0" + suffix + "Z");
         }
     }
 

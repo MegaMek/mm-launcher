@@ -22,7 +22,6 @@ public final class ReleaseCatalog {
     public static final int MAX_PAGE_SIZE = 50;
     private static final int MAX_METADATA = 8 * 1024 * 1024;
     private static final Pattern TAG = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,99}");
-    private static final Pattern SHA256 = Pattern.compile("sha256:[0-9a-fA-F]{64}");
     private static final Pattern ASSET_NAME =
             Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,254}\\.tar\\.gz");
     private static final URI API = URI.create("https://api.github.com");
@@ -97,10 +96,8 @@ public final class ReleaseCatalog {
                     : "Multiple supported tar.gz assets are ambiguous");
         }
         Asset asset = matches.getFirst();
-        if (asset.digest() == null) {
-            return new Assessment(false, asset, "No SHA-256 checksum published");
-        }
-        if (!SHA256.matcher(asset.digest()).matches()) {
+        if (asset.publishedDigest().orElse(null)
+                instanceof PackageDigest.MalformedPublished) {
             return new Assessment(false, asset, "Published SHA-256 checksum is invalid");
         }
         if (!isInstallAssetName(repository, asset.name())) {
@@ -168,7 +165,8 @@ public final class ReleaseCatalog {
             long size = sizeNode.longValue();
             String digest = optionalText(item, "digest");
             String url = requiredText(item, "browser_download_url");
-            Asset asset = new Asset(name, size, digest, checkedUri(url, "asset URL"));
+            Asset asset = new Asset(name, size, PackageDigest.published(digest),
+                    checkedUri(url, "asset URL"));
             if (installing && name.startsWith(repository.assetPrefix()) && name.endsWith(".tar.gz")) {
                 validateInitialAssetUri(repository, tag, asset);
             }
@@ -272,7 +270,22 @@ public final class ReleaseCatalog {
         catch (IllegalArgumentException e) { throw new IOException("invalid " + label, e); }
     }
 
-    public record Asset(String name, long size, String digest, URI url) {}
+    public record Asset(String name, long size,
+                        java.util.Optional<PackageDigest.Published> publishedDigest, URI url) {
+        public Asset {
+            publishedDigest = publishedDigest == null
+                    ? java.util.Optional.empty() : publishedDigest;
+        }
+
+        /** Compatibility view for diagnostics and older callers; trust code uses publishedDigest. */
+        public String digest() {
+            return publishedDigest.map(PackageDigest.Published::raw).orElse(null);
+        }
+
+        public Asset(String name, long size, String digest, URI url) {
+            this(name, size, PackageDigest.published(digest), url);
+        }
+    }
     public record Assessment(boolean eligible, Asset asset, String reason) {}
     public record Release(String tag, String title, boolean draft, boolean prerelease,
                           URI notesUrl, List<Asset> assets) {}

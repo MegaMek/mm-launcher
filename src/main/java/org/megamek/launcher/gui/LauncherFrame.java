@@ -6,6 +6,7 @@ import org.megamek.launcher.channel.ChannelUpdateChecker;
 import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.channel.QuickInstallSnapshot;
+import org.megamek.launcher.channel.SelectedChannelReleaseCatalog;
 import org.megamek.launcher.diagnostics.SanitizedErrors;
 import org.megamek.launcher.onboarding.ExistingImportService;
 import org.megamek.launcher.onboarding.NormalInstallService;
@@ -24,6 +25,7 @@ import org.megamek.launcher.update.PreparedAdoption;
 import org.megamek.launcher.update.PreparedUpdate;
 import org.megamek.launcher.update.UpdatePreviewService;
 import org.megamek.launcher.update.RealUpdateService;
+import org.megamek.launcher.update.UninstallService;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
@@ -93,17 +95,15 @@ public final class LauncherFrame extends JFrame {
     private final JLabel status = new JLabel("Loading installations…");
     private final Set<String> checkedOnOpen =
             java.util.Collections.synchronizedSet(new HashSet<>());
+    private final Map<String, Boolean> checkPreferenceSaves = new HashMap<>();
     private LauncherServices.HomeState state;
-    private ChannelUpdateChecker.Result channelCheck;
-    private String channelCheckError;
-    private SwingWorker<ChannelUpdateChecker.Result, Void> channelWorker;
     private SwingWorker<QuickInstallSnapshot, Void> firstLaunchOptionsWorker;
     private FirstLaunchMetadataState firstLaunchMetadataState =
             FirstLaunchMetadataState.NOT_STARTED;
     private QuickInstallSnapshot firstLaunchSnapshot;
     private String firstLaunchMetadataFailure;
     private long firstLaunchMetadataAttempt;
-    private SwingWorker<Map<String, InstallationCheck>, Void> otherChecksWorker;
+    private SwingWorker<Map<String, InstallationCheck>, Void> automaticChecksWorker;
     private SwingWorker<InstallationCheck, Void> installationCheckWorker;
     private final Map<String, InstallationCheck> installationChecks = new HashMap<>();
     private final AtomicReference<OperationContext> activeOperation = new AtomicReference<>();
@@ -115,6 +115,7 @@ public final class LauncherFrame extends JFrame {
     private final List<HomeLaunchSplitButton> homeLaunchButtons =
             new java.util.ArrayList<>();
     private JButton homeInstallationsButton;
+    private JPanel homeInformationRow;
     private JLabel homeInformationLabel;
     private boolean homeSizeInitialized;
     private long homeGeneration;
@@ -123,6 +124,7 @@ public final class LauncherFrame extends JFrame {
     private LauncherServices.SettingsView launcherSettings;
     private Throwable launcherSettingsError;
     private boolean settingsLoading;
+    private String transientHomeMessage;
 
     public LauncherFrame(LauncherServices services) {
         this(services, new SwingExistingImportPrompts(),
@@ -145,8 +147,6 @@ public final class LauncherFrame extends JFrame {
         this.services = services;
         this.existingImportPrompts = existingImportPrompts;
         this.normalInstallLocationPrompts = normalInstallLocationPrompts;
-        status.addPropertyChangeListener("text", event ->
-                status.setVisible(status.getText() != null && !status.getText().isBlank()));
         setName("launcherFrame");
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         setMinimumSize(guiScale.scaleForGUI(680, 470));
@@ -158,7 +158,8 @@ public final class LauncherFrame extends JFrame {
                 if (gate.isBusy()) {
                     OperationContext operation = activeOperation.get();
                     if (operation != null) {
-                        if (operation.type() == OperationType.RECOVERY) {
+                        if (operation.type() == OperationType.RECOVERY
+                                || operation.type() == OperationType.UNINSTALL_RECOVERY) {
                             status.setText(
                                     "Recovery is finishing — keep the launcher open.");
                             return;
@@ -187,10 +188,10 @@ public final class LauncherFrame extends JFrame {
 
     private void prepareExactNormalInstall(OfficialRepository repository,
                                            FollowChannel futureChannel, String tag,
-                                           Path destination, Path selectedJava) {
+                                           Path destination) {
         run("Checking exact " + displayProduct(repository.key()) + " " + tag,
                 () -> services.prepareExactNormalInstall(repository, futureChannel, tag,
-                        destination, selectedJava),
+                        destination),
                 this::showNormalInstallConfirmation);
     }
 
@@ -203,9 +204,7 @@ public final class LauncherFrame extends JFrame {
         homeGeneration++;
         disposeFirstLaunchSplitButton();
         disposeHomeLaunchButtons();
-        cancelChannelWorker();
-        channelCheck = null;
-        channelCheckError = null;
+        cancelCheckWorkers();
         installationChecks.clear();
         status.setText("Loading installations…");
         run("Loading installations", () -> {
@@ -234,8 +233,7 @@ public final class LauncherFrame extends JFrame {
                     recordErrorAsync("Loading first-launch artwork", firstLaunchArtworkError,
                             message -> status.setText("Artwork unavailable. " + message));
                 }
-                maybeCheckOnOpen();
-                maybeCheckOtherCopiesOnOpen();
+                maybeCheckManagedCopiesOnOpen();
             } else {
                 renderLoadError(loaded.error());
             }
@@ -268,15 +266,18 @@ public final class LauncherFrame extends JFrame {
         homeInformationLabel.setForeground(new Color(232, 211, 146));
         homeInformationLabel.setFont(guiScale.font(
                 homeInformationLabel.getFont(), Font.PLAIN, 12f));
-        homeInformationLabel.setBorder(BorderFactory.createEmptyBorder(0,
+        homeInformationLabel.setHorizontalAlignment(javax.swing.SwingConstants.LEFT);
+        homeInformationRow = new JPanel(new BorderLayout());
+        homeInformationRow.setName("homeInformationRow");
+        homeInformationRow.setOpaque(false);
+        homeInformationRow.setBorder(BorderFactory.createEmptyBorder(0,
                 guiScale.scaleForGUI(8), guiScale.scaleForGUI(12),
                 guiScale.scaleForGUI(8)));
-        homeInformationLabel.setAlignmentX(Component.LEFT_ALIGNMENT);
-        homeInformationLabel.setHorizontalAlignment(javax.swing.SwingConstants.LEFT);
-        homeInformationLabel.setMaximumSize(new Dimension(Integer.MAX_VALUE,
-                homeInformationLabel.getPreferredSize().height
-                        + guiScale.scaleForGUI(12)));
-        center.add(homeInformationLabel);
+        homeInformationRow.setAlignmentX(Component.CENTER_ALIGNMENT);
+        homeInformationRow.add(homeInformationLabel, BorderLayout.WEST);
+        homeInformationRow.setMaximumSize(new Dimension(Integer.MAX_VALUE,
+                homeInformationRow.getPreferredSize().height));
+        center.add(homeInformationRow);
         updateHomeInformationMessage();
         renderApplicationLaunches(center);
 
@@ -401,11 +402,11 @@ public final class LauncherFrame extends JFrame {
         FirstLaunchSplitButton download = new FirstLaunchSplitButton(guiScale,
                 () -> {
                     if (!isCurrentFirstLaunch(generation, capturedHome, source[0])) return;
-                    prepareCapturedNormalInstall(QuickInstallSnapshot.DEFAULT_KEY, null, null);
+                    prepareCapturedNormalInstall(QuickInstallSnapshot.DEFAULT_KEY, null);
                 },
                 key -> {
                     if (!isCurrentFirstLaunch(generation, capturedHome, source[0])) return;
-                    prepareCapturedNormalInstall(key, null, null);
+                    prepareCapturedNormalInstall(key, null);
                 },
                 () -> {
                     if (!isCurrentFirstLaunch(generation, capturedHome, source[0])) return;
@@ -420,7 +421,9 @@ public final class LauncherFrame extends JFrame {
                 "Choose and statically inspect an existing MegaMek, MekHQ, or MegaMekLab "
                         + "installation without moving its files.");
         useExisting.addActionListener(event -> chooseExisting());
-        status.setText(firstLaunchArtworkError == null
+        status.setText(transientHomeMessage != null && !transientHomeMessage.isBlank()
+                ? transientHomeMessage
+                : firstLaunchArtworkError == null
                 ? ""
                 : "Artwork unavailable; diagnostics are available in Settings.");
         FirstLaunchPanel firstLaunch = new FirstLaunchPanel(firstLaunchArtwork, guiScale,
@@ -514,12 +517,12 @@ public final class LauncherFrame extends JFrame {
         switch (firstLaunchMetadataState) {
             case NOT_STARTED -> {
                 firstLaunchSplitButton.setOptionsLoading();
-                status.setText("Checking install versions…");
+                status.setText("");
                 if (startInitial) startFirstLaunchOptionsCheck();
             }
             case LOADING -> {
                 firstLaunchSplitButton.setOptionsLoading();
-                status.setText("Checking install versions…");
+                status.setText("");
             }
             case READY -> {
                 if (firstLaunchSnapshot == null) {
@@ -570,6 +573,7 @@ public final class LauncherFrame extends JFrame {
         }
         homeLaunchButtons.clear();
         homeInstallationsButton = null;
+        homeInformationRow = null;
         homeInformationLabel = null;
     }
 
@@ -593,17 +597,20 @@ public final class LauncherFrame extends JFrame {
         if (homeInformationLabel == null) return;
         String text = homeInformationText();
         homeInformationLabel.setText(text);
-        homeInformationLabel.setVisible(!text.isBlank());
-        homeInformationLabel.setMaximumSize(new Dimension(Integer.MAX_VALUE,
-                homeInformationLabel.getPreferredSize().height));
+        homeInformationRow.setVisible(!text.isBlank());
+        homeInformationRow.setMaximumSize(new Dimension(Integer.MAX_VALUE,
+                homeInformationRow.getPreferredSize().height));
         homeInformationLabel.getAccessibleContext().setAccessibleName(
                 text.isBlank() ? "No launcher message" : text);
-        homeInformationLabel.revalidate();
-        homeInformationLabel.repaint();
+        homeInformationRow.revalidate();
+        homeInformationRow.repaint();
     }
 
     private String homeInformationText() {
-        if (channelWorker != null || otherChecksWorker != null
+        if (transientHomeMessage != null && !transientHomeMessage.isBlank()) {
+            return transientHomeMessage;
+        }
+        if (automaticChecksWorker != null
                 || installationCheckWorker != null
                 || installationChecks.values().stream()
                 .anyMatch(check -> "Checking".equals(check.error()))) {
@@ -613,11 +620,12 @@ public final class LauncherFrame extends JFrame {
                 || state.installationStatuses() == null) {
             return "";
         }
-        List<InstallationRecord> managed = state.registry().installations().stream()
+        List<InstallationRecord> checkedRecords = state.registry().installations().stream()
                 .filter(record -> managedUpdatesAvailable(installationLocalStatus(record)))
+                .filter(record -> installationChecks.containsKey(record.id()))
                 .toList();
-        if (managed.isEmpty()) return "";
-        long updates = managed.stream().filter(record -> {
+        if (checkedRecords.isEmpty()) return "";
+        long updates = checkedRecords.stream().filter(record -> {
             InstallationCheck check = installationChecks.get(record.id());
             return check != null && check.result() != null
                     && check.result().updateAvailable();
@@ -626,21 +634,23 @@ public final class LauncherFrame extends JFrame {
             return updates + (updates == 1
                     ? " installation has an update" : " installations have updates");
         }
-        boolean failed = managed.stream().map(record -> installationChecks.get(record.id()))
+        boolean failed = checkedRecords.stream().map(record -> installationChecks.get(record.id()))
                 .filter(java.util.Objects::nonNull)
                 .anyMatch(check -> check.error() != null || check.result() == null
                         || check.result().status() == ChannelUpdateChecker.Status.UNAVAILABLE
                         || check.result().status() == ChannelUpdateChecker.Status.UNCONFIGURED
                         || check.result().status() == ChannelUpdateChecker.Status.NON_COMPARABLE);
         if (failed) return "Some installations could not be checked";
-        boolean allChecked = managed.stream().allMatch(record -> {
+        boolean allChecked = checkedRecords.stream().allMatch(record -> {
             InstallationCheck check = installationChecks.get(record.id());
             return check != null && check.error() == null && check.result() != null;
         });
         boolean allInstallationsManaged =
-                managed.size() == state.registry().installations().size();
-        return allChecked && allInstallationsManaged
-                ? "All installations are up to date" : "";
+                checkedRecords.size() == state.registry().installations().size();
+        if (!allChecked) return "";
+        return allInstallationsManaged
+                ? "All installations are up to date"
+                : "Checked installations are up to date";
     }
 
     private void resumeFirstLaunchOptions() {
@@ -686,8 +696,8 @@ public final class LauncherFrame extends JFrame {
         launches.setName("homeLaunchActions");
         launches.setOpaque(false);
         launches.setAlignmentX(Component.CENTER_ALIGNMENT);
-        boolean missingJava = false;
         boolean pending = false;
+        boolean pendingUninstall = false;
         boolean unavailable = state.preferredError() != null
                 && targets.containsValue(state.preferred());
         for (Map.Entry<String, InstallationRecord> target : targets.entrySet()) {
@@ -698,22 +708,23 @@ public final class LauncherFrame extends JFrame {
                     displayProduct(productKey), record.observedBuild(), channel,
                     () -> launchDirectly(record, productKey),
                     homeLaunchAlternatives(record, productKey));
-            missingJava |= record.javaExecutable() == null;
             LauncherServices.InstallationStatus local = installationLocalStatus(record);
             pending |= local != null && local.pendingUpdate();
+            pendingUninstall |= local != null && local.pendingUninstall();
             unavailable |= local != null && local.error() != null;
-            launch.setEnabled(record.javaExecutable() != null
-                    && (local == null || !local.pendingUpdate() && local.error() == null));
+            launch.setEnabled(local == null
+                    || !local.pendingUpdate() && !local.pendingUninstall()
+                    && local.error() == null);
             homeLaunchButtons.add(launch);
             launches.add(launch);
         }
         panel.add(launches);
-        if (missingJava || pending || unavailable) {
+        if (pending || pendingUninstall || unavailable) {
             panel.add(Box.createVerticalStrut(guiScale.scaleForGUI(7)));
-            String message = pending
+            String message = pendingUninstall
+                    ? "Uninstall recovery required."
+                    : pending
                     ? "An installation needs update recovery before it can be played."
-                    : missingJava
-                    ? "A preferred application needs Java 21+ before it can be played."
                     : "An installation changed or is unavailable.";
             JLabel blocker = homeStatusLabel(message);
             blocker.setName("homeActionRequiredMessage");
@@ -784,136 +795,10 @@ public final class LauncherFrame extends JFrame {
         };
     }
 
-    private void updateChecks(InstallationRecord record) {
-        LauncherServices.InstallationStatus local = installationLocalStatus(record);
-        ChannelPreferenceStore.ReadResult read =
-                local == null ? null : local.channelPreference();
-        if (read == null || read.status() != ChannelPreferenceStore.Status.CONFIGURED
-                || read.preference() == null || local.previewEligibility() == null
-                || !local.previewEligibility().available()) {
-            showError("Update checks unavailable", new IOException(read == null
-                    ? "The installation status changed; reload Installations."
-                    : read.reason()));
-            return;
-        }
-        ChannelPreference existing = read.preference();
-        JCheckBox checkOnOpen = new JCheckBox(
-                "Check this copy on open (uses the network in the background)",
-                existing.checkOnOpen());
-        checkOnOpen.setName("checkOnOpenCheckbox");
-        checkOnOpen.setOpaque(false);
-        checkOnOpen.setForeground(FirstLaunchPanel.TEXT);
-        JPanel choices = new JPanel();
-        choices.setLayout(new BoxLayout(choices, BoxLayout.Y_AXIS));
-        choices.setBackground(FirstLaunchPanel.BACKGROUND);
-        choices.setBorder(BorderFactory.createEmptyBorder(
-                guiScale.scaleForGUI(18), guiScale.scaleForGUI(20),
-                guiScale.scaleForGUI(12), guiScale.scaleForGUI(20)));
-        choices.add(checkOnOpen);
-
-        JPanel actions = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT));
-        actions.setBackground(FirstLaunchPanel.BACKGROUND);
-        JButton cancel = homeButton("Cancel", "cancelUpdateChecksButton");
-        JButton save = homeButton("Save", "saveUpdateChecksButton");
-        actions.add(cancel);
-        actions.add(save);
-        JDialog editor = new JDialog(this, "Update checks", true);
-        editor.setName("updateChecksDialog");
-        editor.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-        JPanel surface = new JPanel(new BorderLayout());
-        surface.setBackground(FirstLaunchPanel.BACKGROUND);
-        surface.add(choices, BorderLayout.CENTER);
-        surface.add(actions, BorderLayout.SOUTH);
-        editor.setContentPane(surface);
-        editor.setMinimumSize(guiScale.scaleForGUI(500, 145));
-        editor.pack();
-        editor.setLocationRelativeTo(this);
-        cancel.addActionListener(event -> editor.dispose());
-        save.addActionListener(event -> {
-            boolean selected = checkOnOpen.isSelected();
-            editor.dispose();
-            run("Saving update checks",
-                    () -> services.setCheckOnOpen(record, existing, selected),
-                    ignored -> reload());
-        });
-        editor.setVisible(true);
-    }
-
-    private void maybeCheckOnOpen() {
-        if (state == null || state.preferred() == null || state.channelPreference() == null
-                || !state.automaticChecksEnabled()
-                || state.channelPreference().status() != ChannelPreferenceStore.Status.CONFIGURED
-                || !state.channelPreference().preference().checkOnOpen()
-                || state.previewEligibility() == null
-                || !state.previewEligibility().available()) return;
-        ChannelPreference preference = state.channelPreference().preference();
-        String key = preference.installationId() + "|" + preference.registeredAt()
-                + "|" + preference.channel();
-        if (checkedOnOpen.add(key)) startChannelCheck(true);
-    }
-
-    private void startChannelCheck(boolean automatic) {
-        if (channelWorker != null || state == null || state.preferred() == null
-                || state.channelPreference() == null
-                || state.channelPreference().status() != ChannelPreferenceStore.Status.CONFIGURED) {
-            return;
-        }
-        final long generation = homeGeneration;
-        final InstallationRecord record = state.preferred();
-        final ChannelPreference preference = state.channelPreference().preference();
-        channelCheck = null;
-        channelCheckError = null;
-        channelWorker = new SwingWorker<>() {
-            @Override
-            protected ChannelUpdateChecker.Result doInBackground() throws Exception {
-                return services.checkUpdates(record);
-            }
-
-            @Override
-            protected void done() {
-                if (channelWorker != this) return;
-                channelWorker = null;
-                if (isCancelled() || !isDisplayable() || generation != homeGeneration
-                        || state == null || state.preferred() == null
-                        || !state.preferred().equals(record)
-                        || state.channelPreference() == null
-                        || !preference.equals(state.channelPreference().preference())) return;
-                try {
-                    channelCheck = get();
-                    channelCheckError = null;
-                    installationChecks.put(record.id(),
-                            new InstallationCheck(channelCheck, null));
-                } catch (java.util.concurrent.CancellationException ignored) {
-                    return;
-                } catch (InterruptedException error) {
-                    Thread.currentThread().interrupt();
-                    return;
-                } catch (java.util.concurrent.ExecutionException error) {
-                    channelCheck = null;
-                    Throwable failure = error.getCause();
-                    channelCheckError = errorDetail(failure);
-                    installationChecks.put(record.id(),
-                            new InstallationCheck(null, channelCheckError));
-                    recordErrorAsync("Channel check failed", failure, ignored -> {
-                    });
-                }
-                if (gate.isBusy()) return;
-                if (page == Page.INSTALLATIONS) renderInstallationsPage();
-                else if (page == Page.HOME) updateHomeInstallationsLabel();
-            }
-        };
-        channelWorker.execute();
-        renderCurrentPage();
-    }
-
-    private void cancelChannelWorker() {
-        if (channelWorker != null) {
-            channelWorker.cancel(true);
-            channelWorker = null;
-        }
-        if (otherChecksWorker != null) {
-            otherChecksWorker.cancel(true);
-            otherChecksWorker = null;
+    private void cancelCheckWorkers() {
+        if (automaticChecksWorker != null) {
+            automaticChecksWorker.cancel(true);
+            automaticChecksWorker = null;
         }
         if (installationCheckWorker != null) {
             installationCheckWorker.cancel(true);
@@ -978,44 +863,39 @@ public final class LauncherFrame extends JFrame {
         installationCheckWorker.execute();
     }
 
-    private void maybeCheckOtherCopiesOnOpen() {
-        if (state == null || state.registry() == null || otherChecksWorker != null
-                || !state.automaticChecksEnabled()) return;
+    private void maybeCheckManagedCopiesOnOpen() {
+        if (state == null || state.registry() == null || automaticChecksWorker != null) return;
         final long generation = homeGeneration;
-        final RegistryData captured = state.registry();
-        final String mainId = captured.defaultInstallationId();
-        if (captured.installations().stream().noneMatch(record -> !record.id().equals(mainId))) {
-            return;
-        }
-        otherChecksWorker = new SwingWorker<>() {
+        final List<InstallationRecord> selectedRecords = state.registry().installations().stream()
+                .filter(record -> {
+                    LauncherServices.InstallationStatus local =
+                            installationLocalStatus(record);
+                    return managedUpdatesAvailable(local)
+                            && local.channelPreference().preference().checkOnOpen()
+                            && !checkedOnOpen.contains(checkOnOpenKey(
+                                    local.channelPreference().preference()));
+                })
+                .limit(32)
+                .toList();
+        if (selectedRecords.isEmpty()) return;
+        automaticChecksWorker = new SwingWorker<>() {
             @Override
             protected Map<String, InstallationCheck> doInBackground() {
                 Map<String, InstallationCheck> results = new HashMap<>();
-                int checked = 0;
-                for (InstallationRecord record : captured.installations()) {
-                    if (isCancelled() || Thread.currentThread().isInterrupted() || checked >= 32) {
+                for (InstallationRecord record : selectedRecords) {
+                    if (isCancelled() || Thread.currentThread().isInterrupted()) {
                         break;
                     }
-                    if (record.id().equals(mainId)) continue;
                     try {
                         ChannelPreferenceStore.ReadResult selected =
                                 services.channelPreference(record);
                         if (selected.status() != ChannelPreferenceStore.Status.CONFIGURED) {
-                            results.put(record.id(), new InstallationCheck(null, null,
-                                    selected.status() == ChannelPreferenceStore.Status.UNKNOWN
-                                            ? "Channel not configured"
-                                            : "Channel setting needs attention"));
                             continue;
                         }
-                        results.put(record.id(), new InstallationCheck(null, null,
-                                selected.preference().channel().toString()));
                         if (!selected.preference().checkOnOpen()) continue;
                         if (!services.canCheckOnOpen(record)) continue;
-                        String key = selected.preference().installationId() + "|"
-                                + selected.preference().registeredAt() + "|"
-                                + selected.preference().channel();
+                        String key = checkOnOpenKey(selected.preference());
                         if (!checkedOnOpen.add(key)) continue;
-                        checked++;
                         ChannelUpdateChecker.Result result = services.checkUpdates(record);
                         if (services.isCheckBindingCurrent(record, result.preference())) {
                             results.put(record.id(), new InstallationCheck(result, null));
@@ -1033,8 +913,8 @@ public final class LauncherFrame extends JFrame {
 
             @Override
             protected void done() {
-                if (otherChecksWorker != this) return;
-                otherChecksWorker = null;
+                if (automaticChecksWorker != this) return;
+                automaticChecksWorker = null;
                 if (isCancelled() || generation != homeGeneration || !isDisplayable()) return;
                 try {
                     installationChecks.putAll(get());
@@ -1052,7 +932,7 @@ public final class LauncherFrame extends JFrame {
                 }
             }
         };
-        otherChecksWorker.execute();
+        automaticChecksWorker.execute();
         updateHomeInformationMessage();
     }
 
@@ -1127,10 +1007,15 @@ public final class LauncherFrame extends JFrame {
                 guiScale.scaleForGUI(22), guiScale.scaleForGUI(14),
                 guiScale.scaleForGUI(22)));
         content.setBackground(FirstLaunchPanel.BACKGROUND);
-        JPanel header = pageHeader("Installations",
-                "Manage each physical installation independently.");
+        JPanel header = new JPanel(new BorderLayout());
         header.setBackground(FirstLaunchPanel.BACKGROUND);
-        for (Component child : header.getComponents()) child.setForeground(FirstLaunchPanel.TEXT);
+        header.setBorder(BorderFactory.createEmptyBorder(0, 0,
+                guiScale.scaleForGUI(12), 0));
+        JLabel title = new JLabel("Installations", javax.swing.SwingConstants.CENTER);
+        title.setName("pageTitle");
+        title.setForeground(FirstLaunchPanel.TEXT);
+        title.setFont(guiScale.font(title.getFont(), Font.BOLD, 24f));
+        header.add(title, BorderLayout.NORTH);
         JPanel topActions = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT,
                 guiScale.scaleForGUI(8), 0));
         topActions.setName("installationTopActions");
@@ -1143,8 +1028,7 @@ public final class LauncherFrame extends JFrame {
         importExisting.addActionListener(event -> chooseExisting());
         topActions.add(install);
         topActions.add(importExisting);
-        header.add(Box.createVerticalStrut(guiScale.scaleForGUI(8)));
-        header.add(topActions);
+        header.add(topActions, BorderLayout.SOUTH);
         content.add(header, BorderLayout.NORTH);
 
         RegistryData data = state.registry();
@@ -1171,7 +1055,13 @@ public final class LauncherFrame extends JFrame {
 
     private JPanel installationCard(InstallationRecord record) {
         JPanel card = new JPanel(new BorderLayout(guiScale.scaleForGUI(12),
-                guiScale.scaleForGUI(8)));
+                guiScale.scaleForGUI(8))) {
+            @Override
+            public Dimension getMaximumSize() {
+                Dimension preferred = getPreferredSize();
+                return new Dimension(Integer.MAX_VALUE, preferred.height);
+            }
+        };
         card.setName("installationCard-" + record.id());
         card.setBackground(FirstLaunchPanel.PANEL);
         card.setBorder(BorderFactory.createCompoundBorder(
@@ -1179,7 +1069,7 @@ public final class LauncherFrame extends JFrame {
                 BorderFactory.createEmptyBorder(guiScale.scaleForGUI(12),
                         guiScale.scaleForGUI(14), guiScale.scaleForGUI(12),
                         guiScale.scaleForGUI(14))));
-        card.setMaximumSize(new Dimension(Integer.MAX_VALUE, guiScale.scaleForGUI(190)));
+        card.setAlignmentX(Component.CENTER_ALIGNMENT);
         card.getAccessibleContext().setAccessibleName(
                 record.name() + " " + record.observedBuild());
 
@@ -1222,9 +1112,35 @@ public final class LauncherFrame extends JFrame {
         }
         JLabel updateStatus = new JLabel(installationUpdateStatus(record, local));
         updateStatus.setName("installationStatus-" + record.id());
-        updateStatus.setForeground(local != null && local.pendingUpdate()
+        updateStatus.setForeground(local != null
+                && (local.pendingUpdate() || local.pendingUninstall())
                 ? FirstLaunchPanel.GOLD : FirstLaunchPanel.MUTED);
         summary.add(updateStatus);
+        if (updateManaged) {
+            ChannelPreference expectedPreference = local.channelPreference().preference();
+            Boolean pendingSelection = checkPreferenceSaves.get(record.id());
+            JCheckBox checkOnOpen = new JCheckBox(
+                    "Check for updates when the launcher opens",
+                    pendingSelection == null
+                            ? expectedPreference.checkOnOpen() : pendingSelection);
+            checkOnOpen.setName("checkOnOpenCheckbox-" + record.id());
+            checkOnOpen.setOpaque(false);
+            checkOnOpen.setForeground(FirstLaunchPanel.TEXT);
+            checkOnOpen.setMnemonic(KeyEvent.VK_C);
+            checkOnOpen.setAlignmentX(Component.LEFT_ALIGNMENT);
+            checkOnOpen.setBorder(BorderFactory.createEmptyBorder());
+            checkOnOpen.setMargin(new java.awt.Insets(0, 0, 0, 0));
+            checkOnOpen.getAccessibleContext().setAccessibleName(
+                    "Check for updates when the launcher opens for " + record.name());
+            checkOnOpen.getAccessibleContext().setAccessibleDescription(
+                    "Saves immediately for this installation only. It does not change the "
+                            + "fixed channel or affect an update check already in progress.");
+            checkOnOpen.setEnabled(pendingSelection == null);
+            checkOnOpen.addActionListener(event -> saveCheckOnOpen(
+                    record, expectedPreference, checkOnOpen));
+            summary.add(Box.createVerticalStrut(guiScale.scaleForGUI(4)));
+            summary.add(checkOnOpen);
+        }
         card.add(summary, BorderLayout.CENTER);
 
         JPanel actions = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT,
@@ -1247,9 +1163,6 @@ public final class LauncherFrame extends JFrame {
             actions.add(update);
         }
         if (updateManaged) {
-            JButton checksButton = homeButton("Update checks…", "updateChecksButton");
-            checksButton.addActionListener(event -> updateChecks(record));
-            actions.add(checksButton);
             boolean checking = checked != null && "Checking".equals(checked.error());
             boolean needsCheck = checked == null || checked.error() != null
                     || checked.result() == null
@@ -1286,6 +1199,83 @@ public final class LauncherFrame extends JFrame {
         return card;
     }
 
+    private void saveCheckOnOpen(InstallationRecord record,
+                                 ChannelPreference expectedPreference,
+                                 JCheckBox checkbox) {
+        boolean requested = checkbox.isSelected();
+        if (checkPreferenceSaves.containsKey(record.id())) return;
+        checkPreferenceSaves.put(record.id(), requested);
+        checkbox.setEnabled(false);
+        new SwingWorker<CheckOnOpenSave, Void>() {
+            @Override
+            protected CheckOnOpenSave doInBackground() {
+                try {
+                    ChannelPreference saved = services.setCheckOnOpen(
+                            record, expectedPreference, requested);
+                    return new CheckOnOpenSave(new ChannelPreferenceStore.ReadResult(
+                            ChannelPreferenceStore.Status.CONFIGURED, saved, "Configured"),
+                            null);
+                } catch (IOException | RuntimeException failure) {
+                    try {
+                        return new CheckOnOpenSave(
+                                services.channelPreference(record), failure);
+                    } catch (IOException | RuntimeException reloadFailure) {
+                        failure.addSuppressed(reloadFailure);
+                        return new CheckOnOpenSave(null, failure);
+                    }
+                }
+            }
+
+            @Override
+            protected void done() {
+                checkPreferenceSaves.remove(record.id());
+                if (!isDisplayable()) return;
+                CheckOnOpenSave outcome;
+                try {
+                    outcome = get();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    checkbox.setSelected(expectedPreference.checkOnOpen());
+                    checkbox.setEnabled(true);
+                    showError("Update check setting was not saved", interrupted);
+                    return;
+                } catch (java.util.concurrent.ExecutionException failure) {
+                    checkbox.setSelected(expectedPreference.checkOnOpen());
+                    checkbox.setEnabled(true);
+                    showError("Update check setting was not saved", failure.getCause());
+                    return;
+                }
+                if (outcome.authoritative() != null) {
+                    if (outcome.failure() == null
+                            && outcome.authoritative().status()
+                            == ChannelPreferenceStore.Status.CONFIGURED
+                            && outcome.authoritative().preference() != null) {
+                        ChannelPreference saved = outcome.authoritative().preference();
+                        checkedOnOpen.add(checkOnOpenKey(saved));
+                    }
+                    replaceChannelPreference(record, outcome.authoritative());
+                    if (page == Page.INSTALLATIONS) {
+                        renderInstallationsPage();
+                    } else {
+                        boolean configured = outcome.authoritative().status()
+                                == ChannelPreferenceStore.Status.CONFIGURED
+                                && outcome.authoritative().preference() != null;
+                        checkbox.setSelected(configured
+                                ? outcome.authoritative().preference().checkOnOpen()
+                                : expectedPreference.checkOnOpen());
+                        checkbox.setEnabled(configured);
+                    }
+                } else {
+                    checkbox.setSelected(expectedPreference.checkOnOpen());
+                    checkbox.setEnabled(true);
+                }
+                if (outcome.failure() != null) {
+                    showError("Update check setting was not saved", outcome.failure());
+                }
+            }
+        }.execute();
+    }
+
     private LauncherServices.InstallationStatus installationLocalStatus(
             InstallationRecord record) {
         LauncherServices.InstallationStatus local = state.installationStatuses() == null
@@ -1296,6 +1286,32 @@ public final class LauncherFrame extends JFrame {
                     state.preferredError());
         }
         return local;
+    }
+
+    private void replaceChannelPreference(
+            InstallationRecord record,
+            ChannelPreferenceStore.ReadResult preference) {
+        if (state == null || state.registry() == null) return;
+        Map<String, LauncherServices.InstallationStatus> statuses =
+                new java.util.LinkedHashMap<>(state.installationStatuses() == null
+                        ? Map.of() : state.installationStatuses());
+        LauncherServices.InstallationStatus current = installationLocalStatus(record);
+        if (current != null) {
+            statuses.put(record.id(), new LauncherServices.InstallationStatus(
+                    preference, current.previewEligibility(), current.pendingUpdate(),
+                    current.pendingUninstall(), current.error(), current.adoption()));
+        }
+        ChannelPreferenceStore.ReadResult preferredPreference =
+                record.equals(state.preferred()) ? preference : state.channelPreference();
+        state = new LauncherServices.HomeState(state.registry(), state.preferred(),
+                state.currentInspection(), state.preferredError(),
+                state.previewEligibility(), state.pendingUpdate(), preferredPreference,
+                state.preferredApplications(), Map.copyOf(statuses));
+    }
+
+    private static String checkOnOpenKey(ChannelPreference preference) {
+        return preference.installationId() + "|" + preference.registeredAt()
+                + "|" + preference.channel();
     }
 
     private JPopupMenu installationMenu(InstallationRecord record,
@@ -1319,31 +1335,32 @@ public final class LauncherFrame extends JFrame {
                     }, ignored -> reload()));
             menu.add(preferred);
         }
-        menu.addSeparator();
-        JMenuItem java = installationMenuItem("Change Java");
-        java.addActionListener(event -> chooseJava(record));
-        menu.add(java);
-        if (updateManaged) {
-            JMenuItem checks = installationMenuItem("Update checks…");
-            checks.addActionListener(event -> updateChecks(record));
-            menu.add(checks);
-            JMenuItem preview = installationMenuItem("Preview update");
-            preview.addActionListener(event -> openSelectedUpdate(record, false));
-            menu.add(preview);
+        menu.add(installationMenuSeparator());
+        if (local != null && local.pendingUninstall()) {
+            JMenuItem recover = installationMenuItem("Recover uninstall");
+            recover.addActionListener(event -> recoverUninstall(record));
+            menu.add(recover);
+            return menu;
         }
         if (ownershipProvenance && local.pendingUpdate()) {
             JMenuItem recover = installationMenuItem("Recover interrupted update");
             recover.addActionListener(event -> recoverUpdate(record));
             menu.add(recover);
         }
-        JMenuItem location = installationMenuItem("Show location");
-        location.addActionListener(event -> JOptionPane.showMessageDialog(this,
-                record.canonicalRoot(), record.name() + " location",
-                JOptionPane.INFORMATION_MESSAGE));
+        JMenuItem location = installationMenuItem("Open location");
+        location.getAccessibleContext().setAccessibleDescription(
+                "Open " + record.name() + " in the platform file manager");
+        location.addActionListener(event -> openLocation(record));
         menu.add(location);
-        JMenuItem remove = installationMenuItem("Remove record");
-        remove.addActionListener(event -> removeInstallation(record));
+        JMenuItem remove = installationMenuItem("Remove from launcher…");
+        remove.addActionListener(event -> removeFromLauncher(record));
         menu.add(remove);
+        if (updateManaged) {
+            menu.add(installationMenuSeparator());
+            JMenuItem uninstall = installationMenuItem("Uninstall…");
+            uninstall.addActionListener(event -> uninstall(record));
+            menu.add(uninstall);
+        }
         return menu;
     }
 
@@ -1354,6 +1371,27 @@ public final class LauncherFrame extends JFrame {
         item.setForeground(HomeLaunchSplitButton.POPUP_FOREGROUND);
         item.getAccessibleContext().setAccessibleName(text);
         return item;
+    }
+
+    private JPanel installationMenuSeparator() {
+        int height = guiScale.scaleForGUI(11);
+        int inset = guiScale.scaleForGUI(12);
+        JPanel separator = new JPanel() {
+            @Override
+            protected void paintComponent(java.awt.Graphics graphics) {
+                super.paintComponent(graphics);
+                graphics.setColor(new Color(84, 116, 108));
+                int y = getHeight() / 2;
+                graphics.drawLine(inset, y, Math.max(inset, getWidth() - inset), y);
+            }
+        };
+        separator.setName("installationMenuSeparator");
+        separator.setOpaque(true);
+        separator.setBackground(HomeLaunchSplitButton.POPUP_BACKGROUND);
+        separator.setMinimumSize(new Dimension(1, height));
+        separator.setPreferredSize(new Dimension(1, height));
+        separator.setMaximumSize(new Dimension(Integer.MAX_VALUE, height));
+        return separator;
     }
 
     private static String installationChannel(LauncherServices.InstallationStatus local) {
@@ -1371,7 +1409,8 @@ public final class LauncherFrame extends JFrame {
             LauncherServices.InstallationStatus local) {
         return hasOwnershipProvenance(local)
                 && local.previewEligibility().available()
-                && hasFixedChannel(local);
+                && hasFixedChannel(local)
+                && !local.pendingUninstall();
     }
 
     private static boolean hasFixedChannel(LauncherServices.InstallationStatus local) {
@@ -1390,6 +1429,9 @@ public final class LauncherFrame extends JFrame {
 
     private String installationUpdateStatus(InstallationRecord record,
                                             LauncherServices.InstallationStatus local) {
+        if (local != null && local.pendingUninstall()) {
+            return "Uninstall recovery required";
+        }
         if (local != null && local.error() != null) {
             return "Installation needs attention";
         }
@@ -1789,20 +1831,78 @@ public final class LauncherFrame extends JFrame {
         return dialog;
     }
 
-    private void removeInstallation(InstallationRecord record) {
+    private void openLocation(InstallationRecord record) {
+        run("Opening installation folder", () -> {
+            services.openLocation(record);
+            return null;
+        }, ignored -> status.setText("Opened installation folder."),
+                error -> showError("Open location failed", error));
+    }
+
+    private void removeFromLauncher(InstallationRecord record) {
         int answer = JOptionPane.showConfirmDialog(this,
-                "Remove only the launcher record for “" + record.name()
-                        + "”?\nThe application files will be retained.",
-                "Remove registry record", JOptionPane.OK_CANCEL_OPTION,
+                "Remove “" + record.name()
+                        + "” from the launcher?\nIts files will stay in the installation folder.",
+                "Remove from launcher", JOptionPane.OK_CANCEL_OPTION,
                 JOptionPane.WARNING_MESSAGE);
         if (answer != JOptionPane.OK_OPTION) return;
-        run("Removing registry record", () -> {
-            services.remove(record);
-            return null;
-        }, ignored -> {
+        run("Removing from launcher", () -> services.removeFromLauncher(record), result -> {
             selectedInstallationId = null;
+            transientHomeMessage = result.warning() == null
+                    ? "Removed from launcher. Files were kept."
+                    : "Removed from launcher. Files were kept. " + result.warning();
+            page = Page.HOME;
             reload();
         });
+    }
+
+    private void uninstall(InstallationRecord record) {
+        int answer = JOptionPane.showConfirmDialog(this,
+                "Uninstall " + record.name() + "?\nOfficial application files will be removed. "
+                        + "Saves, settings, custom files, and modified files will be kept.",
+                "Uninstall", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
+        if (answer != JOptionPane.OK_OPTION) return;
+        OperationProgressDialog progress = new OperationProgressDialog(this,
+                "Uninstalling", "uninstallProgressLog", this::showOperationLogs);
+        progress.setVisible(true);
+        runOperation("Uninstalling " + record.name(), OperationType.UNINSTALL,
+                List.of(Path.of(record.canonicalRoot())), progress,
+                context -> {
+                    UninstallService.Plan plan = services.planUninstall(record, context);
+                    return services.uninstall(plan, context);
+                }, result -> {
+                    progress.dispose();
+                    selectedInstallationId = null;
+                    transientHomeMessage = result.retainedFiles()
+                            ? "Uninstalled. Your custom files were kept in the installation folder."
+                            : "Uninstalled.";
+                    if (result.warning() != null) {
+                        transientHomeMessage += " " + result.warning();
+                    }
+                    page = Page.HOME;
+                    reload();
+                }, error -> progress.setTitle("Uninstall failed"), () -> {
+                });
+    }
+
+    private void recoverUninstall(InstallationRecord record) {
+        OperationProgressDialog progress = new OperationProgressDialog(this,
+                "Recovering uninstall", "uninstallRecoveryProgressLog",
+                this::showOperationLogs);
+        progress.startNonCancellable(
+                "Uninstall recovery must remain open until it finishes.");
+        progress.setVisible(true);
+        runOperation("Recovering uninstall", OperationType.UNINSTALL_RECOVERY,
+                List.of(Path.of(record.canonicalRoot())), progress,
+                context -> services.recoverUninstall(record, context),
+                result -> {
+                    progress.dispose();
+                    transientHomeMessage = result.message()
+                            + (result.warning() == null ? "" : " " + result.warning());
+                    page = Page.HOME;
+                    reload();
+                }, error -> progress.setTitle("Uninstall recovery failed"), () -> {
+                });
     }
 
     private JPanel pageHeader(String titleText, String subtitle) {
@@ -1854,39 +1954,6 @@ public final class LauncherFrame extends JFrame {
             loading.setForeground(FirstLaunchPanel.MUTED);
             center.add(loading);
         } else if (launcherSettings != null) {
-            JPanel updates = settingsSection("Updates");
-            JCheckBox checks = new JCheckBox(
-                    "Check installed versions when the launcher opens",
-                    launcherSettings.settings().checkInstalledVersionsOnOpen());
-            checks.setName("installedVersionsCheckMasterCheckbox");
-            checks.setOpaque(false);
-            checks.setForeground(FirstLaunchPanel.TEXT);
-            checks.getAccessibleContext().setAccessibleDescription(
-                    "Master gate for automatic checks. Existing per-installation Off choices "
-                            + "remain Off.");
-            updates.add(checks);
-            checks.addActionListener(event -> {
-                boolean requested = checks.isSelected();
-                checks.setEnabled(false);
-                run("Saving automatic update checks",
-                    () -> services.setCheckInstalledVersionsOnOpen(requested),
-                    saved -> {
-                        launcherSettings = new LauncherServices.SettingsView(saved,
-                                launcherSettings.defaultJava(),
-                                launcherSettings.defaultJavaFeature(),
-                                launcherSettings.defaultJavaPersisted());
-                        launcherSettingsError = null;
-                        renderSettingsPage();
-                    }, error -> {
-                        checks.setSelected(!requested);
-                        showError("Automatic check setting was not saved", error);
-                        renderSettingsPage();
-                    }, () -> {
-                    }, false);
-            });
-            center.add(updates);
-            center.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
-
             JPanel java = settingsSection("Game Java");
             JLabel runtime = new JLabel("Java " + launcherSettings.defaultJavaFeature());
             runtime.setName("defaultJavaStatus");
@@ -1898,16 +1965,17 @@ public final class LauncherFrame extends JFrame {
             javaRow.setName("defaultJavaRow");
             javaRow.setOpaque(false);
             javaRow.setAlignmentX(Component.LEFT_ALIGNMENT);
-            JTextField javaPath = new JTextField(launcherSettings.defaultJava().toString());
+            String configuredJava = launcherSettings.defaultJava().toString();
+            JTextField javaPath = new JTextField(configuredJava);
             javaPath.setName("defaultJavaPath");
-            javaPath.setToolTipText(launcherSettings.defaultJava().toString());
+            javaPath.setToolTipText(configuredJava);
             javaPath.setEditable(false);
             javaPath.setBorder(BorderFactory.createEmptyBorder());
             javaPath.setOpaque(false);
             javaPath.setFont(guiScale.font(javaPath.getFont(), Font.PLAIN, 12f));
             javaPath.setForeground(FirstLaunchPanel.MUTED);
             javaPath.setCaretPosition(0);
-            javaPath.getAccessibleContext().setAccessibleName("Default game Java path");
+            javaPath.getAccessibleContext().setAccessibleName("Game Java path");
             javaRow.add(javaPath, BorderLayout.CENTER);
             JButton changeJava = homeButton("Change default Java",
                     "changeDefaultJavaButton");
@@ -1978,27 +2046,15 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void chooseDefaultJavaFromCandidates(List<Path> candidates) {
-        showJavaSelectionDialog("Change default game Java", "defaultJavaCandidateCombo",
+        showJavaSelectionDialog("Change default Java", "defaultJavaCandidateCombo",
                 candidates, selected -> run("Validating default game Java",
-                        () -> services.selectDefaultJava(selected), saved -> {
+                        () -> {
+                            services.selectDefaultJava(selected);
+                            return null;
+                        }, ignored -> {
                             launcherSettings = null;
                             launcherSettingsError = null;
                             loadSettingsPage();
-                        }));
-    }
-
-    private void chooseJava(InstallationRecord record) {
-        run("Finding Java runtimes", services::javaCandidates,
-                candidates -> chooseJavaFromCandidates(record, candidates));
-    }
-
-    private void chooseJavaFromCandidates(InstallationRecord record, List<Path> candidates) {
-        showJavaSelectionDialog("Change Java for " + record.name(), "javaCandidateCombo",
-                candidates, selected -> run("Validating selected Java",
-                        () -> services.selectJava(record, selected), feature -> {
-                            JOptionPane.showMessageDialog(this, "Java " + feature + " selected.",
-                                    "Java selected", JOptionPane.INFORMATION_MESSAGE);
-                            reload();
                         }));
     }
 
@@ -2137,7 +2193,7 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void prepareNormalInstall(OfficialRepository repository, FollowChannel channel,
-                                      Path destination, Path selectedJava) {
+                                      Path destination) {
         final Path target;
         try {
             target = destination == null
@@ -2148,23 +2204,21 @@ public final class LauncherFrame extends JFrame {
             return;
         }
         run("Checking " + quickChoiceName(repository, channel),
-                () -> services.prepareNormalInstall(repository, channel, target, selectedJava),
+                () -> services.prepareNormalInstall(repository, channel, target),
                 this::showNormalInstallConfirmation,
-                error -> normalPlanFailure(repository, channel, target, selectedJava, error), () -> {
+                error -> normalPlanFailure(repository, channel, target, error), () -> {
                 }, false);
     }
 
-    private void prepareCapturedNormalInstall(QuickInstallOption.Key key, Path destination,
-                                              Path selectedJava) {
+    private void prepareCapturedNormalInstall(QuickInstallOption.Key key, Path destination) {
         if (firstLaunchMetadataState != FirstLaunchMetadataState.READY
                 || firstLaunchSnapshot == null) {
             return;
         }
-        prepareCapturedNormalInstall(firstLaunchSnapshot.option(key), destination, selectedJava);
+        prepareCapturedNormalInstall(firstLaunchSnapshot.option(key), destination);
     }
 
-    private void prepareCapturedNormalInstall(QuickInstallOption option, Path destination,
-                                              Path selectedJava) {
+    private void prepareCapturedNormalInstall(QuickInstallOption option, Path destination) {
         QuickInstallOption.Key key = option.key();
         AtomicReference<Path> attemptedDestination = new AtomicReference<>(destination);
         setStableFirstLaunchStatus();
@@ -2175,22 +2229,22 @@ public final class LauncherFrame extends JFrame {
                             key.repository(), key.channel()) : destination;
                     attemptedDestination.set(target);
                     return services.prepareCapturedNormalInstall(
-                            option, target, selectedJava);
+                            option, target);
                 },
                 this::showNormalInstallConfirmation,
                 error -> capturedNormalPlanFailure(
-                        option, attemptedDestination.get(), selectedJava, error),
+                        option, attemptedDestination.get(), error),
                 () -> {
                 }, false, false);
     }
 
     private void capturedNormalPlanFailure(QuickInstallOption option, Path target,
-                                           Path selectedJava, Throwable error) {
+                                           Throwable error) {
         QuickInstallOption.Key key = option.key();
         String detail = errorDetail(error);
         boolean javaProblem = detail.toLowerCase(java.util.Locale.ROOT).contains("java");
         Object[] choices = javaProblem
-                ? new Object[]{"Choose Java…", "Retry", "Cancel"}
+                ? new Object[]{"Open Settings", "Retry", "Cancel"}
                 : new Object[]{"Retry", "Cancel"};
         int answer = JOptionPane.showOptionDialog(this,
                 (javaProblem
@@ -2203,28 +2257,20 @@ public final class LauncherFrame extends JFrame {
                 JOptionPane.DEFAULT_OPTION, JOptionPane.ERROR_MESSAGE,
                 null, choices, choices[0]);
         if (javaProblem && answer == 0) {
-            JFileChooser chooser = new JFileChooser();
-            chooser.setDialogTitle("Choose Java home or Java executable");
-            chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
-            if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-                prepareCapturedNormalInstall(option, target,
-                        chooser.getSelectedFile().toPath());
-            } else {
-                resumeFirstLaunchOptions();
-            }
+            navigateTo(Page.SETTINGS);
         } else if (answer == (javaProblem ? 1 : 0)) {
-            prepareCapturedNormalInstall(option, target, selectedJava);
+            prepareCapturedNormalInstall(option, target);
         } else {
             resumeFirstLaunchOptions();
         }
     }
 
     private void normalPlanFailure(OfficialRepository repository, FollowChannel channel,
-                                   Path target, Path selectedJava, Throwable error) {
+                                   Path target, Throwable error) {
         String detail = errorDetail(error);
         boolean javaProblem = detail.toLowerCase(java.util.Locale.ROOT).contains("java");
         Object[] choices = javaProblem
-                ? new Object[]{"Choose Java…", "Retry", "Cancel"}
+                ? new Object[]{"Open Settings", "Retry", "Cancel"}
                 : new Object[]{"Retry", "Cancel"};
         int answer = JOptionPane.showOptionDialog(this,
                 (javaProblem
@@ -2236,17 +2282,9 @@ public final class LauncherFrame extends JFrame {
                 JOptionPane.DEFAULT_OPTION, JOptionPane.ERROR_MESSAGE,
                 null, choices, choices[0]);
         if (javaProblem && answer == 0) {
-            JFileChooser chooser = new JFileChooser();
-            chooser.setDialogTitle("Choose Java home or Java executable");
-            chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
-            if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-                prepareNormalInstall(repository, channel, target,
-                        chooser.getSelectedFile().toPath());
-            } else {
-                resumeFirstLaunchOptions();
-            }
+            navigateTo(Page.SETTINGS);
         } else if (answer == (javaProblem ? 1 : 0)) {
-            prepareNormalInstall(repository, channel, target, selectedJava);
+            prepareNormalInstall(repository, channel, target);
         } else {
             resumeFirstLaunchOptions();
         }
@@ -2280,15 +2318,13 @@ public final class LauncherFrame extends JFrame {
                                             + "available; no new target was selected."));
                             resumeFirstLaunchOptions();
                         } else {
-                            prepareCapturedNormalInstall(captured, changed,
-                                    plan.javaExecutable());
+                            prepareCapturedNormalInstall(captured, changed);
                         }
                     } else if (plan.currentChannelTarget()) {
-                        prepareNormalInstall(plan.repository(), plan.channel(), changed,
-                                plan.javaExecutable());
+                        prepareNormalInstall(plan.repository(), plan.channel(), changed);
                     } else {
                         prepareExactNormalInstall(plan.repository(), plan.channel(),
-                                plan.release().tag(), changed, plan.javaExecutable());
+                                plan.release().tag(), changed);
                     }
                     return true;
                 }, source -> {
@@ -2321,15 +2357,13 @@ public final class LauncherFrame extends JFrame {
     private void runNormalInstall(NormalInstallService.Plan plan) {
         String product = displayProduct(plan.repository().key());
         String release = VersionDisplay.programChannelVersion(
-                product, plan.currentChannelTarget() ? plan.channel().toString() : null,
-                plan.version());
+                product, plan.channel().toString(), plan.version());
         String operationDescription = "Installing " + release;
         OperationProgressDialog progress = new OperationProgressDialog(this,
                 operationDescription, "normalInstallProgressLog", this::showOperationLogs);
-        progress.append("Installing the confirmed official " + product
-                + (plan.currentChannelTarget() ? " " + plan.channel()
-                : " exact historical release; " + plan.channel()
-                + " is the created installation's fixed update channel") + "...\n");
+        progress.append("Installing the confirmed official " + product + " "
+                + plan.channel() + " selection; the channel is the created installation's "
+                + "fixed update track...\n");
         JButton repair = button("Open Installations", "repairNormalInstallButton");
         repair.setEnabled(false);
         progress.addActionButton(repair);
@@ -2377,20 +2411,17 @@ public final class LauncherFrame extends JFrame {
         private final DefaultListModel<PickerReleaseChoice> model = new DefaultListModel<>();
         private final JList<PickerReleaseChoice> releases = new JList<>(model);
         private final JButton fetch = homeButton(
-                "Fetch channel release", "fetchReleasesButton");
-        private final JButton browse = homeButton(
-                "Browse all releases…", "browseAllReleasesButton");
+                "Fetch releases", "fetchReleasesButton");
+        private final JButton previous = homeButton(
+                "Previous page", "previousReleasePageButton");
         private final JButton next = homeButton("Next page", "nextReleasePageButton");
         private final JButton install = homeButton(
-                "Choose destination…", "installReleaseButton");
-        private final JLabel information = new JLabel(
-                "Fetch the authoritative current channel target, or browse unclassified history.");
-        private final JLabel pageLabel = new JLabel(
-                "No release metadata is fetched until you choose an action.");
+                "Install", "installReleaseButton");
+        private final JLabel pageIndicator = new JLabel("Page —");
+        private final JLabel requestStatus = new JLabel(" ");
         private final JDialog dialog;
         private SwingWorker<?, Void> worker;
         private long generation;
-        private ReleasePickerMode mode = ReleasePickerMode.NONE;
         private OfficialRepository loadedRepository;
         private FollowChannel loadedChannel;
         private int displayedPage;
@@ -2403,7 +2434,7 @@ public final class LauncherFrame extends JFrame {
                     value == null ? "" : displayProduct(value.key()));
             product.getAccessibleContext().setAccessibleName("Product");
             product.getAccessibleContext().setAccessibleDescription(
-                    "Official product repository to fetch or browse.");
+                    "Official product repository whose releases will be fetched.");
             channel.setName("downloadChannelCombo");
             channel.setSelectedItem(FollowChannel.MILESTONE);
             channel.getAccessibleContext().setAccessibleName("Channel");
@@ -2424,11 +2455,12 @@ public final class LauncherFrame extends JFrame {
                     guiScale.scaleForGUI(5)));
             releases.getAccessibleContext().setAccessibleName("Available official releases");
             releases.getAccessibleContext().setAccessibleDescription(
-                    "One authoritative channel release, or an explicitly requested page of "
-                            + "unclassified historical releases.");
+                    "The selected current channel release and historical releases whose channel "
+                            + "membership is unknown.");
             releases.setCellRenderer((list, value, index, selected, focused) -> {
                 JLabel label = new JLabel(value == null ? "" : value.toString());
                 label.setOpaque(true);
+                label.setEnabled(value != null && value.assessment().eligible());
                 label.setFont(guiScale.font(label.getFont(), Font.PLAIN, 13f));
                 label.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(8),
                         guiScale.scaleForGUI(10), guiScale.scaleForGUI(8),
@@ -2437,40 +2469,61 @@ public final class LauncherFrame extends JFrame {
                         ? HomeLaunchSplitButton.POPUP_SELECTION : FirstLaunchPanel.PANEL);
                 label.setForeground(selected
                         ? HomeLaunchSplitButton.POPUP_SELECTION_FOREGROUND
-                        : FirstLaunchPanel.TEXT);
+                        : value != null && !value.assessment().eligible()
+                        ? FirstLaunchPanel.MUTED : FirstLaunchPanel.TEXT);
+                if (value != null && !value.assessment().eligible()) {
+                    label.setToolTipText("Unavailable: "
+                            + SanitizedErrors.text(value.assessment().reason()));
+                    label.getAccessibleContext().setAccessibleDescription(
+                            "Unavailable. "
+                                    + SanitizedErrors.text(value.assessment().reason()));
+                }
                 return label;
             });
 
             fetch.getAccessibleContext().setAccessibleDescription(
-                    "Read the official current release pointer and resolve only the exact "
-                            + "selected product and channel.");
-            browse.getAccessibleContext().setAccessibleDescription(
-                    "Explicitly switch to paged GitHub history. Historical channel "
-                            + "classification is unavailable.");
+                    "Fetch page one for the selected product and channel.");
+            previous.getAccessibleContext().setAccessibleDescription(
+                    "Fetch the previous page for the unchanged product and channel.");
             next.getAccessibleContext().setAccessibleDescription(
-                    "Fetch the next page of unclassified history for the selected product.");
+                    "Fetch the next page for the unchanged product and channel.");
             install.getAccessibleContext().setAccessibleDescription(
-                    "Choose a new destination, then revalidate this exact choice before consent.");
+                    "Install the selected release after choosing a destination and confirming.");
+            previous.setEnabled(false);
             next.setEnabled(false);
             install.setEnabled(false);
 
-            JPanel selectors = new JPanel(new java.awt.FlowLayout(
-                    java.awt.FlowLayout.LEFT, guiScale.scaleForGUI(9), 0));
+            JPanel selectors = new JPanel(new java.awt.GridBagLayout());
             selectors.setOpaque(false);
+            java.awt.GridBagConstraints selectorCell = new java.awt.GridBagConstraints();
+            selectorCell.gridy = 0;
+            selectorCell.insets = new java.awt.Insets(0, 0, 0, guiScale.scaleForGUI(7));
+            selectorCell.anchor = java.awt.GridBagConstraints.LINE_START;
             JLabel productLabel = styledPickerLabel("Product:");
             productLabel.setLabelFor(product);
-            selectors.add(productLabel);
-            selectors.add(product);
+            selectorCell.gridx = 0;
+            selectorCell.weightx = 0;
+            selectorCell.fill = java.awt.GridBagConstraints.NONE;
+            selectors.add(productLabel, selectorCell);
+            selectorCell.gridx = 1;
+            selectorCell.weightx = 0.5;
+            selectorCell.fill = java.awt.GridBagConstraints.HORIZONTAL;
+            selectors.add(product, selectorCell);
             JLabel channelLabel = styledPickerLabel("Channel:");
             channelLabel.setLabelFor(channel);
-            selectors.add(channelLabel);
-            selectors.add(channel);
-
-            JPanel sourceActions = new JPanel(new java.awt.FlowLayout(
-                    java.awt.FlowLayout.LEFT, guiScale.scaleForGUI(8), 0));
-            sourceActions.setOpaque(false);
-            sourceActions.add(fetch);
-            sourceActions.add(browse);
+            selectorCell.gridx = 2;
+            selectorCell.weightx = 0;
+            selectorCell.fill = java.awt.GridBagConstraints.NONE;
+            selectors.add(channelLabel, selectorCell);
+            selectorCell.gridx = 3;
+            selectorCell.weightx = 0.5;
+            selectorCell.fill = java.awt.GridBagConstraints.HORIZONTAL;
+            selectors.add(channel, selectorCell);
+            selectorCell.gridx = 4;
+            selectorCell.weightx = 0;
+            selectorCell.fill = java.awt.GridBagConstraints.NONE;
+            selectorCell.insets = new java.awt.Insets(0, 0, 0, 0);
+            selectors.add(fetch, selectorCell);
 
             JPanel heading = new JPanel();
             heading.setOpaque(false);
@@ -2480,21 +2533,10 @@ public final class LauncherFrame extends JFrame {
             title.setForeground(FirstLaunchPanel.GOLD);
             title.setFont(guiScale.font(title.getFont(), Font.BOLD, 22f));
             title.setAlignmentX(Component.LEFT_ALIGNMENT);
-            information.setName("releasePickerSourceExplanation");
-            information.setForeground(FirstLaunchPanel.MUTED);
-            information.setFont(guiScale.font(information.getFont(), Font.PLAIN, 12f));
-            information.setAlignmentX(Component.LEFT_ALIGNMENT);
-            information.getAccessibleContext().setAccessibleName(
-                    "Release source explanation");
             selectors.setAlignmentX(Component.LEFT_ALIGNMENT);
-            sourceActions.setAlignmentX(Component.LEFT_ALIGNMENT);
             heading.add(title);
-            heading.add(Box.createVerticalStrut(guiScale.scaleForGUI(5)));
-            heading.add(information);
             heading.add(Box.createVerticalStrut(guiScale.scaleForGUI(12)));
             heading.add(selectors);
-            heading.add(Box.createVerticalStrut(guiScale.scaleForGUI(8)));
-            heading.add(sourceActions);
 
             JScrollPane scroll = new JScrollPane(releases);
             scroll.setName("releaseListScrollPane");
@@ -2505,16 +2547,26 @@ public final class LauncherFrame extends JFrame {
             JPanel resultActions = new JPanel(new java.awt.FlowLayout(
                     java.awt.FlowLayout.RIGHT, guiScale.scaleForGUI(8), 0));
             resultActions.setOpaque(false);
+            resultActions.add(previous);
+            pageIndicator.setName("releasePageIndicator");
+            pageIndicator.setForeground(FirstLaunchPanel.TEXT);
+            pageIndicator.setFont(guiScale.font(
+                    pageIndicator.getFont(), Font.BOLD, 12f));
+            pageIndicator.getAccessibleContext().setAccessibleName("Release page");
+            resultActions.add(pageIndicator);
             resultActions.add(next);
             resultActions.add(install);
-            pageLabel.setName("releasePickerStatus");
-            pageLabel.setForeground(FirstLaunchPanel.MUTED);
-            pageLabel.setFont(guiScale.font(pageLabel.getFont(), Font.PLAIN, 12f));
-            pageLabel.getAccessibleContext().setAccessibleName("Release picker status");
-            JPanel bottom = new JPanel(new BorderLayout(guiScale.scaleForGUI(8), 0));
+            requestStatus.setName("releasePickerStatus");
+            requestStatus.setForeground(FirstLaunchPanel.MUTED);
+            requestStatus.setFont(guiScale.font(
+                    requestStatus.getFont(), Font.PLAIN, 12f));
+            requestStatus.getAccessibleContext().setAccessibleName("Release picker status");
+            requestStatus.setPreferredSize(new Dimension(1, guiScale.scaleForGUI(20)));
+            JPanel bottom = new JPanel(new BorderLayout(guiScale.scaleForGUI(8),
+                    guiScale.scaleForGUI(3)));
             bottom.setOpaque(false);
-            bottom.add(pageLabel, BorderLayout.CENTER);
-            bottom.add(resultActions, BorderLayout.EAST);
+            bottom.add(requestStatus, BorderLayout.NORTH);
+            bottom.add(resultActions, BorderLayout.CENTER);
 
             JPanel body = new JPanel(new BorderLayout(guiScale.scaleForGUI(12),
                     guiScale.scaleForGUI(12)));
@@ -2550,8 +2602,7 @@ public final class LauncherFrame extends JFrame {
                             available.y + available.height - placed.height)));
             dialog.getAccessibleContext().setAccessibleName("Install another version");
             dialog.getAccessibleContext().setAccessibleDescription(
-                    "Fetch one authoritative current channel release or explicitly browse "
-                            + "unclassified historical releases.");
+                    "Fetch official releases for one selected product and fixed update channel.");
             dialog.getRootPane().setDefaultButton(fetch);
             dialog.getRootPane().getInputMap(
                     javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
@@ -2572,15 +2623,19 @@ public final class LauncherFrame extends JFrame {
                 }
             });
 
-            fetch.addActionListener(event -> fetchCurrent());
-            browse.addActionListener(event -> fetchHistory(1, true));
-            next.addActionListener(event -> {
-                if (mode == ReleasePickerMode.HISTORY && displayedMayHaveNext) {
-                    fetchHistory(displayedPage + 1, false);
+            fetch.addActionListener(event -> fetchPage(1, true));
+            previous.addActionListener(event -> {
+                if (displayedPage > 1) {
+                    fetchPage(displayedPage - 1, false);
                 }
             });
-            product.addActionListener(event -> invalidateForProduct());
-            channel.addActionListener(event -> invalidateForChannel());
+            next.addActionListener(event -> {
+                if (displayedPage > 0 && displayedMayHaveNext) {
+                    fetchPage(displayedPage + 1, false);
+                }
+            });
+            product.addActionListener(event -> invalidateResults());
+            channel.addActionListener(event -> invalidateResults());
             releases.addListSelectionListener(event -> updateInstallEnabled());
             install.addActionListener(event -> chooseDestination());
         }
@@ -2597,109 +2652,62 @@ public final class LauncherFrame extends JFrame {
             product.requestFocusInWindow();
         }
 
-        private void invalidateForProduct() {
-            invalidateResults();
-            information.setText("Product changed. Fetch its channel release or explicitly "
-                    + "browse its unclassified history.");
-        }
-
-        private void invalidateForChannel() {
-            if (mode == ReleasePickerMode.CURRENT) {
-                invalidateResults();
-                information.setText("Channel changed. Fetch its authoritative current release.");
-            } else if (mode == ReleasePickerMode.HISTORY) {
-                information.setText("Historical rows remain unclassified. "
-                        + "Channel " + channel.getSelectedItem()
-                        + " will be followed only after installing the exact selection.");
-                updateInstallEnabled();
-            }
-        }
-
         private void invalidateResults() {
             generation++;
             if (worker != null) worker.cancel(true);
-            mode = ReleasePickerMode.NONE;
             loadedRepository = null;
             loadedChannel = null;
             displayedPage = 0;
             displayedMayHaveNext = false;
             model.clear();
+            previous.setEnabled(false);
             next.setEnabled(false);
             install.setEnabled(false);
-            pageLabel.setText("Selection changed; fetch a new result.");
+            pageIndicator.setText("Page —");
+            requestStatus.setText(" ");
         }
 
-        private void fetchCurrent() {
+        private void fetchPage(int requestedPage, boolean reset) {
             OfficialRepository repository =
                     (OfficialRepository) product.getSelectedItem();
             FollowChannel selectedChannel = (FollowChannel) channel.getSelectedItem();
             if (repository == null || selectedChannel == null) return;
-            mode = ReleasePickerMode.CURRENT;
-            loadedRepository = null;
-            loadedChannel = null;
-            displayedPage = 0;
-            displayedMayHaveNext = false;
-            model.clear();
-            next.setEnabled(false);
-            install.setEnabled(false);
-            information.setText("Fetching only the authoritative "
-                    + displayProduct(repository.key()) + " " + selectedChannel + " target.");
-            startTask("Fetching channel release",
-                    () -> services.quickInstallOption(repository, selectedChannel), option -> {
-                        if (product.getSelectedItem() != repository
-                                || channel.getSelectedItem() != selectedChannel
-                                || option.key().repository() != repository
-                                || option.key().channel() != selectedChannel) {
-                            return;
-                        }
-                        ReleaseCatalog.Assessment assessment =
-                                services.assess(repository, option.release());
-                        model.clear();
-                        model.addElement(PickerReleaseChoice.current(option, assessment));
-                        loadedRepository = repository;
-                        loadedChannel = selectedChannel;
-                        releases.setSelectedIndex(0);
-                        information.setText("Authoritative current channel result. "
-                                + "It will be revalidated before consent and transfer.");
-                        pageLabel.setText("Exactly one " + selectedChannel
-                                + " channel release.");
-                        updateInstallEnabled();
-                    });
-        }
-
-        private void fetchHistory(int requestedPage, boolean explicitSwitch) {
-            OfficialRepository repository =
-                    (OfficialRepository) product.getSelectedItem();
-            if (repository == null) return;
-            if (explicitSwitch) {
+            if (!reset && (repository != loadedRepository
+                    || selectedChannel != loadedChannel || displayedPage < 1)) {
+                return;
+            }
+            if (reset) {
                 generation++;
-                mode = ReleasePickerMode.HISTORY;
                 loadedRepository = null;
                 loadedChannel = null;
                 displayedPage = 0;
                 displayedMayHaveNext = false;
                 model.clear();
+                pageIndicator.setText("Page —");
                 install.setEnabled(false);
             }
+            previous.setEnabled(false);
             next.setEnabled(false);
-            information.setText("Browsing GitHub history for "
-                    + displayProduct(repository.key())
-                    + ". Older releases are not labeled by channel.");
-            startTask("Fetching unclassified release history",
-                    () -> services.releases(repository, requestedPage), result -> {
+            startTask("Fetching releases",
+                    () -> services.installableReleases(
+                            repository, selectedChannel, requestedPage), result -> {
                         if (product.getSelectedItem() != repository
-                                || mode != ReleasePickerMode.HISTORY) return;
+                                || channel.getSelectedItem() != selectedChannel
+                                || result.repository() != repository
+                                || result.channel() != selectedChannel
+                                || result.page() != requestedPage) {
+                            return;
+                        }
                         model.clear();
-                        result.releases().forEach(release -> model.addElement(
-                                PickerReleaseChoice.history(repository, release,
-                                        services.assess(repository, release))));
+                        result.entries().forEach(entry -> model.addElement(
+                                PickerReleaseChoice.from(entry, selectedChannel)));
                         loadedRepository = repository;
-                        loadedChannel = null;
+                        loadedChannel = selectedChannel;
                         displayedPage = result.page();
                         displayedMayHaveNext = result.mayHaveNextPage();
-                        pageLabel.setText("Unclassified history page " + result.page()
-                                + (result.mayHaveNextPage()
-                                ? " · more may exist" : " · last page"));
+                        pageIndicator.setText("Page " + result.page());
+                        requestStatus.setText(" ");
+                        previous.setEnabled(result.page() > 1);
                         next.setEnabled(result.mayHaveNextPage());
                         updateInstallEnabled();
                     });
@@ -2713,14 +2721,9 @@ public final class LauncherFrame extends JFrame {
             boolean matching = choice != null && choice.assessment().eligible()
                     && repository != null && repository == loadedRepository
                     && selectedChannel != null && choice.repository() == repository
-                    && choice.mode() == mode
-                    && (mode == ReleasePickerMode.HISTORY
-                    || selectedChannel == loadedChannel
-                    && choice.channel() == selectedChannel);
+                    && selectedChannel == loadedChannel
+                    && choice.channel() == selectedChannel;
             install.setEnabled(matching && worker == null);
-            if (choice != null && !choice.assessment().eligible()) {
-                pageLabel.setText(choice.assessment().reason());
-            }
         }
 
         private void chooseDestination() {
@@ -2730,28 +2733,23 @@ public final class LauncherFrame extends JFrame {
             FollowChannel selectedChannel = (FollowChannel) channel.getSelectedItem();
             if (choice == null || repository == null || selectedChannel == null
                     || !choice.assessment().eligible() || choice.repository() != repository
-                    || choice.mode() != mode || repository != loadedRepository
-                    || mode == ReleasePickerMode.CURRENT
-                    && (selectedChannel != loadedChannel
-                    || choice.channel() != selectedChannel)) {
+                    || repository != loadedRepository || selectedChannel != loadedChannel
+                    || choice.channel() != selectedChannel) {
                 return;
             }
             Path destination = chooseNewInstallDestination(dialog, repository,
                     selectedChannel, choice.release().tag());
             if (destination == null || !dialog.isDisplayable()) return;
-            ReleasePickerMode capturedMode = mode;
             String tag = choice.release().tag();
             startTask("Revalidating exact install plan",
-                    () -> capturedMode == ReleasePickerMode.CURRENT
-                            ? services.prepareNormalInstall(repository, selectedChannel,
-                            destination, null)
-                            : services.prepareExactNormalInstall(repository, selectedChannel,
-                            tag, destination, null),
+                    () -> services.prepareExactNormalInstall(
+                            repository, selectedChannel, tag, destination),
                     plan -> {
                         if (!dialog.isDisplayable() || choice != releases.getSelectedValue()
-                                || capturedMode != mode
                                 || product.getSelectedItem() != repository
-                                || channel.getSelectedItem() != selectedChannel) {
+                                || channel.getSelectedItem() != selectedChannel
+                                || loadedRepository != repository
+                                || loadedChannel != selectedChannel) {
                             return;
                         }
                         dialog.dispose();
@@ -2769,7 +2767,10 @@ public final class LauncherFrame extends JFrame {
             }
             long request = ++generation;
             status.setText(description + "…");
-            pageLabel.setText(description + "…");
+            requestStatus.setText(description + "…");
+            if (description.equals("Fetching releases")) {
+                fetch.setText("Fetching…");
+            }
             setActionsEnabled(false);
             SwingWorker<T, Void> started = new SwingWorker<>() {
                 @Override
@@ -2782,25 +2783,27 @@ public final class LauncherFrame extends JFrame {
                     gate.leave();
                     if (worker == this) worker = null;
                     setActionsEnabled(true);
+                    fetch.setText("Fetch releases");
                     if (isCancelled() || !dialog.isDisplayable()
                             || request != generation) return;
                     try {
                         success.accept(get());
                     } catch (java.util.concurrent.ExecutionException error) {
-                        pageLabel.setText("Request failed; controls are available to retry.");
-                        next.setEnabled(mode == ReleasePickerMode.HISTORY
-                                && displayedPage > 0 && displayedMayHaveNext);
+                        requestStatus.setText("Request failed; controls are available to retry.");
+                        previous.setEnabled(displayedPage > 1);
+                        next.setEnabled(displayedPage > 0 && displayedMayHaveNext);
                         showError(description + " failed", error.getCause());
                     } catch (InterruptedException error) {
                         Thread.currentThread().interrupt();
-                        pageLabel.setText("Request interrupted; controls are available to retry.");
-                        next.setEnabled(mode == ReleasePickerMode.HISTORY
-                                && displayedPage > 0 && displayedMayHaveNext);
+                        requestStatus.setText(
+                                "Request interrupted; controls are available to retry.");
+                        previous.setEnabled(displayedPage > 1);
+                        next.setEnabled(displayedPage > 0 && displayedMayHaveNext);
                         showError(description + " interrupted", error);
                     } catch (RuntimeException error) {
-                        pageLabel.setText("Request failed; controls are available to retry.");
-                        next.setEnabled(mode == ReleasePickerMode.HISTORY
-                                && displayedPage > 0 && displayedMayHaveNext);
+                        requestStatus.setText("Request failed; controls are available to retry.");
+                        previous.setEnabled(displayedPage > 1);
+                        next.setEnabled(displayedPage > 0 && displayedMayHaveNext);
                         showError(description + " failed", error);
                     }
                     updateInstallEnabled();
@@ -2813,7 +2816,11 @@ public final class LauncherFrame extends JFrame {
                 worker = null;
                 gate.leave();
                 setActionsEnabled(true);
-                pageLabel.setText("Request could not start; controls are available to retry.");
+                fetch.setText("Fetch releases");
+                requestStatus.setText(
+                        "Request could not start; controls are available to retry.");
+                previous.setEnabled(displayedPage > 1);
+                next.setEnabled(displayedPage > 0 && displayedMayHaveNext);
                 showError(description + " failed", error);
             }
         }
@@ -2878,7 +2885,7 @@ public final class LauncherFrame extends JFrame {
         body.add(top, BorderLayout.NORTH);
         body.add(new JScrollPane(releases), BorderLayout.CENTER);
         body.add(bottom, BorderLayout.SOUTH);
-        JDialog dialog = dialog(applyWorkflow ? "Choose update" : "Preview update", body, null,
+        JDialog dialog = dialog("Choose update", body, null,
                 new Dimension(780, 460));
         Consumer<Integer> load = requested -> {
             next.setEnabled(false);
@@ -2970,7 +2977,6 @@ public final class LauncherFrame extends JFrame {
                 + "\nTarget: " + preview.targetRelease().tag()
                 + "\nFull package already downloaded and verified: "
                 + NumberFormat.getIntegerInstance().format(preview.targetAsset().size()) + " bytes"
-                + "\nSHA-256: " + preview.targetAsset().digest()
                 + "\nManaged changes: ADD "
                 + preview.counts().get(org.megamek.launcher.plan.Action.ADD)
                 + ", REPLACE " + preview.counts().get(org.megamek.launcher.plan.Action.REPLACE)
@@ -2984,7 +2990,7 @@ public final class LauncherFrame extends JFrame {
                 + "guarantee detection of older or externally started applications."
                 + "\n\nMetadata, source provenance, local files, and this exact retained package "
                 + "will be checked again. The package will NOT be downloaded a second time."
-                + "\n\nApply this exact size and digest to the installation named above?";
+                + "\n\nApply this exact verified package to the installation named above?";
         int answer = JOptionPane.showConfirmDialog(this, message, "Authorize update Apply",
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
         return answer == JOptionPane.OK_OPTION;
@@ -3149,59 +3155,19 @@ public final class LauncherFrame extends JFrame {
         dialog.setVisible(true);
     }
 
-    private void chooseInstallDestination(JDialog owner, OfficialRepository repository,
-                                          ReleaseChoice choice, FollowChannel channel) {
-        JFileChooser chooser = folders("Choose an existing writable parent folder");
-        if (chooser.showOpenDialog(owner) != JFileChooser.APPROVE_OPTION) return;
-        Path safeFolder = null;
-        String suggestion = choice.release().tag();
-        while (safeFolder == null) {
-            String folder = JOptionPane.showInputDialog(owner,
-                    "New subfolder name (it must not exist):", suggestion);
-            if (folder == null) return;
-            try {
-                safeFolder = safeSubfolder(folder);
-            } catch (IllegalArgumentException e) {
-                JOptionPane.showMessageDialog(owner, e.getMessage(), "Invalid subfolder name",
-                        JOptionPane.ERROR_MESSAGE);
-                suggestion = folder;
-            }
-        }
-        String name = JOptionPane.showInputDialog(owner, "Name for this installation:",
-                displayProduct(repository.key()) + " " + choice.release().tag());
-        if (name == null) return;
-        Path destination = chooser.getSelectedFile().toPath().resolve(safeFolder);
-        ReleaseCatalog.Asset asset = choice.assessment().asset();
-        int answer = JOptionPane.showConfirmDialog(owner,
-                "Release: " + choice.release().title() + " (" + choice.release().tag() + ")"
-                        + "\nDownload: " + NumberFormat.getIntegerInstance().format(asset.size())
-                        + " bytes\nDestination: " + destination
-                        + "\n\nInstall this version?",
-                "Confirm download", JOptionPane.OK_CANCEL_OPTION,
-                JOptionPane.WARNING_MESSAGE);
-        if (answer != JOptionPane.OK_OPTION) return;
-        owner.dispose();
-        install(repository, choice.release().tag(), destination, name, channel);
-    }
-
     private Path chooseNewInstallDestination(JDialog owner, OfficialRepository repository,
                                              FollowChannel channel, String tag) {
         JFileChooser chooser = folders("Choose an existing writable parent folder");
         if (chooser.showOpenDialog(owner) != JFileChooser.APPROVE_OPTION) return null;
-        String suggestion = displayProduct(repository.key()) + " "
-                + (tag == null ? channel : tag);
-        while (true) {
-            String folder = JOptionPane.showInputDialog(owner,
-                    "New subfolder name (it must not exist):", suggestion);
-            if (folder == null) return null;
-            try {
-                return chooser.getSelectedFile().toPath().resolve(safeSubfolder(folder));
-            } catch (IllegalArgumentException error) {
-                JOptionPane.showMessageDialog(owner, error.getMessage(),
-                        "Invalid subfolder name", JOptionPane.ERROR_MESSAGE);
-                suggestion = folder;
-            }
+        final String suggestion;
+        try {
+            suggestion = NormalInstallService.friendlyName(repository, channel, tag);
+        } catch (IOException invalid) {
+            showError("Preparing install location failed", invalid);
+            return null;
         }
+        Path folder = SubfolderDialog.show(owner, suggestion, guiScale);
+        return folder == null ? null : chooser.getSelectedFile().toPath().resolve(folder);
     }
 
     void install(OfficialRepository repository, String tag, Path destination, String name,
@@ -3340,7 +3306,7 @@ public final class LauncherFrame extends JFrame {
                 }
                 if (!isDisplayable()) return;
                 if (result.cancelled()) {
-                    progress.append("\nCANCELLED before installation finalization. "
+                    progress.append("\nCANCELLED before finalization. "
                             + "Any operation-owned temporary files were discarded.\n");
                     progress.showCancelled();
                     if (page == Page.HOME && state != null && state.preferred() == null) {
@@ -3705,18 +3671,9 @@ public final class LauncherFrame extends JFrame {
             JFileChooser chooser = folders("Choose an existing writable parent folder");
             if (chooser.showOpenDialog(parent) != JFileChooser.APPROVE_OPTION) return null;
             String proposedName =
-                    NormalInstallService.defaultFolderName(plan.repository(), plan.channel());
-            String value = JOptionPane.showInputDialog(parent,
-                    "New subfolder name (it must not exist):", proposedName);
-            if (value == null) return null;
-            final Path folder;
-            try {
-                folder = safeSubfolder(value);
-            } catch (IllegalArgumentException error) {
-                JOptionPane.showMessageDialog(parent, error.getMessage(),
-                        "Invalid folder name", JOptionPane.ERROR_MESSAGE);
-                return null;
-            }
+                    NormalInstallService.friendlyName(plan);
+            Path folder = SubfolderDialog.show(parent, proposedName, GuiScale.DEFAULT);
+            if (folder == null) return null;
             return chooser.getSelectedFile().toPath().resolve(folder);
         }
     }
@@ -3747,7 +3704,7 @@ public final class LauncherFrame extends JFrame {
         disposeFirstLaunchSplitButton();
         disposeHomeLaunchButtons();
         cancelFirstLaunchOptionsWorker();
-        cancelChannelWorker();
+        cancelCheckWorkers();
         OperationContext operation = activeOperation.get();
         if (operation != null && !operation.finalizationStarted()) {
             operation.requestCancellation();
@@ -3780,44 +3737,33 @@ public final class LauncherFrame extends JFrame {
         }
     }
 
-    private enum ReleasePickerMode {
-        NONE, CURRENT, HISTORY
-    }
-
-    private record PickerReleaseChoice(ReleasePickerMode mode,
-                                       OfficialRepository repository,
+    private record PickerReleaseChoice(OfficialRepository repository,
                                        FollowChannel channel,
+                                       SelectedChannelReleaseCatalog.Classification classification,
                                        ReleaseCatalog.Release release,
                                        ReleaseCatalog.Assessment assessment,
                                        String label) {
-        private static PickerReleaseChoice current(
-                QuickInstallOption option, ReleaseCatalog.Assessment assessment) {
-            return new PickerReleaseChoice(ReleasePickerMode.CURRENT,
-                    option.key().repository(), option.key().channel(), option.release(),
-                    assessment, VersionDisplay.programChannelVersion(
-                    displayProduct(option.key().repository().key()),
-                    option.key().channel().toString(), option.version()));
-        }
-
-        private static PickerReleaseChoice history(
-                OfficialRepository repository, ReleaseCatalog.Release release,
-                ReleaseCatalog.Assessment assessment) {
-            String tag = release.tag();
+        private static PickerReleaseChoice from(
+                SelectedChannelReleaseCatalog.Entry entry, FollowChannel channel) {
+            String tag = entry.release().tag();
             String version = tag != null && tag.length() > 1
                     && (tag.charAt(0) == 'v' || tag.charAt(0) == 'V')
                     ? tag.substring(1) : tag;
-            return new PickerReleaseChoice(ReleasePickerMode.HISTORY, repository, null,
-                    release, assessment, VersionDisplay.programChannelVersion(
-                    displayProduct(repository.key()), null, version)
-                    + " · channel unclassified");
+            return new PickerReleaseChoice(entry.identity().repository(), channel,
+                    entry.classification(), entry.release(), entry.assessment(),
+                    VersionDisplay.programChannelVersion(
+                            displayProduct(entry.identity().repository().key()),
+                            channel.toString(), version));
         }
 
         @Override
         public String toString() {
+            if (!assessment.eligible()) {
+                return label + " — Unavailable";
+            }
             ReleaseCatalog.Asset asset = assessment.asset();
-            String size = asset == null ? "no supported asset"
-                    : NumberFormat.getIntegerInstance().format(asset.size()) + " bytes";
-            return label + " — " + size + " — " + assessment.reason();
+            return label + " — "
+                    + NormalInstallConfirmationDialog.formatBinaryBytes(asset.size());
         }
     }
 
@@ -3831,6 +3777,10 @@ public final class LauncherFrame extends JFrame {
             this(result, error, result == null || result.preference() == null
                     ? null : result.preference().channel().toString());
         }
+    }
+
+    private record CheckOnOpenSave(ChannelPreferenceStore.ReadResult authoritative,
+                                   Throwable failure) {
     }
 
     private static final class ResponsiveHomeActions extends JPanel {

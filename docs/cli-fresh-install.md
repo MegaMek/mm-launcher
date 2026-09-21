@@ -8,7 +8,9 @@ installation; explicit receipt-backed updates use the separate
 
 ## 1. Build and choose local state
 
-Requires Java 21 or newer. Run the steps in the same PowerShell window and stop on any error.
+MM Launcher itself requires Java 21 or newer. That exact runtime is also the automatic game-launch
+fallback when no explicit default is saved. Package installation does not validate Java. Run the
+steps in the same PowerShell window and stop on any error.
 
 ```powershell
 Set-Location C:\repos\megamek\mm-launcher
@@ -56,7 +58,10 @@ registry was empty.
 `--channel milestone|development` is required. It becomes this new installation's immutable
 update track after the exact ownership receipt is published. The manually selected tag does not
 classify the release; it only supplies the new copy's initial bytes. To follow another channel,
-run `install-release` again with another nonexistent destination. Nightly is not yet supported.
+run `install-release` again with another nonexistent destination. Every successful managed CLI
+install initializes its per-installation check-on-open preference to true. There is no
+`--check-on-open` option or global/new-install default; supplying that removed option is an error.
+Nightly is not yet supported.
 
 ## 2a. Perform a metadata-only check
 
@@ -74,25 +79,22 @@ is never reported as current. If the installed verified package is newer than it
 target, no downgrade is offered. The former `channel-set` compatibility command rejects with
 `Channel is fixed; install another managed copy` and performs no write.
 
-## 3. Select external Java and preview
+## 3. Preview launch arguments
 
-Copy the `id=` from successful installation output. Choose a Java path printed by discovery (or
-another installed Java 21+ home/executable), then choose a program present in the package.
+Copy the `id=` from successful installation output, then choose a program present in the package.
+By default, preview validates and uses the exact runtime executing MM Launcher. To override it for
+all copies, use `java-discover` followed by
+`java-select --registry $registry --java <Java-home-or-executable>`.
 
 ```powershell
 $installationId = Read-Host "Installation UUID (without id=)"
 $installationId = ([guid]::Parse($installationId.Trim())).ToString()
-& $cli java-discover
-if ($LASTEXITCODE -ne 0) { throw "Java discovery failed." }
-$javaPath = Read-Host "Full path to the external Java home or java executable"
-& $cli java-select --registry $registry --id $installationId --java $javaPath
-if ($LASTEXITCODE -ne 0) { throw "Java selection failed." }
 $product = Read-Host "Program: megamek, mekhq, or lab"
 & $cli launch --registry $registry --id $installationId --product $product --dry-run true
 if ($LASTEXITCODE -ne 0) { throw "Launch preview failed." }
 ```
 
-**Nothing has started yet.** Check the root, program, and Java in the preview.
+**Nothing has started yet.** Check the root, program, and effective Java in the preview.
 
 ## 4. Launch explicitly
 

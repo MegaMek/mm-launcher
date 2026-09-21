@@ -112,7 +112,7 @@ class OnboardingTest {
 
         store.select(registry, second.id());
         assertEquals(second.id(), store.read(registry).defaultInstallationId());
-        store.remove(registry, second.id());
+        store.remove(registry, second);
         assertEquals(first.id(), store.read(registry).defaultInstallationId());
 
         byte[] valid = Files.readAllBytes(registry);
@@ -148,11 +148,13 @@ class OnboardingTest {
         InstallationRecord record = new InstallationRecord(
                 "12345678-1234-1234-1234-123456789012", "fixture",
                 inspection.canonicalRoot(), inspection.observedBuild(), inspection.products(),
-                java.toString(), null, false, "2026-01-01T00:00:00Z");
+                null, false, "2026-01-01T00:00:00Z");
         RecordingRunner runner = new RecordingRunner();
         ApplicationLauncher launcher = new ApplicationLauncher(runner);
+        JavaRuntime.CurrentJava gameJava =
+                new JavaRuntime(runner).validateExternal(java, root);
 
-        assertEquals(7, launcher.launch(record, "megamek"));
+        assertEquals(7, launcher.launch(record, "megamek", gameJava));
         assertEquals(2, runner.commands.size());
         assertEquals(List.of(java.toString(), "-version"), runner.commands.get(0));
         List<String> launched = runner.commands.get(1);
@@ -180,10 +182,12 @@ class OnboardingTest {
         InstallationRecord record = new InstallationRecord(
                 "12345678-1234-1234-1234-123456789012", "fixture",
                 inspection.canonicalRoot(), inspection.observedBuild(), inspection.products(),
-                java.toString(), null, false, "2026-01-01T00:00:00Z");
+                null, false, "2026-01-01T00:00:00Z");
         Map<String, Long> before = inventory(root);
 
-        int exit = new ApplicationLauncher().launch(record, "megamek");
+        JavaRuntime runtime = new JavaRuntime();
+        int exit = new ApplicationLauncher().launch(record, "megamek",
+                runtime.validateExternal(java, root));
 
         assertEquals(0, exit);
         assertEquals(before, inventory(root));

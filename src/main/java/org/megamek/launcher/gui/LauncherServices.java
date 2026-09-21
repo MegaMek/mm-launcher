@@ -7,6 +7,7 @@ import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.channel.OfficialYamlChannelCatalog;
 import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.channel.QuickInstallSnapshot;
+import org.megamek.launcher.channel.SelectedChannelReleaseCatalog;
 import org.megamek.launcher.diagnostics.OperationLogStore;
 import org.megamek.launcher.diagnostics.SanitizedErrors;
 import org.megamek.launcher.launch.ApplicationLauncher;
@@ -38,6 +39,7 @@ import org.megamek.launcher.update.PreparedAdoption;
 import org.megamek.launcher.update.PreparedUpdate;
 import org.megamek.launcher.update.PreparedUpdateService;
 import org.megamek.launcher.update.RealUpdateService;
+import org.megamek.launcher.update.UninstallService;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -68,6 +70,8 @@ public class LauncherServices {
     private final ExistingImportService existingImports;
     private final ImportedCopyAdoptionService adoptions;
     private final LauncherSettingsStore settings;
+    private final UninstallService uninstalls;
+    private final OpenLocationService locations;
 
     public LauncherServices(Path registry) {
         this(registry, new RegistryStore(), new InstallationInspector(),
@@ -110,17 +114,13 @@ public class LauncherServices {
         this.preparedUpdates = new PreparedUpdateService(transport, updateCoordinator);
         this.operationLogs = new OperationLogStore(this.registry);
         this.settings = new LauncherSettingsStore(this.registry);
-        this.normalInstalls = new NormalInstallService(this.registry, transport, javaRuntime,
-                () -> {
-                    LauncherSettingsStore.CheckConfiguration current =
-                            settings.readCheckConfiguration();
-                    return new NormalInstallService.CheckConfiguration(
-                            current.settings().checkNewInstallsOnOpen(), current.revision());
-                }, installLocations);
-        this.existingImports = new ExistingImportService(this.registry, store, inspector,
-                javaRuntime);
+        this.normalInstalls = new NormalInstallService(this.registry, transport,
+                installLocations);
+        this.existingImports = new ExistingImportService(this.registry, store, inspector);
         this.adoptions = new ImportedCopyAdoptionService(this.registry, transport,
                 updateCoordinator);
+        this.uninstalls = new UninstallService(this.registry, updateCoordinator);
+        this.locations = new OpenLocationService(this.registry);
     }
 
     public Path registry() {
@@ -130,21 +130,6 @@ public class LauncherServices {
     public QuickInstallSnapshot quickInstallSnapshot()
             throws IOException, InterruptedException {
         return new OfficialYamlChannelCatalog(transport).quickInstallSnapshot();
-    }
-
-    /**
-     * Resolves only the requested current product/channel target: one bounded website YAML read
-     * followed by one exact repository/tag lookup, with no historical release enumeration.
-     */
-    public QuickInstallOption quickInstallOption(OfficialRepository repository,
-                                                  FollowChannel channel)
-            throws IOException, InterruptedException {
-        if (repository == null || channel == null) {
-            throw new IOException("product and channel are required");
-        }
-        QuickInstallOption.Key key = new QuickInstallOption.Key(repository, channel);
-        return new QuickInstallOption(key,
-                new OfficialYamlChannelCatalog(transport).target(channel, repository));
     }
 
     public LoggedOperation beginOperation(OperationType type,
@@ -174,40 +159,34 @@ public class LauncherServices {
         return normalInstalls.defaultDestination(repository, channel);
     }
 
-    public NormalInstallService.Plan prepareNormalInstall(Path destination, Path selectedJava)
+    public NormalInstallService.Plan prepareNormalInstall(Path destination)
             throws IOException, InterruptedException {
-        return prepareNormalInstall(FollowChannel.MILESTONE, destination, selectedJava);
+        return prepareNormalInstall(FollowChannel.MILESTONE, destination);
     }
 
-    public NormalInstallService.Plan prepareNormalInstall(FollowChannel channel, Path destination,
-                                                          Path selectedJava)
+    public NormalInstallService.Plan prepareNormalInstall(FollowChannel channel, Path destination)
             throws IOException, InterruptedException {
-        return prepareNormalInstall(OfficialRepository.MEKHQ, channel, destination, selectedJava);
+        return prepareNormalInstall(OfficialRepository.MEKHQ, channel, destination);
     }
 
     public NormalInstallService.Plan prepareNormalInstall(OfficialRepository repository,
                                                           FollowChannel channel,
-                                                          Path destination, Path selectedJava)
+                                                          Path destination)
             throws IOException, InterruptedException {
-        Path selected = selectedJava == null ? configuredDefaultJava() : selectedJava;
-        return normalInstalls.prepare(repository, channel, destination, selected);
+        return normalInstalls.prepare(repository, channel, destination);
     }
 
     public NormalInstallService.Plan prepareCapturedNormalInstall(QuickInstallOption option,
-                                                                  Path destination,
-                                                                  Path selectedJava)
+                                                                  Path destination)
             throws IOException, InterruptedException {
-        Path selected = selectedJava == null ? configuredDefaultJava() : selectedJava;
-        return normalInstalls.prepareCapturedCurrent(option, destination, selected);
+        return normalInstalls.prepareCapturedCurrent(option, destination);
     }
 
     public NormalInstallService.Plan prepareExactNormalInstall(OfficialRepository repository,
                                                                FollowChannel futureChannel,
-                                                               String tag, Path destination,
-                                                               Path selectedJava)
+                                                               String tag, Path destination)
             throws IOException, InterruptedException {
-        Path selected = selectedJava == null ? configuredDefaultJava() : selectedJava;
-        return normalInstalls.prepareExact(repository, futureChannel, tag, destination, selected);
+        return normalInstalls.prepareExact(repository, futureChannel, tag, destination);
     }
 
     public NormalInstallService.Result installNormal(NormalInstallService.Plan plan,
@@ -217,52 +196,33 @@ public class LauncherServices {
         return normalInstalls.install(plan, progress, context);
     }
 
-    public LauncherSettingsStore.Settings settings() throws IOException {
-        return settings.read();
-    }
-
-    public LauncherSettingsStore.Settings setCheckNewInstallsOnOpen(boolean enabled)
-            throws IOException {
-        ensureRegistryParent();
-        return settings.write(enabled);
-    }
-
-    public LauncherSettingsStore.Settings setCheckInstalledVersionsOnOpen(boolean enabled)
-            throws IOException {
-        ensureRegistryParent();
-        return settings.writeAutomaticChecks(enabled);
-    }
-
     public SettingsView settingsView() throws IOException, InterruptedException {
         LauncherSettingsStore.Settings current = settings.read();
-        Path java;
-        int feature;
-        boolean persisted = current.defaultJavaExecutable() != null;
-        if (persisted) {
-            java = javaRuntime.resolve(current.defaultJavaExecutable());
-            feature = javaRuntime.validate(java, java.getParent());
-            if (feature != current.defaultJavaFeature()) {
-                throw new IOException("configured default Java version changed; choose it again");
-            }
-        } else {
-            java = javaRuntime.currentExecutable();
-            feature = javaRuntime.validate(java, java.getParent());
+        if (current.defaultJavaExecutable() == null) {
+            Path java = javaRuntime.currentExecutable();
+            int feature = javaRuntime.validate(java, java.getParent());
+            return new SettingsView(java, feature, false);
         }
-        return new SettingsView(current, java, feature, persisted);
+        Path java = javaRuntime.resolve(current.defaultJavaExecutable());
+        int feature = javaRuntime.validate(java, java.getParent());
+        if (feature != current.defaultJavaFeature()) {
+            throw new IOException("configured Game Java version changed; choose it again");
+        }
+        return new SettingsView(java, feature, true);
     }
 
-    public LauncherSettingsStore.Settings selectDefaultJava(Path selected)
+    public void selectDefaultJava(Path selected)
             throws IOException, InterruptedException {
         Path executable = javaRuntime.resolve(selected.toString());
+        RegistryData data = readRegistry();
+        for (InstallationRecord record : data.installations()) {
+            if (executable.startsWith(Path.of(record.canonicalRoot()))) {
+                throw new IOException("Game Java must be outside every installation folder");
+            }
+        }
         int feature = javaRuntime.validate(executable, executable.getParent());
         ensureRegistryParent();
-        return settings.writeDefaultJava(executable, feature);
-    }
-
-    private Path configuredDefaultJava() throws IOException {
-        LauncherSettingsStore.Settings current = settings.read();
-        return current.defaultJavaExecutable() == null
-                ? null : Path.of(current.defaultJavaExecutable());
+        settings.writeDefaultJava(executable, feature);
     }
 
     public String recordGuiError(String title, Throwable error) {
@@ -293,10 +253,13 @@ public class LauncherServices {
     }
 
     public HomeState loadHome() throws IOException {
+        if (Files.exists(registry, LinkOption.NOFOLLOW_LINKS)) {
+            uninstalls.recoverCommitted();
+        }
         RegistryData data = readRegistry();
         if (data.defaultInstallationId() == null) {
             return new HomeState(data, null, null, null, null, false, null,
-                    Map.of(), Map.of(), automaticChecksEnabled());
+                    Map.of(), Map.of());
         }
         HomeState legacy = loadInstallation(data, store.resolve(data, null));
         Map<String, InstallationRecord> preferredApplications = new LinkedHashMap<>();
@@ -310,8 +273,9 @@ public class LauncherServices {
             ChannelPreferenceStore.ReadResult channel = null;
             UpdatePreviewService.Eligibility eligibility = null;
             boolean pending = pending(record);
+            boolean pendingUninstall = uninstalls.hasPending(record.id());
             ImportedCopyAdoptionService.Availability adoption =
-                    adoptions.availability(data, record, pending);
+                    adoptions.availability(data, record, pending || pendingUninstall);
             try {
                 channel = new ChannelPreferenceStore().read(registry, data, record);
                 eligibility = new UpdatePreviewService(transport)
@@ -323,24 +287,16 @@ public class LauncherServices {
                     throw new IOException("registered build or application layout changed");
                 }
                 statuses.put(record.id(), new InstallationStatus(
-                        channel, eligibility, pending, null, adoption));
+                        channel, eligibility, pending, pendingUninstall, null, adoption));
             } catch (IOException | RuntimeException error) {
                 statuses.put(record.id(), new InstallationStatus(
-                        channel, eligibility, pending, detail(error), adoption));
+                        channel, eligibility, pending, pendingUninstall, detail(error), adoption));
             }
         }
         return new HomeState(data, legacy.preferred(), legacy.currentInspection(),
                 legacy.preferredError(), legacy.previewEligibility(), legacy.pendingUpdate(),
                 legacy.channelPreference(), Map.copyOf(preferredApplications),
-                Map.copyOf(statuses), automaticChecksEnabled());
-    }
-
-    private boolean automaticChecksEnabled() {
-        try {
-            return settings.read().checkInstalledVersionsOnOpen();
-        } catch (IOException error) {
-            return false; // Invalid settings never become an implicit permission to check.
-        }
+                Map.copyOf(statuses));
     }
 
     public HomeState loadInstallation(String id) throws IOException {
@@ -364,14 +320,15 @@ public class LauncherServices {
                         "The preferred copy no longer matches its registered build or program "
                                 + "layout. Use Manage installations to remove it, select another "
                                 + "copy, or recover an interrupted update.", eligibility, pending,
-                        channel);
+                        channel, Map.of(), Map.of());
             }
-            return new HomeState(data, record, current, null, eligibility, pending, channel);
+            return new HomeState(data, record, current, null, eligibility, pending, channel,
+                    Map.of(), Map.of());
         } catch (IOException | RuntimeException e) {
             return new HomeState(data, record, null,
                     "The preferred copy is unavailable: " + detail(e)
                             + ". Use recovery if an update was interrupted, or Manage "
-                            + "installations.", eligibility, pending, channel);
+                            + "installations.", eligibility, pending, channel, Map.of(), Map.of());
         }
     }
 
@@ -386,7 +343,7 @@ public class LauncherServices {
 
     public ExistingImportService.Plan prepareExistingImport(Path root, OperationContext context)
             throws IOException, InterruptedException {
-        return existingImports.prepare(root, configuredDefaultJava(), context);
+        return existingImports.prepare(root, context);
     }
 
     public ExistingImportService.Result importExisting(ExistingImportService.Plan plan,
@@ -430,33 +387,37 @@ public class LauncherServices {
         store.selectPreferred(registry, productKey, record);
     }
 
-    public void remove(InstallationRecord record) throws IOException {
-        store.remove(registry, record.id());
-    }
-
     public List<Path> javaCandidates() {
         return javaRuntime.candidates();
     }
 
-    public int selectJava(InstallationRecord record, Path selected)
-            throws IOException, InterruptedException {
-        Path executable = javaRuntime.resolve(selected.toString());
-        if (executable.startsWith(Path.of(record.canonicalRoot()))) {
-            throw new IOException("selected Java must be external to the application directory");
-        }
-        int feature = javaRuntime.validate(executable, Path.of(record.canonicalRoot()));
-        store.selectJava(registry, record.id(), executable.toString());
-        return feature;
-    }
-
     public List<String> preview(InstallationRecord record, String product)
             throws IOException, InterruptedException {
-        return applicationLauncher.command(requireCurrentLaunchRecord(record), product);
+        InstallationRecord current = requireCurrentLaunchRecord(record);
+        JavaRuntime.CurrentJava java = configuredGameJava(current);
+        return applicationLauncher.command(current, product, java);
     }
 
     public int launch(InstallationRecord record, String product)
             throws IOException, InterruptedException {
-        return applicationLauncher.launch(requireCurrentLaunchRecord(record), product);
+        InstallationRecord current = requireCurrentLaunchRecord(record);
+        JavaRuntime.CurrentJava java = configuredGameJava(current);
+        return applicationLauncher.launch(current, product, java);
+    }
+
+    private JavaRuntime.CurrentJava configuredGameJava(InstallationRecord record)
+            throws IOException, InterruptedException {
+        LauncherSettingsStore.Settings configured = settings.read();
+        if (configured.defaultJavaExecutable() == null) {
+            return javaRuntime.validateCurrentExternal(Path.of(record.canonicalRoot()));
+        }
+        Path selected = Path.of(configured.defaultJavaExecutable());
+        JavaRuntime.CurrentJava java = javaRuntime.validateExternal(
+                selected, Path.of(record.canonicalRoot()));
+        if (java.feature() != configured.defaultJavaFeature()) {
+            throw new IOException("Game Java changed. Open Settings and choose it again.");
+        }
+        return java;
     }
 
     private InstallationRecord requireCurrentLaunchRecord(InstallationRecord expected)
@@ -464,7 +425,7 @@ public class LauncherServices {
         RegistryData current = readRegistry();
         List<InstallationRecord> records = current.installations();
         if (records == null) {
-            throw new IOException("the launcher registry has no installation records");
+            throw new IOException("the launcher has no installations");
         }
         InstallationRecord registered = records.stream()
                 .filter(record -> record.id().equals(expected.id()))
@@ -473,14 +434,57 @@ public class LauncherServices {
                         "the selected installation is no longer registered"));
         if (!registered.equals(expected)) {
             throw new IOException(
-                    "the selected installation record changed; return Home and try again");
+                    "the selected installation changed; return Home and try again");
+        }
+        if (uninstalls.hasPending(registered.id())) {
+            throw new IOException("Uninstall recovery required");
         }
         return registered;
+    }
+
+    public void openLocation(InstallationRecord record) throws IOException {
+        locations.open(record);
+    }
+
+    public UninstallService.Result removeFromLauncher(InstallationRecord record)
+            throws IOException {
+        return uninstalls.removeFromLauncher(record);
+    }
+
+    public UninstallService.Plan planUninstall(InstallationRecord record,
+                                               OperationContext context)
+            throws IOException, InterruptedException,
+            org.megamek.launcher.manifest.ManifestException {
+        return uninstalls.plan(record, context);
+    }
+
+    public UninstallService.Result uninstall(UninstallService.Plan plan,
+                                             OperationContext context)
+            throws IOException, InterruptedException,
+            org.megamek.launcher.manifest.ManifestException {
+        return uninstalls.uninstall(plan, UninstallService.CONFIRMATION, context);
+    }
+
+    public UninstallService.RecoveryResult recoverUninstall(
+            InstallationRecord record, OperationContext context)
+            throws IOException, InterruptedException {
+        return uninstalls.recover(record, context);
     }
 
     public ReleaseCatalog.Page releases(OfficialRepository repository, int page)
             throws IOException, InterruptedException {
         return new ReleaseCatalog(transport).list(repository, page, 10);
+    }
+
+    /**
+     * Loads one install-browser page for exactly one product/channel snapshot. This performs one
+     * fixed YAML read, one history-page read, and only the selected exact lookup needed when the
+     * history page cannot supply an eligible canonical current target.
+     */
+    public SelectedChannelReleaseCatalog.Result installableReleases(
+            OfficialRepository repository, FollowChannel channel, int page)
+            throws IOException, InterruptedException {
+        return new SelectedChannelReleaseCatalog(transport).page(repository, channel, page, 10);
     }
 
     public ReleaseCatalog.Assessment assess(OfficialRepository repository,
@@ -492,8 +496,10 @@ public class LauncherServices {
                                           Path destination, String name, PrintStream progress)
             throws IOException, InterruptedException {
         ensureRegistryParent();
-        return new FreshInstaller(transport).install(repository, tag, destination, registry,
+        FreshInstaller.Result result = new FreshInstaller(transport).install(
+                repository, tag, destination, registry,
                 name, progress);
+        return result;
     }
 
     private FreshInstaller.Result install(OfficialRepository repository, String tag,
@@ -501,8 +507,10 @@ public class LauncherServices {
                                           OperationContext context)
             throws IOException, InterruptedException {
         ensureRegistryParent();
-        return new FreshInstaller(transport).install(repository, tag, destination, registry,
+        FreshInstaller.Result result = new FreshInstaller(transport).install(
+                repository, tag, destination, registry,
                 name, progress, context);
+        return result;
     }
 
     public FreshInstaller.Result install(OfficialRepository repository, String tag,
@@ -513,8 +521,7 @@ public class LauncherServices {
         FreshInstaller.Result result = install(repository, tag, destination, name, progress);
         try {
             new ChannelPreferenceStore().initializeManaged(registry, result.record(),
-                    result.ownershipReceipt(), channel,
-                    settings.read().checkNewInstallsOnOpen());
+                    result.ownershipReceipt(), channel, true);
         } catch (IOException error) {
             throw new IOException("installation is valid and REGISTERED at "
                     + result.destination() + " but FIXED CHANNEL PROVENANCE WAS NOT PERSISTED: "
@@ -533,8 +540,7 @@ public class LauncherServices {
                 repository, tag, destination, name, progress, context);
         try {
             new ChannelPreferenceStore().initializeManaged(registry, result.record(),
-                    result.ownershipReceipt(), channel,
-                    settings.read().checkNewInstallsOnOpen());
+                    result.ownershipReceipt(), channel, true);
         } catch (IOException error) {
             throw new IOException("installation is valid and REGISTERED at "
                     + result.destination() + " but FIXED CHANNEL PROVENANCE WAS NOT PERSISTED: "
@@ -576,7 +582,7 @@ public class LauncherServices {
 
     /** Local provenance/preference gate for automatic checks; imported copies remain launch-only. */
     public boolean canCheckOnOpen(InstallationRecord expected) throws IOException {
-        if (!settings.read().checkInstalledVersionsOnOpen()) return false;
+        requireNoPendingUninstall(expected);
         RegistryData data = readRegistry();
         InstallationRecord current = store.resolve(data, expected.id());
         if (!current.equals(expected)) return false;
@@ -591,6 +597,7 @@ public class LauncherServices {
 
     public ChannelUpdateChecker.Result checkUpdates(InstallationRecord expected)
             throws IOException, InterruptedException {
+        requireNoPendingUninstall(expected);
         ChannelUpdateChecker.Result result =
                 new ChannelUpdateChecker(registry, transport).check(expected.id());
         if (!result.record().equals(expected)) {
@@ -604,6 +611,7 @@ public class LauncherServices {
             ChannelUpdateChecker.Result expected, PrintStream progress)
             throws IOException, InterruptedException,
             org.megamek.launcher.manifest.ManifestException {
+        requireNoPendingUninstall(record);
         ChannelUpdateChecker.Recommendation recommendation =
                 requireCurrentRecommendation(record, expected);
         return new UpdatePreviewService(transport).preview(registry, record, receipt,
@@ -615,6 +623,7 @@ public class LauncherServices {
                                                        PrintStream progress)
             throws IOException, InterruptedException,
             org.megamek.launcher.manifest.ManifestException {
+        requireNoPendingUninstall(record);
         return new UpdatePreviewService(transport).preview(registry, record.id(), tag, progress);
     }
 
@@ -623,6 +632,7 @@ public class LauncherServices {
                                                        PrintStream progress)
             throws IOException, InterruptedException,
             org.megamek.launcher.manifest.ManifestException {
+        requireNoPendingUninstall(record);
         return new UpdatePreviewService(transport).preview(
                 registry, record, receipt, tag, progress);
     }
@@ -633,6 +643,7 @@ public class LauncherServices {
                                                        OperationContext context)
             throws IOException, InterruptedException,
             org.megamek.launcher.manifest.ManifestException {
+        requireNoPendingUninstall(record);
         return new UpdatePreviewService(transport).preview(
                 registry, record, receipt, tag, progress, context);
     }
@@ -643,6 +654,7 @@ public class LauncherServices {
                                         PrintStream progress)
             throws IOException, InterruptedException,
             org.megamek.launcher.manifest.ManifestException {
+        requireNoPendingUninstall(record);
         return preparedUpdates.prepare(registry, record, receipt, current, tag, assetName, size,
                 digest, progress);
     }
@@ -653,6 +665,7 @@ public class LauncherServices {
                                         PrintStream progress, OperationContext context)
             throws IOException, InterruptedException,
             org.megamek.launcher.manifest.ManifestException {
+        requireNoPendingUninstall(record);
         return preparedUpdates.prepare(registry, record, receipt, current, tag, assetName, size,
                 digest, progress, context);
     }
@@ -662,6 +675,7 @@ public class LauncherServices {
             ChannelUpdateChecker.Result expected, PrintStream progress)
             throws IOException, InterruptedException,
             org.megamek.launcher.manifest.ManifestException {
+        requireNoPendingUninstall(record);
         return preparedUpdates.prepareRecommended(
                 registry, record, receipt, current, expected, progress);
     }
@@ -671,6 +685,7 @@ public class LauncherServices {
             ChannelUpdateChecker.Result expected, PrintStream progress, OperationContext context)
             throws IOException, InterruptedException,
             org.megamek.launcher.manifest.ManifestException {
+        requireNoPendingUninstall(record);
         return preparedUpdates.prepareRecommended(
                 registry, record, receipt, current, expected, progress, context);
     }
@@ -772,6 +787,12 @@ public class LauncherServices {
         }
     }
 
+    private void requireNoPendingUninstall(InstallationRecord record) throws IOException {
+        if (record == null || uninstalls.hasPending(record.id())) {
+            throw new IOException("Uninstall recovery required");
+        }
+    }
+
     private void ensureRegistryParent() throws IOException {
         Path parent = registry.getParent();
         if (parent == null) throw new IOException("registry has no parent directory: " + registry);
@@ -820,20 +841,19 @@ public class LauncherServices {
                             boolean pendingUpdate,
                             ChannelPreferenceStore.ReadResult channelPreference,
                             Map<String, InstallationRecord> preferredApplications,
-                            Map<String, InstallationStatus> installationStatuses,
-                            boolean automaticChecksEnabled) {
+                            Map<String, InstallationStatus> installationStatuses) {
         public HomeState(RegistryData registry, InstallationRecord preferred,
                          Inspection currentInspection, String preferredError,
                          UpdatePreviewService.Eligibility previewEligibility,
                          boolean pendingUpdate) {
             this(registry, preferred, currentInspection, preferredError, previewEligibility,
-                    pendingUpdate, null, Map.of(), Map.of(), true);
+                    pendingUpdate, null, Map.of(), Map.of());
         }
 
         public HomeState(RegistryData registry, InstallationRecord preferred,
                          Inspection currentInspection, String preferredError) {
             this(registry, preferred, currentInspection, preferredError, null, false, null,
-                    Map.of(), Map.of(), true);
+                    Map.of(), Map.of());
         }
 
         public HomeState(RegistryData registry, InstallationRecord preferred,
@@ -842,24 +862,31 @@ public class LauncherServices {
                          boolean pendingUpdate,
                          ChannelPreferenceStore.ReadResult channelPreference) {
             this(registry, preferred, currentInspection, preferredError, previewEligibility,
-                    pendingUpdate, channelPreference, Map.of(), Map.of(), true);
+                    pendingUpdate, channelPreference, Map.of(), Map.of());
         }
     }
 
     public record InstallationStatus(ChannelPreferenceStore.ReadResult channelPreference,
                                      UpdatePreviewService.Eligibility previewEligibility,
-                                     boolean pendingUpdate, String error,
+                                     boolean pendingUpdate, boolean pendingUninstall, String error,
                                      ImportedCopyAdoptionService.Availability adoption) {
         public InstallationStatus(ChannelPreferenceStore.ReadResult channelPreference,
                                   UpdatePreviewService.Eligibility previewEligibility,
                                   boolean pendingUpdate, String error) {
-            this(channelPreference, previewEligibility, pendingUpdate, error,
+            this(channelPreference, previewEligibility, pendingUpdate, false, error,
                     ImportedCopyAdoptionService.Availability.INCOMPLETE);
+        }
+
+        public InstallationStatus(ChannelPreferenceStore.ReadResult channelPreference,
+                                  UpdatePreviewService.Eligibility previewEligibility,
+                                  boolean pendingUpdate, String error,
+                                  ImportedCopyAdoptionService.Availability adoption) {
+            this(channelPreference, previewEligibility, pendingUpdate, false, error, adoption);
         }
     }
 
-    public record SettingsView(LauncherSettingsStore.Settings settings, Path defaultJava,
-                               int defaultJavaFeature, boolean defaultJavaPersisted) {
+    public record SettingsView(Path defaultJava, Integer defaultJavaFeature,
+                               boolean persisted) {
     }
 
     public static final class LoggedOperation {

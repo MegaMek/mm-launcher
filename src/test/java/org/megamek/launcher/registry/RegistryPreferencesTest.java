@@ -24,7 +24,7 @@ class RegistryPreferencesTest {
     @TempDir Path temp;
 
     @Test
-    void schemaOneMainMigratesOnlyProductsItContainsWithoutWriting() throws Exception {
+    void oldSchemaIsRejectedWithoutWriting() throws Exception {
         InstallationRecord suite = record(temp.resolve("suite"), "Suite",
                 product("megamek"), product("lab"));
         Path registry = temp.resolve("registry.json");
@@ -34,14 +34,27 @@ class RegistryPreferencesTest {
                 "installations", List.of(suite))));
         byte[] before = Files.readAllBytes(registry);
 
-        RegistryData migrated = new RegistryStore().read(registry);
-
-        assertEquals(RegistryStore.SCHEMA, migrated.schemaVersion());
-        assertEquals(Map.of("megamek", suite.id(), "lab", suite.id()),
-                migrated.preferredInstallationIds());
-        assertFalse(migrated.preferredInstallationIds().containsKey("mekhq"));
+        assertThrows(IOException.class, () -> new RegistryStore().read(registry));
         assertArrayEquals(before, Files.readAllBytes(registry),
-                "side-effect-free migration does not silently rewrite the registry");
+                "old pre-release schemas are rejected without rewriting");
+    }
+
+    @Test
+    void currentSchemaHasNoJavaAndRejectsOldRecordShape() throws Exception {
+        InstallationRecord record = record(temp.resolve("clean"), "Clean",
+                product("megamek"));
+        Path clean = write(new RegistryData(RegistryStore.SCHEMA, record.id(),
+                Map.of("megamek", record.id()), List.of(record)));
+        String json = Files.readString(clean);
+        assertFalse(json.contains("javaExecutable"));
+
+        Path oldShape = temp.resolve("old-java-shape.json");
+        String malformed = json.replace("\"pin\"",
+                "\"javaExecutable\" : \"C:\\\\Java\\\\bin\\\\java.exe\", \"pin\"");
+        Files.writeString(oldShape, malformed);
+        byte[] before = Files.readAllBytes(oldShape);
+        assertThrows(IOException.class, () -> new RegistryStore().read(oldShape));
+        assertArrayEquals(before, Files.readAllBytes(oldShape));
     }
 
     @Test
@@ -94,12 +107,28 @@ class RegistryPreferencesTest {
                 Map.of("megamek", first.id(), "lab", first.id(), "mekhq", second.id()),
                 List.of(first, second)));
 
-        new RegistryStore().remove(registry, first.id());
+        new RegistryStore().remove(registry, first);
 
         RegistryData remaining = new RegistryStore().read(registry);
         assertEquals(List.of(second), remaining.installations());
         assertEquals(Map.of("mekhq", second.id()), remaining.preferredInstallationIds());
         assertEquals(second.id(), remaining.defaultInstallationId());
+    }
+
+    @Test
+    void removalChoosesDeterministicCompatiblePreferenceFallback() throws Exception {
+        InstallationRecord first = record(temp.resolve("first"), "First",
+                product("megamek"));
+        InstallationRecord second = record(temp.resolve("second"), "Second",
+                product("megamek"));
+        Path registry = write(new RegistryData(RegistryStore.SCHEMA, first.id(),
+                Map.of("megamek", first.id()), List.of(first, second)));
+
+        new RegistryStore().remove(registry, first);
+
+        RegistryData remaining = new RegistryStore().read(registry);
+        assertEquals(second.id(), remaining.defaultInstallationId());
+        assertEquals(second.id(), remaining.preferredInstallationIds().get("megamek"));
     }
 
     @Test
@@ -147,7 +176,7 @@ class RegistryPreferencesTest {
     private static InstallationRecord record(Path root, String name, Product... products) {
         return new InstallationRecord(UUID.randomUUID().toString(), name,
                 root.toAbsolutePath().normalize().toString(), "0.51.0",
-                List.of(products), "C:\\Java\\bin\\java.exe", null, false,
+                List.of(products), null, false,
                 "2026-09-18T00:00:00Z");
     }
 

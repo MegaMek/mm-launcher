@@ -48,6 +48,10 @@ There is no automatic release selection, background update, bundled JRE, arbitra
 custom URL, downgrade/upgrade version interpretation, elevation, process termination, or
 self-update.
 
+A pending uninstall journal blocks preview and Apply. See
+[Safe uninstall contract](uninstall-contract.md) for current-provenance deletion planning,
+same-filesystem backups, the registration commit barrier, and crash recovery.
+
 The shared operation context uses typed metadata/download/verify/extract/plan/await-consent/
 prepare-install/Apply/recover/cleanup/final phases; control flow never parses presentation text.
 Prepared GUI cancellation remains available while refreshing metadata, re-hashing the retained
@@ -141,8 +145,8 @@ allowlisted operations and recorded for conservative empty-only rollback cleanup
 
 Commit order is installed runtime validation, atomic current-provenance publication, locked atomic
 registry build/product refresh, committed journal, then exact owned cleanup. Registry refresh
-compares the selected identity/layout and preserves default selection, UUID, name, root, external
-Java, pin, registration time, and every unrelated record. A concurrent unrelated Java/name/default
+compares the selected identity/layout and preserves default selection, UUID, name, root, pin,
+registration time, and every unrelated record. A concurrent unrelated launcher Java/name/default
 change is retained; a removed/rebound or unexpectedly relaid-out selected record fails.
 
 `recover-update --registry <json> [--id <uuid>]

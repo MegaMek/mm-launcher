@@ -425,7 +425,8 @@ public final class ImportedCopyAdoptionService {
         try {
             receipt = receipts.write(registry, data, record, prepared.repository(),
                     prepared.release().tag(), prepared.asset().name(),
-                    prepared.asset().size(), prepared.asset().digest(), ownership);
+                    prepared.asset().size(),
+                    prepared.workspace().resolvedDigest().canonical(), ownership);
             receiptPublished = true;
             failureHook.hit("AFTER_RECEIPT");
 
@@ -438,8 +439,7 @@ public final class ImportedCopyAdoptionService {
                     record.registeredAt(), prepared.repository().key(),
                     prepared.release().tag(), prepared.asset().name(),
                     prepared.asset().size(),
-                    prepared.asset().digest().substring("sha256:".length())
-                            .toLowerCase(Locale.ROOT),
+                    prepared.workspace().resolvedDigest().hex(),
                     ownership.manifest(), ownership.excludedPaths(), overrides, List.of(),
                     attemptId);
             states.write(registry, record, receipt, current);

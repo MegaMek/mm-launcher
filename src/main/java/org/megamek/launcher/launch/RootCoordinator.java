@@ -69,6 +69,30 @@ public final class RootCoordinator {
 
     public Lease acquire(Path root, boolean closeAllAcknowledged) throws IOException {
         Path canonical = StrictPathSafety.requireDirectory(root, "coordinated application root");
+        return acquireCanonical(canonical, closeAllAcknowledged);
+    }
+
+    /**
+     * Recovery-only gate for a transaction which may have removed an empty root. The exact
+     * canonical path is derived from its real parent; the directory is not created here.
+     */
+    public Lease acquireForRecovery(Path root, boolean closeAllAcknowledged) throws IOException {
+        Path absolute = root.toAbsolutePath().normalize();
+        if (Files.exists(absolute, LinkOption.NOFOLLOW_LINKS)) {
+            return acquireCanonical(StrictPathSafety.requireDirectory(
+                    absolute, "coordinated recovery root"), closeAllAcknowledged);
+        }
+        Path parent = StrictPathSafety.requireDirectory(absolute.getParent(),
+                "coordinated application parent");
+        Path canonical = parent.resolve(absolute.getFileName());
+        if (!canonical.equals(absolute)) {
+            throw new IOException("recovery root is not canonical");
+        }
+        return acquireCanonical(canonical, closeAllAcknowledged);
+    }
+
+    private Lease acquireCanonical(Path canonical, boolean closeAllAcknowledged)
+            throws IOException {
         if (!persistent) return new Lease(canonical, null, null, null, false);
         ensureDirectory();
         String key = hash(canonical.toString());

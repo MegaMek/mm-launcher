@@ -63,7 +63,6 @@ class ChannelPreferenceStoreTest {
                 store.read(registry, after, first).preference().channel());
         assertEquals(FollowChannel.DEVELOPMENT,
                 store.read(registry, after, second).preference().channel());
-        assertEquals("C:\\Java\\bin\\java.exe", after.installations().getFirst().javaExecutable());
         assertEquals("keep-pin", after.installations().getFirst().pin());
         assertEquals(first.id(), after.defaultInstallationId());
         assertArrayEquals(registryBefore, Files.readAllBytes(registry));
@@ -236,6 +235,6 @@ class ChannelPreferenceStoreTest {
                 "0.51.0", List.of());
         return new InstallationRecord(UUID.randomUUID().toString(), name,
                 root.toAbsolutePath().normalize().toString(), "0.51.0", List.of(product),
-                java, pin, false, "2026-09-16T01:02:03Z");
+                pin, false, "2026-09-16T01:02:03Z");
     }
 }

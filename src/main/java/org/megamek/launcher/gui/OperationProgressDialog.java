@@ -412,6 +412,9 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
                     ? "Checking the selected installation…"
                     : type == OperationType.ADOPT_EXISTING
                     ? "Checking the imported copy…"
+                    : type == OperationType.UNINSTALL
+                    || type == OperationType.UNINSTALL_RECOVERY
+                    ? "Checking uninstall recovery state…"
                     : "Checking release information…";
             case DOWNLOAD -> "Downloading the verified package…";
             case VERIFY -> type == OperationType.IMPORT_EXISTING
@@ -426,6 +429,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
                     ? "Registering the selected installation…"
                     : "Preparing the installation…";
             case APPLY -> "Applying the verified update…";
+            case UNINSTALL -> "Removing verified official files…";
             case RECOVER -> "Repairing the interrupted update…";
             case CLEANUP -> "Cleaning up temporary files…";
             case FINAL -> "Completing the operation…";
@@ -444,6 +448,8 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
             case UPDATE_PREVIEW -> "preview";
             case UPDATE_APPLY -> "update";
             case RECOVERY -> "recovery";
+            case UNINSTALL -> "uninstall";
+            case UNINSTALL_RECOVERY -> "uninstall recovery";
             case GUI_ERROR -> "operation";
         };
         return "Finishing " + operation + " — do not close the launcher.";

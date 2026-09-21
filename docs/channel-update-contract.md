@@ -24,7 +24,7 @@ boolean. It fails closed for missing/corrupt/stale state. Imported and pre-launc
 neither ownership receipt nor fixed channel, remain launch-only, and cannot gain update
 eligibility through a channel setting alone. The separate explicit adoption transaction must
 first reconstruct and verify one exact official ancestor; it is not a channel mutation API.
-Registry application preferences, Java, pin, compatibility default, receipt, current provenance,
+Registry application preferences, launcher-wide Game Java, pin, compatibility default, receipt, current provenance,
 and installed bytes are unchanged by the check toggle. Apply/recovery preserve the fixed channel.
 
 ## Fixed official source
@@ -80,16 +80,17 @@ Apply refreshes the channel/preference/target metadata and re-verifies/re-extrac
 archive; it never silently downloads a second package or retargets. The advanced exact-release path
 remains available without changing the fixed channel.
 
-For a new installation, **Fetch channel release** resolves only the current authoritative target
-for the selected product/channel: one fixed YAML read plus one exact repository/tag lookup, with no
-history enumeration or package transfer. **Browse all releases…** is a separate explicit GitHub
-history mode. Those historical rows are unclassified because title and `prerelease` are mutable
-and do not record later promotion (including the known 0.51.0 promotion case). The selected Channel in history mode becomes only the created installation's fixed update
-channel; it is not evidence that the selected historical release belonged to that channel. Both
-paths re-enter the normal planner
-for exact metadata, Java, destination, registry, Settings, asset, and digest validation before
-consent and revalidate again before package transfer. See `../ci.md` for the immutable channel
-history target state.
+For a new installation, one **Fetch releases** action reads both fixed YAML pointers and one
+bounded GitHub history page for the selected product. It includes the selected current identity
+and unknown history, excludes a distinct identity known only as the other current channel target,
+and includes a shared stable/dev identity for either selection. Title and `prerelease` remain
+mutable and do not record later promotion (including the known 0.51.0 promotion case), so most
+history is intentionally unknown and appears under both channel selections. The selected Channel
+becomes only the created installation's fixed update channel; it is not evidence that an unknown
+release belonged to that channel. Every chosen row re-enters the normal planner through its exact
+repository/tag for metadata, destination, registry, asset URL/name/size/digest validation before
+consent and again before package transfer. See `../ci.md` for the immutable channel history target
+state.
 
 Channel metadata checks remain outside the package-operation gate and retain their existing
 startup/manual behavior. A package download started from a recommendation uses the shared typed
@@ -112,28 +113,26 @@ Opening the styled menu while versions are loading or available starts no reques
 channel, Main selection, or setting. Closing and reopening after unavailable rows have been
 viewed is the explicit snapshot retry and still changes no installation state. The deferred
 current-or-history picker remains on Installations after a copy exists or in relevant problem
-navigation. Normal and exact new GUI installs use one launcher Settings check-on-open default: it is true while
-initially absent, and a user's explicit false is preserved for later new copies. The normal quote
-binds its exact repository/product set/channel/source version, Settings revision,
-registry/default snapshot, and On or Off state without displaying a passive update row or
-technical pane. A changed, corrupt, or unavailable settings configuration blocks transfer and
-publication until a fresh quote is accepted. This is not a migration: every existing explicit
-false remains false, and valid existing channels are preserved without a read-time rewrite.
+navigation. Normal, exact historical, CLI, and successfully adopted managed installations always
+initialize their per-installation check-on-open value to true. There is no configurable global or
+new-install default. The normal quote binds its exact repository/product set/channel/source
+version and registry/default snapshot without carrying a check preference or Settings revision.
+This is a pre-release schema break, not a migration: every existing valid channel preference is
+read as written, while old launcher Settings schemas are rejected rather than migrated.
 Absent/corrupt/unknown legacy channels remain Unknown or Unavailable and launch-only with no
 inference or assignment path. The CLI fresh installer requires a channel and initializes its
-check-on-open value to false.
+check-on-open value to true.
 
 Eligible opt-in checks run serially and independently off the event-dispatch thread, do not disable
-healthy launch or page navigation, are cancelled on disposal/mutation, and discard results after
+healthy launch or page navigation, are cancelled on disposal or full state reload, and discard results after
 Main, record, fixed-track setting, or package changes. Off, unknown, corrupt, and launch-only copies are not
 reported as checked. Manual Installations checks may inspect the selected copy regardless of its
 on-open switch. There is no automatic Apply, automatic downgrade, launcher self-update, Nightly
 support, component download, game launch, or website/game CI change in this contract.
 
-Automatic checks additionally require the launcher-wide
-`checkInstalledVersionsOnOpen` master setting. Its absent/schema-1 migration value is enabled to
-preserve prior startup behavior. Turning it off gates all startup checks but does not rewrite the
-per-installation `checkOnOpen` value or channel; therefore explicit Off remains Off after either
-master transition. Manual per-card Check/Retry remains available for eligible managed records.
+The per-installation `ChannelPreference.checkOnOpen` boolean is the sole automatic-check
+authority. There is no launcher-wide gate. The card checkbox saves only that boolean immediately;
+it never changes channel/binding/receipt and never cancels a check already running. Manual
+per-card Check/Retry remains available for eligible managed records.
 Home aggregates physical-installation results and cannot call unchecked, unavailable,
 non-comparable, or imported launch-only records current. There is no bulk update.

@@ -9,6 +9,7 @@ public enum OperationPhase {
     AWAIT_CONSENT("Awaiting confirmation"),
     PREPARE_INSTALL("Preparing installation"),
     APPLY("Applying update"),
+    UNINSTALL("Removing official files"),
     RECOVER("Recovering update"),
     CLEANUP("Cleaning temporary files"),
     FINAL("Finished");

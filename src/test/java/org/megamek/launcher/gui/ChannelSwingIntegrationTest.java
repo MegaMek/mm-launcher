@@ -16,6 +16,7 @@ import org.megamek.launcher.update.OwnershipReceipt;
 import org.megamek.launcher.update.UpdatePreviewService;
 
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
@@ -60,17 +61,20 @@ class ChannelSwingIntegrationTest {
             assertTrue(provenance.getText().startsWith("Channel: Milestone"));
             assertNull(onEdt(() -> find(frame, "chooseChannelButton")));
             assertNull(onEdt(() -> find(frame, "channelChoiceCombo")));
-            JButton checks = waitFor(() -> find(frame, "updateChecksButton"));
+            JCheckBox checks = waitFor(() -> (JCheckBox) findNamed(
+                    frame, "checkOnOpenCheckbox-" + services.record.id()));
+            assertFalse(checks.isSelected());
             SwingUtilities.invokeLater(checks::doClick);
-            JDialog choice = waitForDialog("Update checks");
-            assertNull(findNamed(choice, "fixedChannelLabel"));
-            assertNull(findCombo(choice, "channelChoiceCombo"));
-            click(choice, "Save");
             waitUntil(() -> services.saved.get() == 1);
+            assertTrue(onEdt(checks::isSelected));
             assertEquals(0, services.checks.get(),
                     "saving a local check preference must not fetch metadata");
             assertEquals(FollowChannel.MILESTONE,
                     services.preference.preference().channel());
+            assertNull(onEdt(() -> find(frame, "updateChecksButton")));
+            assertNull(onEdt(() -> find(frame, "saveUpdateChecksButton")));
+            assertNull(onEdt(() -> find(frame, "cancelUpdateChecksButton")));
+            assertNull(onEdt(() -> find(frame, "updateChecksDialog")));
 
             JButton check = waitFor(() -> {
                 JButton button = find(frame, "checkUpdatesButton");
@@ -142,6 +146,63 @@ class ChannelSwingIntegrationTest {
             SwingUtilities.invokeAndWait(frame::dispose);
         }
     }
+
+        @Test
+        void failedImmediatePreferenceSaveReloadsAuthoritativeValueWithoutCheckingNetwork()
+                throws Exception {
+            Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                    "actual Swing channel integration requires a display");
+            FakeServices services = new FakeServices(temp.resolve("save-failure.json"));
+            services.saveFailure = new IOException("fixture preference write failed");
+            LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+            try {
+                SwingUtilities.invokeAndWait(frame::showWindow);
+                JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
+                SwingUtilities.invokeAndWait(installations::doClick);
+                JCheckBox checkbox = waitFor(() -> (JCheckBox) findNamed(
+                        frame, "checkOnOpenCheckbox-" + services.record.id()));
+                assertFalse(checkbox.isSelected());
+
+                SwingUtilities.invokeLater(checkbox::doClick);
+                JDialog error = waitForDialog("Update check setting was not saved");
+                JCheckBox restored = waitFor(() -> (JCheckBox) findNamed(
+                        frame, "checkOnOpenCheckbox-" + services.record.id()));
+                assertFalse(restored.isSelected());
+                assertTrue(restored.isEnabled());
+                assertEquals(0, services.checks.get());
+                SwingUtilities.invokeAndWait(error::dispose);
+            } finally {
+                services.release.countDown();
+                SwingUtilities.invokeAndWait(frame::dispose);
+            }
+        }
+
+            @Test
+            void manualCheckRemainsAvailableWhenAutomaticCheckIsOff() throws Exception {
+                Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                        "actual Swing channel integration requires a display");
+                FakeServices services = new FakeServices(temp.resolve("manual-off.json"));
+                LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+                try {
+                    SwingUtilities.invokeAndWait(frame::showWindow);
+                    Thread.sleep(100);
+                    assertEquals(0, services.checks.get());
+                    JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
+                    SwingUtilities.invokeAndWait(installations::doClick);
+                    JCheckBox checkbox = waitFor(() -> (JCheckBox) findNamed(
+                            frame, "checkOnOpenCheckbox-" + services.record.id()));
+                    assertFalse(checkbox.isSelected());
+                    JButton check = waitFor(() -> find(frame, "checkUpdatesButton"));
+
+                    SwingUtilities.invokeLater(check::doClick);
+                    assertTrue(services.started.await(5, TimeUnit.SECONDS));
+                    assertEquals(1, services.checks.get());
+                    services.release.countDown();
+                } finally {
+                    services.release.countDown();
+                    SwingUtilities.invokeAndWait(frame::dispose);
+                }
+            }
 
     @Test
     void failedAutomaticCheckShowsCouldNotCheckAndExplicitRetry() throws Exception {
@@ -283,6 +344,7 @@ class ChannelSwingIntegrationTest {
         private final CountDownLatch started = new CountDownLatch(1);
         private final CountDownLatch release = new CountDownLatch(1);
         private volatile IOException checkFailure;
+        private volatile IOException saveFailure;
 
         FakeServices(Path registry) {
             this(registry, false);
@@ -294,7 +356,7 @@ class ChannelSwingIntegrationTest {
                     "0.51.0", List.of());
             record = new InstallationRecord("00000000-0000-0000-0000-000000000001",
                     "Channel fixture", registry.getParent().resolve("copy").toString(),
-                    "0.51.0", List.of(product), "C:\\Java\\java.exe", "keep", false,
+                    "0.51.0", List.of(product), "keep", false,
                     "2026-09-16T00:00:00Z");
             inspection = new Inspection(record.canonicalRoot(), record.products(),
                     record.observedBuild(), "fixture");
@@ -321,8 +383,9 @@ class ChannelSwingIntegrationTest {
         @Override
         public ChannelPreference setCheckOnOpen(InstallationRecord expected,
                                                 ChannelPreference expectedPreference,
-                                                boolean checkOnOpen) {
+                                                boolean checkOnOpen) throws IOException {
             assertEquals(preference.preference(), expectedPreference);
+            if (saveFailure != null) throw saveFailure;
             ChannelPreference selected = new ChannelPreference(1, expected.id(),
                     expected.canonicalRoot(), expected.registeredAt(),
                     expectedPreference.channel(), checkOnOpen);
@@ -335,6 +398,13 @@ class ChannelSwingIntegrationTest {
         @Override
         public ChannelPreferenceStore.ReadResult channelPreference(InstallationRecord expected) {
             return preference;
+        }
+
+        @Override
+        public boolean canCheckOnOpen(InstallationRecord expected) {
+            return record.equals(expected)
+                    && preference.status() == ChannelPreferenceStore.Status.CONFIGURED
+                    && preference.preference().checkOnOpen();
         }
 
         @Override

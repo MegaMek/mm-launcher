@@ -199,7 +199,10 @@ class FirstLaunchPanelTest {
             assertEquals(buttonBounds.y, existingBounds.y);
             assertEquals(buttonBounds.width, existingBounds.width);
             assertNull(findComponent(panel, "homeTitle"));
-            assertFalse(status.isVisible());
+            assertTrue(status.isVisible());
+            assertEquals("", status.getText());
+            assertEquals(SwingConstants.CENTER, status.getHorizontalAlignment());
+            assertEquals(Component.CENTER_ALIGNMENT, status.getAlignmentX());
             List<String> labels = new ArrayList<>();
             collectLabels(panel, labels);
             for (String removed : List.of("review", "all three", "stay where", "approval",
@@ -341,10 +344,7 @@ class FirstLaunchPanelTest {
             });
             assertTrue(java.util.Arrays.equals(before, Files.readAllBytes(registry)));
             JLabel status = (JLabel) onEdt(() -> findComponent(frame, "homeStatusLabel"));
-            assertNotNull(status);
-            assertEquals(FirstLaunchPanel.MUTED, status.getForeground());
-            assertEquals(SwingConstants.CENTER, status.getHorizontalAlignment());
-            assertEquals(Component.CENTER_ALIGNMENT, status.getAlignmentX());
+            assertNull(status, "managed Home uses the single homeInformationMessage instead");
         } finally {
             onEdt(() -> {
                 for (var window : frame.getOwnedWindows()) window.dispose();
@@ -388,6 +388,12 @@ class FirstLaunchPanelTest {
             assertFalse(onEdt(() -> find(frame, "downloadOptionsButton").isEnabled()));
             assertFalse(onEdt(() -> find(frame, "downloadOptionsButton").isFocusable()));
             assertTrue(onEdt(() -> find(frame, "useExistingCopyButton").isEnabled()));
+            JLabel status = (JLabel) onEdt(() ->
+                    findComponent(frame, "homeStatusLabel"));
+            assertEquals("", onEdt(status::getText));
+            assertTrue(onEdt(status::isVisible));
+            Rectangle actionsBefore = onEdt(() ->
+                    findComponent(frame, "firstLaunchActions").getBounds());
             onEdt(() -> {
                 find(frame, "downloadOptionsButton").doClick();
                 return null;
@@ -408,6 +414,11 @@ class FirstLaunchPanelTest {
             assertTrue(onEdt(() -> find(frame, "downloadOptionsButton").isEnabled()));
             assertEquals("Install latest MekHQ Development (9.10.0)", onEdt(() ->
                     ((JMenuItem) split.popupMenu().getComponent(2)).getText()));
+            assertEquals("", onEdt(status::getText));
+            assertTrue(onEdt(status::isVisible));
+            assertEquals(actionsBefore, onEdt(() ->
+                    findComponent(frame, "firstLaunchActions").getBounds()),
+                    "metadata completion must not move the action row");
             onEdt(() -> {
                 split.closePopup();
                 return null;

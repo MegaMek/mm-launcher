@@ -80,7 +80,7 @@ class JavaRuntimeTest {
     }
 
     @Test
-    void currentJavaInsideImportedRootFailsBeforeAnyRegistryRecord() throws Exception {
+    void importIgnoresCurrentJavaInsideImportedRoot() throws Exception {
         Path root = suite("contained-runtime");
         Path java = Files.createDirectories(root.resolve("bin")).resolve("java");
         Files.writeString(java, "fixture");
@@ -88,36 +88,35 @@ class JavaRuntimeTest {
         JavaRuntime runtime = new JavaRuntime(runner, root::toString, () -> "Linux");
         Path registry = temp.resolve("registry.json");
         ExistingImportService service = new ExistingImportService(registry, new RegistryStore(),
-                new InstallationInspector(), runtime);
+                new InstallationInspector());
 
-        IOException error = assertThrows(IOException.class, () -> service.prepare(root,
-                OperationContext.none(OperationType.IMPORT_EXISTING)));
+        ExistingImportService.Plan plan = service.prepare(root,
+                OperationContext.none(OperationType.IMPORT_EXISTING));
+        service.register(plan, "Contained runtime copy",
+                OperationContext.none(OperationType.IMPORT_EXISTING));
 
-        assertTrue(error.getMessage().contains("inside the application folder"));
-        assertFalse(Files.exists(registry));
+        assertEquals(1, new RegistryStore().read(registry).installations().size());
         assertTrue(runner.commands.isEmpty(),
-                "contained Java is rejected before executing even java -version");
+                "import does not resolve or execute Java");
     }
 
     @Test
-    void changedCurrentJavaAfterQuoteFailsBeforeRegistration() throws Exception {
+    void changedCurrentJavaAfterInspectionDoesNotAffectRegistration() throws Exception {
         Path root = suite("changed-runtime-copy");
         Path home = runtimeHome("changed-runtime-home", "java");
         RecordingRunner runner = new RecordingRunner();
         JavaRuntime runtime = new JavaRuntime(runner, home::toString, () -> "Linux");
         Path registry = temp.resolve("changed-runtime-registry.json");
         ExistingImportService service = new ExistingImportService(registry, new RegistryStore(),
-                new InstallationInspector(), runtime);
+                new InstallationInspector());
         OperationContext context = OperationContext.none(OperationType.IMPORT_EXISTING);
         ExistingImportService.Plan plan = service.prepare(root, context);
         Files.writeString(home.resolve("bin/java"), "changed and longer");
 
-        IOException error = assertThrows(IOException.class,
-                () -> service.register(plan, "Changed runtime", context));
+        service.register(plan, "Changed runtime", context);
 
-        assertTrue(error.getMessage().contains("selected default game Java changed"));
-        assertFalse(Files.exists(registry));
-        assertEquals(2, runner.commands.size());
+        assertEquals(1, new RegistryStore().read(registry).installations().size());
+        assertTrue(runner.commands.isEmpty());
     }
 
     private Path runtimeHome(String name, String executable) throws IOException {

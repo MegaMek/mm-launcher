@@ -422,7 +422,7 @@ class RealUpdateServiceTest {
         PreparedUpdate sourcePrepared = sourceService.prepare(source.registry, sourceRecord,
                 sourceReceipt, CurrentUpdateState.initial(sourceReceipt), "v2",
                 "MegaMek-v2.tar.gz", targetArchive.length, digest, quiet());
-        sourceStore.selectJava(source.registry, source.id, fakeJava("source-drift-java").toString());
+        sourceStore.remove(source.registry, sourceRecord);
         IOException staleSource = assertThrows(IOException.class, () -> sourceService.apply(
                 sourcePrepared, RealUpdateService.CONFIRM, quiet()));
         assertTrue(staleSource.getMessage().contains("source")
@@ -644,8 +644,6 @@ class RealUpdateServiceTest {
         RealUpdateService.ApplyResult first = apply(fixture, "v2", v2, point -> {});
         assertEquals("2.0.0", first.record().observedBuild());
         assertEquals("v2", first.state().tag());
-        assertEquals(null, first.record().javaExecutable(),
-                "an update must not invent a Java selection");
         assertTrue(first.skippedDecisions() >= 4);
         for (Action action : Action.values()) {
             assertTrue(first.decisions().stream().anyMatch(item -> item.action() == action),
@@ -674,8 +672,6 @@ class RealUpdateServiceTest {
                 "data/icons/unit.png", bytes("case-v3")));
         RealUpdateService.ApplyResult second = apply(fixture, "v3", v3, point -> {});
         assertEquals("v3", second.state().tag());
-        assertEquals(null, second.record().javaExecutable(),
-                "a repeated update must not invent a Java selection");
         assertEquals("official-3", Files.readString(root.resolve("data/modified.txt")));
         assertEquals("user-obsolete", Files.readString(root.resolve("data/obsolete.txt")));
         assertEquals("user-collision", Files.readString(root.resolve("data/collision.txt")));
@@ -694,23 +690,23 @@ class RealUpdateServiceTest {
                 "data/icons/unit.png", bytes("case-v4")));
         RealUpdateService.ApplyResult third = apply(fixture, "v4", v4, point -> {});
         assertEquals("v4", third.state().tag());
-        assertEquals(null, third.record().javaExecutable());
         RegistryStore registryStore = new RegistryStore();
         InstallationRecord beforeJavaSelection = registryStore.resolve(
                 registryStore.read(fixture.registry), fixture.id);
         assertEquals("4.0.0", beforeJavaSelection.observedBuild());
-        assertEquals(null, beforeJavaSelection.javaExecutable());
         assertEquals("user-collision", Files.readString(root.resolve("data/collision.txt")));
         assertEquals("case-old", Files.readString(root.resolve("data/Icons/unit.png")));
 
         Path java = Path.of(System.getProperty("java.home"), "bin",
                 System.getProperty("os.name").toLowerCase(Locale.ROOT).contains("win")
                         ? "java.exe" : "java");
-        registryStore.selectJava(fixture.registry, fixture.id, java.toString());
         var launchRecord = registryStore.resolve(registryStore.read(fixture.registry), fixture.id);
         ProcessRunner benign = (command, workingDirectory, timeout, inheritIo) ->
                 new ProcessRunner.Result(0, "openjdk version \"21.0.1\"", false);
-        List<String> launch = new ApplicationLauncher(benign).command(launchRecord, "megamek");
+        JavaRuntime.CurrentJava gameJava =
+                new JavaRuntime(benign).validateExternal(java, fixture.root);
+        List<String> launch = new ApplicationLauncher(benign)
+                .command(launchRecord, "megamek", gameJava);
         assertTrue(launch.contains("megamek.MegaMek"));
         assertEquals("4.0.0", launchRecord.observedBuild());
 
@@ -726,7 +722,7 @@ class RealUpdateServiceTest {
     }
 
     @Test
-    void selectedJavaAndRegistryPreferencesSurviveRepeatedUpdatesAndFreshLoadLaunch()
+    void globalJavaAndRegistryPreferencesSurviveRepeatedUpdatesAndFreshLoadLaunch()
             throws Exception {
         Fixture fixture = installWithPin("java-retention", "v1",
                 packageFiles(1, Map.of("lib/runtime.txt", bytes("runtime-1"))),
@@ -737,15 +733,13 @@ class RealUpdateServiceTest {
         LauncherServices selectingServices = launcherServices(fixture.registry, benign);
         InstallationRecord installed = store.resolve(store.read(fixture.registry), fixture.id);
         Path java = fakeJava("selected-jdk");
-        assertEquals(21, selectingServices.selectJava(installed, java));
+        selectingServices.selectDefaultJava(java);
 
         Path unrelatedRoot = fixture.registry.getParent().resolve("unrelated-copy");
         materialize(unrelatedRoot, packageFiles(9, Map.of(
                 "lib/runtime.txt", bytes("unrelated-runtime"))));
         InstallationRecord unrelated = store.register(
                 fixture.registry, "Unrelated copy", unrelatedRoot, "keep-unrelated-pin");
-        Path unrelatedJava = fakeJava("unrelated-jdk");
-        store.selectJava(fixture.registry, unrelated.id(), unrelatedJava.toString());
 
         RegistryData beforeData = store.read(fixture.registry);
         InstallationRecord before = store.resolve(beforeData, fixture.id);
@@ -754,7 +748,6 @@ class RealUpdateServiceTest {
         var fixedChannel = channels.read(
                 fixture.registry, beforeData, before).preference();
         channels.setCheckOnOpen(fixture.registry, before, fixedChannel, true);
-        assertEquals(java.toRealPath().toString(), before.javaExecutable());
         assertEquals("keep-main-pin", before.pin());
         assertEquals("keep-unrelated-pin", unrelatedBefore.pin());
 
@@ -785,17 +778,16 @@ class RealUpdateServiceTest {
         LauncherServices reloadedServices = launcherServices(fixture.registry, benign);
         LauncherServices.HomeState home = reloadedServices.loadHome();
         assertEquals(null, home.preferredError());
-        assertEquals(before.javaExecutable(), home.preferred().javaExecutable());
         assertIdentityAndPreferences(before, home.preferred());
         List<String> command = reloadedServices.preview(home.preferred(), "megamek");
-        assertEquals(before.javaExecutable(), command.getFirst());
+        assertEquals(java.toRealPath().toString(), command.getFirst());
         assertTrue(command.contains("megamek.MegaMek"));
         assertEquals(0, reloadedServices.launch(home.preferred(), "megamek"),
                 "benign launch must not require selecting Java again");
     }
 
     @Test
-    void registryRefreshUsesLatestJavaSelectedDuringUpdateInsteadOfSnapshotValue()
+    void registryRefreshDoesNotContainPerInstallationJava()
             throws Exception {
         for (String changePoint : List.of("BEFORE_APP_MUTATION", "AFTER_STATE_COMMIT")) {
             Fixture fixture = install("java-race-" + changePoint.toLowerCase(Locale.ROOT),
@@ -803,11 +795,6 @@ class RealUpdateServiceTest {
                             "lib/runtime.txt", bytes("runtime-1"),
                             "docs/change.txt", bytes("old"))));
             RegistryStore store = new RegistryStore();
-            Path oldJava = fakeJava("old-jdk-" + changePoint.toLowerCase(Locale.ROOT));
-            Path latestJava = fakeJava("latest-jdk-" + changePoint.toLowerCase(Locale.ROOT));
-            if (changePoint.equals("BEFORE_APP_MUTATION")) {
-                store.selectJava(fixture.registry, fixture.id, oldJava.toString());
-            }
 
             byte[] archive = archive("MegaMek-v2", packageFiles(2, Map.of(
                     "lib/runtime.txt", bytes("runtime-2"),
@@ -815,22 +802,17 @@ class RealUpdateServiceTest {
             AtomicBoolean changed = new AtomicBoolean();
             RealUpdateService service = service(transport("v2", archive), point -> {
                 if (point.equals(changePoint)) {
-                    store.selectJava(fixture.registry, fixture.id, latestJava.toString());
                     changed.set(true);
                 }
             });
             RealUpdateService.Snapshot snapshot = service.snapshot(fixture.registry, fixture.id);
-            assertEquals(changePoint.equals("BEFORE_APP_MUTATION")
-                            ? oldJava.toString() : null,
-                    snapshot.record().javaExecutable());
 
             RealUpdateService.ApplyResult result = service.apply(snapshot, "v2", archive.length,
                     "sha256:" + sha(archive), RealUpdateService.CONFIRM, quiet());
 
             assertTrue(changed.get());
-            assertEquals(latestJava.toString(), result.record().javaExecutable());
-            assertEquals(latestJava.toString(), store.resolve(
-                    store.read(fixture.registry), fixture.id).javaExecutable());
+            assertFalse(new com.fasterxml.jackson.databind.ObjectMapper()
+                    .valueToTree(result.record()).has("javaExecutable"));
         }
     }
 
@@ -992,7 +974,6 @@ class RealUpdateServiceTest {
                     "docs/change.txt", bytes("new"))));
             RegistryStore store = new RegistryStore();
             Path java = fakeJava("recovery-jdk-" + failurePoint.toLowerCase(Locale.ROOT));
-            store.selectJava(fixture.registry, fixture.id, java.toString());
             InstallationRecord before = store.resolve(store.read(fixture.registry), fixture.id);
             RealUpdateService failing = service(transport("v2", archive), point -> {
                 if (point.equals(failurePoint)) throw new IOException("simulated crash " + point);
@@ -1006,7 +987,6 @@ class RealUpdateServiceTest {
             RealUpdateService.RecoveryResult first = recovery.recover(fixture.registry, fixture.id,
                     RealUpdateService.CONFIRM);
             InstallationRecord recovered = store.resolve(store.read(fixture.registry), fixture.id);
-            assertEquals(java.toString(), first.record().javaExecutable());
             assertIdentityAndPreferences(before, recovered);
             if (failurePoint.equals("BEFORE_APP_MUTATION")) {
                 assertTrue(first.outcome().contains("rolled back"));
@@ -1281,7 +1261,6 @@ class RealUpdateServiceTest {
         assertEquals(expected.id(), actual.id());
         assertEquals(expected.name(), actual.name());
         assertEquals(expected.canonicalRoot(), actual.canonicalRoot());
-        assertEquals(expected.javaExecutable(), actual.javaExecutable());
         assertEquals(expected.pin(), actual.pin());
         assertEquals(expected.updateEligible(), actual.updateEligible());
         assertEquals(expected.registeredAt(), actual.registeredAt());

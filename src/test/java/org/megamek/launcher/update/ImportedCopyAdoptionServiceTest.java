@@ -80,8 +80,10 @@ class ImportedCopyAdoptionServiceTest {
         assertEquals("v1.2.3", receipt.tag());
         assertEquals("v1.2.3", current.tag());
         assertTrue(current.overrides().isEmpty());
-        assertEquals(FollowChannel.MILESTONE, new ChannelPreferenceStore()
-                .read(fixture.registry(), data, record).preference().channel());
+        var preference = new ChannelPreferenceStore()
+                .read(fixture.registry(), data, record).preference();
+        assertEquals(FollowChannel.MILESTONE, preference.channel());
+        assertTrue(preference.checkOnOpen());
         assertTrue(new UpdatePreviewService(transport)
                 .eligibility(fixture.registry(), record.id()).available());
         assertEquals(ImportedCopyAdoptionService.Availability.MANAGED,

@@ -1,10 +1,10 @@
-# Existing-copy launch-only contract (registry schema 2)
+# Existing-copy launch-only contract (registry schema 3)
 
 The persistent registry is an explicitly supplied JSON file outside all application roots. It is
 not `.mm-launcher` sandbox state, an ownership manifest, or an update authorization. Every
 installation record has a random stable UUID, unique name, canonical root, exact observed build
-(or `unknown`), detected products and classpaths, optional user pin text, optional explicitly
-validated external Java executable, registration timestamp, and literal
+(or `unknown`), detected products and classpaths, optional user pin text, registration timestamp,
+and literal
 `"updateEligible": false`.
 
 Unknown/missing JSON fields, duplicate keys, wrong schema, malformed IDs, duplicate names or IDs,
@@ -15,16 +15,15 @@ or non-file lock path is an error. The first record is the deterministic initial
 `select` changes a surviving default. Removing the default chooses the first surviving registered
 record, or null when empty.
 
-Schema 2 retains that legacy default for CLI/API compatibility and adds strict independent
-preferred-installation UUIDs for `megamek`, `mekhq`, and `lab`. Schema 1 is migrated in memory by
-initializing only applications actually contained by its default record; the read itself never
-writes. A missing/stale UUID has a deterministic first-matching-record runtime fallback without
+Schema 3 contains strict independent preferred-installation UUIDs for `megamek`, `mekhq`, and
+`lab`. Older pre-release schemas and records with obsolete Java fields are rejected without
+migration. A missing/stale UUID has a deterministic first-matching-record runtime fallback without
 repairing the stored value. New registration fills only unset included applications. Removal
 clears only preferences that pointed to the removed UUID. Unknown/malformed preference keys or
 values fail closed.
 
 Registration requires `REGISTER-LAUNCH-ONLY`. Removal requires `REMOVE-LAUNCH-ONLY`. Both modify
-registry metadata only. Inspection, default selection, removal, and Java selection do not modify
+launcher metadata only. Inspection, default selection, and removal do not modify
 application content. Registration rejects application roots containing `.mm-launcher`; therefore
 an existing sandbox or its pending/unsafe transaction cannot be treated as launch-only to bypass
 the updater gate.
@@ -44,14 +43,10 @@ The expected root directories are `data`, `mmconf`, and `lib`; directory names a
 source trees are not detection evidence. Conflicting version evidence fails rather than inventing
 a release identity.
 
-The optional Java candidate list used by a **Change Java** action contains only the launcher's
-`java.home` and `JAVA_HOME`. Existing-copy import uses the validated launcher-level default game
-Java when configured, otherwise the exact runtime which started MM Launcher from `java.home`,
-using `java.exe` on Windows and `java` elsewhere. The absent fallback is not silently persisted.
-It rejects links/reparse points, missing/nonregular executables, and Java
-canonically contained by the selected application root, then directly executes only
-`<current-java> -version` without a shell, with bounded output and timeout. Java 21 or newer is a
-registration prerequisite; failure leaves no null-Java imported record.
+The Game Java candidate list contains only the launcher's `java.home` and `JAVA_HOME`.
+Existing-copy import does not read settings or resolve, execute, or validate Java. Its immutable
+plan contains only static inspection evidence, and registration remains valid when Java settings
+are absent, corrupt, or changed. Java is launch-time state, never per-copy registration state.
 
 Before preview or launch, the launcher re-inspects the canonical root and requires the observed
 build and selected product metadata to equal the registered evidence. It then constructs a fixed
@@ -60,21 +55,22 @@ Java and layout but does not start the game. Actual launch is the only applicati
 is foreground/waiting; direct process-start errors and the child's exit code are returned.
 
 The GUI's visible first-launch and Installations import actions use one flow. The folder chooser is
-the only pre-operation prompt. One styled progress window performs static inspection, default-game-
-Java validation, and direct registration; there is no separate name, confirmation, or completion
+the only pre-operation prompt. One styled progress window performs static inspection and direct
+registration; there is no separate name, confirmation, or completion
 dialog. The record name is derived from detected product and version without inferring a channel.
-Immediately before one atomic registry mutation, Java is revalidated; under the registry lock
-RegistryStore re-inspects the root, compares the captured canonical inspection, rechecks validated
-Java file identity and external placement, and applies duplicate/overlap rules. It never holds that
+Immediately before one atomic registry mutation, RegistryStore re-inspects the root, compares the
+captured canonical inspection, and applies
+duplicate/overlap rules. It never holds that
 lock while executing a process. First registration supplies the compatibility default only if
 locked current state has none and initializes only unset preferences for its included applications.
 Existing or concurrently added preferences win, and all existing record fields are retained.
 Imported records have no ownership receipt, channel sidecar, or provenance and remain launch-only;
 Home includes their detected programs in the application union. Installations labels each one
-**Imported copy · Launch only · Updates unavailable** and exposes launch/preference, Java,
-location, removal, and a separate **Enable managed updates…** control, but no check, Preview,
+**Imported copy · Launch only · Updates unavailable** and exposes launch/preference,
+**Open location**, **Remove from launcher…**, and a separate **Enable managed updates…** control, but no check, Preview,
 Update, or Recover action. Import itself never prompts for a channel and never starts adoption or
-a download.
+a download. Successful exact-copy adoption creates the fixed-channel sidecar with check-on-open
+enabled, after which the direct per-card checkbox is the sole automatic-check setting.
 
 An official package folder copied without its launcher registry, ownership receipt, and
 fixed-channel sidecar may still identify its build during static inspection, but that identity
@@ -110,7 +106,8 @@ $installationId = Read-Host "Paste its UUID from id= above (without id=)"
 $installationId = ([guid]::Parse($installationId.Trim())).ToString()
 ```
 
-Then use the README's common external-Java selection, preview, and explicit launch steps.
+Then use the README's explicit launch steps. The exact Java runtime executing MM Launcher is used
+automatically unless an explicit launcher-wide default is later selected.
 Inspection may report
 `confidence=recognized-packaging-optional-transitive-missing`; that is normal for supported suite
 packages which relocate a shared JAR. Registration neither modifies nor launches the application.

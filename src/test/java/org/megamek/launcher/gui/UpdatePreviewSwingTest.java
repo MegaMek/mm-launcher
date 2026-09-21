@@ -66,6 +66,10 @@ class UpdatePreviewSwingTest {
                     "an imported copy must not offer channel/check configuration");
             assertNull(findMenuItem(menu, "Preview update"),
                     "an imported copy must not offer an unsupported preview action");
+            assertNull(findMenuItem(menu, "Change Java"));
+            assertNotNull(findMenuItem(menu, "Open location"));
+            assertNotNull(findMenuItem(menu, "Remove from launcher…"));
+            assertNull(findMenuItem(menu, "Uninstall…"));
             assertTrue(fixture.network.requests.isEmpty(), "home rendering must not use network");
         } finally {
             dispose(frame);
@@ -73,7 +77,7 @@ class UpdatePreviewSwingTest {
     }
 
     @Test
-    void validReceiptRemainsPreviewAvailableWhenLocalJarIsDamagedAndLaunchIsDisabled()
+    void validReceiptStillHasNoStandalonePreviewActionWhenLaunchIsDisabled()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
@@ -90,8 +94,9 @@ class UpdatePreviewSwingTest {
         SwingUtilities.invokeAndWait(installations::doClick);
         JPopupMenu menu = openInstallationMenu(frame, fixture.record.id());
         JMenuItem preview = findMenuItem(menu, "Preview update");
-        assertNotNull(preview);
-        assertTrue(preview.isEnabled());
+        assertNull(preview);
+        assertNotNull(findMenuItem(menu, "Open location"));
+        assertNotNull(findMenuItem(menu, "Remove from launcher…"));
             assertTrue(fixture.network.requests.isEmpty(), "startup must not check releases");
         } finally {
             dispose(frame);

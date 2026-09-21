@@ -22,6 +22,9 @@ The validated MekHQ Milestone version is added directly to the primary label, fo
 truthfully, disabled, and removed from keyboard focus; **Use existing installation** remains
 enabled and independent. Failure never invents a version or leaves the primary actionable. It
 enables only the arrow needed to expose a clear **Retry version check** menu command.
+The disabled button already communicates loading, so Home does not repeat a `Checking…` message.
+Its fixed-height message row remains reserved even when empty, preventing metadata completion or
+later failure text from moving the action controls.
 
 One display-only worker reads the bounded official YAML and resolves eligible assets for all six
 choices, deduplicating exact release metadata when stable and development point to the same
@@ -43,13 +46,15 @@ one joined split control for every application in the union of registered static
 The primary segment uses the same **Program Channel (Version)** order as first launch, for example
 **Launch MekHQ Milestone (0.51.0)**. Controls share equal widths and wrap/stack on compact widths.
 
-Each application resolves independently from schema-2 preference state. The arrow lists every
+Each application resolves independently from schema-3 preference state. The arrow lists every
 other record containing that product in deterministic registry order as **name · version** plus
 already-held status. Opening it performs no filesystem/network work. Selecting a row passes that
 exact captured record/product to launch without changing any preference/default/channel; stale
 data is explicitly rejected instead of falling back at click time. The arrow is absent and
-unfocusable without alternates. Missing Java, root/layout mismatch, and pending recovery disable
-the affected primary and route to its installation card.
+unfocusable without alternates. An absent saved Java default is healthy and does not disable Home;
+the launch worker validates either the explicit default or the exact runtime executing MM
+Launcher. Root/layout mismatch and pending recovery disable the affected primary and route to its
+installation card.
 
 Primary and alternate actions launch immediately without a command/runtime confirmation. After
 BusyGate admission, the frame iconifies on the EDT before the child can start and remains alive to
@@ -69,8 +74,7 @@ A regular, non-primary **Use existing installation** button is visibly next, cap
 **MegaMek, MekHQ, or MegaMekLab**. It opens only a user-directed folder chooser. The first page has
 no Java prerequisite/download copy or control and no separate advanced action. Installations keeps
 the product/exact-release/channel picker after a copy exists and on relevant repair/recovery
-navigation; that picker still performs no request until **Fetch channel release** or
-**Browse all releases…**. Local logs remain in
+navigation; that picker still performs no request until **Fetch releases**. Local logs remain in
 Settings, and there is no simple/advanced mode toggle. Merely displaying empty Home starts only
 the six-choice metadata snapshot; it performs no package request, registration, Java validation,
 channel choice, or filesystem write. It disables only the two install segments while loading,
@@ -78,8 +82,8 @@ never the direct import action. Disposing the frame cancels and discards an in-f
 Re-rendering or leaving Home retains an in-flight or successful session snapshot without binding
 a stale component.
 
-After the folder chooser, import uses one styled operation window for static inspection,
-default-game-Java validation, and atomic launch-only registration. There is no separate name,
+After the folder chooser, import uses one styled operation window for static inspection and atomic
+launch-only registration. It neither reads Java settings nor runs a Java process. There is no separate name,
 confirmation, or completion dialog. A name is derived from the detected product and version
 without inventing a channel. Import initializes preferences only for included applications that
 remain unset under the registry lock. Home then uses the union across all records. Imported copies
@@ -92,25 +96,27 @@ Milestone or Development channel.
 
 Selecting the main segment passes the cached `(MEKHQ, MILESTONE)` option to the normal planner.
 Selecting an available row passes that exact cached `QuickInstallOption`; neither action performs
-a current-channel/YAML lookup. The planner still freshly captures destination, configured Java,
-registry/default state, and revisioned Settings off the EDT. A local planning failure/retry keeps
+a current-channel/YAML lookup. The planner still freshly captures destination and registry/default state off the EDT. A local
+planning failure/retry keeps
 the cached target. The planner, confirmation, verified transfer, cancellation, atomic registration, current-runtime
-reuse, destination, Main-if-empty selection, and Settings-default path are shared by all six.
+reuse, destination, and Main-if-empty selection are shared by all six.
 Each immutable quote uses the first-launch dark-teal/gold visual language without restyling other
 dialogs. The normal summary names the selected application/channel, validated version, actual
 program set, human-readable binary download size, and full selectable destination.
 **Change location** retains the existing-parent/safe-new-subfolder flow and builds a fresh quote
 for the same repository and channel; the validated launcher Java has no happy-path chooser in this
 dialog. The simple confirmation has no passive update-behavior row and no technical-details
-toggle or pane. Source/tag/asset/digest, Java, registry/Main, and Settings bindings remain in the
+toggle or pane. Source/tag/asset/digest, destination, and registry/Main bindings remain in the
 immutable backend plan and are revalidated before transfer. For a captured-current quote,
 install-time validation re-fetches the exact repository/tag release and requires the same asset
 name, size, SHA-256, and URL; it never rereads the moving current pointer or retargets the quote.
 Historical exact plans and the existing current/history picker retain distinct provenance.
+Every successful managed publication initializes its per-installation check-on-open value to
+true; first launch has no global or new-install update-check default.
 Operation logs retain errors. Package
 transfer and parent/destination creation begin only after explicit **Install**. Escape, Cancel, or
 window close returns to the unchanged first-launch options. Offline feedback identifies that
-choice and offers retry, including focused Java selection when Java planning failed, without
+choice and offers retry without
 cross-product, cross-channel, title-based, or latest-release fallback.
 
 For the ordinary GUI registry, the default managed payload/support-data destination is
@@ -123,13 +129,16 @@ location. This macOS location is not the `MM Launcher.app` resource tree.
 Explicit `gui --registry` overrides and custom `LauncherServices` registries instead keep the
 isolated `<registry parent>/installations/<product channel>` layout.
 
-On managed Installations, **Fetch channel release** defaults to MekHQ/Milestone and resolves only
-that current authoritative target. **Browse all releases…** separately opens unclassified paged
-history; its Channel selection becomes only the created installation's fixed update track and does
-not classify that historical release. Product/channel changes invalidate current results, product
-changes invalidate history, and both paths return through the normal planner for exact
-revalidation before consent. Product/channel and Java selectors share the dark vector-arrow combo
-treatment rather than an operating-system white arrow segment.
+On managed Installations, one Product/Channel/**Fetch releases** row defaults to MekHQ/Milestone.
+It combines that channel's authoritative current target with the selected product's paged history
+whose membership is unknown, excluding only a distinct target known to be current solely for the
+other channel. Most history appears for both selections because titles and prerelease flags are
+not channel evidence. Channel becomes only the created installation's fixed update track and does
+not classify an unknown historical release. Product or channel changes clear results and
+invalidate in-flight work; Previous/Next retain their exact selection snapshot. Every row returns
+through exact repository/tag normal-planner revalidation before consent. Product/channel and Java
+selectors share the dark vector-arrow combo treatment rather than an operating-system white arrow
+segment.
 
 Cancelling a quote returns to the unchanged default Home presentation and starts a fresh background
 snapshot. The main label/caption never adopts a popup selection, and popup planning never changes a

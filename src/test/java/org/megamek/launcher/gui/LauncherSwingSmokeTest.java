@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.megamek.launcher.channel.FollowChannel;
-import org.megamek.launcher.channel.QuickInstallOption;
+import org.megamek.launcher.channel.SelectedChannelReleaseCatalog;
 import org.megamek.launcher.release.FreshInstaller;
 import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
@@ -158,25 +158,23 @@ class LauncherSwingSmokeTest {
             assertNotNull(waitForButton(frame, "launch-megamek-button"));
             JButton settings = waitForButton(frame, "settingsButton");
             SwingUtilities.invokeAndWait(settings::doClick);
-            waitFor(() -> component(frame,
-                    "installedVersionsCheckMasterCheckbox") != null);
-            assertNotNull(component(frame, "installedVersionsCheckMasterCheckbox"));
+            waitFor(() -> component(frame, "defaultJavaPath") != null);
+            assertNull(component(frame, "installedVersionsCheckMasterCheckbox"));
             assertNull(find(frame, "saveSettingsButton"),
                     "settings are persisted immediately without a save workflow");
             JPanel settingsSections = component(frame, "settingsSections");
             assertEquals(FirstLaunchPanel.BACKGROUND, settingsSections.getBackground());
-            JPanel updates = component(frame, "settingsUpdatesSection");
             JPanel gameJava = component(frame, "settingsGameJavaSection");
             JPanel diagnostics = component(frame, "settingsDiagnosticsSection");
-            assertFalse(updates.isOpaque());
+            assertNull(component(frame, "settingsUpdatesSection"));
             assertFalse(gameJava.isOpaque());
             assertFalse(diagnostics.isOpaque());
             assertNotNull(component(frame, "defaultJavaPath"));
-            assertEquals("Java 21",
-                    ((JLabel) component(frame, "defaultJavaStatus")).getText());
+            assertTrue(((JLabel) component(frame, "defaultJavaStatus")).getText()
+                    .startsWith("Java "));
             JButton changeDefaultJava = waitForButton(frame, "changeDefaultJavaButton");
             SwingUtilities.invokeAndWait(changeDefaultJava::doClick);
-            JDialog javaSelector = owned(frame, "Change default game Java");
+            JDialog javaSelector = owned(frame, "Change default Java");
             assertEquals(FirstLaunchPanel.BACKGROUND,
                     component(javaSelector, "javaSelectionDialogContent").getBackground());
             assertTrue(component(javaSelector, "defaultJavaCandidateCombo")
@@ -228,31 +226,42 @@ class LauncherSwingSmokeTest {
                 frame.downloadDialog();
             });
             JDialog dialog = owned(frame, "Download an official release");
+            JButton previous = find(dialog, "previousReleasePageButton");
             JButton next = find(dialog, "nextReleasePageButton");
-            JButton browse = find(dialog, "browseAllReleasesButton");
+            JButton fetch = find(dialog, "fetchReleasesButton");
             JComboBox<?> product = findCombo(dialog, "downloadProductCombo");
+            assertFalse(previous.isEnabled());
             assertFalse(next.isEnabled());
             SwingUtilities.invokeAndWait(() -> product.setSelectedIndex(1));
             assertFalse(next.isEnabled());
 
-            SwingUtilities.invokeAndWait(browse::doClick);
+            SwingUtilities.invokeAndWait(fetch::doClick);
             waitFor(() -> next.isEnabled());
             assertEquals(List.of(1), services.pages);
+            assertEquals("Page 1", findLabel(dialog, "releasePageIndicator").getText());
+            assertFalse(previous.isEnabled());
 
             SwingUtilities.invokeAndWait(next::doClick);
             waitFor(() -> services.pages.size() == 2);
             waitFor(next::isEnabled);
-            closeOwned(frame, "Fetching unclassified release history failed");
+            closeOwned(frame, "Fetching releases failed");
+            assertTrue(findLabel(dialog, "releasePickerStatus").getText()
+                    .startsWith("Request failed"));
             SwingUtilities.invokeAndWait(next::doClick);
             waitFor(() -> services.pages.size() == 3);
             assertEquals(List.of(1, 2, 2), services.pages);
+            waitFor(previous::isEnabled);
+            assertEquals("Page 2", findLabel(dialog, "releasePageIndicator").getText());
+            SwingUtilities.invokeAndWait(previous::doClick);
+            waitFor(() -> services.pages.size() == 4);
+            assertEquals(List.of(1, 2, 2, 1), services.pages);
         } finally {
             dispose(frame);
         }
     }
 
     @Test
-    void installPickerDefaultsAndCurrentFetchStaySeparateFromUnclassifiedHistory()
+    void installPickerUsesOneProductChannelFetchAndSimpleHumanSizedRows()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
@@ -275,45 +284,102 @@ class LauncherSwingSmokeTest {
             assertEquals("Channel", channel.getAccessibleContext().getAccessibleName());
 
             JButton fetch = find(dialog, "fetchReleasesButton");
-            assertEquals("Fetch channel release", fetch.getText());
+            assertEquals("Fetch releases", fetch.getText());
+            assertEquals(product.getParent(), channel.getParent());
+            assertEquals(product.getParent(), fetch.getParent(),
+                    "Product, Channel, and Fetch belong to one responsive control row");
+            java.awt.GridBagLayout controlLayout =
+                    (java.awt.GridBagLayout) product.getParent().getLayout();
+            assertEquals(controlLayout.getConstraints(product).gridy,
+                    controlLayout.getConstraints(channel).gridy);
+            assertEquals(controlLayout.getConstraints(product).gridy,
+                    controlLayout.getConstraints(fetch).gridy);
             SwingUtilities.invokeAndWait(fetch::doClick);
             waitFor(() -> {
                 JList<?> found = findList(dialog, "releaseList");
-                return found != null && found.getModel().getSize() == 1;
+                return found != null && found.getModel().getSize() == 3;
             });
             JList<?> list = findList(dialog, "releaseList");
             assertEquals(1, services.currentFetches);
             assertEquals(OfficialRepository.MEKHQ, services.currentRepository);
             assertEquals(FollowChannel.MILESTONE, services.currentChannel);
-            assertTrue(services.pages.isEmpty(),
-                    "selected-channel fetch must not enumerate release history");
+            assertEquals(List.of(1), services.pages);
             assertTrue(list.getModel().getElementAt(0).toString()
-                    .contains("MekHQ Milestone (0.51.0)"));
-            assertEquals(0, list.getSelectedIndex());
+                    .equals("MekHQ Milestone (0.51.0) — 4.0 KiB"));
+            assertTrue(list.getModel().getElementAt(1).toString()
+                    .equals("MekHQ Milestone (0.50.1) — 4.0 KiB"));
+            assertEquals("MekHQ Milestone (0.49.1) — Unavailable",
+                    list.getModel().getElementAt(2).toString());
+            assertEquals("Install", find(dialog, "installReleaseButton").getText());
+            assertFalse(list.getModel().getElementAt(0).toString().contains("Available"));
+            assertFalse(list.getModel().getElementAt(0).toString().contains("bytes"));
+            assertFalse(list.getModel().getElementAt(2).toString().contains("SHA-256"));
+            assertEquals(-1, list.getSelectedIndex());
+            assertEquals(" ", findLabel(dialog, "releasePickerStatus").getText());
+            JButton previous = find(dialog, "previousReleasePageButton");
+            JLabel indicator = findLabel(dialog, "releasePageIndicator");
+            JButton next = find(dialog, "nextReleasePageButton");
+            JButton destination = find(dialog, "installReleaseButton");
+            assertEquals(previous.getParent(), indicator.getParent());
+            assertEquals(previous.getParent(), next.getParent());
+            assertEquals(previous.getParent(), destination.getParent());
+            assertTrue(previous.getParent().getComponentZOrder(previous)
+                    < previous.getParent().getComponentZOrder(indicator));
+            assertTrue(previous.getParent().getComponentZOrder(indicator)
+                    < previous.getParent().getComponentZOrder(next));
+            assertTrue(previous.getParent().getComponentZOrder(next)
+                    < previous.getParent().getComponentZOrder(destination));
+            SwingUtilities.invokeAndWait(() -> list.setSelectedIndex(2));
+            assertFalse(find(dialog, "installReleaseButton").isEnabled(),
+                    "an unavailable row cannot enable destination selection");
 
             SwingUtilities.invokeAndWait(
                     () -> channel.setSelectedItem(FollowChannel.DEVELOPMENT));
             assertEquals(0, list.getModel().getSize(),
-                    "changing the channel invalidates the current target");
-
-            SwingUtilities.invokeAndWait(
-                    () -> find(dialog, "browseAllReleasesButton").doClick());
-            waitFor(() -> !services.pages.isEmpty()
-                    && findList(dialog, "releaseList").getModel().getSize() == 1);
-            assertEquals(List.of(1), services.pages);
-            assertTrue(findLabel(dialog, "releasePickerSourceExplanation").getText()
-                    .contains("Older releases are not labeled by channel"));
-            assertTrue(findList(dialog, "releaseList").getModel().getElementAt(0)
-                    .toString().contains("channel unclassified"));
+                    "changing the channel invalidates all fetched rows");
+            assertEquals("Page —", findLabel(dialog, "releasePageIndicator").getText());
             SwingUtilities.invokeAndWait(
                     () -> product.setSelectedItem(OfficialRepository.LAB));
             assertEquals(0, findList(dialog, "releaseList").getModel().getSize(),
-                    "changing product invalidates historical results");
-            assertEquals("Selection changed; fetch a new result.",
+                    "changing product invalidates all fetched rows");
+            assertEquals(" ",
                     findLabel(dialog, "releasePickerStatus").getText());
+            assertFalse(find(dialog, "previousReleasePageButton").isEnabled());
             assertFalse(find(dialog, "nextReleasePageButton").isEnabled());
             assertFalse(find(dialog, "installReleaseButton").isEnabled());
         } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void releasePickerDiscardsInFlightResultsAfterProductChange() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        StalePickerServices services = new StalePickerServices(temp.resolve("stale-picker.json"));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                frame.setVisible(true);
+                frame.downloadDialog();
+            });
+            JDialog dialog = owned(frame, "Download an official release");
+            JButton fetch = find(dialog, "fetchReleasesButton");
+            JComboBox<?> product = findCombo(dialog, "downloadProductCombo");
+            SwingUtilities.invokeLater(fetch::doClick);
+            assertTrue(services.started.await(5, TimeUnit.SECONDS));
+
+            SwingUtilities.invokeAndWait(
+                    () -> product.setSelectedItem(OfficialRepository.LAB));
+            services.release.countDown();
+            waitFor(fetch::isEnabled);
+
+            assertEquals(0, findList(dialog, "releaseList").getModel().getSize());
+            assertEquals("Page —", findLabel(dialog, "releasePageIndicator").getText());
+            assertFalse(find(dialog, "previousReleasePageButton").isEnabled());
+            assertFalse(find(dialog, "nextReleasePageButton").isEnabled());
+        } finally {
+            services.release.countDown();
             dispose(frame);
         }
     }
@@ -565,9 +631,8 @@ class LauncherSwingSmokeTest {
         JButton fetch = onEdt(() -> find(picker, "fetchReleasesButton"));
         assertNotNull(fetch);
         assertTrue(onEdt(fetch::isEnabled));
-        JButton browse = onEdt(() -> find(picker, "browseAllReleasesButton"));
-        assertNotNull(browse);
-        assertEquals("Browse all releases…", browse.getText());
+        assertEquals("Fetch releases", fetch.getText());
+        assertFalse(onEdt(() -> find(picker, "previousReleasePageButton").isEnabled()));
         assertFalse(onEdt(() -> find(picker, "installReleaseButton").isEnabled()));
         return picker;
     }
@@ -767,25 +832,41 @@ class LauncherSwingSmokeTest {
         }
 
         @Override
-        public QuickInstallOption quickInstallOption(OfficialRepository repository,
-                                                     FollowChannel channel) {
+        public SelectedChannelReleaseCatalog.Result installableReleases(
+                OfficialRepository repository, FollowChannel channel, int page)
+                throws IOException {
             currentFetches++;
             currentRepository = repository;
             currentChannel = channel;
-            return QuickInstallTestData.snapshot("0.51.0", "0.52.0")
-                    .option(new QuickInstallOption.Key(repository, channel));
-        }
-
-        @Override public ReleaseCatalog.Page releases(OfficialRepository repository, int page)
-                throws IOException {
             pages.add(page);
             if (page == 2 && pages.stream().filter(value -> value == 2).count() == 1) {
                 throw new IOException("fixture page failure");
             }
-            String tag = "v0.50." + page;
+            List<SelectedChannelReleaseCatalog.Entry> entries = new ArrayList<>();
+            if (page == 1) {
+                entries.add(entry(repository,
+                        channel == FollowChannel.MILESTONE ? "v0.51.0" : "v0.52.0",
+                        SelectedChannelReleaseCatalog.Classification.SELECTED_CHANNEL, true));
+            }
+            entries.add(entry(repository, "v0.50." + page,
+                    SelectedChannelReleaseCatalog.Classification.UNKNOWN, true));
+            if (page == 1) {
+                entries.add(entry(repository, "v0.49.1",
+                        SelectedChannelReleaseCatalog.Classification.UNKNOWN, false));
+            }
+            return new SelectedChannelReleaseCatalog.Result(repository, channel, page, 10,
+                    channel == FollowChannel.MILESTONE ? "0.51.0" : "0.52.0",
+                    channel == FollowChannel.MILESTONE ? "v0.51.0" : "v0.52.0",
+                    entries, true);
+        }
+
+        private static SelectedChannelReleaseCatalog.Entry entry(
+                OfficialRepository repository, String tag,
+                SelectedChannelReleaseCatalog.Classification classification,
+                boolean eligible) {
             ReleaseCatalog.Asset asset = new ReleaseCatalog.Asset(
                     repository.assetPrefix() + tag + ".tar.gz", 4096,
-                    "sha256:" + "b".repeat(64),
+                    eligible ? null : "sha256:not-a-valid-digest",
                     java.net.URI.create("https://github.com/" + repository.slug()
                             + "/releases/download/" + tag + "/"
                             + repository.assetPrefix() + tag + ".tar.gz"));
@@ -793,7 +874,47 @@ class LauncherSwingSmokeTest {
                     "Mutable title must not classify this row", false, false,
                     java.net.URI.create("https://github.com/" + repository.slug()
                             + "/releases/tag/" + tag), List.of(asset));
-            return new ReleaseCatalog.Page(page, 10, List.of(release), true);
+            return new SelectedChannelReleaseCatalog.Entry(
+                    new SelectedChannelReleaseCatalog.Identity(repository, tag),
+                    classification, release,
+                    new ReleaseCatalog.Assessment(eligible, asset,
+                            eligible ? "Available" : "Published SHA-256 checksum is invalid"));
+        }
+    }
+
+    private static final class StalePickerServices extends LauncherServices {
+        final CountDownLatch started = new CountDownLatch(1);
+        final CountDownLatch release = new CountDownLatch(1);
+
+        StalePickerServices(Path registry) {
+            super(registry);
+        }
+
+        @Override
+        public SelectedChannelReleaseCatalog.Result installableReleases(
+                OfficialRepository repository, FollowChannel channel, int page)
+                throws InterruptedException {
+            started.countDown();
+            release.await();
+            ReleaseCatalog.Asset asset = new ReleaseCatalog.Asset(
+                    repository.assetPrefix() + "v0.51.0.tar.gz", 4096,
+                    "sha256:" + "c".repeat(64),
+                    java.net.URI.create("https://github.com/" + repository.slug()
+                            + "/releases/download/v0.51.0/"
+                            + repository.assetPrefix() + "v0.51.0.tar.gz"));
+            ReleaseCatalog.Release releaseMetadata = new ReleaseCatalog.Release(
+                    "v0.51.0", "Ignored stale result", false, false,
+                    java.net.URI.create("https://github.com/" + repository.slug()
+                            + "/releases/tag/v0.51.0"), List.of(asset));
+            SelectedChannelReleaseCatalog.Entry entry =
+                    new SelectedChannelReleaseCatalog.Entry(
+                            new SelectedChannelReleaseCatalog.Identity(
+                                    repository, releaseMetadata.tag()),
+                            SelectedChannelReleaseCatalog.Classification.SELECTED_CHANNEL,
+                            releaseMetadata,
+                            new ReleaseCatalog.Assessment(true, asset, "Available"));
+            return new SelectedChannelReleaseCatalog.Result(repository, channel, page, 10,
+                    "0.51.0", "v0.51.0", List.of(entry), false);
         }
     }
 

@@ -2,15 +2,15 @@
 
 ## Scope and authority
 
-`preview-update --registry <json> [--id <uuid>] --tag <exact-tag>` and the standalone GUI
-**Preview update** action are observational, point-in-time comparisons. Each may download, verify,
+`preview-update --registry <json> [--id <uuid>] --tag <exact-tag>` is a diagnostic,
+observational point-in-time comparison. It may download, verify,
 extract, and statically inspect one official release in launcher metadata staging, then disposes
 that workspace. It never writes beneath an installed application root,
 changes its timestamps, updates the registry or receipt, locks an installation, converts saves, or
 applies a decision. Its result is not authority to apply later. Tags are exact labels, not
 semantic-version upgrade/downgrade recommendations.
 
-Registry schema remains 1 and every record remains `updateEligible=false`; that legacy guard is not
+Registry schema 3 keeps every record at `updateEligible=false`; that legacy guard is not
 preview or Apply eligibility. Eligibility comes from a valid immutable local ownership receipt and,
 after the first successful update, coherent latest current provenance.
 Imported and pre-receipt copies remain launchable/manageable but cannot preview, and provenance is
@@ -30,9 +30,8 @@ and binding failures. Metadata, installation, and staging paths must have only r
 ancestors and cannot overlap any registered installation. Receipt creation uses an OS lock,
 a uniquely owned staging file, and atomic create-new hard-link publication: an existing or
 concurrently appearing final receipt is never replaced, and another writer's staging object is
-never removed. The per-receipt lock file may remain as inert serialization state. Removing a
-registry record intentionally
-leaves an orphan receipt; a new registration gets another UUID/time and cannot match it.
+never removed. The per-receipt lock file may remain as inert serialization state. **Remove from launcher…** removes the exact registration and all sidecars for its ID while leaving
+the application root byte-for-byte untouched. A new registration gets another UUID/time.
 
 The receipt trusts launcher-local state derived from HTTPS plus GitHub's same-source digest. This
 detects transfer corruption but is not an independent signature. Hostile same-user modification of

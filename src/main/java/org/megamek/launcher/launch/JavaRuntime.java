@@ -43,15 +43,6 @@ public final class JavaRuntime {
         return List.copyOf(candidates);
     }
 
-    /**
-     * Resolves only the Java runtime which is executing this launcher.  The normal first-install
-     * path intentionally does not fall through to JAVA_HOME or to a runtime inherited from a
-     * different registered copy.
-     */
-    public Path launcherJava() throws IOException {
-        return currentExecutable();
-    }
-
     /** Returns the canonical executable from this process's exact {@code java.home}. */
     public Path currentExecutable() throws IOException {
         String home = javaHome.get();
@@ -76,7 +67,7 @@ public final class JavaRuntime {
     }
 
     /**
-     * Validates the exact launcher JVM for an imported copy and captures its file identity.
+     * Validates the exact launcher JVM for a game launch and captures its file identity.
      * No environment or registry candidate is considered.
      */
     public CurrentJava validateCurrentExternal(Path applicationRoot)
@@ -85,9 +76,9 @@ public final class JavaRuntime {
     }
 
     /**
-     * Validates and captures an explicitly selected Java executable (or Java home) for a new
-     * installation/import.  The captured file identity is rechecked by RegistryStore at publish
-     * time.
+     * Validates and captures an explicitly selected Java executable (or Java home) for launch.
+     * Launch preparation rechecks the file identity before process start; it is never stored in
+     * an installation record.
      */
     public CurrentJava validateExternal(Path selected, Path applicationRoot)
             throws IOException, InterruptedException {
@@ -186,8 +177,8 @@ public final class JavaRuntime {
     }
 
     /**
-     * Unforgeable-by-callers evidence that a specific current-JVM executable passed Java 21+
-     * validation. RegistryStore rechecks the file identity immediately before publication.
+     * Unforgeable-by-callers evidence that a specific executable passed Java 21+ validation.
+     * Launch preparation rechecks the file identity immediately before process start.
      */
     public static final class CurrentJava {
         private final Path executable;
@@ -220,12 +211,6 @@ public final class JavaRuntime {
             return feature;
         }
 
-        public boolean sameRuntime(CurrentJava other) {
-            return other != null && executable.equals(other.executable)
-                    && feature == other.feature
-                    && sameIdentity(other.fileKey, other.size, other.modifiedMillis);
-        }
-
         public Path requireUnchanged() throws IOException {
             Path canonical = executable.toAbsolutePath().normalize().toRealPath();
             if (!canonical.equals(executable) || feature < 21) {
@@ -238,7 +223,7 @@ public final class JavaRuntime {
                     || !attributes.isRegularFile()
                     || !sameIdentity(attributes.fileKey(), attributes.size(),
                     attributes.lastModifiedTime().toMillis())) {
-                throw new IOException("validated launcher Java changed before registration");
+                throw new IOException("validated Game Java changed before launch");
             }
             return canonical;
         }

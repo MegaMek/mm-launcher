@@ -95,7 +95,7 @@ class ProvenanceInstallTest {
                 root.toAbsolutePath().normalize().toString(), "test",
                 List.of(new org.megamek.launcher.onboarding.Product(
                         "megamek", "MegaMek.jar", "megamek.MegaMek", "test", List.of())),
-                null, null, false, "2026-01-01T00:00:00Z");
+                null, false, "2026-01-01T00:00:00Z");
     }
 
     private static void createInstallation(Path root) throws IOException {

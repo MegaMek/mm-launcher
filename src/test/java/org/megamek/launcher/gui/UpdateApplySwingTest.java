@@ -356,6 +356,7 @@ class UpdateApplySwingTest {
                 first, second, first.products().getFirst(), firstReceipt, secondReceipt,
                 firstCurrent, secondCurrent, unavailableInspection, targetArchive,
                 new RootCoordinator(temp.resolve("swing-coordination")));
+        services.selectDefaultJava(Path.of(System.getProperty("java.home")));
         return new Fixture(services, first, second, firstCurrent);
     }
 
@@ -366,7 +367,18 @@ class UpdateApplySwingTest {
     }
 
     private static JButton checkAndWaitForUpdate(LauncherFrame frame) throws Exception {
-        JButton check = waitFor(() -> find(frame, "checkUpdatesButton"));
+        JButton action;
+        try {
+            action = waitFor(() -> {
+                JButton update = find(frame, "applyUpdateButton");
+                return update != null ? update : find(frame, "checkUpdatesButton");
+            });
+        } catch (AssertionError error) {
+            throw new AssertionError("No update action. Current UI: " + componentText(frame),
+                    error);
+        }
+        if ("applyUpdateButton".equals(action.getName())) return action;
+        JButton check = action;
         SwingUtilities.invokeAndWait(check::doClick);
         return waitFor(() -> find(frame, "applyUpdateButton"));
     }

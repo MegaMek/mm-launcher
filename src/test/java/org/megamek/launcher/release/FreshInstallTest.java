@@ -10,6 +10,7 @@ import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.registry.RegistryData;
 import org.megamek.launcher.registry.RegistryStore;
+import org.megamek.launcher.update.ReceiptStore;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -55,6 +56,7 @@ class FreshInstallTest {
 
         Path registry = temp.resolve("registry.json");
         Path destination = temp.resolve("installed");
+        configureJava(registry);
         QueueTransport installing = new QueueTransport(response(200, metadata),
                 binary(200, Map.of(), archive));
         ByteArrayOutputStream output = new ByteArrayOutputStream();
@@ -72,8 +74,11 @@ class FreshInstallTest {
         assertFalse(data.installations().getFirst().updateEligible());
         assertTrue(data.installations().getFirst().products().stream()
                 .anyMatch(product -> product.key().equals("megamek")));
-        assertEquals(FollowChannel.MILESTONE, new ChannelPreferenceStore()
-                .read(registry, data, data.installations().getFirst()).preference().channel());
+        var preference = new ChannelPreferenceStore()
+                .read(registry, data, data.installations().getFirst()).preference();
+        assertEquals(FollowChannel.MILESTONE, preference.channel());
+        assertTrue(preference.checkOnOpen());
+        assertTrue(output.toString(StandardCharsets.UTF_8).contains("checkOnOpen=true"));
         assertTrue(output.toString(StandardCharsets.UTF_8).contains("NOT LAUNCHED"));
     }
 
@@ -91,6 +96,27 @@ class FreshInstallTest {
 
         assertEquals(2, result);
         assertTrue(errors.toString(StandardCharsets.UTF_8).contains("--channel"));
+        assertTrue(network.uris.isEmpty());
+        assertFalse(Files.exists(registry));
+        assertFalse(Files.exists(destination));
+    }
+
+    @Test
+    void removedCheckOnOpenCliOptionIsRejectedBeforeNetworkOrWrite() {
+        Path registry = temp.resolve("removed-option-registry.json");
+        Path destination = temp.resolve("removed-option-install");
+        QueueTransport network = new QueueTransport();
+        ByteArrayOutputStream errors = new ByteArrayOutputStream();
+
+        int result = Main.run(new String[]{"install-release", "--application", "megamek",
+                        "--tag", "v1.2.3", "--destination", destination.toString(),
+                        "--registry", registry.toString(), "--name", "Downloaded",
+                        "--channel", "milestone", "--check-on-open", "false"},
+                new PrintStream(new ByteArrayOutputStream()), new PrintStream(errors), network);
+
+        assertEquals(2, result);
+        assertTrue(errors.toString(StandardCharsets.UTF_8)
+                .contains("unknown option: --check-on-open"));
         assertTrue(network.uris.isEmpty());
         assertFalse(Files.exists(registry));
         assertFalse(Files.exists(destination));
@@ -129,6 +155,56 @@ class FreshInstallTest {
     }
 
     @Test
+    void officialAssetWithoutPublishedDigestDownloadsOnceAndPersistsComputedIdentity()
+            throws Exception {
+        byte[] archive = suiteArchive("MegaMek-1.2.3");
+        String metadata = releaseJson(archive, sha(archive))
+                .replace("\"digest\":\"sha256:" + sha(archive) + "\",", "");
+        Path registry = temp.resolve("computed-registry.json");
+        Path destination = temp.resolve("computed-install");
+        QueueTransport transport = new QueueTransport(
+                response(200, metadata),
+                binary(200, Map.of("content-length",
+                        List.of(Integer.toString(archive.length))), archive));
+
+        assertEquals(0, runInstall(transport, registry, destination,
+                new ByteArrayOutputStream()));
+        assertEquals(2, transport.uris.size(), "one metadata request and one binary body");
+        RegistryData data = new RegistryStore().read(registry);
+        var receipt = new ReceiptStore().read(
+                registry, data, data.installations().getFirst());
+        assertEquals(sha(archive), receipt.assetSha256());
+        assertTrue(Files.isRegularFile(destination.resolve("MegaMek.jar")));
+    }
+
+    @Test
+    void absentDigestStillRejectsContentLengthAndBodySizeMismatchWithoutPublication()
+            throws Exception {
+        byte[] archive = suiteArchive("MegaMek-1.2.3");
+        String metadata = releaseJson(archive, sha(archive))
+                .replace("\"digest\":\"sha256:" + sha(archive) + "\",", "");
+
+        Path lengthRegistry = temp.resolve("length-registry.json");
+        Path lengthDestination = temp.resolve("length-install");
+        QueueTransport lengthMismatch = new QueueTransport(
+                response(200, metadata),
+                binary(200, Map.of("content-length",
+                        List.of(Integer.toString(archive.length + 1))), archive));
+        assertEquals(2, runInstall(lengthMismatch, lengthRegistry, lengthDestination,
+                new ByteArrayOutputStream()));
+        assertFalse(Files.exists(lengthDestination));
+
+        Path longRegistry = temp.resolve("long-registry.json");
+        Path longDestination = temp.resolve("long-install");
+        byte[] longer = java.util.Arrays.copyOf(archive, archive.length + 1);
+        QueueTransport longBody = new QueueTransport(response(200, metadata),
+                binary(200, Map.of(), longer));
+        assertEquals(2, runInstall(longBody, longRegistry, longDestination,
+                new ByteArrayOutputStream()));
+        assertFalse(Files.exists(longDestination));
+    }
+
+    @Test
     void archiveRejectsTraversalAliasesLinksBoundsAndTruncation() throws Exception {
         SafeTarExtractor extractor = new SafeTarExtractor();
         assertThrows(IOException.class, () -> extractor.extract(
@@ -163,6 +239,7 @@ class FreshInstallTest {
         Path registry = temp.resolve("registry.json");
         RegistryStore store = new RegistryStore();
         String firstId = store.register(registry, "Existing", existing, null).id();
+        configureJava(registry);
 
         QueueTransport duplicateUnused = new QueueTransport();
         ByteArrayOutputStream duplicateError = new ByteArrayOutputStream();
@@ -252,11 +329,26 @@ class FreshInstallTest {
 
     private int runInstall(ReleaseTransport transport, Path registry, Path destination,
                            String name, ByteArrayOutputStream errors) {
+        configureJava(registry);
         return Main.run(new String[]{"install-release", "--application", "megamek",
                         "--tag", "v1.2.3", "--destination", destination.toString(),
                         "--registry", registry.toString(), "--name", name,
                         "--channel", "milestone"},
                 new PrintStream(new ByteArrayOutputStream()), new PrintStream(errors), transport);
+    }
+
+    private static void configureJava(Path registry) {
+        Path executable = Path.of(System.getProperty("java.home"), "bin",
+                System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT)
+                        .contains("win") ? "java.exe" : "java");
+        int result = Main.run(new String[]{"java-select", "--registry", registry.toString(),
+                        "--java", executable.toString()},
+                new PrintStream(java.io.OutputStream.nullOutputStream()),
+                new PrintStream(java.io.OutputStream.nullOutputStream()),
+                (uri, accept) -> {
+                    throw new AssertionError("Game Java selection must not use the network");
+                });
+        if (result != 0) throw new AssertionError("could not configure test Game Java");
     }
 
     private static String releaseJson(byte[] archive, String hash) {

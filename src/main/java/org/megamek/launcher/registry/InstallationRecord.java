@@ -6,7 +6,7 @@ import java.util.List;
 
 public record InstallationRecord(String id, String name, String canonicalRoot,
                                   String observedBuild, List<Product> products,
-                                  String javaExecutable, String pin, boolean updateEligible,
+                                  String pin, boolean updateEligible,
                                   String registeredAt) {
     public InstallationRecord {
         products = products == null ? null : List.copyOf(products);

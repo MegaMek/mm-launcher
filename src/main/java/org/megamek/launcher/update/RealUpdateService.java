@@ -102,6 +102,10 @@ public final class RealUpdateService {
 
     public Snapshot snapshot(Path registry, String id) throws IOException {
         Path registryPath = registry.toAbsolutePath().normalize();
+        if (Files.exists(UninstallService.pendingJournalPath(registryPath, id),
+                LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("Uninstall recovery required");
+        }
         RegistryData data = registries.read(registryPath);
         InstallationRecord record = registries.resolve(data, id);
         ChannelPreferenceStore.ReadResult fixed =
@@ -205,7 +209,8 @@ public final class RealUpdateService {
                     context.enterFinalization("The update transaction and recovery journal have "
                             + "begun; cancellation can no longer be performed safely.");
                     return transact(current, workspace.extracted(), workspace.release(),
-                            workspace.asset(), target, targetInspection, pair, decisions);
+                            workspace.asset(), workspace.resolvedDigest().hex(), target,
+                            targetInspection, pair, decisions);
                 }
             }
         }
@@ -225,7 +230,7 @@ public final class RealUpdateService {
             Objects.requireNonNull(prepared, "prepared update");
             UpdatePreviewService.Preview preview = prepared.capturedPreview();
             validateAuthorization(prepared.source().current().tag(), preview.targetRelease().tag(),
-                    preview.targetAsset().size(), preview.targetAsset().digest(), confirmation);
+                    preview.targetAsset().size(), preview.resolvedAssetDigest(), confirmation);
             prepared.claim(owner);
 
             ApplyResult result;
@@ -272,7 +277,11 @@ public final class RealUpdateService {
                         new ChannelUpdateChecker(current.registry(), transport)
                                 .check(current.record().id());
                 if (!fresh.updateAvailable()
-                        || !recommendation.equals(fresh.recommendation())) {
+                        || !sameRecommendationExceptDigest(
+                        recommendation, fresh.recommendation())
+                        || !java.util.Objects.equals(
+                        prepared.workspace().asset().digest(),
+                        fresh.recommendation().assetDigest())) {
                     throw new IOException("channel source, preference, or target metadata changed; "
                             + "check again and restart the update attempt");
                 }
@@ -325,7 +334,8 @@ public final class RealUpdateService {
             context.enterFinalization("The update transaction and recovery journal have begun; "
                     + "cancellation can no longer be performed safely.");
             return transact(current, extracted, preview.targetRelease(), preview.targetAsset(),
-                    prepared.target(), inspection, pair, decisions);
+                    prepared.workspace().resolvedDigest().hex(), prepared.target(), inspection,
+                    pair, decisions);
         }
     }
 
@@ -459,13 +469,14 @@ public final class RealUpdateService {
 
     private ApplyResult transact(Snapshot snapshot, Path extracted,
                                  ReleaseCatalog.Release release, ReleaseCatalog.Asset asset,
+                                 String resolvedDigest,
                                  OwnershipPolicy.Build target, Inspection targetInspection,
                                  ManifestReader.PreviewPairValidation pair,
                                  List<Decision> decisions)
             throws IOException, ManifestException {
         String transactionId = UUID.randomUUID().toString();
-        CurrentUpdateState next = nextState(snapshot.current(), target, release, asset, pair,
-                decisions, transactionId);
+        CurrentUpdateState next = nextState(snapshot.current(), target, release, asset,
+                resolvedDigest, pair, decisions, transactionId);
         Path namespace = createNamespace(snapshot, transactionId);
         Path transaction = transaction(namespace, transactionId);
         Path pendingFile = namespace.resolve("pending.json");
@@ -896,6 +907,7 @@ public final class RealUpdateService {
                                          OwnershipPolicy.Build target,
                                          ReleaseCatalog.Release release,
                                          ReleaseCatalog.Asset asset,
+                                         String resolvedDigest,
                                          ManifestReader.PreviewPairValidation pair,
                                          List<Decision> decisions, String transactionId) {
         Map<String, OverrideEntry> overrides = new LinkedHashMap<>();
@@ -936,7 +948,7 @@ public final class RealUpdateService {
         return new CurrentUpdateState(CurrentStateStore.SCHEMA, OwnershipPolicy.VERSION,
                 previous.installationId(), previous.canonicalRoot(), previous.registeredAt(),
                 previous.repository(), release.tag(), asset.name(), asset.size(),
-                asset.digest().substring("sha256:".length()).toLowerCase(Locale.ROOT),
+                resolvedDigest,
                 target.manifest(), target.excludedPaths(),
                 overrides.values().stream().sorted(Comparator.comparing(
                         OverrideEntry::path, String.CASE_INSENSITIVE_ORDER)).toList(),
@@ -1254,13 +1266,30 @@ public final class RealUpdateService {
         if (!CONFIRM.equals(confirmation)) {
             throw new IOException("--confirm must be exactly " + CONFIRM);
         }
+
+        private static boolean sameRecommendationExceptDigest(
+                ChannelUpdateChecker.Recommendation first,
+                ChannelUpdateChecker.Recommendation second) {
+            return second != null
+                    && first.installationId().equals(second.installationId())
+                    && first.canonicalRoot().equals(second.canonicalRoot())
+                    && first.registeredAt().equals(second.registeredAt())
+                    && first.preference().equals(second.preference())
+                    && first.repository() == second.repository()
+                    && first.source().equals(second.source())
+                    && first.targetTag().equals(second.targetTag())
+                    && first.assetName().equals(second.assetName())
+                    && first.assetSize() == second.assetSize()
+                    && first.notesUrl().equals(second.notesUrl());
+        }
         if (fromTag == null || !TAG.matcher(fromTag).matches()
                 || targetTag == null || !TAG.matcher(targetTag).matches()) {
             throw new IOException("source and target must be explicit valid release tags");
         }
         if (size <= 0 || size > FreshInstaller.MAX_DOWNLOAD
-                || digest == null || !DIGEST.matcher(digest).matches()) {
-            throw new IOException("consent must bind the exact target byte size and SHA-256");
+                || digest != null && !DIGEST.matcher(digest).matches()) {
+            throw new IOException("consent must bind the exact target byte size and any "
+                    + "published SHA-256");
         }
     }
 

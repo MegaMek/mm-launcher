@@ -7,6 +7,8 @@ public enum OperationType {
     UPDATE_PREVIEW("Update preview"),
     UPDATE_APPLY("Update"),
     RECOVERY("Update recovery"),
+    UNINSTALL("Uninstall"),
+    UNINSTALL_RECOVERY("Uninstall recovery"),
     GUI_ERROR("Launcher error");
 
     private final String displayName;

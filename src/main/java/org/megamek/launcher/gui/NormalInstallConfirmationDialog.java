@@ -194,7 +194,7 @@ final class NormalInstallConfirmationDialog extends JDialog {
                 ? VersionDisplay.installLatest(
                 product, plan.channel().toString(), plan.version())
                 : "Install " + VersionDisplay.programChannelVersion(
-                product, null, plan.version());
+                product, plan.channel().toString(), plan.version());
     }
 
     private JLabel label(String text, String name, Font font, Color color) {

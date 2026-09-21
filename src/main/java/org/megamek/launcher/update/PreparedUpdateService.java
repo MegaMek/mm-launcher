@@ -139,10 +139,37 @@ public final class PreparedUpdateService {
         }
         ChannelUpdateChecker.Result fresh =
                 new ChannelUpdateChecker(registry, transport).check(record.id());
-        if (!fresh.updateAvailable() || !captured.equals(fresh.recommendation())) {
+        if (!fresh.updateAvailable()
+                || !compatibleRecommendation(captured, fresh.recommendation())) {
             throw new IOException("channel source, preference, or target metadata changed; "
                     + "check again and restart the update attempt");
         }
-        return captured;
+        return fresh.recommendation();
+    }
+
+    /**
+     * Published-digest absence may become a valid digest at the final metadata refresh. Every
+     * other recommendation field remains consent-bound, and a quoted digest may not disappear or
+     * change.
+     */
+    private static boolean compatibleRecommendation(ChannelUpdateChecker.Recommendation quoted,
+            ChannelUpdateChecker.Recommendation refreshed) {
+        if (refreshed == null) return false;
+        boolean digestCompatible = quoted.assetDigest() == null
+                ? refreshed.assetDigest() == null
+                    || org.megamek.launcher.release.PackageDigest
+                    .expectedPublished(refreshed.assetDigest()).isPresent()
+                : quoted.assetDigest().equalsIgnoreCase(refreshed.assetDigest());
+        return digestCompatible
+                && quoted.installationId().equals(refreshed.installationId())
+                && quoted.canonicalRoot().equals(refreshed.canonicalRoot())
+                && quoted.registeredAt().equals(refreshed.registeredAt())
+                && quoted.preference().equals(refreshed.preference())
+                && quoted.repository() == refreshed.repository()
+                && quoted.source().equals(refreshed.source())
+                && quoted.targetTag().equals(refreshed.targetTag())
+                && quoted.assetName().equals(refreshed.assetName())
+                && quoted.assetSize() == refreshed.assetSize()
+                && quoted.notesUrl().equals(refreshed.notesUrl());
     }
 }

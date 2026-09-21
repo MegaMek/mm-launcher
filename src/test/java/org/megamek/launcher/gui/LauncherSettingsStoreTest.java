@@ -10,6 +10,7 @@ import java.nio.file.Path;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -17,68 +18,81 @@ class LauncherSettingsStoreTest {
     @TempDir Path temp;
 
     @Test
-    void absentSettingDefaultsTrueOnlyForFutureInstallsAndCanBeTurnedOff() throws Exception {
+    void absentSettingsContainOnlyTheUnsetDefaultJavaAndDoNotWrite() throws Exception {
         Path registry = temp.resolve("registry.json");
         LauncherSettingsStore store = new LauncherSettingsStore(registry);
 
-        LauncherSettingsStore.CheckConfiguration initial = store.readCheckConfiguration();
-        assertTrue(store.read().checkNewInstallsOnOpen());
-        assertTrue(store.read().checkInstalledVersionsOnOpen());
-        assertTrue(initial.settings().checkNewInstallsOnOpen());
-        assertEquals("absent", initial.revision());
+        LauncherSettingsStore.Settings initial = store.read();
+
+        assertEquals(LauncherSettingsStore.SCHEMA, initial.schemaVersion());
+        assertNull(initial.defaultJavaExecutable());
+        assertNull(initial.defaultJavaFeature());
         assertFalse(Files.exists(store.path()), "reading the default is side-effect free");
         assertFalse(Files.exists(registry));
-
-        store.write(false);
-        LauncherSettingsStore.CheckConfiguration disabled = store.readCheckConfiguration();
-        assertFalse(disabled.settings().checkNewInstallsOnOpen());
-        assertTrue(disabled.revision().startsWith("sha256:"));
-        assertFalse(disabled.revision().equals(initial.revision()));
-        assertFalse(Files.exists(registry), "launcher settings do not synthesize a registry");
     }
 
     @Test
-    void globalMasterIsImmediateAndPreservesFutureCopyDefaultAndJava() throws Exception {
+    void defaultJavaRoundTripsInExactCurrentSchemaWithoutUpdateFields() throws Exception {
         Path registry = temp.resolve("registry.json");
         LauncherSettingsStore store = new LauncherSettingsStore(registry);
         Path java = temp.resolve("jdk").resolve("bin").resolve("java.exe")
                 .toAbsolutePath().normalize();
-        store.write(false);
-        store.writeDefaultJava(java, 21);
 
-        LauncherSettingsStore.Settings disabled = store.writeAutomaticChecks(false);
+        LauncherSettingsStore.Settings saved = store.writeDefaultJava(java, 21);
+        String json = Files.readString(store.path());
 
-        assertFalse(disabled.checkInstalledVersionsOnOpen());
-        assertFalse(disabled.checkNewInstallsOnOpen(),
-                "global gate never rewrites per-copy defaults");
-        assertEquals(java.toString(), disabled.defaultJavaExecutable());
-        assertEquals(21, disabled.defaultJavaFeature());
+        assertEquals(java.toString(), saved.defaultJavaExecutable());
+        assertEquals(21, saved.defaultJavaFeature());
+        assertEquals(saved, store.read());
+        assertTrue(json.contains("\"schemaVersion\" : 3"));
+        assertFalse(json.contains("checkInstalledVersionsOnOpen"));
+        assertFalse(json.contains("checkNewInstallsOnOpen"));
     }
 
     @Test
-    void schemaOneMigratesGlobalMasterEnabledWithoutRewriting() throws Exception {
+    void oldGlobalUpdateSchemaIsRejectedWithoutMigrationOrRewrite() throws Exception {
         Path registry = temp.resolve("registry.json");
         LauncherSettingsStore store = new LauncherSettingsStore(registry);
         Files.writeString(store.path(), """
                 {
-                  "schemaVersion" : 1,
+                  "schemaVersion" : 2,
+                  "checkInstalledVersionsOnOpen" : true,
                   "checkNewInstallsOnOpen" : false
                 }
                 """);
         String before = Files.readString(store.path());
 
-        LauncherSettingsStore.Settings migrated = store.read();
+        IOException error = assertThrows(IOException.class, store::read);
 
-        assertTrue(migrated.checkInstalledVersionsOnOpen());
-        assertFalse(migrated.checkNewInstallsOnOpen());
+        assertTrue(error.getMessage().contains("unsupported launcher settings schema"));
         assertEquals(before, Files.readString(store.path()));
+    }
+
+    @Test
+    void removedGlobalFieldIsRejectedEvenWhenClaimingCurrentSchema() throws Exception {
+        LauncherSettingsStore store =
+                new LauncherSettingsStore(temp.resolve("registry.json"));
+        String malformed = """
+                {
+                  "schemaVersion" : 3,
+                  "defaultJavaExecutable" : null,
+                  "defaultJavaFeature" : null,
+                  "checkInstalledVersionsOnOpen" : false
+                }
+                """;
+        Files.writeString(store.path(), malformed);
+
+        assertThrows(IOException.class, store::read);
+        assertEquals(malformed, Files.readString(store.path()));
     }
 
     @Test
     void invalidDefaultJavaDoesNotReplacePreviousSettings() throws Exception {
         Path registry = temp.resolve("registry.json");
         LauncherSettingsStore store = new LauncherSettingsStore(registry);
-        store.writeAutomaticChecks(false);
+        Path java = temp.resolve("jdk").resolve("bin").resolve("java.exe")
+                .toAbsolutePath().normalize();
+        store.writeDefaultJava(java, 21);
         byte[] before = Files.readAllBytes(store.path());
 
         assertThrows(IOException.class,
@@ -94,21 +108,20 @@ class LauncherSettingsStoreTest {
 
         IOException read = assertThrows(IOException.class, store::read);
         assertTrue(read.getMessage().contains("not reset"));
-        assertThrows(IOException.class, () -> store.write(true));
+        assertThrows(IOException.class, () -> store.writeDefaultJava(
+                temp.resolve("java.exe").toAbsolutePath().normalize(), 21));
         assertEquals("{broken", Files.readString(settings));
     }
 
     @Test
-    void wrongTypedMasterValueIsRejectedWithoutCoercionOrReset() throws Exception {
+    void wrongTypedDefaultJavaValueIsRejectedWithoutCoercionOrReset() throws Exception {
         LauncherSettingsStore store =
                 new LauncherSettingsStore(temp.resolve("registry.json"));
         String malformed = """
                 {
-                  "schemaVersion" : 2,
-                  "checkInstalledVersionsOnOpen" : "false",
-                  "checkNewInstallsOnOpen" : true,
-                  "defaultJavaExecutable" : null,
-                  "defaultJavaFeature" : null
+                  "schemaVersion" : 3,
+                  "defaultJavaExecutable" : false,
+                  "defaultJavaFeature" : 21
                 }
                 """;
         Files.writeString(store.path(), malformed);

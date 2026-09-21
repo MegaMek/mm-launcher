@@ -13,14 +13,14 @@ must agree on repository, tag, version, assets, sizes, and SHA-256 digests. A la
 accurately label or filter old releases as Milestone or Development without immutable,
 cross-repository metadata that records that history.
 
-Until that index exists, the launcher's bounded adapter is:
-
-1. **Fetch channel release** reads the fixed website YAML once and resolves one exact
-   product/repository/tag through the GitHub release API. This is authoritative only for the
-   selected channel's current target.
-2. **Browse all releases** is an explicit, paged GitHub-history mode. Its rows are unclassified
-   and unverified with respect to channel. The selected channel becomes the newly installed
-   copy's immutable local update track.
+Until that index exists, the launcher's single **Fetch releases** adapter reads both current
+pointers from the fixed website YAML once and one bounded GitHub-history page from only the
+selected product repository. It includes the selected channel's authoritative current identity
+and identities whose history is unknown, excludes a distinct identity known only as the other
+current target, and accepts a shared stable/dev identity for either channel. It performs an exact
+selected-target lookup only when needed for canonical eligible metadata. Most historical rows
+therefore appear under both channels. The selected channel becomes the newly installed copy's
+immutable local update track and does not assert an unknown release's historical origin.
 
 This document recommends future CI and publication work. It does not claim that any repository
 already implements these capabilities.
@@ -39,6 +39,11 @@ later Nightly—bound to that installation UUID, canonical root, registration ti
 receipt. CI does not mark individual user installations. Promotion may place identical release
 bytes in several channels, but it does not retarget installations that already chose a track.
 Using another track means installing another managed copy in a separate root.
+
+Safe uninstall consumes the launcher's latest verified local ownership/current-provenance
+manifest. CI-produced package manifests therefore remain file-exact inputs: generated artifacts
+must not include mutable user locations, links, aliases, or paths outside the documented ownership
+allowlist. The launcher never interprets archive membership alone as deletion authority.
 
 Product CI should place a schema-versioned manifest at one fixed path inside every official
 archive, for example `release-manifest.json`. It should be generated before packaging and covered
@@ -282,7 +287,7 @@ schema-versioned adapter and classify historical rows only when an exact immutab
 identity has verified history. During migration:
 
 - keep the current fixed-YAML plus exact-tag path as the authoritative current fallback;
-- keep GitHub Browse all unclassified whenever history is absent, unsupported, stale, or invalid;
+- keep GitHub history unclassified whenever history is absent, unsupported, stale, or invalid;
 - never downgrade from invalid canonical history to inferred title/flag classification;
 - cache only with generation/source identity and revalidate before transfer;
 - retain the same exact repository/tag/asset/digest and normal-install planner checks;

@@ -282,8 +282,8 @@ public final class UpdatePreviewService {
             decisions.forEach(decision ->
                     counts.put(decision.action(), counts.get(decision.action()) + 1));
             Preview preview = new Preview(record, current.asReceipt(), workspace.release(),
-                    workspace.asset(), target.manifest(), target.excludedPaths(), decisions,
-                    Map.copyOf(counts), current);
+                    workspace.asset(), workspace.resolvedDigest().canonical(), target.manifest(),
+                    target.excludedPaths(), decisions, Map.copyOf(counts), current);
             return new PreparedMaterial(workspace, target, targetInspection, validation, preview);
         } catch (IOException | ManifestException | RuntimeException error) {
             try {
@@ -297,6 +297,10 @@ public final class UpdatePreviewService {
 
     private Path validateLocalBoundary(InstallationRecord record, Path registry, RegistryData data)
             throws IOException {
+        if (Files.exists(UninstallService.pendingJournalPath(registry, record.id()),
+                LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("Uninstall recovery required");
+        }
         Path root = Path.of(record.canonicalRoot()).toAbsolutePath().normalize();
         StrictPathSafety.requireDirectory(root, "registered root");
         Path reserved = root.resolve(".mm-launcher");
@@ -334,7 +338,7 @@ public final class UpdatePreviewService {
 
     private static Preview copyPreview(Preview preview) {
         return new Preview(preview.record(), copyReceipt(preview.baseline()),
-                preview.targetRelease(), preview.targetAsset(),
+                preview.targetRelease(), preview.targetAsset(), preview.resolvedAssetDigest(),
                 copyManifest(preview.targetManifest()), List.copyOf(preview.targetExcludedPaths()),
                 List.copyOf(preview.decisions()), Map.copyOf(preview.counts()),
                 copyCurrent(preview.currentState()));
@@ -383,6 +387,7 @@ public final class UpdatePreviewService {
 
     public record Preview(InstallationRecord record, OwnershipReceipt baseline,
                           ReleaseCatalog.Release targetRelease, ReleaseCatalog.Asset targetAsset,
+                          String resolvedAssetDigest,
                           org.megamek.launcher.manifest.Manifest targetManifest,
                           List<String> targetExcludedPaths, List<Decision> decisions,
                           Map<Action, Long> counts, CurrentUpdateState currentState) {
@@ -393,6 +398,16 @@ public final class UpdatePreviewService {
                        Map<Action, Long> counts) {
             this(record, baseline, targetRelease, targetAsset, targetManifest,
                     targetExcludedPaths, decisions, counts, null);
+        }
+
+        public Preview(InstallationRecord record, OwnershipReceipt baseline,
+                       ReleaseCatalog.Release targetRelease, ReleaseCatalog.Asset targetAsset,
+                       org.megamek.launcher.manifest.Manifest targetManifest,
+                       List<String> targetExcludedPaths, List<Decision> decisions,
+                       Map<Action, Long> counts, CurrentUpdateState currentState) {
+            this(record, baseline, targetRelease, targetAsset,
+                    targetAsset.digest(), targetManifest, targetExcludedPaths, decisions,
+                    counts, currentState);
         }
     }
 
