@@ -6,20 +6,15 @@ import org.megamek.launcher.registry.RegistryStore;
 import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
 import org.megamek.launcher.release.ReleaseTransport;
+import org.megamek.launcher.release.VersionIdentity;
 import org.megamek.launcher.update.RealUpdateService;
 
 import java.io.IOException;
-import java.math.BigInteger;
 import java.net.URI;
 import java.nio.file.Path;
-import java.util.Arrays;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 /** Shared CLI/GUI model for a metadata-only, channel-aware availability check. */
 public final class ChannelUpdateChecker {
-    private static final Pattern RELEASE =
-            Pattern.compile("v([0-9]{1,18}(?:\\.[0-9]{1,18}){2,3})");
     private final Path registry;
     private final RegistryStore registries;
     private final ChannelPreferenceStore preferences;
@@ -111,10 +106,10 @@ public final class ChannelUpdateChecker {
 
     static Status compareTags(String currentTag, String targetTag) {
         if (currentTag != null && currentTag.equals(targetTag)) return Status.EXACT_CURRENT;
-        NumericVersion current = NumericVersion.parse(currentTag);
-        NumericVersion target = NumericVersion.parse(targetTag);
+        VersionIdentity current = numericTag(currentTag);
+        VersionIdentity target = numericTag(targetTag);
         if (current == null || target == null) return Status.NON_COMPARABLE;
-        int order = current.compareTo(target);
+        int order = compareNumeric(current, target);
         if (order < 0) return Status.UPDATE_AVAILABLE;
         if (order > 0) return Status.INSTALLED_AHEAD;
         return Status.NON_COMPARABLE;
@@ -137,28 +132,23 @@ public final class ChannelUpdateChecker {
         return message == null || message.isBlank() ? error.getClass().getSimpleName() : message;
     }
 
-    private record NumericVersion(BigInteger[] components) implements Comparable<NumericVersion> {
-        static NumericVersion parse(String tag) {
-            if (tag == null) return null;
-            Matcher matcher = RELEASE.matcher(tag);
-            if (!matcher.matches()) return null;
-            String[] pieces = matcher.group(1).split("\\.");
-            BigInteger[] components = new BigInteger[4];
-            Arrays.fill(components, BigInteger.ZERO);
-            for (int index = 0; index < pieces.length; index++) {
-                components[index] = new BigInteger(pieces[index]);
-            }
-            return new NumericVersion(components);
-        }
+    private static VersionIdentity numericTag(String tag) {
+        if (tag == null || !tag.startsWith("v")) return null;
+        VersionIdentity parsed = VersionIdentity.fromExact(tag).orElse(null);
+        return parsed == null || !parsed.suffix().isEmpty() ? null : parsed;
+    }
 
-        @Override
-        public int compareTo(NumericVersion other) {
-            for (int index = 0; index < components.length; index++) {
-                int compared = components[index].compareTo(other.components[index]);
-                if (compared != 0) return compared;
-            }
-            return 0;
+    private static int compareNumeric(VersionIdentity first, VersionIdentity second) {
+        int count = Math.max(first.components().size(), second.components().size());
+        for (int index = 0; index < count; index++) {
+            java.math.BigInteger left = index < first.components().size()
+                    ? first.components().get(index) : java.math.BigInteger.ZERO;
+            java.math.BigInteger right = index < second.components().size()
+                    ? second.components().get(index) : java.math.BigInteger.ZERO;
+            int compared = left.compareTo(right);
+            if (compared != 0) return compared;
         }
+        return 0;
     }
 
     public enum Status {

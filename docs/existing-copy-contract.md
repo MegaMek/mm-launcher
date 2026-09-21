@@ -123,10 +123,20 @@ binding, re-inspects the product/build, checks canonical non-link/non-overlappin
 acquires the shared root gate, and rejects a live launcher-tracked application or pending update.
 Network work is refused on the Swing event thread.
 
-The observed products choose one fixed official repository and the observed version may suggest
-an exact tag, but neither is authority. The user may instead choose one exact release through the
-bounded official release browser. Milestone is the default future channel and Development is the
-only alternative; Nightly is unsupported. `ReleaseCatalog` must return one supported full
+The observed product set maps deterministically: any supported bundle containing MekHQ uses the
+MekHQ repository, lab-only uses MegaMekLab, and MegaMek-only uses MegaMek. Other mixed or unknown
+sets are rejected. After the user chooses the future update policy (Milestone by default or
+Development), the launcher searches bounded release-list metadata rather than guessing
+`/tags/v<observed>`. It accepts exactly one eligible immutable tag whose normalized dotted version
+matches the observed build; leading zeroes are insignificant, but prerelease/build suffixes and
+component count are not discarded. Draft and ineligible releases do not qualify. A full final
+bounded page is inconclusive rather than permission to guess.
+
+Zero, multiple, incomplete, or failed searches leave the copy launch-only and expose only a simple
+message plus **Choose a different version…**. That explicit fallback opens the bounded official
+release browser and binds its exact selection to the same record and chosen future channel.
+Neither path classifies a historical release into a channel from its title or prerelease flag.
+Nightly is unsupported. `ReleaseCatalog` must return one supported full
 `tar.gz` asset with a bounded size and either a valid published SHA-256 or no published digest.
 The verified fetcher downloads it
 once and the safe extractor opens it in an attempt-owned external workspace. Official static

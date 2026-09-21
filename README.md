@@ -150,6 +150,12 @@ per-application split controls and aggregate installation-level update summary d
 A missing root or pending recovery is routed to the exact installation card. An absent saved Java
 default is healthy and never blocks Home; Java is resolved by the launch worker.
 Imported/no-receipt copies remain launch-only and are never offered impossible update actions.
+Their explicit **Enable managed updates…** flow presents one compact program/version and future
+channel choice. **Continue** searches bounded official release-list metadata automatically; it
+never guesses a tag URL. Exactly one eligible normalized version match proceeds to the existing
+one-package verification. Otherwise the copy remains launch-only and the user may explicitly
+choose a different official version from the bounded chooser. Existing application and personal
+files are not changed by matching or verification.
 
 The existing `application`/`installDist` entry point remains the CLI. Requires Java 21. From the
 launcher checkout, build and run the graphical subcommand in PowerShell:

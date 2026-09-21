@@ -371,6 +371,14 @@ public class LauncherServices {
         return adoptions.prepare(record, repository, exactTag, channel, progress, context);
     }
 
+    public PreparedAdoption prepareAutomaticAdoption(
+            InstallationRecord record, OfficialRepository repository,
+            FollowChannel channel, PrintStream progress, OperationContext context)
+            throws IOException, InterruptedException,
+            org.megamek.launcher.manifest.ManifestException {
+        return adoptions.prepareAutomatically(record, repository, channel, progress, context);
+    }
+
     public ImportedCopyAdoptionService.CommitResult commitAdoption(
             PreparedAdoption prepared)
             throws IOException, InterruptedException,

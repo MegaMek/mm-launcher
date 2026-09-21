@@ -386,12 +386,26 @@ styled, keyboard-accessible **Enable managed updates…** action. It appears onl
 current state, channel, adoption staging, and pending transaction are all absent. Managed,
 managed-incomplete/corrupt, and recovery-pending cards never show it.
 
-The separate first screen shows detected application/version and a styled future-channel selector
-with Milestone selected by default and Development as the only alternative. **Verify copy** and
-**Cancel** are the primary actions. If the detected version cannot resolve one exact eligible
-release, **Choose official release…** opens the existing bounded paged official-history pattern;
-rows use understandable versions and do not expose digest or repository terminology. All
-metadata/package work runs in a worker under `BusyGate`.
+The compact first screen shows one **Program (Version)** line and a styled update-channel selector
+with Milestone selected by default and Development as the only alternative. **Cancel** is fixed at
+the far left and **Continue** at the far right; Escape cancels and Enter continues. No network
+request occurs until Continue. Continue searches bounded GitHub release-list metadata for the
+detected official repository and automatically prepares the copy only when one safe immutable tag
+matches. Numeric dotted versions compare numerically (`0.50.7`, `0.50.07`, and `v0.50.07` are
+equivalent), while component count and prerelease/build suffix remain identity-bearing.
+
+Drafts and releases without exactly one eligible supported asset are ignored. Search is capped at
+ten 50-entry pages and refuses a result if more history may exist at that bound. It does not infer
+a historical channel from title or prerelease metadata, does not probe a guessed exact-tag URL,
+and does not request package bytes. Preparation then re-fetches the selected exact tag and uses the
+existing one-package verified path. If there are zero or multiple safe candidates, the bound is
+reached, or metadata fails, the normal UI says only **We couldn’t find the matching official
+version. This copy will remain launch-only.** and offers **Close** /
+**Choose a different version…**. The latter alone opens the existing bounded paged
+official-history chooser; rows use understandable versions and do not expose digest or repository
+terminology. Technical causes are retained only in sanitized local diagnostics. All
+metadata/package work runs in a worker under `BusyGate`, with exact record, selected channel,
+dialog generation, and cancellation guards.
 
 Verification uses one styled progress surface and supports safe cancellation until publication.
 Its visible summary never lists paths, digests, or comparison counts. An eligible result says

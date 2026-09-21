@@ -58,6 +58,9 @@ public final class ImportedCopyAdoptionService {
     private static final Pattern CREDIBLE_VERSION =
             Pattern.compile("[0-9]+\\.[0-9]+(?:\\.[0-9]+)?(?:[-.][A-Za-z0-9.-]+)?");
     private static final int DIAGNOSTIC_PATH_LIMIT = 40;
+    public static final String AUTOMATIC_MATCH_UNAVAILABLE =
+            "We couldn’t find the matching official version. "
+                    + "This copy will remain launch-only.";
 
     private final Path registry;
     private final ReleaseTransport transport;
@@ -110,6 +113,66 @@ public final class ImportedCopyAdoptionService {
                 ? "v" + version : null;
         return new Suggestion(repository, tag, displayProducts(record.products()),
                 version == null || version.isBlank() ? "Unknown" : version);
+    }
+
+    /**
+     * Resolves the observed build from bounded list metadata, then enters the ordinary exact-tag
+     * preparation path. The exact endpoint is therefore used only after one list candidate exists.
+     */
+    public PreparedAdoption prepareAutomatically(
+            InstallationRecord expected, OfficialRepository requestedRepository,
+            FollowChannel fixedChannel, PrintStream diagnostics, OperationContext context)
+            throws IOException, InterruptedException, ManifestException {
+        String exactTag = resolveAutomaticTag(expected, requestedRepository,
+                fixedChannel, diagnostics, context);
+        return prepare(expected, requestedRepository, exactTag, fixedChannel,
+                diagnostics, context);
+    }
+
+    private String resolveAutomaticTag(
+            InstallationRecord expected, OfficialRepository requestedRepository,
+            FollowChannel fixedChannel, PrintStream diagnostics, OperationContext context)
+            throws IOException, InterruptedException {
+        requireWorkerThread();
+        if (expected == null) throw new IOException("selected imported copy is required");
+        requireChannel(fixedChannel);
+        Objects.requireNonNull(diagnostics, "diagnostics");
+        Objects.requireNonNull(context, "context");
+        try (OperationContext.WorkerRegistration ignored = context.activate()) {
+            context.phase(OperationPhase.METADATA,
+                    "Finding the matching official version");
+            RegistryData data = registries.read(registry);
+            InstallationRecord record = registries.resolve(data, expected.id());
+            if (!record.equals(expected)) {
+                throw new IOException("the selected installation changed; reopen Installations");
+            }
+            OfficialRepository repository = repositoryFor(record.products());
+            if (repository != requestedRepository) {
+                throw new IOException("the detected application mapping changed");
+            }
+            Path root = requireTrueImported(data, record);
+            try (var gate = coordinator.acquire(root, false)) {
+                gate.requireNoPendingUpdate();
+                Inspection observed = inspector.inspect(root);
+                if (!matchesRecord(observed, record)) {
+                    throw new IOException("the imported application changed after registration");
+                }
+                if (observed.observedBuild().isBlank()
+                        || "unknown".equalsIgnoreCase(observed.observedBuild())
+                        || !observed.confidence().startsWith("recognized-packaging")) {
+                    throw new IOException("the detected application version is not strong enough "
+                            + "to resolve an official release");
+                }
+            }
+            AutomaticAdoptionResolver.Resolution resolution =
+                    new AutomaticAdoptionResolver(transport).resolve(repository,
+                            record.observedBuild(), diagnostics, context);
+            if (resolution.matched()) return resolution.release().tag();
+            Throwable technical = resolution.failure() == null
+                    ? new IOException(resolution.diagnostic())
+                    : resolution.failure();
+            throw new CandidateResolutionException(AUTOMATIC_MATCH_UNAVAILABLE, technical);
+        }
     }
 
     /** Classifies local sidecar presence without contacting any release service. */
@@ -216,21 +279,26 @@ public final class ImportedCopyAdoptionService {
             try {
                 release = catalog.exact(repository, exactTag);
             } catch (IOException error) {
-                throw new CandidateResolutionException(
-                        "The detected version could not be found as a verifiable official "
-                                + "release.", error);
+                throw new CandidateResolutionException(AUTOMATIC_MATCH_UNAVAILABLE, error);
             }
             ReleaseCatalog.Assessment assessment = catalog.assess(repository, release);
             if (!assessment.eligible()) {
-                throw new CandidateResolutionException(
-                        "This official release cannot be verified: " + assessment.reason());
+                throw new CandidateResolutionException(AUTOMATIC_MATCH_UNAVAILABLE,
+                        new IOException("selected exact release is no longer eligible: "
+                                + assessment.reason()));
             }
             ReleaseCatalog.Asset asset = assessment.asset();
             VerifiedPackageFetcher.ExpectedAsset expectedAsset =
                     new VerifiedPackageFetcher.ExpectedAsset(asset.name(), asset.size(),
                             asset.digest(), asset.url());
-            workspace = new VerifiedPackageFetcher(transport).fetch(repository, release.tag(),
-                    attemptDirectory, "package-", diagnostics, expectedAsset, context);
+            try {
+                workspace = new VerifiedPackageFetcher(transport).fetch(
+                        repository, release.tag(), attemptDirectory, "package-",
+                        diagnostics, expectedAsset, context);
+            } catch (IOException error) {
+                throw new CandidateResolutionException(
+                        AUTOMATIC_MATCH_UNAVAILABLE, error);
+            }
             context.phase(OperationPhase.PLAN,
                     "Comparing the existing copy with the verified official package");
             Inspection officialInspection = inspector.inspect(workspace.extracted());
@@ -812,12 +880,12 @@ public final class ImportedCopyAdoptionService {
                 && first.products().equals(second.products());
     }
 
-    private static OfficialRepository repositoryFor(List<Product> products) throws IOException {
+    static OfficialRepository repositoryFor(List<Product> products) throws IOException {
         Set<String> keys = products.stream().map(Product::key).collect(
                 java.util.stream.Collectors.toSet());
         if (keys.contains("mekhq")) return OfficialRepository.MEKHQ;
-        if (keys.contains("megamek")) return OfficialRepository.MEGAMEK;
         if (keys.equals(Set.of("lab"))) return OfficialRepository.LAB;
+        if (keys.equals(Set.of("megamek"))) return OfficialRepository.MEGAMEK;
         throw new IOException("the detected applications do not map to one supported official "
                 + "package");
     }

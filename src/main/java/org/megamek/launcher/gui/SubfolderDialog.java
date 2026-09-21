@@ -186,19 +186,7 @@ final class SubfolderDialog extends JDialog {
     }
 
     private JButton button(String text, String name, boolean primary) {
-        JButton button = new JButton(text);
-        button.setName(name);
-        button.setFont(scale.font(button.getFont(), Font.BOLD, 13f));
-        button.setFocusPainted(true);
-        button.setOpaque(true);
-        button.setBackground(primary ? FirstLaunchPanel.GOLD : FirstLaunchPanel.PANEL);
-        button.setForeground(primary ? FirstLaunchPanel.BACKGROUND : FirstLaunchPanel.TEXT);
-        button.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(FirstLaunchPanel.GOLD),
-                BorderFactory.createEmptyBorder(scale.scaleForGUI(7),
-                        scale.scaleForGUI(15), scale.scaleForGUI(7),
-                        scale.scaleForGUI(15))));
-        button.getAccessibleContext().setAccessibleName(text);
-        return button;
+        return new FirstLaunchButton(text, name, primary, scale,
+                FirstLaunchButton.Size.SMALL);
     }
 }

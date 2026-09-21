@@ -15,6 +15,8 @@ import org.megamek.launcher.release.ReleaseTransport;
 import org.megamek.launcher.update.ReceiptStore;
 
 import javax.swing.JButton;
+import javax.swing.JComboBox;
+import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
@@ -226,6 +228,148 @@ class ExistingImportSwingTest {
         }
     }
 
+    @Test
+    void adoptionStartIsCompactAndCancelOrEscapeMakesNoRequest() throws Exception {
+            Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                    "actual Swing controls require a display");
+            Path root = versionedMegaMekSuite("adoption-dialog");
+            Path registry = temp.resolve("adoption-dialog-registry.json");
+            AtomicInteger requests = new AtomicInteger();
+            ReleaseTransport recording = (uri, accept) -> {
+                requests.incrementAndGet();
+                throw new IOException("network must not run before Continue");
+            };
+            LauncherServices services = new LauncherServices(
+                    registry, new RegistryStore(), new InstallationInspector(), recording,
+                    new JavaRuntime(new RecordingRunner()),
+                    new ApplicationLauncher(new RecordingRunner()));
+            var record = services.register("Imported", root);
+            LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+            try {
+                onEdt(() -> {
+                    frame.showWindow();
+                    return null;
+                });
+                JButton manage = waitFor(() -> findButton(frame, "manageInstallationsButton"));
+                onEdt(() -> {
+                    manage.doClick();
+                    return null;
+                });
+                JButton enable = waitFor(() -> findButton(frame,
+                        "enableManagedUpdatesButton-" + record.id()));
+                onEdt(() -> {
+                    enable.doClick();
+                    return null;
+                });
+                JDialog dialog = waitFor(() -> findDialog(frame, "adoptionCandidateDialog"));
+                JButton cancel = (JButton) find(dialog, "cancelAdoptionButton");
+                JButton proceed = (JButton) find(dialog, "continueAdoptionButton");
+                JLabel application = (JLabel) find(dialog,
+                        "adoptionDetectedApplicationVersion");
+                JComboBox<?> channel = (JComboBox<?>) find(dialog, "adoptionChannelCombo");
+                assertEquals("MegaMek (0.50.7)", application.getText());
+                assertEquals(org.megamek.launcher.channel.FollowChannel.MILESTONE,
+                        channel.getSelectedItem());
+                assertTrue(cancel.getX() < proceed.getX());
+                assertTrue(dialog.getHeight() < dialog.getWidth(), "dialog remains compact");
+                assertNull(find(dialog, "chooseAdoptionReleaseButton"));
+                assertNull(find(dialog, "verifyAdoptionButton"));
+                assertEquals(0, countButtonText(dialog, "Verify copy"));
+                assertEquals(0, countButtonText(dialog, "Choose official release…"));
+                onEdt(() -> {
+                    dialog.getRootPane().getActionMap().get("cancelAdoption").actionPerformed(
+                            new java.awt.event.ActionEvent(dialog, 0, "escape"));
+                    return null;
+                });
+                assertEquals(0, requests.get());
+
+                onEdt(() -> {
+                    enable.doClick();
+                    return null;
+                });
+                JDialog reopened = waitFor(() -> findDialog(frame, "adoptionCandidateDialog"));
+                onEdt(() -> {
+                    ((JButton) find(reopened, "cancelAdoptionButton")).doClick();
+                    return null;
+                });
+                assertEquals(0, requests.get());
+            } finally {
+                dispose(frame);
+            }
+    }
+
+    @Test
+    void automaticMatchFailureIsSimpleDeduplicatedAndOnlyThenOffersChooser()
+            throws Exception {
+            Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                    "actual Swing controls require a display");
+            Path root = versionedMegaMekSuite("adoption-failure");
+            Path registry = temp.resolve("adoption-failure-registry.json");
+            AtomicInteger requests = new AtomicInteger();
+            ReleaseTransport missing = (uri, accept) -> {
+                requests.incrementAndGet();
+                return new ReleaseTransport.Response(404, Map.of(),
+                        new java.io.ByteArrayInputStream(
+                                "{\"message\":\"Not Found\"}".getBytes(
+                                        java.nio.charset.StandardCharsets.UTF_8)));
+            };
+            LauncherServices services = new LauncherServices(
+                    registry, new RegistryStore(), new InstallationInspector(), missing,
+                    new JavaRuntime(new RecordingRunner()),
+                    new ApplicationLauncher(new RecordingRunner()));
+            var record = services.register("Imported", root);
+            LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+            try {
+                onEdt(() -> {
+                    frame.showWindow();
+                    return null;
+                });
+                JButton manage = waitFor(() -> findButton(frame, "manageInstallationsButton"));
+                onEdt(() -> {
+                    manage.doClick();
+                    return null;
+                });
+                JButton enable = waitFor(() -> findButton(frame,
+                        "enableManagedUpdatesButton-" + record.id()));
+                onEdt(() -> {
+                    enable.doClick();
+                    return null;
+                });
+                JDialog start = waitFor(() -> findDialog(frame, "adoptionCandidateDialog"));
+                JButton proceed = (JButton) find(start, "continueAdoptionButton");
+                onEdt(() -> {
+                    proceed.doClick();
+                    proceed.doClick();
+                    return null;
+                });
+
+                JButton fallback = waitFor(() -> {
+                    JButton button = (JButton) findOwned(frame,
+                            "browseAfterAdoptionFailureButton");
+                    return button != null && button.isShowing() && button.isEnabled()
+                            ? button : null;
+                });
+                JLabel detail = waitFor(() -> (JLabel) findOwned(
+                        frame, "operationProgressDetail"));
+                assertTrue(detail.getText().contains(
+                        "We couldn’t find the matching official version."));
+                assertFalse(detail.getText().contains("404"));
+                assertEquals(1, requests.get(), "Continue is single-flight");
+                assertTrue(services.operationLogsForViewer().contains("HTTP 404"),
+                        "technical reason remains in sanitized local diagnostics");
+
+                onEdt(() -> {
+                    fallback.doClick();
+                    return null;
+                });
+                assertNotNull(waitFor(() -> findDialog(frame, "adoptionReleaseBrowser")));
+                assertEquals(1, requests.get(),
+                        "opening fallback does not fetch until its explicit Fetch versions action");
+            } finally {
+                dispose(frame);
+        }
+    }
+
     private LauncherServices services(Path registry, RecordingRunner runner) {
         return services(registry, runner,
                 () -> QuickInstallTestData.snapshot("0.51.0", "0.52.0"));
@@ -274,6 +418,24 @@ class ExistingImportSwingTest {
         return root;
     }
 
+    private Path versionedMegaMekSuite(String name) throws Exception {
+        Path root = Files.createDirectory(temp.resolve(name));
+        Files.createDirectories(root.resolve("data"));
+        Files.createDirectories(root.resolve("mmconf"));
+        Files.createDirectories(root.resolve("lib"));
+        Manifest manifest = new Manifest();
+        manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        manifest.getMainAttributes().put(Attributes.Name.MAIN_CLASS, "megamek.MegaMek");
+        try (JarOutputStream jar = new JarOutputStream(
+                Files.newOutputStream(root.resolve("MegaMek.jar")), manifest)) {
+            jar.putNextEntry(new java.util.jar.JarEntry("megamek/Version.properties"));
+            jar.write("major=0\nminor=50\npatch=7\n".getBytes(
+                    java.nio.charset.StandardCharsets.UTF_8));
+            jar.closeEntry();
+        }
+        return root;
+    }
+
     private static Map<Path, Long> inventory(Path root) throws Exception {
         try (var files = Files.walk(root)) {
             return files.filter(Files::isRegularFile).collect(java.util.stream.Collectors.toMap(
@@ -310,6 +472,31 @@ class ExistingImportSwingTest {
     private static JButton findButton(Container root, String name) {
         Component found = find(root, name);
         return found instanceof JButton button ? button : null;
+    }
+
+    private static int countButtonText(Container root, String text) {
+        int count = 0;
+        for (Component child : root.getComponents()) {
+            if (child instanceof JButton button && text.equals(button.getText())) count++;
+            if (child instanceof Container nested) count += countButtonText(nested, text);
+        }
+        return count;
+    }
+
+    private static JDialog findDialog(LauncherFrame frame, String name) {
+        for (java.awt.Window window : frame.getOwnedWindows()) {
+            if (window instanceof JDialog dialog && dialog.isShowing()
+                    && name.equals(dialog.getName())) return dialog;
+        }
+        return null;
+    }
+
+    private static Component findOwned(LauncherFrame frame, String name) {
+        for (java.awt.Window window : frame.getOwnedWindows()) {
+            Component found = find(window, name);
+            if (found != null) return found;
+        }
+        return null;
     }
 
     private static boolean hasShowingDialog(LauncherFrame frame, String title) {

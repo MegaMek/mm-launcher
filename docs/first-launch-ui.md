@@ -91,8 +91,11 @@ receive no ownership receipt or channel setting and remain update-ineligible. Th
 prompted to choose a channel; Installations labels them **Imported copy · Launch only · Updates
 unavailable**. A genuine import later exposes one separate **Enable managed updates…** action;
 it is never part of import and never appears for corrupt/incomplete provenance. That opt-in flow
-verifies one exact official package without changing root files before it can publish a fixed
-Milestone or Development channel.
+starts with a compact **Program (Version)** and update-channel dialog. Cancel/Escape performs no
+network work; Continue automatically searches bounded official release-list metadata and, only
+for one safe match, verifies one exact official package without changing root files before it can
+publish a fixed Milestone or Development channel. A simple launch-only result offers the bounded
+manual version chooser only after automatic matching is inconclusive or unavailable.
 
 Selecting the main segment passes the cached `(MEKHQ, MILESTONE)` option to the normal planner.
 Selecting an available row passes that exact cached `QuickInstallOption`; neither action performs

@@ -43,6 +43,9 @@ public final class ReleaseCatalog {
                 + perPage + "&page=" + page);
         JsonNode root = requestJson(uri);
         if (!root.isArray()) throw new IOException("GitHub release response must be an array");
+        if (root.size() > perPage) {
+            throw new IOException("GitHub release response exceeds the requested page size");
+        }
         List<Release> releases = new ArrayList<>();
         for (JsonNode node : root) releases.add(parseRelease(repository, node, false));
         return new Page(page, perPage, List.copyOf(releases),

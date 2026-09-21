@@ -8,6 +8,7 @@ import org.megamek.launcher.operation.OperationProgress;
 import org.megamek.launcher.operation.OperationProgressListener;
 import org.megamek.launcher.operation.OperationType;
 import org.megamek.launcher.operation.ProgressUnit;
+import org.megamek.launcher.update.ImportedCopyAdoptionService;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -207,6 +208,8 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
 
     void showFailure(Throwable problem, String logWarning) {
         failure = problem;
+        boolean simpleAdoptionResolution =
+                problem instanceof ImportedCopyAdoptionService.CandidateResolutionException;
         failureShown = true;
         finished = true;
         pending.set(null);
@@ -216,7 +219,9 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         afterProgress.setVisible(false);
         phase.setText(getTitle() == null || getTitle().isBlank()
                 ? "Operation failed" : getTitle());
-        detail.setText(conciseFailure(problem));
+        detail.setText(simpleAdoptionResolution
+                ? "<html>" + ImportedCopyAdoptionService.AUTOMATIC_MATCH_UNAVAILABLE + "</html>"
+                : conciseFailure(problem));
         if (logWarning != null && !logWarning.isBlank()) {
             loggingWarning.setText(
                     "Local diagnostics could not be saved. The original failure is unchanged.");
@@ -227,7 +232,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         for (JButton button : contextualActions) {
             button.setVisible(button.isEnabled());
         }
-        viewDetails.setVisible(true);
+        viewDetails.setVisible(!simpleAdoptionResolution);
         cancel.setText("Close");
         cancel.getAccessibleContext().setAccessibleName("Close");
         cancel.setEnabled(true);

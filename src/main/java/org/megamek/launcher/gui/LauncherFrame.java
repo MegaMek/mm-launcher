@@ -35,6 +35,7 @@ import javax.swing.DefaultListModel;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
+import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JFileChooser;
 import javax.swing.JFrame;
@@ -72,6 +73,7 @@ import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.text.NumberFormat;
 import java.util.List;
@@ -763,9 +765,15 @@ public final class LauncherFrame extends JFrame {
         LauncherServices.InstallationStatus local = installationLocalStatus(record);
         String update = !managedUpdatesAvailable(local) || check == null
                 ? null : channelStatus(check.result(), check.error());
-        return name + " · " + VersionDisplay.programChannelVersion(
-                displayProduct(productKey), channel, version)
-                + (update == null ? "" : " · " + update);
+        String product = displayProduct(productKey);
+        String versionLabel = VersionDisplay.programChannelVersion(product, channel, version);
+        String generatedPrefix = product + (channel == null ? " (" : " " + channel + " (");
+        boolean generatedName = name.equalsIgnoreCase(product + " existing installation")
+                || name.equalsIgnoreCase(versionLabel)
+                || name.regionMatches(true, 0, generatedPrefix, 0, generatedPrefix.length())
+                && name.endsWith(")");
+        String label = generatedName ? name : name + " · " + versionLabel;
+        return label + (update == null ? "" : " · " + update);
     }
 
     private String homeChannelLabel(InstallationRecord record) {
@@ -963,7 +971,14 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void chooseExisting() {
-        Path selected = existingImportPrompts.chooseFolder(this);
+        Path preferredParent = null;
+        try {
+            preferredParent = services.normalInstallDestination(
+                    OfficialRepository.MEKHQ, FollowChannel.MILESTONE).getParent();
+        } catch (IOException ignored) {
+            // The chooser will use its platform fallback if no suggestion can be resolved.
+        }
+        Path selected = existingImportPrompts.chooseFolder(this, preferredParent);
         if (selected == null) return;
         OperationProgressDialog progress = new OperationProgressDialog(this,
                 "Adding existing installation", "existingImportProgressLog",
@@ -1366,9 +1381,25 @@ public final class LauncherFrame extends JFrame {
 
     private JMenuItem installationMenuItem(String text) {
         JMenuItem item = new JMenuItem(text);
+        item.setUI(new javax.swing.plaf.basic.BasicMenuItemUI() {
+            @Override
+            protected void installDefaults() {
+                super.installDefaults();
+                checkIcon = null;
+                arrowIcon = null;
+                defaultTextIconGap = 0;
+                selectionBackground = HomeLaunchSplitButton.POPUP_SELECTION;
+                selectionForeground = HomeLaunchSplitButton.POPUP_SELECTION_FOREGROUND;
+                disabledForeground = FirstLaunchPanel.MUTED;
+            }
+        });
         item.setOpaque(true);
         item.setBackground(HomeLaunchSplitButton.POPUP_BACKGROUND);
         item.setForeground(HomeLaunchSplitButton.POPUP_FOREGROUND);
+        item.setIconTextGap(0);
+        item.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(9),
+                guiScale.scaleForGUI(12), guiScale.scaleForGUI(9),
+                guiScale.scaleForGUI(12)));
         item.getAccessibleContext().setAccessibleName(text);
         return item;
     }
@@ -1451,20 +1482,35 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void beginAdoption(InstallationRecord record) {
+        final long generation = homeGeneration;
         run("Checking imported copy",
                 () -> services.adoptionSuggestion(record),
-                suggestion -> showAdoptionStart(record, suggestion));
+                suggestion -> {
+                    if (isCurrentAdoption(generation, record)) {
+                        showAdoptionStart(record, suggestion, generation);
+                    }
+                },
+                error -> {
+                    if (!isCurrentAdoption(generation, record)) return;
+                    showIneligibleAdoption(new PreparedAdoption.Report(false,
+                            record.name(), record.observedBuild(), FollowChannel.MILESTONE,
+                            ImportedCopyAdoptionService.AUTOMATIC_MATCH_UNAVAILABLE));
+                    recordErrorAsync("Mapping imported copy to an official product",
+                            error, ignored -> {});
+                }, () -> {}, false);
     }
 
     private void showAdoptionStart(
             InstallationRecord record,
-            ImportedCopyAdoptionService.Suggestion suggestion) {
+            ImportedCopyAdoptionService.Suggestion suggestion,
+            long generation) {
+        if (!isCurrentAdoption(generation, record)) return;
         JPanel details = new JPanel();
         details.setName("adoptionCandidateContent");
         details.setLayout(new BoxLayout(details, BoxLayout.Y_AXIS));
         details.setBackground(FirstLaunchPanel.BACKGROUND);
-        details.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(18),
-                guiScale.scaleForGUI(20), guiScale.scaleForGUI(14),
+        details.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(14),
+                guiScale.scaleForGUI(18), guiScale.scaleForGUI(8),
                 guiScale.scaleForGUI(20)));
 
         JLabel heading = new JLabel("Enable managed updates");
@@ -1473,25 +1519,20 @@ public final class LauncherFrame extends JFrame {
         heading.setFont(guiScale.font(heading.getFont(), Font.BOLD, 22f));
         heading.setAlignmentX(Component.LEFT_ALIGNMENT);
         details.add(heading);
-        details.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
+        details.add(Box.createVerticalStrut(guiScale.scaleForGUI(8)));
 
-        JLabel application = new JLabel("Detected application: "
-                + suggestion.detectedApplication());
-        application.setName("adoptionDetectedApplication");
+        JLabel application = new JLabel(suggestion.detectedApplication() + " ("
+                + suggestion.detectedVersion() + ")");
+        application.setName("adoptionDetectedApplicationVersion");
         application.setForeground(FirstLaunchPanel.TEXT);
         application.setAlignmentX(Component.LEFT_ALIGNMENT);
         details.add(application);
-        JLabel version = new JLabel("Detected version: " + suggestion.detectedVersion());
-        version.setName("adoptionDetectedVersion");
-        version.setForeground(FirstLaunchPanel.TEXT);
-        version.setAlignmentX(Component.LEFT_ALIGNMENT);
-        details.add(version);
-        details.add(Box.createVerticalStrut(guiScale.scaleForGUI(12)));
+        details.add(Box.createVerticalStrut(guiScale.scaleForGUI(9)));
 
         JPanel channelRow = new JPanel(new java.awt.FlowLayout(
                 java.awt.FlowLayout.LEFT, guiScale.scaleForGUI(8), 0));
         channelRow.setOpaque(false);
-        JLabel channelLabel = new JLabel("Future update channel:");
+        JLabel channelLabel = new JLabel("Update channel:");
         channelLabel.setForeground(FirstLaunchPanel.TEXT);
         StyledComboBox<FollowChannel> channel = new StyledComboBox<>(
                 new FollowChannel[]{FollowChannel.MILESTONE, FollowChannel.DEVELOPMENT},
@@ -1506,11 +1547,10 @@ public final class LauncherFrame extends JFrame {
         channelRow.add(channel);
         channelRow.setAlignmentX(Component.LEFT_ALIGNMENT);
         details.add(channelRow);
-        details.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
+        details.add(Box.createVerticalStrut(guiScale.scaleForGUI(8)));
 
-        JLabel explanation = new JLabel("<html>The launcher will compare this copy with one "
-                + "official package. Existing application and personal files will not be "
-                + "changed.</html>");
+        JLabel explanation = new JLabel(
+                "Existing application and personal files will not be changed.");
         explanation.setName("adoptionExplanation");
         explanation.setForeground(FirstLaunchPanel.MUTED);
         explanation.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -1519,51 +1559,60 @@ public final class LauncherFrame extends JFrame {
         JDialog dialog = new JDialog(this, "Enable managed updates", false);
         dialog.setName("adoptionCandidateDialog");
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-        JPanel actions = new JPanel(new java.awt.FlowLayout(
-                java.awt.FlowLayout.RIGHT, guiScale.scaleForGUI(8), 0));
+        JPanel actions = new JPanel(new BorderLayout());
         actions.setBackground(FirstLaunchPanel.BACKGROUND);
-        JButton choose = homeButton("Choose official release…",
-                "chooseAdoptionReleaseButton");
         JButton cancel = homeButton("Cancel", "cancelAdoptionButton");
-        JButton verify = homeButton("Verify copy", "verifyAdoptionButton");
-        verify.setFont(guiScale.font(verify.getFont(), Font.BOLD, 14f));
-        verify.setMnemonic(KeyEvent.VK_V);
-        verify.getAccessibleContext().setAccessibleDescription(
-                "Download one official package and verify this copy without changing it.");
-        actions.add(choose);
-        actions.add(cancel);
-        actions.add(verify);
+        JButton continueButton = homeButton("Continue", "continueAdoptionButton");
+        continueButton.setFont(guiScale.font(
+                continueButton.getFont(), Font.BOLD, 14f));
+        continueButton.setMnemonic(KeyEvent.VK_C);
+        continueButton.getAccessibleContext().setAccessibleDescription(
+                "Find the matching official version and verify this copy without changing it.");
+        cancel.setMnemonic(KeyEvent.VK_A);
+        cancel.getAccessibleContext().setAccessibleDescription(
+                "Close without contacting the release service.");
+        actions.add(cancel, BorderLayout.WEST);
+        actions.add(continueButton, BorderLayout.EAST);
         JPanel body = new JPanel(new BorderLayout(0, guiScale.scaleForGUI(12)));
         body.setBackground(FirstLaunchPanel.BACKGROUND);
         body.add(details, BorderLayout.CENTER);
         body.add(actions, BorderLayout.SOUTH);
         dialog.setContentPane(body);
-        dialog.setSize(guiScale.scaleForGUI(610, 330));
+        Dimension requested = guiScale.scaleForGUI(560, 235);
+        dialog.setSize(GuiScale.fitWindow(requested,
+                GuiScale.usableBounds(getGraphicsConfiguration())));
         dialog.setLocationRelativeTo(this);
 
+        java.util.concurrent.atomic.AtomicBoolean continuing =
+                new java.util.concurrent.atomic.AtomicBoolean();
         cancel.addActionListener(event -> dialog.dispose());
-        choose.addActionListener(event -> {
-            FollowChannel selected = (FollowChannel) channel.getSelectedItem();
-            dialog.dispose();
-            openAdoptionReleaseBrowser(record, suggestion, selected);
-        });
-        verify.addActionListener(event -> {
-            FollowChannel selected = (FollowChannel) channel.getSelectedItem();
-            dialog.dispose();
-            if (suggestion.suggestedTag() == null) {
-                openAdoptionReleaseBrowser(record, suggestion, selected);
-            } else {
-                prepareAdoption(record, suggestion, suggestion.suggestedTag(), selected);
+        continueButton.addActionListener(event -> {
+            if (!continuing.compareAndSet(false, true)) return;
+            if (!isCurrentAdoption(generation, record)) {
+                dialog.dispose();
+                return;
             }
+            FollowChannel selected = (FollowChannel) channel.getSelectedItem();
+            if (selected == null) {
+                continuing.set(false);
+                return;
+            }
+            continueButton.setEnabled(false);
+            cancel.setEnabled(false);
+            dialog.dispose();
+            prepareAdoption(record, suggestion, null, selected, generation);
         });
-        dialog.getRootPane().setDefaultButton(verify);
+        dialog.getRootPane().setDefaultButton(continueButton);
+        installEscapeAction(dialog, "cancelAdoption", dialog::dispose);
         dialog.setVisible(true);
     }
 
     private void openAdoptionReleaseBrowser(
             InstallationRecord record,
             ImportedCopyAdoptionService.Suggestion suggestion,
-            FollowChannel fixedChannel) {
+            FollowChannel fixedChannel,
+            long generation) {
+        if (!isCurrentAdoption(generation, record)) return;
         DefaultListModel<AdoptionReleaseChoice> model = new DefaultListModel<>();
         JList<AdoptionReleaseChoice> releases = new JList<>(model);
         releases.setName("adoptionReleaseList");
@@ -1580,9 +1629,10 @@ public final class LauncherFrame extends JFrame {
         JButton fetch = homeButton("Fetch versions", "fetchAdoptionReleasesButton");
         JButton next = homeButton("Next page", "nextAdoptionReleasePageButton");
         JButton cancel = homeButton("Cancel", "cancelAdoptionReleaseButton");
-        JButton verify = homeButton("Verify copy", "verifySelectedAdoptionButton");
+        JButton continueButton = homeButton("Continue",
+                "continueSelectedAdoptionButton");
         next.setEnabled(false);
-        verify.setEnabled(false);
+        continueButton.setEnabled(false);
         final int[] pageNumber = {0};
         final boolean[] more = {false};
 
@@ -1612,7 +1662,7 @@ public final class LauncherFrame extends JFrame {
         buttons.setOpaque(false);
         buttons.add(next);
         buttons.add(cancel);
-        buttons.add(verify);
+        buttons.add(continueButton);
         actions.add(buttons, BorderLayout.EAST);
 
         JPanel body = new JPanel(new BorderLayout(guiScale.scaleForGUI(10),
@@ -1635,11 +1685,15 @@ public final class LauncherFrame extends JFrame {
         Consumer<Integer> load = requested -> {
             fetch.setEnabled(false);
             next.setEnabled(false);
-            verify.setEnabled(false);
+            continueButton.setEnabled(false);
             run("Fetching official versions",
                     () -> services.releases(suggestion.repository(), requested),
                     result -> {
-                        if (!dialog.isDisplayable()) return;
+                        if (!dialog.isDisplayable()
+                                || !isCurrentAdoption(generation, record)) {
+                            dialog.dispose();
+                            return;
+                        }
                         model.clear();
                         result.releases().forEach(release -> model.addElement(
                                 new AdoptionReleaseChoice(release,
@@ -1654,38 +1708,53 @@ public final class LauncherFrame extends JFrame {
                     }, error -> {
                         fetch.setEnabled(true);
                         next.setEnabled(pageNumber[0] > 0 && more[0]);
-                    });
+                        status.setText("Official versions could not be loaded. Try again.");
+                        recordErrorAsync("Loading official versions for adoption",
+                                error, ignored -> {});
+                    }, () -> {}, false);
         };
         fetch.addActionListener(event -> load.accept(1));
         next.addActionListener(event -> load.accept(pageNumber[0] + 1));
         releases.addListSelectionListener(event -> {
             AdoptionReleaseChoice selected = releases.getSelectedValue();
-            verify.setEnabled(selected != null && selected.assessment().eligible());
+            continueButton.setEnabled(selected != null
+                    && selected.assessment().eligible());
             if (selected != null && !selected.assessment().eligible()) {
                 status.setText("This release cannot be used for safe verification.");
             }
         });
         cancel.addActionListener(event -> dialog.dispose());
-        verify.addActionListener(event -> {
+        continueButton.addActionListener(event -> {
             AdoptionReleaseChoice selected = releases.getSelectedValue();
-            if (selected == null || !selected.assessment().eligible()) return;
+            if (selected == null || !selected.assessment().eligible()
+                    || !isCurrentAdoption(generation, record)) {
+                if (!isCurrentAdoption(generation, record)) dialog.dispose();
+                return;
+            }
+            continueButton.setEnabled(false);
             dialog.dispose();
-            prepareAdoption(record, suggestion, selected.release().tag(), fixedChannel);
+            prepareAdoption(record, suggestion, selected.release().tag(),
+                    fixedChannel, generation);
         });
+        installEscapeAction(dialog, "cancelAdoptionRelease", dialog::dispose);
         dialog.setVisible(true);
     }
 
     private void prepareAdoption(
             InstallationRecord record,
             ImportedCopyAdoptionService.Suggestion suggestion,
-            String exactTag, FollowChannel fixedChannel) {
+            String exactTag, FollowChannel fixedChannel, long generation) {
+        if (!isCurrentAdoption(generation, record)) return;
         OperationProgressDialog progress = new OperationProgressDialog(this,
                 "Verifying imported copy", "adoptionProgressLog", this::showOperationLogs);
-        JButton browse = button("Choose official release…", "browseAfterAdoptionFailureButton");
+        JButton browse = button("Choose a different version…",
+                "browseAfterAdoptionFailureButton");
         browse.setEnabled(false);
         browse.addActionListener(event -> {
             progress.dispose();
-            openAdoptionReleaseBrowser(record, suggestion, fixedChannel);
+            if (isCurrentAdoption(generation, record)) {
+                openAdoptionReleaseBrowser(record, suggestion, fixedChannel, generation);
+            }
         });
         progress.addActionButton(browse);
         progress.setVisible(true);
@@ -1693,9 +1762,22 @@ public final class LauncherFrame extends JFrame {
                 StandardCharsets.UTF_8);
         runOperation("Verifying imported copy", OperationType.ADOPT_EXISTING,
                 List.of(Path.of(record.canonicalRoot())), progress,
-                context -> services.prepareAdoption(record, suggestion.repository(), exactTag,
+                context -> exactTag == null
+                        ? services.prepareAutomaticAdoption(record, suggestion.repository(),
+                        fixedChannel, stream, context)
+                        : services.prepareAdoption(record, suggestion.repository(), exactTag,
                         fixedChannel, stream, context),
                 prepared -> {
+                    if (!isCurrentAdoption(generation, record)) {
+                        try {
+                            prepared.close();
+                        } catch (IOException error) {
+                            recordErrorAsync("Cleaning stale adoption workspace",
+                                    error, ignored -> {});
+                        }
+                        progress.dispose();
+                        return;
+                    }
                     if (prepared.report().eligible()) {
                         progress.dispose();
                         showEligibleAdoption(prepared);
@@ -1715,9 +1797,26 @@ public final class LauncherFrame extends JFrame {
                     }
                 }, error -> {
                     progress.setTitle("This copy remains launch-only");
-                    browse.setEnabled(error
-                            instanceof ImportedCopyAdoptionService.CandidateResolutionException);
+                    browse.setEnabled(isCurrentAdoption(generation, record)
+                            && error instanceof
+                            ImportedCopyAdoptionService.CandidateResolutionException);
                 }, stream::close);
+    }
+
+    private boolean isCurrentAdoption(long generation, InstallationRecord record) {
+        return isDisplayable() && generation == homeGeneration
+                && page == Page.INSTALLATIONS && state != null
+                && state.registry().installations().contains(record);
+    }
+
+    private static void installEscapeAction(JDialog dialog, String key, Runnable action) {
+        dialog.getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(
+                KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), key);
+        dialog.getRootPane().getActionMap().put(key, new AbstractAction() {
+            @Override public void actionPerformed(ActionEvent event) {
+                action.run();
+            }
+        });
     }
 
     private void showEligibleAdoption(PreparedAdoption prepared) {
@@ -3157,7 +3256,14 @@ public final class LauncherFrame extends JFrame {
 
     private Path chooseNewInstallDestination(JDialog owner, OfficialRepository repository,
                                              FollowChannel channel, String tag) {
-        JFileChooser chooser = folders("Choose an existing writable parent folder");
+        Path preferredParent = null;
+        try {
+            preferredParent = services.normalInstallDestination(repository, channel).getParent();
+        } catch (IOException ignored) {
+            // The chooser still has a safe platform default when the suggested path is unavailable.
+        }
+        JFileChooser chooser = folders("Choose an existing writable parent folder",
+                preferredParent);
         if (chooser.showOpenDialog(owner) != JFileChooser.APPROVE_OPTION) return null;
         final String suggestion;
         try {
@@ -3582,10 +3688,20 @@ public final class LauncherFrame extends JFrame {
     }
 
     private static JFileChooser folders(String title) {
+        return folders(title, null);
+    }
+
+    private static JFileChooser folders(String title, Path preferredDirectory) {
         JFileChooser chooser = new JFileChooser();
         chooser.setDialogTitle(title);
         chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
         chooser.setAcceptAllFileFilterUsed(false);
+        Path current = preferredDirectory;
+        while (current != null && (!Files.isDirectory(current, LinkOption.NOFOLLOW_LINKS)
+                || Files.isSymbolicLink(current))) {
+            current = current.getParent();
+        }
+        if (current != null) chooser.setCurrentDirectory(current.toFile());
         return chooser;
     }
 
@@ -3657,6 +3773,10 @@ public final class LauncherFrame extends JFrame {
     @FunctionalInterface
     interface ExistingImportPrompts {
         Path chooseFolder(Component parent);
+
+        default Path chooseFolder(Component parent, Path preferredDirectory) {
+            return chooseFolder(parent);
+        }
     }
 
     @FunctionalInterface
@@ -3668,7 +3788,8 @@ public final class LauncherFrame extends JFrame {
             implements NormalInstallLocationPrompts {
         @Override
         public Path choose(Component parent, NormalInstallService.Plan plan) throws IOException {
-            JFileChooser chooser = folders("Choose an existing writable parent folder");
+            JFileChooser chooser = folders("Choose an existing writable parent folder",
+                    plan.destination().getParent());
             if (chooser.showOpenDialog(parent) != JFileChooser.APPROVE_OPTION) return null;
             String proposedName =
                     NormalInstallService.friendlyName(plan);
@@ -3681,7 +3802,13 @@ public final class LauncherFrame extends JFrame {
     private static final class SwingExistingImportPrompts implements ExistingImportPrompts {
         @Override
         public Path chooseFolder(Component parent) {
-            JFileChooser chooser = folders("Choose an extracted MegaMek or MekHQ folder");
+            return chooseFolder(parent, null);
+        }
+
+        @Override
+        public Path chooseFolder(Component parent, Path preferredDirectory) {
+            JFileChooser chooser = folders("Choose an extracted MegaMek or MekHQ folder",
+                    preferredDirectory);
             return chooser.showOpenDialog(parent) == JFileChooser.APPROVE_OPTION
                     ? chooser.getSelectedFile().toPath() : null;
         }

@@ -104,6 +104,39 @@ class ImportedCopyAdoptionServiceTest {
     }
 
     @Test
+    void automaticResolutionUsesListBeforeExactMetadataAndDownloadsOnePackage()
+            throws Exception {
+        byte[] jar = jarVersion(0, 50, 7, null);
+        byte[] archive = archive(jar, "official-data", "official-setting");
+        String metadata = releaseJson(archive, "v0.50.07", "0.50.07");
+        QueueTransport transport = new QueueTransport(
+                response("[" + metadata + "]"), response(metadata), response(metadata),
+                binary(archive));
+        Fixture fixture = fixture(jar, "official-data", "local-setting",
+                transport, point -> {});
+
+        try (PreparedAdoption prepared = fixture.service().prepareAutomatically(
+                fixture.record(),
+                org.megamek.launcher.release.OfficialRepository.MEGAMEK,
+                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                OperationContext.none(OperationType.ADOPT_EXISTING))) {
+            assertTrue(prepared.report().eligible());
+            assertEquals("v0.50.07", prepared.release().tag());
+        }
+
+        assertEquals(1, transport.packageRequests);
+        assertEquals(4, transport.requests.size());
+        assertTrue(transport.requests.get(0).toString().contains(
+                "/releases?per_page=50&page=1"));
+        assertTrue(transport.requests.get(1).toString().endsWith(
+                "/releases/tags/v0.50.07"));
+        assertTrue(transport.requests.get(2).toString().endsWith(
+                "/releases/tags/v0.50.07"));
+        assertFalse(transport.requests.get(0).toString().contains("/tags/"),
+                "automatic matching must not probe a guessed exact tag");
+    }
+
+    @Test
     void modifiedDataProtectedAndUnknownFilesArePreservedAndSeeded()
             throws Exception {
         byte[] jar = jar(null);
@@ -428,13 +461,25 @@ class ImportedCopyAdoptionServiceTest {
     }
 
     private static String releaseJson(byte[] archive, String digest) {
+        return releaseJson(archive, "v1.2.3", "1.2.3", digest);
+    }
+
+    private static String releaseJson(byte[] archive, String tag, String version)
+            throws Exception {
+        String digest = HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(archive));
+        return releaseJson(archive, tag, version, digest);
+    }
+
+    private static String releaseJson(byte[] archive, String tag, String version,
+                                      String digest) {
         return """
-                {"tag_name":"v1.2.3","name":"Version 1.2.3","draft":false,"prerelease":false,
-                "html_url":"https://github.com/MegaMek/megamek/releases/tag/v1.2.3",
-                "assets":[{"name":"MegaMek-1.2.3.tar.gz","size":%d,
+                {"tag_name":"%s","name":"Version %s","draft":false,"prerelease":false,
+                "html_url":"https://github.com/MegaMek/megamek/releases/tag/%s",
+                "assets":[{"name":"MegaMek-%s.tar.gz","size":%d,
                 "digest":"sha256:%s",
-                "browser_download_url":"https://github.com/MegaMek/megamek/releases/download/v1.2.3/MegaMek-1.2.3.tar.gz"}]}
-                """.formatted(archive.length, digest);
+                "browser_download_url":"https://github.com/MegaMek/megamek/releases/download/%s/MegaMek-%s.tar.gz"}]}
+                """.formatted(tag, version, tag, version, archive.length, digest, tag, version);
     }
 
     private static Supplier<ReleaseTransport.Response> response(String body) {
