@@ -278,11 +278,8 @@ public final class ImportedCopyAdoptionService {
             logComparison(diagnostics, context, comparison);
             String application = displayProducts(record.products());
             String version = displayVersion(record.observedBuild());
-            String message = comparison.eligible()
-                    ? "This copy can be managed safely. Existing files will not be changed."
-                    : comparison.reason();
             PreparedAdoption.Report report = new PreparedAdoption.Report(comparison.eligible(),
-                    application, version, fixedChannel, message);
+                    application, version, fixedChannel, comparison.reason());
             VerifiedPackageFetcher.Workspace retainedWorkspace = workspace;
             Path retainedDirectory = attemptDirectory;
             PreparedAdoption prepared = new PreparedAdoption(owner, record, repository,
@@ -653,19 +650,22 @@ public final class ImportedCopyAdoptionService {
             }
         }
         boolean criticalModified = modified.stream().anyMatch(PathMatch::identityCritical);
-        boolean eligible = identity && missing.isEmpty() && conflicts.isEmpty()
-                && !criticalModified;
+        // A missing file has no unknown content to trust; the ordinary update planner already
+        // restores any official path that isn't present locally (see UpdatePlanner.decide), so
+        // missing files carry no more risk here than they do for any later managed update.
+        boolean eligible = identity && conflicts.isEmpty() && !criticalModified;
         String reason;
         if (!identity) {
             reason = "This installation does not match the official release for its version.";
         } else if (!conflicts.isEmpty()) {
             reason = "A file or folder conflict prevents this installation from being managed.";
-        } else if (!missing.isEmpty()) {
-            reason = "This installation is missing files from the official release.";
         } else if (criticalModified) {
             reason = "Core application files differ from the official release.";
+        } else if (!missing.isEmpty()) {
+            reason = "This copy can be managed safely. " + missing.size()
+                    + " missing file(s) will be restored by the next update.";
         } else {
-            reason = "Verified";
+            reason = "This copy can be managed safely. Existing files will not be changed.";
         }
         return new Comparison(eligible, identity, exact, List.copyOf(modified),
                 List.copyOf(missing), List.copyOf(unknown), List.copyOf(conflicts),

@@ -158,11 +158,14 @@ regular files while checking stable identity. The extracted package then reports
 **Checking official package** and is traversed and hashed exactly once. The same immutable
 per-entry SHA-256 evidence produces both the official ownership manifest and the full official
 comparison snapshot. Every official runtime path (root application executable/JAR/script and all
-`lib/` dependencies) must be present and byte-identical. Missing managed paths are currently
-unsupported and block adoption. Modified non-runtime managed paths are allowed only as explicit
-`MODIFIED` overrides seeded with the pristine official ancestor hash. Unknown regular files are
-retained. Protected saves, campaigns, userdata, custom content, configuration, logs, and backups
-remain excluded and unmanaged.
+`lib/` dependencies) present locally must be byte-identical; a path that is present under a
+conflicting non-regular entry, or whose content differs, blocks adoption. A managed path that is
+simply absent locally does not block adoption: it carries no unknown content to trust, and the
+ordinary managed-update planner already restores any official path missing from the installation,
+so a missing file is no riskier here than for any later update. Modified non-runtime managed paths
+are allowed only as explicit `MODIFIED` overrides seeded with the pristine official ancestor hash.
+Unknown regular files are retained. Protected saves, campaigns, userdata, custom content,
+configuration, logs, and backups remain excluded and unmanaged.
 
 The opaque prepared handle is one-use, process-local, non-serializable, and bound to its creating
 service, registry, exact record, root snapshot, repository/tag/asset/size/resolved digest, fixed

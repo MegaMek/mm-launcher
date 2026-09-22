@@ -119,8 +119,10 @@ content as official.
 
 For an adopted copy, the initial current state names the exact verified ancestor and seeds every
 allowed pre-existing modified managed path as `MODIFIED` with only its official ancestor hash.
-Runtime modifications and missing managed paths block adoption, so the first later preview cannot
-mistake mixed executable bytes for pristine content or silently restore an intentional omission.
+Runtime content modifications and folder/file conflicts block adoption, so the first later preview
+cannot mistake mixed executable bytes for pristine content. A managed path simply absent at
+adoption time does not block adoption and needs no seeded state: the first later preview plans it
+as an ordinary `ADD`, the same outcome any later update would give any other missing official path.
 Unknown and protected files remain outside the manifest. Adoption publishes no root transaction
 and performs no application mutation; the first post-adoption update remains an ordinary,
 separately requested Check/Preview/Apply.

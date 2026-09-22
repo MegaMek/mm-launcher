@@ -341,7 +341,7 @@ class ImportedCopyAdoptionServiceTest {
     }
 
     @Test
-    void modifiedRuntimeAndMissingManagedFilesRemainLaunchOnly() throws Exception {
+    void modifiedRuntimeFilesRemainLaunchOnly() throws Exception {
         byte[] officialJar = jar(null);
         byte[] archive = archive(officialJar, "official-data", "official-setting");
 
@@ -371,7 +371,17 @@ class ImportedCopyAdoptionServiceTest {
                     "a mixed dependency JAR must block adoption");
         }
         assertNoProvenance(dependency);
+    }
 
+    @Test
+    void missingManagedFilesDoNotBlockAdoptionAndAreRestoredByTheNextUpdate()
+            throws Exception {
+        byte[] officialJar = jar(null);
+        byte[] archive = archive(officialJar, "official-data", "official-setting");
+
+        // A missing critical runtime dependency carries no unknown content to trust; the
+        // ordinary update planner already restores any official path that isn't present
+        // locally, so it is no riskier here than it is for any later managed update.
         QueueTransport criticalMissingTransport = transport(archive);
         Fixture criticalMissing = fixture(officialJar, "official-data", "local-setting",
                 criticalMissingTransport, point -> {});
@@ -381,10 +391,12 @@ class ImportedCopyAdoptionServiceTest {
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
                 FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING))) {
-            assertFalse(prepared.report().eligible(),
-                    "a missing dependency must block adoption");
+            assertTrue(prepared.report().eligible(),
+                    "a missing dependency no longer blocks adoption");
+            assertEquals("This copy can be managed safely. 1 missing file(s) will be "
+                    + "restored by the next update.", prepared.report().message());
+            criticalMissing.service().commit(prepared);
         }
-        assertNoProvenance(criticalMissing);
 
         QueueTransport missingTransport = transport(archive);
         Fixture missing = fixture(officialJar, "official-data", "local-setting",
@@ -394,10 +406,13 @@ class ImportedCopyAdoptionServiceTest {
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
                 FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING))) {
-            assertFalse(prepared.report().eligible(),
-                    "intentional missing managed files are blocked by explicit policy");
+            assertTrue(prepared.report().eligible(),
+                    "an intentionally removed managed file no longer blocks adoption");
+            missing.service().commit(prepared);
         }
-        assertNoProvenance(missing);
+        RegistryData missingData = missing.registries().read(missing.registry());
+        assertEquals(ImportedCopyAdoptionService.Availability.MANAGED,
+                missing.service().availability(missingData, missing.record(), false));
     }
 
     @Test
