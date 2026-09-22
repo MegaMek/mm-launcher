@@ -5,7 +5,6 @@ import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.manifest.FileEntry;
 import org.megamek.launcher.manifest.ManifestException;
-import org.megamek.launcher.manifest.ManifestReader;
 import org.megamek.launcher.onboarding.Inspection;
 import org.megamek.launcher.onboarding.InstallationInspector;
 import org.megamek.launcher.onboarding.Product;
@@ -19,28 +18,20 @@ import org.megamek.launcher.registry.RegistryStore;
 import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
 import org.megamek.launcher.release.ReleaseTransport;
-import org.megamek.launcher.release.SafeTarExtractor;
 import org.megamek.launcher.release.VerifiedPackageFetcher;
 import org.megamek.launcher.sandbox.OverrideEntry;
 
 import java.awt.EventQueue;
 import java.io.IOException;
-import java.io.InputStream;
 import java.io.PrintStream;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.attribute.BasicFileAttributes;
-import java.security.DigestInputStream;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.text.Normalizer;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -263,7 +254,8 @@ public final class ImportedCopyAdoptionService {
                     throw new IOException("the detected application version is not strong enough "
                             + "to verify an official ancestor");
                 }
-                local = snapshot(root, context, OperationPhase.METADATA);
+                local = RootSnapshot.capture(root, context, OperationPhase.METADATA,
+                        RootSnapshot.Scan.INITIAL_IMPORTED_COPY);
             }
             Path workspaceParent = requireWorkspaceParent(before);
             attemptDirectory = Files.createTempDirectory(workspaceParent,
@@ -302,11 +294,11 @@ public final class ImportedCopyAdoptionService {
             context.phase(OperationPhase.PLAN,
                     "Comparing the existing copy with the verified official package");
             Inspection officialInspection = inspector.inspect(workspace.extracted());
+            RootSnapshot officialSnapshot = RootSnapshot.capture(
+                    workspace.extracted(), context, OperationPhase.PLAN,
+                    RootSnapshot.Scan.OFFICIAL_PACKAGE);
             OwnershipPolicy.Build ownership = new OwnershipPolicy().build(
-                    workspace.extracted(), repository, release.tag(), context,
-                    OperationPhase.PLAN);
-            RootSnapshot officialSnapshot = snapshot(
-                    workspace.extracted(), context, OperationPhase.PLAN);
+                    officialSnapshot, repository, release.tag());
             Comparison comparison = compare(record, officialInspection, ownership,
                     officialSnapshot, local);
             logComparison(diagnostics, context, comparison);
@@ -337,9 +329,6 @@ public final class ImportedCopyAdoptionService {
                 }
                 if (cleanupFailure != null) throw cleanupFailure;
             });
-            context.phase(OperationPhase.AWAIT_CONSENT,
-                    comparison.eligible() ? "Copy verified; waiting for confirmation"
-                            : "Copy remains launch-only");
             retained = true;
             return prepared;
         } catch (IOException | InterruptedException | ManifestException | RuntimeException error) {
@@ -396,6 +385,8 @@ public final class ImportedCopyAdoptionService {
             }
             InstallationRecord expected = prepared.record();
             Path root = Path.of(expected.canonicalRoot()).toAbsolutePath().normalize();
+            context.phase(OperationPhase.PREPARE_INSTALL,
+                    "Revalidating local imported-copy state before publication");
             try (var gate = coordinator.acquire(root, false)) {
                 gate.requireNoPendingUpdate();
                 RegistryData currentRegistry = registries.read(registry);
@@ -404,42 +395,12 @@ public final class ImportedCopyAdoptionService {
                     throw new IOException("the selected installation record changed");
                 }
                 requireTrueImported(currentRegistry, current);
-                Inspection observed = inspector.inspect(root);
-                if (!matchesRecord(observed, current)) {
-                    throw new IOException("the imported application changed before confirmation");
-                }
-                RootSnapshot now = snapshot(root, context, OperationPhase.METADATA);
-                if (!prepared.localSnapshot().equals(now)) {
-                    throw new IOException("the imported copy changed while it was being verified");
-                }
-
-                VerifiedPackageFetcher.ExpectedAsset expectedAsset =
-                        new VerifiedPackageFetcher.ExpectedAsset(prepared.asset().name(),
-                                prepared.asset().size(), prepared.asset().digest(),
-                                prepared.asset().url());
-                Path extracted = new VerifiedPackageFetcher(transport).revalidateAndExtract(
-                        prepared.repository(), prepared.release().tag(), prepared.workspace(),
-                        expectedAsset, diagnostics, context);
-                Inspection officialInspection = inspector.inspect(extracted);
-                OwnershipPolicy.Build ownership = new OwnershipPolicy().build(extracted,
-                        prepared.repository(), prepared.release().tag(), context,
-                        OperationPhase.PREPARE_INSTALL);
-                RootSnapshot officialSnapshot = snapshot(
-                        extracted, context, OperationPhase.PREPARE_INSTALL);
-                if (!sameApplication(officialInspection, prepared.officialInspection())
-                        || !ownership.equals(prepared.ownership())
-                        || !sameContents(officialSnapshot, prepared.officialSnapshot())) {
-                    throw new IOException("the retained verified package identity changed");
-                }
-                RootSnapshot finalLocal = snapshot(
-                        root, context, OperationPhase.PREPARE_INSTALL);
-                if (!now.equals(finalLocal)) {
-                    throw new IOException("the imported copy changed during final verification");
-                }
-                Comparison comparison = compare(current, officialInspection, ownership,
-                        officialSnapshot, finalLocal);
-                if (!comparison.equals(prepared.comparison()) || !comparison.eligible()) {
-                    throw new IOException("verification evidence changed before confirmation");
+                RootSnapshot finalLocal = RootSnapshot.capture(
+                        root, context, OperationPhase.PREPARE_INSTALL,
+                        RootSnapshot.Scan.FINAL_IMPORTED_COPY);
+                if (!prepared.localSnapshot().equals(finalLocal)) {
+                    throw new IOException(
+                            "the imported copy changed during download or verification");
                 }
 
                 context.checkpoint();
@@ -447,7 +408,8 @@ public final class ImportedCopyAdoptionService {
                         + "cancellation can no longer be performed safely.");
                 context.phase(OperationPhase.APPLY,
                         "Publishing managed-update metadata outside the application folder");
-                publish(currentRegistry, current, prepared, ownership, comparison);
+                publish(currentRegistry, current, prepared,
+                        prepared.ownership(), prepared.comparison());
                 published = true;
             }
             return new CommitResult(prepared.record(), prepared.channel(), null);
@@ -712,16 +674,18 @@ public final class ImportedCopyAdoptionService {
         return Set.copyOf(critical);
     }
 
-    private static boolean sameContents(RootSnapshot first, RootSnapshot second) {
+    static boolean sameContents(RootSnapshot first, RootSnapshot second) {
         if (first.entries().size() != second.entries().size()) return false;
         for (int index = 0; index < first.entries().size(); index++) {
             EntryEvidence left = first.entries().get(index);
             EntryEvidence right = second.entries().get(index);
             if (!left.path().equals(right.path())
                     || left.regularFile() != right.regularFile()
-                    || left.directory() != right.directory()
-                    || left.size() != right.size()
-                    || !Objects.equals(left.sha256(), right.sha256())) {
+                    || left.directory() != right.directory()) {
+                return false;
+            }
+            if (left.regularFile() && (left.size() != right.size()
+                    || !Objects.equals(left.sha256(), right.sha256()))) {
                 return false;
             }
         }
@@ -737,91 +701,6 @@ public final class ImportedCopyAdoptionService {
             slash = path.indexOf('/', slash + 1);
         }
         return null;
-    }
-
-    private static RootSnapshot snapshot(Path requested, OperationContext context,
-                                         OperationPhase phase)
-            throws IOException, InterruptedException, ManifestException {
-        Path root = StrictPathSafety.requireDirectory(requested, "imported application root");
-        BasicFileAttributes rootBefore = attributes(root);
-        List<Path> paths;
-        try (var walk = Files.walk(root)) {
-            paths = walk.skip(1).limit((long) SafeTarExtractor.MAX_ENTRIES + 1).toList();
-        }
-        if (paths.size() > SafeTarExtractor.MAX_ENTRIES) {
-            throw new IOException("imported copy contains too many entries to verify safely");
-        }
-        paths = paths.stream().sorted(Comparator.comparing(
-                path -> portable(root.relativize(path)))).toList();
-        Set<String> aliases = new HashSet<>();
-        List<EntryEvidence> entries = new ArrayList<>();
-        int completed = 0;
-        long totalBytes = 0;
-        for (Path path : paths) {
-            context.checkpoint();
-            BasicFileAttributes before = attributes(path);
-            if (before.isSymbolicLink() || before.isOther()
-                    || !before.isDirectory() && !before.isRegularFile()) {
-                throw new IOException("imported copy contains a link or special entry");
-            }
-            String relative = portable(root.relativize(path));
-            ManifestReader.validatePortablePath(relative, "local path", "imported copy");
-            if (!aliases.add(key(relative))) {
-                throw new IOException("imported copy contains a case or Unicode path collision");
-            }
-            if (before.isRegularFile()
-                    && (before.size() < 0 || before.size() > SafeTarExtractor.MAX_FILE_SIZE
-                    || totalBytes > SafeTarExtractor.MAX_EXPANDED_SIZE - before.size())) {
-                throw new IOException("imported copy exceeds safe verification size limits");
-            }
-            if (before.isRegularFile()) totalBytes += before.size();
-            String hash = before.isRegularFile() ? sha256(path, context) : null;
-            BasicFileAttributes after = attributes(path);
-            if (before.size() != after.size()
-                    || !before.lastModifiedTime().equals(after.lastModifiedTime())
-                    || before.fileKey() != null && !before.fileKey().equals(after.fileKey())) {
-                throw new IOException("imported copy changed while it was being verified");
-            }
-            entries.add(new EntryEvidence(relative, before.isRegularFile(),
-                    before.isDirectory(), before.size(), before.lastModifiedTime().toMillis(),
-                    before.fileKey() == null ? null : before.fileKey().toString(), hash));
-            context.progress(phase, ++completed, paths.size(),
-                    ProgressUnit.FILES, "Verified " + completed + " local entries");
-        }
-        BasicFileAttributes rootAfter = attributes(root);
-        RootIdentity identity = new RootIdentity(
-                rootBefore.fileKey() == null ? null : rootBefore.fileKey().toString(),
-                rootBefore.creationTime().toMillis(), rootBefore.lastModifiedTime().toMillis());
-        RootIdentity finalIdentity = new RootIdentity(
-                rootAfter.fileKey() == null ? null : rootAfter.fileKey().toString(),
-                rootAfter.creationTime().toMillis(), rootAfter.lastModifiedTime().toMillis());
-        if (!identity.equals(finalIdentity)) {
-            throw new IOException("imported copy changed while it was being verified");
-        }
-        return new RootSnapshot(root.toString(), identity, List.copyOf(entries));
-    }
-
-    private static BasicFileAttributes attributes(Path path) throws IOException {
-        return Files.readAttributes(path, BasicFileAttributes.class,
-                LinkOption.NOFOLLOW_LINKS);
-    }
-
-    private static String sha256(Path path, OperationContext context)
-            throws IOException, InterruptedException {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            try (InputStream input = new DigestInputStream(Files.newInputStream(path), digest)) {
-                byte[] buffer = new byte[128 * 1024];
-                while (true) {
-                    context.checkpoint();
-                    int read = input.read(buffer);
-                    if (read < 0) break;
-                }
-            }
-            return HexFormat.of().formatHex(digest.digest());
-        } catch (NoSuchAlgorithmException impossible) {
-            throw new IllegalStateException("Java runtime lacks SHA-256", impossible);
-        }
     }
 
     private static void logComparison(PrintStream diagnostics, OperationContext context,
@@ -875,11 +754,6 @@ public final class ImportedCopyAdoptionService {
                 && record.products().equals(inspection.products());
     }
 
-    private static boolean sameApplication(Inspection first, Inspection second) {
-        return first.observedBuild().equals(second.observedBuild())
-                && first.products().equals(second.products());
-    }
-
     static OfficialRepository repositoryFor(List<Product> products) throws IOException {
         Set<String> keys = products.stream().map(Product::key).collect(
                 java.util.stream.Collectors.toSet());
@@ -910,10 +784,6 @@ public final class ImportedCopyAdoptionService {
                 .map(ImportedCopyAdoptionService::key)
                 .anyMatch(protectedPath -> folded.equals(protectedPath)
                         || folded.startsWith(protectedPath + "/"));
-    }
-
-    private static String portable(Path path) {
-        return path.toString().replace('\\', '/');
     }
 
     private static String key(String value) {
@@ -980,17 +850,6 @@ public final class ImportedCopyAdoptionService {
         public CandidateResolutionException(String message, Throwable cause) {
             super(message, cause);
         }
-    }
-
-    record RootSnapshot(String canonicalRoot, RootIdentity rootIdentity,
-                        List<EntryEvidence> entries) {
-    }
-
-    record RootIdentity(String fileKey, long creationMillis, long modifiedMillis) {
-    }
-
-    record EntryEvidence(String path, boolean regularFile, boolean directory, long size,
-                         long modifiedMillis, String fileKey, String sha256) {
     }
 
     record PathMatch(String path, String officialSha256, boolean identityCritical) {

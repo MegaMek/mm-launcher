@@ -31,14 +31,19 @@ import org.megamek.launcher.update.ReceiptStore;
 import org.megamek.launcher.update.UpdatePreviewService;
 
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JList;
+import javax.swing.KeyStroke;
 import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Window;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
+import java.awt.event.WindowEvent;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -83,18 +88,48 @@ class UpdateApplySwingTest {
             assertTrue(update.isEnabled());
 
             SwingUtilities.invokeLater(update::doClick);
-            JDialog firstConsent = waitForDialog("Confirm recommended preview download");
+            JDialog firstConsent = waitForDialog("Download update");
+            assertTrue(firstConsent instanceof RecommendedUpdateConsentDialog);
+            assertEquals("recommendedUpdateConsentDialog", firstConsent.getName());
+            assertEquals(FirstLaunchPanel.BACKGROUND,
+                    firstConsent.getContentPane().getBackground());
             String firstText = componentText(firstConsent);
-            assertTrue(firstText.contains("v2.0.0"));
+            assertTrue(firstText.contains("Application: MegaMek"));
+            assertTrue(firstText.contains("Current version: 1.0.0"));
+            assertTrue(firstText.contains("New version: 2.0.0"));
+            assertTrue(firstText.contains("Download size: "
+                    + BinarySizeFormat.mebibytes(fixture.services.asset.size())));
+            assertFalse(firstText.contains(fixture.services.asset.name()));
+            assertFalse(firstText.contains(fixture.services.asset.digest()));
+            assertFalse(firstText.contains(fixture.services.asset.url().toString()));
+            assertFalse(firstText.contains(" bytes"));
+            assertFalse(firstText.contains("v2.0.0"));
+            assertFalse(firstText.contains("tag"));
+            assertFalse(firstText.contains("digest"));
+            assertFalse(firstText.contains("read-only"));
+            assertFalse(firstText.contains("preview"));
+            assertFalse(firstText.contains("Apply"));
+            JButton cancelDownload = find(
+                    firstConsent, "cancelRecommendedUpdateDownloadButton");
+            JButton download = find(firstConsent, "downloadRecommendedUpdateButton");
+            assertTrue(cancelDownload instanceof FirstLaunchButton);
+            assertTrue(download instanceof FirstLaunchButton);
+            Container actions = find(firstConsent, "recommendedUpdateConsentActions");
+            assertTrue(actions.getComponentZOrder(cancelDownload)
+                    < actions.getComponentZOrder(download));
+            assertTrue(actions.getComponent(0) instanceof javax.swing.Box.Filler,
+                    "horizontal glue must right-align the grouped actions");
+            assertEquals(download, firstConsent.getRootPane().getDefaultButton());
             click(firstConsent, "Cancel");
             waitUntil(() -> !firstConsent.isDisplayable());
             assertEquals(0, fixture.services.previewCalls);
             assertEquals(0, fixture.services.applyCalls);
+            assertEquals(0, fixture.services.network.binaryRequests);
 
             SwingUtilities.invokeLater(update::doClick);
             JDialog secondFirstConsent =
-                    waitForDialog("Confirm recommended preview download");
-            click(secondFirstConsent, "OK");
+                    waitForDialog("Download update");
+            click(secondFirstConsent, "Download");
             JDialog applyConsent = waitForDialog("Authorize update Apply");
             String applyText = componentText(applyConsent);
             assertTrue(applyText.contains("destructive"));
@@ -119,8 +154,8 @@ class UpdateApplySwingTest {
             JButton finalUpdate = waitFor(() -> find(frame, "applyUpdateButton"));
             SwingUtilities.invokeLater(finalUpdate::doClick);
             JDialog finalFirstConsent =
-                    waitForDialog("Confirm recommended preview download");
-            click(finalFirstConsent, "OK");
+                    waitForDialog("Download update");
+            click(finalFirstConsent, "Download");
             JDialog finalApplyConsent = waitForDialog("Authorize update Apply");
 
             fixture.services.selectNewPreference();
@@ -171,14 +206,23 @@ class UpdateApplySwingTest {
             JButton recommended = checkAndWaitForUpdate(frame);
 
             SwingUtilities.invokeLater(recommended::doClick);
-            JDialog firstConsent = waitForDialog("Confirm recommended preview download");
-            assertTrue(componentText(firstConsent).contains("v2.0.0"));
-            click(firstConsent, "Cancel");
+            JDialog firstConsent = waitForDialog("Download update");
+            cancelWithEscape(firstConsent);
+            waitUntil(() -> !firstConsent.isDisplayable());
             assertEquals(0, fixture.services.network.binaryRequests,
-                    "cancel before preparation must fetch no package body");
+                    "Escape before preparation must fetch no package body");
 
             SwingUtilities.invokeLater(recommended::doClick);
-            click(waitForDialog("Confirm recommended preview download"), "OK");
+            JDialog closedConsent = waitForDialog("Download update");
+            SwingUtilities.invokeAndWait(() -> closedConsent.dispatchEvent(
+                    new WindowEvent(closedConsent, WindowEvent.WINDOW_CLOSING)));
+            waitUntil(() -> !closedConsent.isDisplayable());
+            assertEquals(0, fixture.services.network.binaryRequests,
+                    "window close before preparation must fetch no package body");
+            assertEquals(0, fixture.services.previewCalls);
+
+            SwingUtilities.invokeLater(recommended::doClick);
+            click(waitForDialog("Download update"), "Download");
             JDialog applyConsent = waitForDialog("Authorize update Apply");
             String applyText = componentText(applyConsent);
             assertTrue(applyText.contains("already downloaded"));
@@ -217,7 +261,7 @@ class UpdateApplySwingTest {
             navigateToInstallations(frame);
             JButton update = checkAndWaitForUpdate(frame);
             SwingUtilities.invokeLater(update::doClick);
-            click(waitForDialog("Confirm recommended preview download"), "OK");
+            click(waitForDialog("Download update"), "Download");
             assertTrue(fixture.services.network.binaryStarted.await(5, TimeUnit.SECONDS));
 
             SwingUtilities.invokeAndWait(frame::dispose);
@@ -273,7 +317,7 @@ class UpdateApplySwingTest {
             navigateToInstallations(frame);
             JButton recommended = checkAndWaitForUpdate(frame);
             SwingUtilities.invokeLater(recommended::doClick);
-            click(waitForDialog("Confirm recommended preview download"), "OK");
+            click(waitForDialog("Download update"), "Download");
             JDialog applyConsent = waitForDialog("Authorize update Apply");
 
             ChannelPreferenceStore channels = new ChannelPreferenceStore();
@@ -309,7 +353,7 @@ class UpdateApplySwingTest {
             navigateToInstallations(frame);
             JButton update = checkAndWaitForUpdate(frame);
             SwingUtilities.invokeLater(update::doClick);
-            click(waitForDialog("Confirm recommended preview download"), "OK");
+            click(waitForDialog("Download update"), "Download");
             click(waitForDialog("Authorize update Apply"), "OK");
             waitUntil(() -> fixture.services.applyCalls == 1);
 
@@ -386,6 +430,18 @@ class UpdateApplySwingTest {
         JButton button = findButtonText(dialog, text);
         assertNotNull(button, "missing dialog button " + text);
         SwingUtilities.invokeAndWait(button::doClick);
+    }
+
+    private static void cancelWithEscape(JDialog dialog) throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            KeyStroke escape = KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0);
+            Object binding = dialog.getRootPane()
+                    .getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).get(escape);
+            assertNotNull(binding, "Escape must be bound in the download consent");
+            var action = dialog.getRootPane().getActionMap().get(binding);
+            assertNotNull(action, "Escape binding must have a cancel action");
+            action.actionPerformed(new ActionEvent(dialog, 0, "escape"));
+        });
     }
 
     private static JDialog waitForDialog(String title) throws Exception {

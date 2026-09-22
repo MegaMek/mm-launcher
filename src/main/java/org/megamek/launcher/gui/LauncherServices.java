@@ -380,10 +380,10 @@ public class LauncherServices {
     }
 
     public ImportedCopyAdoptionService.CommitResult commitAdoption(
-            PreparedAdoption prepared)
+            PreparedAdoption prepared, OperationContext context, PrintStream progress)
             throws IOException, InterruptedException,
             org.megamek.launcher.manifest.ManifestException {
-        return adoptions.commit(prepared);
+        return adoptions.commit(prepared, context, progress);
     }
 
     public void select(InstallationRecord record) throws IOException {

@@ -29,7 +29,6 @@ import java.awt.event.KeyEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.util.List;
-import java.util.Locale;
 
 /**
  * Focused consent surface for an immutable normal-install plan. It deliberately owns only
@@ -45,10 +44,6 @@ final class NormalInstallConfirmationDialog extends JDialog {
     static final Color GOLD = FirstLaunchSplitButton.POPUP_BORDER;
 
     private static final String CANCEL_ACTION = "cancelNormalInstallConfirmation";
-    private static final long KIB = 1L << 10;
-    private static final long MIB = 1L << 20;
-    private static final long GIB = 1L << 30;
-
     private final GuiScale scale;
     private final JButton changeLocation;
     private final JButton install;
@@ -270,11 +265,7 @@ final class NormalInstallConfirmationDialog extends JDialog {
     }
 
     static String formatBinaryBytes(long bytes) {
-        if (bytes < 0) throw new IllegalArgumentException("byte size must not be negative");
-        if (bytes >= GIB) return String.format(Locale.ROOT, "%.1f GiB", (double) bytes / GIB);
-        if (bytes >= MIB) return String.format(Locale.ROOT, "%.1f MiB", (double) bytes / MIB);
-        if (bytes >= KIB) return String.format(Locale.ROOT, "%.1f KiB", (double) bytes / KIB);
-        return bytes + (bytes == 1 ? " byte" : " bytes");
+        return BinarySizeFormat.humanReadable(bytes);
     }
 
     @FunctionalInterface

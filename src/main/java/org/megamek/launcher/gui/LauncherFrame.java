@@ -950,20 +950,11 @@ public final class LauncherFrame extends JFrame {
         if (checked == null || !checked.updateAvailable() || record == null
                 || eligibility == null || !eligibility.available()) return;
         ChannelUpdateChecker.Recommendation recommendation = checked.recommendation();
-        int answer = JOptionPane.showConfirmDialog(this,
-                "Installed verified tag: " + checked.currentTag()
-                        + "\nFollowing: " + checked.preference().channel()
-                        + "\nExact target: " + recommendation.targetTag()
-                        + "\nAsset: " + recommendation.assetName()
-                        + "\nDownload: "
-                        + NumberFormat.getIntegerInstance().format(recommendation.assetSize())
-                        + " bytes"
-                        + "\nRelease notes: " + recommendation.notesUrl()
-                        + "\n\nDownload this exact name, size, and digest for a read-only preview?"
-                        + "\nA separate Apply confirmation follows.",
-                "Confirm recommended preview download", JOptionPane.OK_CANCEL_OPTION,
-                JOptionPane.WARNING_MESSAGE);
-        if (answer != JOptionPane.OK_OPTION) return;
+        boolean download = RecommendedUpdateConsentDialog.confirm(
+                this, displayProduct(recommendation.repository().key()),
+                checked.currentTag(), recommendation.targetTag(),
+                recommendation.assetSize(), guiScale);
+        if (!download) return;
         runPreparedUpdate(record, eligibility.receipt(),
                 eligibility.current(), recommendation.targetTag(),
                 recommendation.assetName(),
@@ -985,10 +976,13 @@ public final class LauncherFrame extends JFrame {
                 this::showOperationLogs);
         progress.append("Inspecting and adding the selected installation...\n");
         progress.setVisible(true);
+        java.util.concurrent.atomic.AtomicBoolean inspectionComplete =
+                new java.util.concurrent.atomic.AtomicBoolean();
         runOperation("Adding existing installation", OperationType.IMPORT_EXISTING,
                 List.of(selected), progress, context -> {
                     ExistingImportService.Plan plan =
                             services.prepareExistingImport(selected, context);
+                    inspectionComplete.set(true);
                     return services.importExisting(plan, existingInstallationName(plan), context);
                 },
                 result -> {
@@ -998,7 +992,14 @@ public final class LauncherFrame extends JFrame {
                     reload();
                 }, error -> {
                     progress.append("\nIMPORT DID NOT COMPLETE: " + errorDetail(error) + "\n");
-                    progress.setTitle("Could not add installation");
+                    if (inspectionComplete.get()) {
+                        progress.setTitle("Could not add installation");
+                    } else {
+                        progress.setTitle("This folder can't be used");
+                        progress.setExpectedFailureSummary(
+                                "Choose the main MegaMek, MekHQ, or MegaMekLab installation "
+                                        + "folder, then try again.");
+                    }
                 }, () -> {});
     }
 
@@ -1194,7 +1195,7 @@ public final class LauncherFrame extends JFrame {
             }
         }
         if (trueImported) {
-            JButton adopt = homeButton("Enable managed updates…",
+            JButton adopt = homeButton("Enable Updates",
                     "enableManagedUpdatesButton-" + record.id());
             adopt.setMnemonic(KeyEvent.VK_E);
             adopt.getAccessibleContext().setAccessibleDescription(
@@ -1512,6 +1513,7 @@ public final class LauncherFrame extends JFrame {
         details.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(14),
                 guiScale.scaleForGUI(18), guiScale.scaleForGUI(8),
                 guiScale.scaleForGUI(20)));
+        int detailGap = guiScale.scaleForGUI(8);
 
         JLabel heading = new JLabel("Enable managed updates");
         heading.setName("adoptionCandidateHeading");
@@ -1519,7 +1521,7 @@ public final class LauncherFrame extends JFrame {
         heading.setFont(guiScale.font(heading.getFont(), Font.BOLD, 22f));
         heading.setAlignmentX(Component.LEFT_ALIGNMENT);
         details.add(heading);
-        details.add(Box.createVerticalStrut(guiScale.scaleForGUI(8)));
+        details.add(Box.createVerticalStrut(detailGap));
 
         JLabel application = new JLabel(suggestion.detectedApplication() + " ("
                 + suggestion.detectedVersion() + ")");
@@ -1527,10 +1529,10 @@ public final class LauncherFrame extends JFrame {
         application.setForeground(FirstLaunchPanel.TEXT);
         application.setAlignmentX(Component.LEFT_ALIGNMENT);
         details.add(application);
-        details.add(Box.createVerticalStrut(guiScale.scaleForGUI(9)));
+        details.add(Box.createVerticalStrut(detailGap));
 
         JPanel channelRow = new JPanel(new java.awt.FlowLayout(
-                java.awt.FlowLayout.LEFT, guiScale.scaleForGUI(8), 0));
+                java.awt.FlowLayout.LEFT, 0, 0));
         channelRow.setOpaque(false);
         JLabel channelLabel = new JLabel("Update channel:");
         channelLabel.setForeground(FirstLaunchPanel.TEXT);
@@ -1544,10 +1546,13 @@ public final class LauncherFrame extends JFrame {
                 "Choose Milestone or Development once. This choice is fixed after enabling.");
         channelLabel.setLabelFor(channel);
         channelRow.add(channelLabel);
+        channelRow.add(Box.createHorizontalStrut(detailGap));
         channelRow.add(channel);
+        channelRow.setMaximumSize(new Dimension(
+                Integer.MAX_VALUE, channelRow.getPreferredSize().height));
         channelRow.setAlignmentX(Component.LEFT_ALIGNMENT);
         details.add(channelRow);
-        details.add(Box.createVerticalStrut(guiScale.scaleForGUI(8)));
+        details.add(Box.createVerticalStrut(detailGap));
 
         JLabel explanation = new JLabel(
                 "Existing application and personal files will not be changed.");
@@ -1562,6 +1567,8 @@ public final class LauncherFrame extends JFrame {
         JPanel actions = new JPanel(new java.awt.FlowLayout(
                 java.awt.FlowLayout.RIGHT, guiScale.scaleForGUI(8), 0));
         actions.setBackground(FirstLaunchPanel.BACKGROUND);
+        actions.setBorder(BorderFactory.createEmptyBorder(
+                0, 0, guiScale.scaleForGUI(12), 0));
         JButton cancel = homeButton("Cancel", "cancelAdoptionButton");
         JButton continueButton = homeButton("Continue", "continueAdoptionButton");
         continueButton.setFont(guiScale.font(
@@ -1761,43 +1768,56 @@ public final class LauncherFrame extends JFrame {
         progress.setVisible(true);
         PrintStream stream = new PrintStream(new LogOutput(progress.logArea()), true,
                 StandardCharsets.UTF_8);
+        java.util.concurrent.atomic.AtomicBoolean publicationAttempted =
+                new java.util.concurrent.atomic.AtomicBoolean();
         runOperation("Verifying imported copy", OperationType.ADOPT_EXISTING,
                 List.of(Path.of(record.canonicalRoot())), progress,
-                context -> exactTag == null
-                        ? services.prepareAutomaticAdoption(record, suggestion.repository(),
-                        fixedChannel, stream, context)
-                        : services.prepareAdoption(record, suggestion.repository(), exactTag,
-                        fixedChannel, stream, context),
-                prepared -> {
-                    if (!isCurrentAdoption(generation, record)) {
-                        try {
+                context -> {
+                    PreparedAdoption prepared = exactTag == null
+                            ? services.prepareAutomaticAdoption(
+                            record, suggestion.repository(), fixedChannel, stream, context)
+                            : services.prepareAdoption(
+                            record, suggestion.repository(), exactTag,
+                            fixedChannel, stream, context);
+                    boolean callerOwnsPrepared = true;
+                    try {
+                        PreparedAdoption.Report report = prepared.report();
+                        if (!report.eligible()) {
+                            context.cleanupPhase(
+                                    "Discarding the completed verification workspace");
+                            callerOwnsPrepared = false;
                             prepared.close();
-                        } catch (IOException error) {
-                            recordErrorAsync("Cleaning stale adoption workspace",
-                                    error, ignored -> {});
+                            return new AdoptionExecution(report, false);
                         }
+                        publicationAttempted.set(true);
+                        // commitAdoption claims the one-use handle before revalidation and
+                        // consumes it on every success, failure, and cancellation path.
+                        callerOwnsPrepared = false;
+                        services.commitAdoption(prepared, context, stream);
+                        return new AdoptionExecution(report, true);
+                    } finally {
+                        if (callerOwnsPrepared) prepared.close();
+                    }
+                },
+                result -> {
+                    if (!isCurrentAdoption(generation, record)) {
                         progress.dispose();
                         return;
                     }
-                    if (prepared.report().eligible()) {
+                    if (result.enabled()) {
                         progress.dispose();
-                        showEligibleAdoption(prepared);
+                        page = Page.INSTALLATIONS;
+                        reload();
                     } else {
-                        PreparedAdoption.Report report = prepared.report();
-                        run("Discarding verification workspace", () -> {
-                            prepared.close();
-                            return null;
-                        }, ignored -> {
-                            progress.dispose();
-                            showIneligibleAdoption(report);
-                        }, error -> {
-                            progress.dispose();
-                            showIneligibleAdoption(report);
-                            recordErrorAsync("Cleaning adoption workspace", error, ignored -> {});
-                        }, () -> {}, false);
+                        progress.dispose();
+                        showIneligibleAdoption(result.report());
                     }
                 }, error -> {
                     progress.setTitle("This copy remains launch-only");
+                    if (publicationAttempted.get()) {
+                        progress.setFailureSummary(
+                                "This copy could not be enabled and will remain launch-only.");
+                    }
                     browse.setEnabled(isCurrentAdoption(generation, record)
                             && error instanceof
                             ImportedCopyAdoptionService.CandidateResolutionException);
@@ -1818,74 +1838,6 @@ public final class LauncherFrame extends JFrame {
                 action.run();
             }
         });
-    }
-
-    private void showEligibleAdoption(PreparedAdoption prepared) {
-        PreparedAdoption.Report report = prepared.report();
-        JPanel body = adoptionResultBody(report.message());
-        JLabel message = (JLabel) ((BorderLayout) body.getLayout())
-                .getLayoutComponent(BorderLayout.CENTER);
-        JPanel actions = new JPanel(new java.awt.FlowLayout(
-                java.awt.FlowLayout.RIGHT, guiScale.scaleForGUI(8), 0));
-        actions.setOpaque(false);
-        JButton cancel = homeButton("Cancel", "cancelPreparedAdoptionButton");
-        JButton enable = homeButton("Enable", "commitAdoptionButton");
-        enable.setFont(guiScale.font(enable.getFont(), Font.BOLD, 14f));
-        enable.setMnemonic(KeyEvent.VK_E);
-        actions.add(cancel);
-        actions.add(enable);
-        body.add(actions, BorderLayout.SOUTH);
-
-        JDialog dialog = adoptionResultDialog("Copy verified", body);
-        java.util.concurrent.atomic.AtomicBoolean consumed =
-                new java.util.concurrent.atomic.AtomicBoolean();
-        Runnable discard = () -> {
-            if (!consumed.compareAndSet(false, true)) {
-                if (!gate.isBusy()) dialog.dispose();
-                return;
-            }
-            dialog.dispose();
-            run("Discarding verification workspace", () -> {
-                prepared.close();
-                return null;
-            }, ignored -> {}, error ->
-                    recordErrorAsync("Cleaning adoption workspace", error, ignored -> {}),
-                    () -> {}, false);
-        };
-        cancel.addActionListener(event -> discard.run());
-        dialog.addWindowListener(new WindowAdapter() {
-            @Override public void windowClosing(WindowEvent event) {
-                discard.run();
-            }
-        });
-        enable.addActionListener(event -> {
-            if (!consumed.compareAndSet(false, true)) return;
-            enable.setEnabled(false);
-            cancel.setEnabled(false);
-            message.setText("Enabling managed updates…");
-            run("Enabling managed updates", () -> services.commitAdoption(prepared),
-                    result -> {
-                        dialog.dispose();
-                        page = Page.HOME;
-                        reload();
-                    }, error -> {
-                        message.setText("This copy could not be enabled and will remain "
-                                + "launch-only.");
-                        enable.setVisible(false);
-                        cancel.setText("Close");
-                        cancel.setEnabled(true);
-                        dialog.setDefaultCloseOperation(
-                                WindowConstants.DISPOSE_ON_CLOSE);
-                        JButton logs = homeButton("View details/logs",
-                                "viewFailedAdoptionLogsButton");
-                        logs.addActionListener(ignored -> showOperationLogs());
-                        actions.add(logs, 0);
-                        actions.revalidate();
-                        recordErrorAsync("Enabling managed updates", error, ignored -> {});
-                    }, () -> {}, false);
-        });
-        dialog.getRootPane().setDefaultButton(enable);
-        dialog.setVisible(true);
     }
 
     private void showIneligibleAdoption(PreparedAdoption.Report report) {
@@ -3102,13 +3054,13 @@ public final class LauncherFrame extends JFrame {
             String assetName, long assetSize, String assetDigest,
             ChannelUpdateChecker.Result recommended) {
         OperationProgressDialog progress = new OperationProgressDialog(this,
-                "Preparing verified update", "applyUpdateProgressLog", this::showOperationLogs);
+                "Preparing update", "applyUpdateProgressLog", this::showOperationLogs);
         progress.append("Downloading and verifying the exact consented package once for "
                 + tag + "...\n");
         progress.setVisible(true);
         PrintStream stream = new PrintStream(new LogOutput(progress.logArea()), true,
                 StandardCharsets.UTF_8);
-        runOperation("Preparing verified update", OperationType.UPDATE_APPLY,
+        runOperation("Preparing update", OperationType.UPDATE_APPLY,
                 List.of(Path.of(record.canonicalRoot())), progress, context -> {
                 PreparedUpdate prepared = null;
                 try {
@@ -3426,7 +3378,6 @@ public final class LauncherFrame extends JFrame {
                 if (result.problem() != null) {
                     failure.accept(result.problem());
                     progress.showFailure(result.problem(), result.loggingWarning());
-                    status.setText("Operation failed — details are available");
                     return;
                 }
                 success.accept(result.value());
@@ -3863,6 +3814,9 @@ public final class LauncherFrame extends JFrame {
                     ? version + " — " + release.title()
                     : version + " — unavailable for safe verification";
         }
+    }
+
+    private record AdoptionExecution(PreparedAdoption.Report report, boolean enabled) {
     }
 
     private record PickerReleaseChoice(OfficialRepository repository,

@@ -67,7 +67,7 @@ Existing or concurrently added preferences win, and all existing record fields a
 Imported records have no ownership receipt, channel sidecar, or provenance and remain launch-only;
 Home includes their detected programs in the application union. Installations labels each one
 **Imported copy · Launch only · Updates unavailable** and exposes launch/preference,
-**Open location**, **Remove from launcher…**, and a separate **Enable managed updates…** control, but no check, Preview,
+**Open location**, **Remove from launcher…**, and a separate **Enable Updates** control, but no check, Preview,
 Update, or Recover action. Import itself never prompts for a channel and never starts adoption or
 a download. Successful exact-copy adoption creates the fixed-channel sidecar with check-on-open
 enabled, after which the direct per-card checkbox is the sole automatic-check setting.
@@ -143,21 +143,28 @@ once and the safe extractor opens it in an attempt-owned external workspace. Off
 inspection must reproduce the record's exact product set, build, root JAR manifests, and
 classpaths.
 
-The comparison inventories the complete local root without following links, rejects
-case/Unicode/file-parent conflicts, and hashes all regular files while checking stable identity.
-Every official runtime path (root application executable/JAR/script and all `lib/` dependencies)
-must be present and byte-identical. Missing managed paths are currently unsupported and block
-adoption. Modified non-runtime managed paths are allowed only as explicit `MODIFIED` overrides
-seeded with the pristine official ancestor hash. Unknown regular files are retained. Protected
-saves, campaigns, userdata, custom content, configuration, logs, and backups remain excluded and
-unmanaged.
+Preparation reports **Checking existing installation** while taking the initial complete local
+snapshot without following links, rejecting case/Unicode/file-parent conflicts, and hashing all
+regular files while checking stable identity. The extracted package then reports
+**Checking official package** and is traversed and hashed exactly once. The same immutable
+per-entry SHA-256 evidence produces both the official ownership manifest and the full official
+comparison snapshot. Every official runtime path (root application executable/JAR/script and all
+`lib/` dependencies) must be present and byte-identical. Missing managed paths are currently
+unsupported and block adoption. Modified non-runtime managed paths are allowed only as explicit
+`MODIFIED` overrides seeded with the pristine official ancestor hash. Unknown regular files are
+retained. Protected saves, campaigns, userdata, custom content, configuration, logs, and backups
+remain excluded and unmanaged.
 
 The opaque prepared handle is one-use, process-local, non-serializable, and bound to its creating
-service, registry, exact record, root snapshot, repository/tag/asset/size/resolved digest, fixed channel,
-and pristine package inventory. Confirmation acquires the root gate again, rechecks every local
-and provenance precondition, refreshes exact metadata, re-hashes and re-extracts the retained
-archive without a second download, and compares the new official evidence with the prepared
-evidence. Drift discards the attempt.
+service, registry, exact record, root snapshot, repository/tag/asset/size/resolved digest, fixed
+channel, immutable official inspection/ownership/snapshot evidence, and pristine package
+inventory. Successful validation proceeds directly to publication for the already-selected
+channel in the same cancellable operation and progress surface. Publication acquires the root gate
+again, rechecks the registry record, true-import and pending state, then takes one final local root
+snapshot under **Confirming installation has not changed** and requires it to equal the prepared
+local snapshot. It performs no remote metadata request, archive re-hash, second extraction, or
+rebuilt official evidence. Cancellation remains available until atomic metadata publication
+begins. Local drift discards the attempt.
 
 Publication writes only launcher metadata outside the application root: immutable ownership
 receipt, explicit current ancestor and override history, adoption binding, then fixed channel as

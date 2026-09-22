@@ -74,13 +74,16 @@ Non-comparable rather than silently current or downgraded. Unconfigured and chec
 never “up to date.”
 
 Recommended Update captures installation binding, fixed channel provenance, fixed source,
-repository, target tag, asset name, size, digest, and notes URL. Preview
+repository, target tag, asset name, size, digest, and notes URL. Preparation
 and Apply revalidate the captured source and metadata; a change requires a new attempt and consent.
-The route downloads its exact full package once, retains it only for that active attempt, shows the
-read-only report, then uses a separate explicit Apply confirmation. Under the captured root gate,
-Apply refreshes the channel/preference/target metadata and re-verifies/re-extracts the retained
-archive; it never silently downloads a second package or retargets. The advanced exact-release path
-remains available without changing the fixed channel.
+The route first shows a simple styled pre-download consent with only the application, current and
+new versions, and rounded MiB download size. Cancel, Escape, or window close fetches no package body;
+Download is the default action. It downloads the exact full package once, retains it only for that
+active attempt, prepares and verifies the plan internally, then uses a separate explicit Apply
+authorization. Under the captured root gate, Apply refreshes the
+channel/preference/target metadata and re-verifies/re-extracts the retained archive; it never
+silently downloads a second package or retargets. The advanced exact-release path remains
+available without changing the fixed channel.
 
 For a new installation, one **Fetch releases** action reads both fixed YAML pointers and one
 bounded GitHub history page for the selected product. It includes the selected current identity

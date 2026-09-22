@@ -89,7 +89,7 @@ without inventing a channel. Import initializes preferences only for included ap
 remain unset under the registry lock. Home then uses the union across all records. Imported copies
 receive no ownership receipt or channel setting and remain update-ineligible. They are never
 prompted to choose a channel; Installations labels them **Imported copy · Launch only · Updates
-unavailable**. A genuine import later exposes one separate **Enable managed updates…** action;
+unavailable**. A genuine import later exposes one separate **Enable Updates** action;
 it is never part of import and never appears for corrupt/incomplete provenance. That opt-in flow
 starts with a compact **Program (Version)** and update-channel dialog. Cancel/Escape performs no
 network work; Continue automatically searches bounded official release-list metadata and, only

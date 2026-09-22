@@ -73,6 +73,8 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
     private final Runnable showLogs;
     private OperationContext context;
     private Throwable failure;
+    private String failureSummary;
+    private boolean expectedFailure;
     private boolean finished;
     private boolean failureShown;
     private boolean nonCancellableFromStart;
@@ -202,6 +204,18 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         detail.setText(concise(message));
     }
 
+    void setExpectedFailureSummary(String message) {
+        setFailureSummary(message);
+        expectedFailure = true;
+    }
+
+    void setFailureSummary(String message) {
+        if (message == null || message.isBlank()) {
+            throw new IllegalArgumentException("failure summary must not be blank");
+        }
+        failureSummary = message;
+    }
+
     void showFailure(Throwable problem) {
         showFailure(problem, null);
     }
@@ -219,10 +233,16 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         afterProgress.setVisible(false);
         phase.setText(getTitle() == null || getTitle().isBlank()
                 ? "Operation failed" : getTitle());
-        detail.setText(simpleAdoptionResolution
-                ? "<html>" + ImportedCopyAdoptionService.AUTOMATIC_MATCH_UNAVAILABLE + "</html>"
-                : conciseFailure(problem));
-        if (logWarning != null && !logWarning.isBlank()) {
+        detail.setBorder(BorderFactory.createEmptyBorder(
+                scale.scaleForGUI(8), 0, 0, 0));
+        String summary = failureSummary != null
+                ? failureSummary
+                : simpleAdoptionResolution
+                ? ImportedCopyAdoptionService.AUTOMATIC_MATCH_UNAVAILABLE
+                : null;
+        detail.setText(summary == null ? conciseFailure(problem) : "<html>" + summary + "</html>");
+        loggingWarning.setVisible(false);
+        if (!expectedFailure && logWarning != null && !logWarning.isBlank()) {
             loggingWarning.setText(
                     "Local diagnostics could not be saved. The original failure is unchanged.");
             loggingWarning.setBorder(BorderFactory.createEmptyBorder(
@@ -232,7 +252,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         for (JButton button : contextualActions) {
             button.setVisible(button.isEnabled());
         }
-        viewDetails.setVisible(!simpleAdoptionResolution);
+        viewDetails.setVisible(!expectedFailure && !simpleAdoptionResolution);
         cancel.setText("Close");
         cancel.getAccessibleContext().setAccessibleName("Close");
         cancel.setEnabled(true);
@@ -299,7 +319,10 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
             }
             return;
         }
-        detail.setText(finishingMessage(context.type(), request.reason()));
+        OperationProgress latest = context.latest();
+        detail.setText(latest != null && latest.outcome() == OperationOutcome.RUNNING
+                ? nonCancellableDetail(latest)
+                : finishingMessage(context.type(), request.reason()));
     }
 
     private void flush() {
@@ -309,7 +332,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         }
         OperationProgress event = pending.getAndSet(null);
         if (event == null || !isDisplayable() || finished) return;
-        phase.setText(event.phase().displayName());
+        phase.setText(phaseName(event));
         boolean extraction = event.phase() == OperationPhase.EXTRACT;
         if (extraction) {
             progress.setIndeterminate(true);
@@ -344,7 +367,29 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
                 ? "Cancel at the next safe checkpoint" : null);
         detail.setText(cancellationAllowed
                 ? progressDetail(event)
-                : finishingMessage(event.operationType(), event.cancellationReason()));
+                : nonCancellableDetail(event));
+    }
+
+    private static String phaseName(OperationProgress event) {
+        if (event.operationType() == OperationType.ADOPT_EXISTING) {
+            if (event.phase() == OperationPhase.PREPARE_INSTALL) {
+                return "Final local check";
+            }
+            if (event.phase() == OperationPhase.APPLY) {
+                return "Enabling managed updates";
+            }
+        }
+        return event.phase().displayName();
+    }
+
+    private String nonCancellableDetail(OperationProgress event) {
+        if (event.operationType() == OperationType.ADOPT_EXISTING) {
+            return event.phase() == OperationPhase.APPLY
+                    ? "Publishing managed-update metadata — do not close the launcher."
+                    : "Final checks complete; metadata publication is starting — "
+                    + "do not close the launcher.";
+        }
+        return finishingMessage(event.operationType(), event.cancellationReason());
     }
 
     private String progressDetail(OperationProgress event) {
@@ -376,7 +421,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
             return NumberFormat.getIntegerInstance().format(event.completed())
                     + " files processed.";
         }
-        return event.phase().displayName();
+        return phaseName(event);
     }
 
     static String humanSize(long bytes) {
@@ -416,7 +461,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
             case METADATA -> type == OperationType.IMPORT_EXISTING
                     ? "Checking the selected installation…"
                     : type == OperationType.ADOPT_EXISTING
-                    ? "Checking the imported copy…"
+                    ? "Checking existing installation…"
                     : type == OperationType.UNINSTALL
                     || type == OperationType.UNINSTALL_RECOVERY
                     ? "Checking uninstall recovery state…"
@@ -428,12 +473,18 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
                     ? "Comparing the existing files safely…"
                     : "Checking the downloaded package…";
             case EXTRACT -> "Processing application files…";
-            case PLAN -> "Reviewing the planned changes…";
+            case PLAN -> type == OperationType.ADOPT_EXISTING
+                    ? "Checking official package…"
+                    : "Reviewing the planned changes…";
             case AWAIT_CONSENT -> "Waiting for confirmation…";
             case PREPARE_INSTALL -> type == OperationType.IMPORT_EXISTING
                     ? "Registering the selected installation…"
+                    : type == OperationType.ADOPT_EXISTING
+                    ? "Confirming installation has not changed…"
                     : "Preparing the installation…";
-            case APPLY -> "Applying the verified update…";
+            case APPLY -> type == OperationType.ADOPT_EXISTING
+                    ? "Publishing managed-update metadata…"
+                    : "Applying the verified update…";
             case UNINSTALL -> "Removing verified official files…";
             case RECOVER -> "Repairing the interrupted update…";
             case CLEANUP -> "Cleaning up temporary files…";

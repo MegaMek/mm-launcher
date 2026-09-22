@@ -14,9 +14,10 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * Opaque, process-local handle for one imported-copy adoption attempt.
  *
- * <p>The retained package and local evidence are deliberately inaccessible to callers. Only the
- * service instance that prepared this handle can consume it, and every terminal path attempts to
- * remove the attempt-owned workspace.</p>
+ * <p>The retained workspace and immutable official/local evidence are deliberately inaccessible
+ * to callers. Publication uses the prepared in-memory evidence rather than reopening the package;
+ * only the creating service can consume the handle, and every terminal path attempts to remove
+ * the attempt-owned workspace.</p>
  */
 public final class PreparedAdoption implements AutoCloseable {
     private final Object owner;
@@ -28,8 +29,8 @@ public final class PreparedAdoption implements AutoCloseable {
     private final VerifiedPackageFetcher.Workspace workspace;
     private final OwnershipPolicy.Build ownership;
     private final Inspection officialInspection;
-    private final ImportedCopyAdoptionService.RootSnapshot officialSnapshot;
-    private final ImportedCopyAdoptionService.RootSnapshot localSnapshot;
+    private final RootSnapshot officialSnapshot;
+    private final RootSnapshot localSnapshot;
     private final ImportedCopyAdoptionService.Comparison comparison;
     private final Report report;
     private final Cleanup cleanup;
@@ -39,8 +40,7 @@ public final class PreparedAdoption implements AutoCloseable {
                      FollowChannel channel, ReleaseCatalog.Release release,
                      ReleaseCatalog.Asset asset, VerifiedPackageFetcher.Workspace workspace,
                      OwnershipPolicy.Build ownership, Inspection officialInspection,
-                     ImportedCopyAdoptionService.RootSnapshot officialSnapshot,
-                     ImportedCopyAdoptionService.RootSnapshot localSnapshot,
+                     RootSnapshot officialSnapshot, RootSnapshot localSnapshot,
                      ImportedCopyAdoptionService.Comparison comparison, Report report,
                      Cleanup cleanup) {
         this.owner = Objects.requireNonNull(owner);
@@ -107,11 +107,11 @@ public final class PreparedAdoption implements AutoCloseable {
         return officialInspection;
     }
 
-    ImportedCopyAdoptionService.RootSnapshot officialSnapshot() {
+    RootSnapshot officialSnapshot() {
         return officialSnapshot;
     }
 
-    ImportedCopyAdoptionService.RootSnapshot localSnapshot() {
+    RootSnapshot localSnapshot() {
         return localSnapshot;
     }
 

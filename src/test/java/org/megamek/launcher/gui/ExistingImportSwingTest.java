@@ -1,5 +1,8 @@
 package org.megamek.launcher.gui;
 
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
+import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -9,9 +12,12 @@ import org.megamek.launcher.launch.ApplicationLauncher;
 import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.launch.ProcessRunner;
 import org.megamek.launcher.onboarding.InstallationInspector;
+import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.registry.RegistryData;
 import org.megamek.launcher.registry.RegistryStore;
 import org.megamek.launcher.release.ReleaseTransport;
+import org.megamek.launcher.update.ImportedCopyAdoptionService;
+import org.megamek.launcher.update.PreparedAdoption;
 import org.megamek.launcher.update.ReceiptStore;
 
 import javax.swing.JButton;
@@ -23,18 +29,22 @@ import java.awt.Component;
 import java.awt.Container;
 import java.awt.GraphicsEnvironment;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import java.util.jar.Attributes;
@@ -45,6 +55,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Tag("gui-smoke")
@@ -99,6 +110,46 @@ class ExistingImportSwingTest {
             assertEquals(1, prompts.folderRequests);
         } finally {
             releaseSnapshot.countDown();
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void invalidExistingFolderShowsPlainGuidanceInsteadOfLayoutDetails() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        Path invalid = Files.createDirectory(temp.resolve("not-an-installation"));
+        Path registry = temp.resolve("invalid-folder-registry.json");
+        LauncherServices services = services(registry, new RecordingRunner());
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(
+                services, new RecordingPrompts(List.of(invalid))));
+        try {
+            onEdt(() -> {
+                frame.showWindow();
+                return null;
+            });
+            JButton importButton = waitFor(() -> findButton(frame, "useExistingCopyButton"));
+            onEdt(() -> {
+                importButton.doClick();
+                return null;
+            });
+
+            JLabel heading = waitFor(() -> {
+                JLabel label = (JLabel) findOwned(frame, "operationPhaseLabel");
+                return label != null && "This folder can't be used".equals(label.getText())
+                        ? label : null;
+            });
+            JLabel detail = (JLabel) findOwned(frame, "operationProgressDetail");
+            assertEquals("This folder can't be used", heading.getText());
+            assertTrue(detail.getText().contains(
+                    "Choose the main MegaMek, MekHQ, or MegaMekLab installation folder"));
+            assertFalse(detail.getText().contains("unsupported layout"));
+            assertFalse(((JButton) findOwned(frame, "operationViewDetailsButton")).isVisible());
+            assertEquals(1, countButtonText(
+                    (Container) detail.getTopLevelAncestor(), "Close"));
+            assertEquals("", ((JLabel) find(frame, "homeStatusLabel")).getText(),
+                    "the operation dialog is the only failure status surface");
+        } finally {
             dispose(frame);
         }
     }
@@ -257,6 +308,7 @@ class ExistingImportSwingTest {
                 });
                 JButton enable = waitFor(() -> findButton(frame,
                         "enableManagedUpdatesButton-" + record.id()));
+                assertEquals("Enable Updates", enable.getText());
                 onEdt(() -> {
                     enable.doClick();
                     return null;
@@ -296,6 +348,94 @@ class ExistingImportSwingTest {
             } finally {
                 dispose(frame);
             }
+    }
+
+    @Test
+    void successfulAdoptionEnablesImmediatelyWithoutAnotherConfirmation() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        AdoptionFixture fixture = adoptableMegaMekSuite("automatic-adoption");
+        Path registry = temp.resolve("automatic-adoption-registry.json");
+        AtomicInteger requests = new AtomicInteger();
+        AtomicInteger packageRequests = new AtomicInteger();
+        AtomicReference<OperationContext> preparationContext = new AtomicReference<>();
+        AtomicReference<OperationContext> publicationContext = new AtomicReference<>();
+        ReleaseTransport transport = automaticAdoptionTransport(
+                fixture.archive(), requests, packageRequests);
+        LauncherServices services = new LauncherServices(
+                registry, new RegistryStore(), new InstallationInspector(), transport,
+                new JavaRuntime(new RecordingRunner()),
+                new ApplicationLauncher(new RecordingRunner())) {
+            @Override
+            public PreparedAdoption prepareAutomaticAdoption(
+                    org.megamek.launcher.registry.InstallationRecord record,
+                    org.megamek.launcher.release.OfficialRepository repository,
+                    org.megamek.launcher.channel.FollowChannel channel,
+                    PrintStream progress, OperationContext context)
+                    throws IOException, InterruptedException,
+                    org.megamek.launcher.manifest.ManifestException {
+                preparationContext.set(context);
+                return super.prepareAutomaticAdoption(
+                        record, repository, channel, progress, context);
+            }
+
+            @Override
+            public ImportedCopyAdoptionService.CommitResult commitAdoption(
+                    PreparedAdoption prepared, OperationContext context,
+                    PrintStream progress)
+                    throws IOException, InterruptedException,
+                    org.megamek.launcher.manifest.ManifestException {
+                publicationContext.set(context);
+                return super.commitAdoption(prepared, context, progress);
+            }
+        };
+        var record = services.register("Imported", fixture.root());
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            onEdt(() -> {
+                frame.showWindow();
+                return null;
+            });
+            JButton manage = waitFor(() -> findButton(frame, "manageInstallationsButton"));
+            onEdt(() -> {
+                manage.doClick();
+                return null;
+            });
+            JButton enable = waitFor(() -> findButton(frame,
+                    "enableManagedUpdatesButton-" + record.id()));
+            onEdt(() -> {
+                enable.doClick();
+                return null;
+            });
+            JDialog start = waitFor(() -> findDialog(frame, "adoptionCandidateDialog"));
+            onEdt(() -> {
+                ((JButton) find(start, "continueAdoptionButton")).doClick();
+                return null;
+            });
+
+            assertNotNull(waitFor(() -> findButton(frame, "manageAddExistingButton")),
+                    "successful validation and publication remain on Installations");
+            JLabel updateStatus = waitFor(() -> {
+                JLabel label = (JLabel) find(frame, "installationStatus-" + record.id());
+                return label != null && "Up to date".equals(label.getText()) ? label : null;
+            });
+            assertEquals("Up to date", updateStatus.getText());
+            assertNull(findButton(frame, "manageInstallationsButton"));
+            assertFalse(hasShowingDialog(frame, "Copy verified"));
+            var preference = new ChannelPreferenceStore()
+                    .read(registry, services.readRegistry(), record).preference();
+            assertEquals(org.megamek.launcher.channel.FollowChannel.MILESTONE,
+                    preference.channel());
+            assertTrue(preference.checkOnOpen());
+            assertSame(preparationContext.get(), publicationContext.get(),
+                    "verification and publication must use one active operation context");
+            assertEquals(6, requests.get(),
+                    "publication performs no remote metadata request");
+            assertEquals(1, packageRequests.get(),
+                    "publication reuses the verified download");
+        } finally {
+            dispose(frame);
+        }
     }
 
     @Test
@@ -436,6 +576,102 @@ class ExistingImportSwingTest {
         return root;
     }
 
+    private AdoptionFixture adoptableMegaMekSuite(String name) throws Exception {
+        Path root = Files.createDirectory(temp.resolve(name));
+        Files.createDirectories(root.resolve("data"));
+        Files.createDirectories(root.resolve("mmconf"));
+        Files.createDirectories(root.resolve("lib"));
+        byte[] jar = versionedMegaMekJar();
+        byte[] dependency = {1, 2, 3, 4};
+        Files.write(root.resolve("MegaMek.jar"), jar);
+        Files.write(root.resolve("lib/library.jar"), dependency);
+        Files.writeString(root.resolve("data/base.txt"), "official-data");
+        Files.writeString(root.resolve("mmconf/user.cfg"), "local-setting");
+
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        try (GzipCompressorOutputStream gzip = new GzipCompressorOutputStream(bytes);
+             TarArchiveOutputStream tar = new TarArchiveOutputStream(gzip)) {
+            addArchiveEntry(tar, "MegaMek-0.50.07/", null);
+            addArchiveEntry(tar, "MegaMek-0.50.07/data/", null);
+            addArchiveEntry(tar, "MegaMek-0.50.07/mmconf/", null);
+            addArchiveEntry(tar, "MegaMek-0.50.07/lib/", null);
+            addArchiveEntry(tar, "MegaMek-0.50.07/MegaMek.jar", jar);
+            addArchiveEntry(tar, "MegaMek-0.50.07/lib/library.jar", dependency);
+            addArchiveEntry(tar, "MegaMek-0.50.07/data/base.txt",
+                    "official-data".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            addArchiveEntry(tar, "MegaMek-0.50.07/mmconf/user.cfg",
+                    "official-setting".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+        return new AdoptionFixture(root, bytes.toByteArray());
+    }
+
+    private static byte[] versionedMegaMekJar() throws Exception {
+        Manifest manifest = new Manifest();
+        manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        manifest.getMainAttributes().put(Attributes.Name.MAIN_CLASS, "megamek.MegaMek");
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        try (JarOutputStream jar = new JarOutputStream(bytes, manifest)) {
+            jar.putNextEntry(new java.util.jar.JarEntry("megamek/Version.properties"));
+            jar.write("major=0\nminor=50\npatch=7\n".getBytes(
+                    java.nio.charset.StandardCharsets.UTF_8));
+            jar.closeEntry();
+        }
+        return bytes.toByteArray();
+    }
+
+    private static void addArchiveEntry(
+            TarArchiveOutputStream tar, String name, byte[] content) throws IOException {
+        TarArchiveEntry entry = new TarArchiveEntry(name);
+        entry.setSize(content == null ? 0 : content.length);
+        if (content == null) entry.setMode(0755);
+        tar.putArchiveEntry(entry);
+        if (content != null) tar.write(content);
+        tar.closeArchiveEntry();
+    }
+
+    private static ReleaseTransport automaticAdoptionTransport(
+            byte[] archive, AtomicInteger requests, AtomicInteger packageRequests)
+            throws Exception {
+        String digest = HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(archive));
+        String metadata = """
+                {"tag_name":"v0.50.07","name":"Version 0.50.07","draft":false,
+                "prerelease":false,
+                "html_url":"https://github.com/MegaMek/megamek/releases/tag/v0.50.07",
+                "assets":[{"name":"MegaMek-0.50.07.tar.gz","size":%d,
+                "digest":"sha256:%s",
+                "browser_download_url":"https://github.com/MegaMek/megamek/releases/download/\
+                v0.50.07/MegaMek-0.50.07.tar.gz"}]}
+                """.formatted(archive.length, digest);
+        Deque<java.util.function.Supplier<ReleaseTransport.Response>> responses =
+                new ArrayDeque<>(List.of(
+                        response("[" + metadata + "]"),
+                        response(metadata),
+                        response(metadata),
+                        binaryResponse(archive),
+                        response("stable: 0.50.07\ndev: 0.51.0\n"),
+                        response(metadata)));
+        return (uri, accept) -> {
+            requests.incrementAndGet();
+            if ("application/octet-stream".equals(accept)) packageRequests.incrementAndGet();
+            var response = responses.pollFirst();
+            if (response == null) throw new IOException("unexpected request: " + uri);
+            return response.get();
+        };
+    }
+
+    private static java.util.function.Supplier<ReleaseTransport.Response> response(String body) {
+        return () -> new ReleaseTransport.Response(200, Map.of(),
+                new java.io.ByteArrayInputStream(
+                        body.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+    }
+
+    private static java.util.function.Supplier<ReleaseTransport.Response> binaryResponse(
+            byte[] body) {
+        return () -> new ReleaseTransport.Response(200, Map.of(),
+                new java.io.ByteArrayInputStream(body));
+    }
+
     private static Map<Path, Long> inventory(Path root) throws Exception {
         try (var files = Files.walk(root)) {
             return files.filter(Files::isRegularFile).collect(java.util.stream.Collectors.toMap(
@@ -564,6 +800,10 @@ class ExistingImportSwingTest {
             commands.add(List.copyOf(command));
             return new Result(0, "openjdk version \"21.0.8\"", false);
         }
+
+    }
+
+    private record AdoptionFixture(Path root, byte[] archive) {
     }
 
     private static final class RecordingPrompts implements LauncherFrame.ExistingImportPrompts {

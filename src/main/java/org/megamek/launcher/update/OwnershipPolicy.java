@@ -98,6 +98,30 @@ public final class OwnershipPolicy {
             context.progress(phase, ++completed, paths.size(), ProgressUnit.FILES,
                     "Inventoried " + completed + " of " + paths.size() + " package entries");
         }
+        return finish(repository, releaseId, managed, excluded);
+    }
+
+    /**
+     * Builds ownership from a full package snapshot without reopening or re-hashing its files.
+     */
+    Build build(RootSnapshot snapshot, OfficialRepository repository, String releaseId)
+            throws ManifestException {
+        List<FileEntry> managed = new ArrayList<>();
+        List<String> excluded = new ArrayList<>();
+        for (EntryEvidence entry : snapshot.entries()) {
+            if (!entry.regularFile()) continue;
+            if (managed(entry.path())) {
+                managed.add(new FileEntry(entry.path(), entry.sha256()));
+            } else {
+                excluded.add(entry.path());
+            }
+        }
+        return finish(repository, releaseId, managed, excluded);
+    }
+
+    private static Build finish(OfficialRepository repository, String releaseId,
+                                List<FileEntry> managed, List<String> excluded)
+            throws ManifestException {
         Manifest manifest = new Manifest(ManifestReader.SCHEMA_VERSION, repository.key(),
                 repository.key() + "-official-package", releaseId, PROTECTED_PATHS,
                 List.copyOf(managed));

@@ -114,6 +114,12 @@ custom metrics in logical coordinates while Java handles per-monitor device DPI.
 [first-launch presentation](first-launch-ui.md). Artwork loading failures are reported without
 disabling onboarding or treating a registry error as empty.
 
+If the selected folder cannot be inspected as a MegaMek suite installation, the operation surface
+shows one plain instruction to choose the main MegaMek, MekHQ, or MegaMekLab installation folder.
+This expected validation state offers only **Close**: it does not expose raw layout/path details,
+developer diagnostics, or a secondary logging warning. Local diagnostics remain available through
+Settings when recording succeeds.
+
 Ready quick-install actions pass the selected cached `QuickInstallOption` to an off-EDT planner.
 That planner freshly captures destination and registry/default state but does not read Settings or
 perform a YAML/current-target lookup. Confirmation opens with the shared Home
@@ -302,11 +308,14 @@ button carries only the known update count and otherwise keeps its default label
 updates that label in place and never replaces managed Home.
 
 An available result displays verified installed tag, followed target, status, release-notes URL,
-and full size. **Update to recommended release…** goes directly to that captured target. Before any
+and full size. **Update to recommended release…** goes directly to that captured target and opens a
+styled pre-download consent showing only the application name, current version, new version, and
+rounded human-readable MiB download size. Its right-aligned actions are **Cancel** then **Download**,
+with Download as the default; Cancel, Escape, and window close fetch no package body. Before any
 package request the backend rechecks the record, channel sidecar, fixed source, repository, tag,
 asset name, size, and digest. Changed metadata is rejected for fresh consent; it cannot silently
-retarget. There is no standalone GUI preview picker. Update still computes and displays the same read-only
-plan before the separate Apply consent and cannot change the channel.
+retarget. There is no standalone GUI preview picker. Update computes the same read-only plan
+internally before the separate Apply authorization and cannot change the channel.
 
 Home determines update/preview availability from local registry, immutable receipt, and latest
 current-provenance validation without startup network access. Missing, corrupt, stale, or
@@ -319,7 +328,7 @@ protected paths, and excluded official paths; the Preview report itself has no A
 
 **Update…** is a distinct, attempt-scoped workflow. After the first consent it downloads the exact
 selected full package once, verifies/extracts it in a random owned workspace, and builds the same
-read-only report. It then presents a separate confirmation naming the captured installation and
+read-only plan internally. It then presents a separate confirmation naming the captured installation and
 path, exact target size/digest, destructive managed actions, retained `SKIP` count,
 backups/recovery, instruction to close every suite application (including manually started copies),
 and the fact that the package is already downloaded and will not be downloaded again. After
@@ -382,7 +391,7 @@ accurately states that externally/older-started applications cannot be universal
 ## Imported-copy adoption
 
 A true imported card says **Imported copy · Launch only · Updates unavailable** and includes one
-styled, keyboard-accessible **Enable managed updates…** action. It appears only when receipt,
+styled, keyboard-accessible **Enable Updates** action. It appears only when receipt,
 current state, channel, adoption staging, and pending transaction are all absent. Managed,
 managed-incomplete/corrupt, and recovery-pending cards never show it.
 
@@ -408,15 +417,25 @@ metadata/package work runs in a worker under `BusyGate`, with exact record, sele
 dialog generation, and cancellation guards.
 
 Verification uses one styled progress surface and supports safe cancellation until publication.
-Its visible summary never lists paths, digests, or comparison counts. An eligible result says
-**This copy can be managed safely. Existing files will not be changed.** and offers
-**Enable** / **Cancel**. An ineligible result says
+Its three filesystem scans are distinguished as **Checking existing installation**,
+**Checking official package**, and **Confirming installation has not changed**, with file counts.
+The official scan hashes each file once and shares that immutable evidence between ownership and
+full-tree comparison. The visible summary never lists paths, digests, or comparison counts. An
+eligible result immediately proceeds to atomic metadata publication for the already-selected
+channel without a second confirmation. An ineligible result says
 **This copy could not be verified and will remain launch-only.** and offers **Close** /
 **View details/logs**. Detailed exact/modified/missing/protected/unknown/conflict information is
 bounded to the hidden operation capture and local logs.
 
-Enable runs off the event-dispatch thread and atomically publishes metadata without re-downloading
-or modifying the root. Success returns to Home with **Managed updates enabled**. Failure keeps
+Final revalidation and publication remain in the same cancellable operation as verification and
+reuse its progress surface and prepared immutable official evidence. Final revalidation is local:
+under the root gate it rechecks registry, true-import, and pending state, then compares one fresh
+local root snapshot with the prepared snapshot. It does not re-fetch metadata, re-hash the archive,
+extract again, or rebuild official evidence. Cancellation remains available through that local
+check, then becomes unavailable at the atomic metadata-publication barrier. Publication runs off
+the event-dispatch thread without re-downloading or modifying the root.
+Success refreshes the Installations page in place and automatically checks the newly managed copy,
+so its current update availability is visible there. Failure keeps
 launch available, displays one concise launch-only message, and links to logs. Closing or
 cancelling before publication closes the opaque prepared handle and removes its owned workspace.
 The fixed channel cannot be edited after success.

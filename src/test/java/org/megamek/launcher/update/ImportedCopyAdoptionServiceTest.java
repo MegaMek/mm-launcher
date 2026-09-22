@@ -11,7 +11,10 @@ import org.megamek.launcher.launch.RootCoordinator;
 import org.megamek.launcher.onboarding.InstallationInspector;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationCancelledException;
+import org.megamek.launcher.operation.OperationPhase;
+import org.megamek.launcher.operation.OperationProgress;
 import org.megamek.launcher.operation.OperationType;
+import org.megamek.launcher.operation.ProgressUnit;
 import org.megamek.launcher.registry.InstallationRecord;
 import org.megamek.launcher.registry.RegistryData;
 import org.megamek.launcher.registry.RegistryStore;
@@ -40,6 +43,7 @@ import java.util.jar.Manifest;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -48,12 +52,49 @@ class ImportedCopyAdoptionServiceTest {
     @TempDir Path temp;
 
     @Test
+    void snapshotContentIdentityIgnoresDirectorySizeButRequiresFileBytes() {
+        var rootIdentity = new RootIdentity("root-key", 1L, 2L);
+        var directory = new EntryEvidence(
+                "data/boards", false, true, 20_480L, 3L, "directory-key", null);
+        var file = new EntryEvidence(
+                "data/boards/map.board", true, false, 4L, 4L, "file-key", "file-hash");
+        var baseline = new RootSnapshot(
+                "official", rootIdentity, List.of(directory, file));
+
+        var differentDirectorySize = new RootSnapshot(
+                "fresh", rootIdentity, List.of(
+                new EntryEvidence(
+                        "data/boards", false, true, 24_576L, 3L,
+                        "directory-key", null),
+                file));
+        assertTrue(ImportedCopyAdoptionService.sameContents(
+                baseline, differentDirectorySize));
+
+        var differentFileSize = new RootSnapshot(
+                "fresh", rootIdentity, List.of(directory,
+                new EntryEvidence(
+                        "data/boards/map.board", true, false, 5L, 4L,
+                        "file-key", "file-hash")));
+        assertFalse(ImportedCopyAdoptionService.sameContents(
+                baseline, differentFileSize));
+
+        var differentFileHash = new RootSnapshot(
+                "fresh", rootIdentity, List.of(directory,
+                new EntryEvidence(
+                        "data/boards/map.board", true, false, 4L, 4L,
+                        "file-key", "different-hash")));
+        assertFalse(ImportedCopyAdoptionService.sameContents(
+                baseline, differentFileHash));
+    }
+
+    @Test
     void pristineImportPublishesExactAncestorWithoutChangingRootOrDownloadingTwice()
             throws Exception {
         byte[] jar = jar(null);
         byte[] archive = archive(jar, "official-data", "official-setting");
         QueueTransport transport = transport(archive);
-        Fixture fixture = fixture(jar, "official-data", "local-setting", transport, point -> {});
+        Fixture fixture = fixture(jar, "official-data", "local-setting",
+                transport, point -> {});
         Map<String, Evidence> before = rootEvidence(fixture.root());
 
         try (PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
@@ -89,8 +130,8 @@ class ImportedCopyAdoptionServiceTest {
         assertEquals(ImportedCopyAdoptionService.Availability.MANAGED,
                 fixture.service().availability(data, record, false));
         assertEquals(1, transport.packageRequests);
-        assertEquals(4, transport.requests.size(),
-                "commit refreshes metadata but does not request another package");
+        assertEquals(3, transport.requests.size(),
+                "continuous publication performs no additional network request");
         assertFalse(record.updateEligible(),
                 "registry membership remains non-authoritative; sidecars gate updates");
 
@@ -101,6 +142,133 @@ class ImportedCopyAdoptionServiceTest {
                 "partial/corrupt adopted provenance must not authorize updates");
         assertEquals(ImportedCopyAdoptionService.Availability.INCOMPLETE,
                 fixture.service().availability(data, record, false));
+    }
+
+    @Test
+    void preparationReusesOfficialHashesAndPublicationUsesOneMonotonicContext()
+            throws Exception {
+        byte[] jar = jar(null);
+        byte[] archive = archive(jar, "official-data", "official-setting");
+        QueueTransport transport = transport(archive);
+        Fixture fixture = fixture(jar, "official-data", "local-setting",
+                transport, point -> {});
+        List<OperationProgress> events = new ArrayList<>();
+        OperationContext context = new OperationContext(
+                OperationType.ADOPT_EXISTING, events::add);
+        int localEntryCount;
+        int officialEntryCount;
+
+        try (PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
+                org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
+                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                context)) {
+            assertTrue(prepared.report().eligible());
+            localEntryCount = prepared.localSnapshot().entries().size();
+            officialEntryCount = prepared.officialSnapshot().entries().size();
+            for (var owned : prepared.ownership().manifest().files()) {
+                EntryEvidence scanned = prepared.officialSnapshot().entries().stream()
+                        .filter(entry -> entry.path().equals(owned.path()))
+                        .findFirst().orElseThrow();
+                assertSame(scanned.sha256(), owned.sha256(),
+                        "ownership must retain the exact SHA-256 computed by the root scan");
+            }
+            int requestsAfterPreparation = transport.requests.size();
+            assertFalse(events.stream().anyMatch(event ->
+                            event.phase() == OperationPhase.FINAL),
+                    "preparation must not report Finished while publication remains");
+            fixture.service().commit(prepared, context,
+                    new PrintStream(new ByteArrayOutputStream()));
+            assertEquals(requestsAfterPreparation, transport.requests.size(),
+                    "publication must use only prepared in-memory official evidence");
+        }
+
+        List<OperationPhase> phases = events.stream().map(OperationProgress::phase).toList();
+        assertTrue(phases.indexOf(OperationPhase.PREPARE_INSTALL)
+                        > phases.lastIndexOf(OperationPhase.PLAN),
+                "final revalidation follows prepared-copy comparison");
+        assertTrue(phases.indexOf(OperationPhase.APPLY)
+                        > phases.indexOf(OperationPhase.PREPARE_INSTALL),
+                "metadata publication follows final revalidation");
+        for (int index = 1; index < phases.size(); index++) {
+            assertTrue(phases.get(index).ordinal() >= phases.get(index - 1).ordinal(),
+                    "one operation context must never regress phases");
+        }
+        assertTrue(events.stream().allMatch(event ->
+                        event.operationId().equals(context.id())),
+                "preparation and publication report through the same operation context");
+        assertScanProgress(events, OperationPhase.METADATA,
+                "Checking existing installation", localEntryCount);
+        assertScanProgress(events, OperationPhase.PLAN,
+                "Checking official package", officialEntryCount);
+        List<OperationProgress> finalSnapshotProgress = assertScanProgress(
+                events, OperationPhase.PREPARE_INSTALL,
+                "Confirming installation has not changed", localEntryCount);
+        assertEquals(localEntryCount, finalSnapshotProgress.size(),
+                "publication takes exactly one final local root snapshot");
+        assertTrue(finalSnapshotProgress.stream().allMatch(
+                        OperationProgress::cancellationAllowed),
+                "the final local snapshot remains cancellable");
+        OperationProgress publication = events.stream()
+                .filter(event -> event.phase() == OperationPhase.APPLY)
+                .findFirst().orElseThrow();
+        assertFalse(publication.cancellationAllowed(),
+                "cancellation is blocked only after metadata publication begins");
+        assertTrue(publication.detail().contains("Publishing managed-update metadata"));
+        assertEquals(1, transport.packageRequests,
+                "publication must not download another package");
+        assertFalse(context.requestCancellation().accepted(),
+                "late cancellation cannot cross the publication barrier");
+    }
+
+    private static List<OperationProgress> assertScanProgress(
+            List<OperationProgress> events, OperationPhase phase,
+            String detailPrefix, int expectedEntries) {
+        List<OperationProgress> scan = events.stream()
+                .filter(event -> event.phase() == phase
+                        && event.unit() == ProgressUnit.FILES
+                        && event.cancellationAllowed())
+                .toList();
+        assertEquals(expectedEntries, scan.size(),
+                detailPrefix + " must scan every entry exactly once");
+        assertTrue(scan.stream().allMatch(event ->
+                        event.detail().startsWith(detailPrefix + " — ")
+                                && event.detail().endsWith(" files and folders")),
+                detailPrefix + " must include useful entry counts");
+        assertTrue(events.stream().anyMatch(event ->
+                        event.phase() == phase
+                                && event.unit() == ProgressUnit.NONE
+                                && event.detail().equals(detailPrefix)),
+                detailPrefix + " must be announced in its expected phase");
+        return scan;
+    }
+
+    @Test
+    void publicationUsesImmutablePreparedEvidenceAndCleansWorkspaceExactlyOnce()
+            throws Exception {
+        byte[] jar = jar(null);
+        byte[] archive = archive(jar, "official-data", "official-setting");
+        QueueTransport transport = transport(archive);
+        Fixture fixture = fixture(jar, "official-data", "local-setting",
+                transport, point -> {});
+        PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
+                org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
+                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                OperationContext.none(OperationType.ADOPT_EXISTING));
+        Path staging = prepared.workspace().staging();
+        Files.write(staging.resolve("package.tar.gz"), new byte[]{9, 8, 7});
+        Files.delete(prepared.workspace().extracted().resolve("data/base.txt"));
+        int requestsAfterPreparation = transport.requests.size();
+
+        fixture.service().commit(prepared);
+
+        assertEquals(requestsAfterPreparation, transport.requests.size(),
+                "publication must not consult remote metadata");
+        assertEquals(ImportedCopyAdoptionService.Availability.MANAGED,
+                fixture.service().availability(
+                        fixture.registries().read(fixture.registry()),
+                        fixture.record(), false));
+        assertFalse(Files.exists(staging),
+                "the consumed prepared workspace must be removed exactly once");
     }
 
     @Test
@@ -332,6 +500,38 @@ class ImportedCopyAdoptionServiceTest {
     }
 
     @Test
+    void cancellationAfterPreparationConsumesHandleAndCleansRetainedWorkspace()
+            throws Exception {
+        byte[] jar = jar(null);
+        byte[] archive = archive(jar, "official-data", "official-setting");
+        QueueTransport transport = transport(archive);
+        Fixture fixture = fixture(jar, "official-data", "local-setting",
+                transport, point -> {});
+        OperationContext context = new OperationContext(OperationType.ADOPT_EXISTING);
+        PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
+                org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
+                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                context);
+
+        assertTrue(context.requestCancellation().accepted());
+        assertThrows(OperationCancelledException.class,
+                () -> fixture.service().commit(prepared, context,
+                        new PrintStream(new ByteArrayOutputStream())));
+        assertThrows(IOException.class,
+                () -> fixture.service().commit(prepared,
+                        OperationContext.none(OperationType.ADOPT_EXISTING),
+                        new PrintStream(new ByteArrayOutputStream())),
+                "a cancelled commit still consumes its one-use prepared handle");
+        assertNoProvenance(fixture);
+        try (var children = Files.list(temp)) {
+            assertFalse(children.anyMatch(path ->
+                            path.getFileName().toString().startsWith(".adoption-attempt-")),
+                    "cancellation must remove the retained adoption workspace");
+        }
+        assertEquals(1, transport.packageRequests);
+    }
+
+    @Test
     void officialPackageWithDifferentDetectedVersionIsIneligible() throws Exception {
         byte[] localJar = jar(null);
         byte[] wrongJar = jarVersion(9, 9, 9, null);
@@ -374,7 +574,7 @@ class ImportedCopyAdoptionServiceTest {
     private static QueueTransport transport(byte[] archive) throws Exception {
         String metadata = releaseJson(archive);
         return new QueueTransport(response(metadata), response(metadata),
-                binary(archive), response(metadata));
+                binary(archive));
     }
 
     private static void assertNoProvenance(Fixture fixture) throws Exception {

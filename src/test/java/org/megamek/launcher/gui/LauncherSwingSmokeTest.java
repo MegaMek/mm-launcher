@@ -620,6 +620,46 @@ class LauncherSwingSmokeTest {
     }
 
     @Test
+    void progressDialogKeepsExpectedValidationFailureSimple() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing progress controls require a display");
+        LauncherFrame frame = onEdt(() ->
+                new LauncherFrame(new LauncherServices(temp.resolve("friendly-failure.json"))));
+        AtomicReference<OperationProgressDialog> holder = new AtomicReference<>();
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                frame.setVisible(true);
+                OperationProgressDialog dialog = new OperationProgressDialog(
+                        frame, "This folder can't be used", "friendlyFailureLog", () -> {
+                        });
+                dialog.setExpectedFailureSummary(
+                        "Choose the main MegaMek, MekHQ, or MegaMekLab installation folder, "
+                                + "then try again.");
+                dialog.showFailure(new IOException(
+                        "unsupported layout: missing directory data"),
+                        "fixture logging warning");
+                holder.set(dialog);
+                dialog.setVisible(true);
+            });
+
+            OperationProgressDialog dialog = holder.get();
+            JLabel detail = findLabel(dialog, "operationProgressDetail");
+            JLabel logging = findLabel(dialog, "operationLoggingWarning");
+            assertTrue(detail.getText().contains(
+                    "Choose the main MegaMek, MekHQ, or MegaMekLab installation folder"));
+            assertFalse(detail.getText().contains("unsupported layout"));
+            assertFalse(logging.isVisible(),
+                    "expected input errors do not expose diagnostics-recording failures");
+            assertFalse(find(dialog, "operationViewDetailsButton").isVisible(),
+                    "expected input errors do not open developer diagnostics");
+            assertTrue(detail.getBorder().getBorderInsets(detail).top > 0,
+                    "failure heading and body retain visible separation");
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
     void progressDialogShowsAtomicCutoffReasonAndDeniesLateCancellation()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
@@ -658,6 +698,73 @@ class LauncherSwingSmokeTest {
             assertFalse(hasShowingDialog(frame, "Cancellation unavailable"));
         } finally {
             context.finish(org.megamek.launcher.operation.OperationOutcome.SUCCEEDED, "done");
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void adoptionProgressDistinguishesEachScanAndNeverShowsRunningFinished()
+            throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing progress controls require a display");
+        LauncherFrame frame = onEdt(() ->
+                new LauncherFrame(new LauncherServices(
+                        temp.resolve("adoption-progress.json"))));
+        AtomicReference<OperationProgressDialog> holder = new AtomicReference<>();
+        OperationContext context = new OperationContext(OperationType.ADOPT_EXISTING,
+                event -> holder.get().onProgress(event));
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                frame.setVisible(true);
+                OperationProgressDialog dialog = new OperationProgressDialog(
+                        frame, "Verifying imported copy", "adoptionFixtureLog", () -> {
+                        });
+                holder.set(dialog);
+                dialog.bind(context);
+                dialog.setVisible(true);
+            });
+            JDialog dialog = owned(frame, "Verifying imported copy");
+            JLabel phase = findLabel(dialog, "operationPhaseLabel");
+            JLabel detail = findLabel(dialog, "operationProgressDetail");
+            JButton cancel = find(dialog, "operationCancelButton");
+
+            context.progress(OperationPhase.METADATA, 1, 3, ProgressUnit.FILES,
+                    "Checking existing installation — 1 of 3 files and folders");
+            waitFor(() -> "Reading metadata".equals(phase.getText())
+                    && detail.getText().contains("Checking existing installation"));
+            assertTrue(detail.getText().contains("1 of 3 files and folders"));
+
+            context.progress(OperationPhase.PLAN, 2, 3, ProgressUnit.FILES,
+                    "Checking official package — 2 of 3 files and folders");
+            waitFor(() -> "Planning changes".equals(phase.getText())
+                    && detail.getText().contains("Checking official package"));
+            assertFalse("Finished".equals(phase.getText()));
+
+            context.progress(OperationPhase.PREPARE_INSTALL, 3, 3, ProgressUnit.FILES,
+                    "Confirming installation has not changed — 3 of 3 files and folders");
+            waitFor(() -> "Final local check".equals(phase.getText())
+                    && detail.getText().contains(
+                    "Confirming installation has not changed"));
+            assertTrue(cancel.isVisible() && cancel.isEnabled());
+
+            context.enterFinalization(
+                    "Managed-update metadata publication has begun; "
+                            + "cancellation can no longer be performed safely.");
+            context.phase(OperationPhase.APPLY,
+                    "Publishing managed-update metadata outside the application folder");
+            waitFor(() -> "Enabling managed updates".equals(phase.getText())
+                    && detail.getText().contains("Publishing managed-update metadata"));
+            assertFalse(cancel.isVisible());
+            assertFalse(cancel.isEnabled());
+            assertFalse(context.requestCancellation().accepted());
+
+            context.finish(org.megamek.launcher.operation.OperationOutcome.SUCCEEDED,
+                    "Operation completed");
+            Thread.sleep(200);
+            assertEquals("Enabling managed updates", phase.getText(),
+                    "terminal FINAL stays hidden until the authoritative callback closes UI");
+            assertFalse("Finished".equals(phase.getText()));
+        } finally {
             dispose(frame);
         }
     }
