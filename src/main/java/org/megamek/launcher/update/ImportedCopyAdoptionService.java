@@ -133,30 +133,14 @@ public final class ImportedCopyAdoptionService {
             context.phase(OperationPhase.METADATA,
                     "Finding the matching official version");
             RegistryData data = registries.read(registry);
-            InstallationRecord record = registries.resolve(data, expected.id());
-            if (!record.equals(expected)) {
-                throw new IOException("the selected installation changed; reopen Installations");
-            }
-            OfficialRepository repository = repositoryFor(record.products());
-            if (repository != requestedRepository) {
-                throw new IOException("the detected application mapping changed");
-            }
-            Path root = requireTrueImported(data, record);
+            InstallationRecord record = requireUnchangedRecord(data, expected);
+            Path root = requireMatchingRepository(data, record, requestedRepository);
             try (var gate = coordinator.acquire(root, false)) {
                 gate.requireNoPendingUpdate();
-                Inspection observed = inspector.inspect(root);
-                if (!matchesRecord(observed, record)) {
-                    throw new IOException("the imported application changed after registration");
-                }
-                if (observed.observedBuild().isBlank()
-                        || "unknown".equalsIgnoreCase(observed.observedBuild())
-                        || !observed.confidence().startsWith("recognized-packaging")) {
-                    throw new IOException("the detected application version is not strong enough "
-                            + "to resolve an official release");
-                }
+                requireRecognizedImport(inspector.inspect(root), record);
             }
             AutomaticAdoptionResolver.Resolution resolution =
-                    new AutomaticAdoptionResolver(transport).resolve(repository,
+                    new AutomaticAdoptionResolver(transport).resolve(requestedRepository,
                             record.observedBuild(), fixedChannel, diagnostics, context);
             if (resolution.matched()) return resolution.release().tag();
             if (resolution.status()
@@ -236,31 +220,14 @@ public final class ImportedCopyAdoptionService {
             context.phase(OperationPhase.METADATA,
                     "Checking that this copy is ready for verification");
             RegistryData before = registries.read(registry);
-            InstallationRecord record = registries.resolve(before, expected.id());
-            if (!record.equals(expected)) {
-                throw new IOException("the selected installation changed; reopen Installations");
-            }
-            OfficialRepository repository = repositoryFor(record.products());
-            if (repository != requestedRepository) {
-                throw new IOException("the selected official product does not match the detected "
-                        + "applications");
-            }
-            Path root = requireTrueImported(before, record);
-            Inspection observed;
+            InstallationRecord record = requireUnchangedRecord(before, expected);
+            Path root = requireMatchingRepository(before, record, requestedRepository);
+            OfficialRepository repository = requestedRepository;
             RootSnapshot local;
             try (var gate = coordinator.acquire(root, false)) {
                 gate.requireNoPendingUpdate();
                 context.checkpoint();
-                observed = inspector.inspect(root);
-                if (!matchesRecord(observed, record)) {
-                    throw new IOException("the imported application changed after registration");
-                }
-                if (observed.observedBuild().isBlank()
-                        || "unknown".equalsIgnoreCase(observed.observedBuild())
-                        || !observed.confidence().startsWith("recognized-packaging")) {
-                    throw new IOException("the detected application version is not strong enough "
-                            + "to verify an official ancestor");
-                }
+                requireRecognizedImport(inspector.inspect(root), record);
                 local = RootSnapshot.capture(root, context, OperationPhase.METADATA,
                         RootSnapshot.Scan.INITIAL_IMPORTED_COPY);
             }
@@ -397,10 +364,7 @@ public final class ImportedCopyAdoptionService {
             try (var gate = coordinator.acquire(root, false)) {
                 gate.requireNoPendingUpdate();
                 RegistryData currentRegistry = registries.read(registry);
-                InstallationRecord current = registries.resolve(currentRegistry, expected.id());
-                if (!current.equals(expected)) {
-                    throw new IOException("the selected installation record changed");
-                }
+                InstallationRecord current = requireUnchangedRecord(currentRegistry, expected);
                 requireTrueImported(currentRegistry, current);
                 RootSnapshot finalLocal = RootSnapshot.capture(
                         root, context, OperationPhase.PREPARE_INSTALL,
@@ -536,6 +500,51 @@ public final class ImportedCopyAdoptionService {
             failure = add(failure, error);
         }
         return failure;
+    }
+
+    /**
+     * The single implementation of "is this still the exact registered installation the caller
+     * expected", shared by every step (resolution, preparation, and commit) that must refuse to
+     * act on a stale selection instead of duplicating this comparison at each call site.
+     */
+    private InstallationRecord requireUnchangedRecord(RegistryData data, InstallationRecord expected)
+            throws IOException {
+        InstallationRecord current = registries.resolve(data, expected.id());
+        if (!current.equals(expected)) {
+            throw new IOException("the selected installation changed; reopen Installations");
+        }
+        return current;
+    }
+
+    /**
+     * The single implementation of "does this record's application still map to the requested
+     * official product", returning its verified imported root on success.
+     */
+    private Path requireMatchingRepository(RegistryData data, InstallationRecord record,
+                                           OfficialRepository requestedRepository)
+            throws IOException {
+        if (repositoryFor(record.products()) != requestedRepository) {
+            throw new IOException("the detected application mapping changed");
+        }
+        return requireTrueImported(data, record);
+    }
+
+    /**
+     * The single implementation of "is the freshly inspected folder still this record, with
+     * enough confidence to trust its observed version", shared by resolution and preparation
+     * instead of being copied at each call site.
+     */
+    private static void requireRecognizedImport(Inspection observed, InstallationRecord record)
+            throws IOException {
+        if (!matchesRecord(observed, record)) {
+            throw new IOException("the imported application changed after registration");
+        }
+        if (observed.observedBuild().isBlank()
+                || "unknown".equalsIgnoreCase(observed.observedBuild())
+                || !observed.confidence().startsWith("recognized-packaging")) {
+            throw new IOException("the detected application version is not strong enough "
+                    + "to verify an official ancestor");
+        }
     }
 
     private Path requireTrueImported(RegistryData data, InstallationRecord record)
