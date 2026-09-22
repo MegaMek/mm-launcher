@@ -278,29 +278,34 @@ class ImportedCopyAdoptionServiceTest {
         byte[] archive = archive(jar, "official-data", "official-setting");
         String metadata = releaseJson(archive, "v0.50.07", "0.50.07");
         QueueTransport transport = new QueueTransport(
-                response("[" + metadata + "]"), response(metadata), response(metadata),
-                binary(archive));
+                response("stable: 0.51.0\ndev: 0.52.0\n"),
+                response("[" + metadata + "]"), response(metadata),
+                response(metadata), binary(archive));
         Fixture fixture = fixture(jar, "official-data", "local-setting",
                 transport, point -> {});
 
         try (PreparedAdoption prepared = fixture.service().prepareAutomatically(
                 fixture.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK,
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.DEVELOPMENT, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING))) {
             assertTrue(prepared.report().eligible());
             assertEquals("v0.50.07", prepared.release().tag());
+            assertEquals(FollowChannel.DEVELOPMENT, prepared.report().fixedChannel(),
+                    "historical unknown identity keeps the selected fixed channel");
         }
 
         assertEquals(1, transport.packageRequests);
-        assertEquals(4, transport.requests.size());
-        assertTrue(transport.requests.get(0).toString().contains(
+        assertEquals(5, transport.requests.size());
+        assertEquals(org.megamek.launcher.channel.OfficialYamlChannelCatalog.SOURCE,
+                transport.requests.get(0));
+        assertTrue(transport.requests.get(1).toString().contains(
                 "/releases?per_page=50&page=1"));
-        assertTrue(transport.requests.get(1).toString().endsWith(
-                "/releases/tags/v0.50.07"));
         assertTrue(transport.requests.get(2).toString().endsWith(
                 "/releases/tags/v0.50.07"));
-        assertFalse(transport.requests.get(0).toString().contains("/tags/"),
+        assertTrue(transport.requests.get(3).toString().endsWith(
+                "/releases/tags/v0.50.07"));
+        assertFalse(transport.requests.get(1).toString().contains("/tags/"),
                 "automatic matching must not probe a guessed exact tag");
     }
 
@@ -348,7 +353,7 @@ class ImportedCopyAdoptionServiceTest {
                 FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING))) {
             assertFalse(prepared.report().eligible());
-            assertEquals("This copy could not be verified and will remain launch-only.",
+            assertEquals("Core application files differ from the official release.",
                     prepared.report().message());
             assertThrows(IOException.class, () -> mixed.service().commit(prepared));
         }

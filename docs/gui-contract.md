@@ -309,13 +309,15 @@ updates that label in place and never replaces managed Home.
 
 An available result displays verified installed tag, followed target, status, release-notes URL,
 and full size. **Update to recommended release…** goes directly to that captured target and opens a
-styled pre-download consent showing only the application name, current version, new version, and
-rounded human-readable MiB download size. Its right-aligned actions are **Cancel** then **Download**,
-with Download as the default; Cancel, Escape, and window close fetch no package body. Before any
-package request the backend rechecks the record, channel sidecar, fixed source, repository, tag,
-asset name, size, and digest. Changed metadata is rejected for fresh consent; it cannot silently
-retarget. There is no standalone GUI preview picker. Update computes the same read-only plan
-internally before the separate Apply authorization and cannot change the channel.
+styled update consent showing the application name, current version, new version, and rounded
+human-readable MiB download size. It states that the operation will download, verify, plan, and
+apply the update and reminds the user to close suite applications. Its right-aligned actions are
+**Cancel** then **Update**, with Update as the default. This one consent authorizes the complete
+attempt; Cancel, Escape, and window close fetch no package body. Before any package request the
+backend rechecks the record, channel sidecar, fixed source, repository, tag, asset name, size, and
+digest. Changed metadata is rejected for fresh consent; it cannot silently retarget. There is no
+standalone GUI preview picker. Update computes the same read-only plan internally and proceeds to
+Apply without another UI confirmation; it cannot change the channel.
 
 Home determines update/preview availability from local registry, immutable receipt, and latest
 current-provenance validation without startup network access. Missing, corrupt, stale, or
@@ -326,13 +328,11 @@ actions. Before downloading it confirms source, exact target, full byte size, te
 inspection, and read-only scope. Work runs off the EDT. Results show all decisions, counts,
 protected paths, and excluded official paths; the Preview report itself has no Apply control.
 
-**Update…** is a distinct, attempt-scoped workflow. After the first consent it downloads the exact
+**Update…** is a distinct, attempt-scoped workflow. After its one consent it downloads the exact
 selected full package once, verifies/extracts it in a random owned workspace, and builds the same
-read-only plan internally. It then presents a separate confirmation naming the captured installation and
-path, exact target size/digest, destructive managed actions, retained `SKIP` count,
-backups/recovery, instruction to close every suite application (including manually started copies),
-and the fact that the package is already downloaded and will not be downloaded again. After
-consent it atomically claims that one-use handle, acquires the captured root's cross-process gate,
+read-only plan internally. Preparation completion does not interrupt progress with another consent
+or expose the plan as a decision point. The worker immediately supplies the existing explicit
+backend confirmation token, atomically claims that one-use handle, acquires the captured root's cross-process gate,
 re-reads the captured record/receipt/current source, refreshes exact release metadata, re-verifies
 the retained compressed size/SHA-256/file identity, safely re-extracts from those bytes, validates
 the result against the pristine captured target inventory/inspection, replans fresh local files,
@@ -340,15 +340,17 @@ and applies only through `RealUpdateService`. The recommended route additionally
 channel source and preference under the gate. Drift fails with instructions to restart; it never
 redownloads or retargets.
 
-One background worker owns the prepared handle through the EDT-only second confirmation and
-Apply/discard. Package transfer, hashing, extraction, planning, Apply, and potentially large cleanup
-stay off the EDT. Cancellation after preparation and a late result after frame disposal discard the
-exact workspace. Concurrent close/Apply, reuse, another facade, changed source/root binding, a live
-launch gate, or pending recovery fail closed. Success distinguishes pristine and preserved-override
-results. If installation commit succeeds but temporary-package cleanup fails, the UI truthfully
-reports **Update complete — cleanup warning** and says not to retry Apply. Apply failure retains the
-transaction journal/backups needed by recovery and does not let package-cleanup failure replace the
-original cause.
+One background worker owns the prepared handle from the initial consent through Apply/discard.
+Package transfer, hashing, extraction, planning, Apply, and potentially large cleanup stay off the
+EDT. Cancellation and a late result after frame disposal discard the exact workspace until the
+existing transaction cutoff makes cancellation unsafe. Concurrent close/Apply, reuse, another
+facade, changed source/root binding, a live launch gate, or pending recovery fail closed. Clean
+success disposes progress and silently reloads the current Installations page; pristine versus
+preserved-override decisions do not create a completion dialog. If installation commit succeeds
+but temporary-package cleanup fails, the existing styled progress surface remains visible with one
+concise **Update complete — cleanup warning**, **Close**, and logs access, and says not to retry
+Update. Apply failure retains the transaction journal/backups needed by recovery and does not let
+package-cleanup failure replace the original cause.
 
 Prepared data is process-local and valid for only the active attempt. It is not serialized, a
 persistent/offline cache, resume state, or arbitrary path authority. A crash can leave its randomly
@@ -401,7 +403,11 @@ the far left and **Continue** at the far right; Escape cancels and Enter continu
 request occurs until Continue. Continue searches bounded GitHub release-list metadata for the
 detected official repository and automatically prepares the copy only when one safe immutable tag
 matches. Numeric dotted versions compare numerically (`0.50.7`, `0.50.07`, and `v0.50.07` are
-equivalent), while component count and prerelease/build suffix remain identity-bearing.
+equivalent), while component count and prerelease/build suffix remain identity-bearing. It first
+reads both canonical current pointers and applies the install browser's classification: the
+selected current identity is allowed, a shared current identity is valid for either channel, a
+distinct opposite-current-only identity is rejected, and neither-current history remains unknown
+and may use the selected fixed channel.
 
 Drafts and releases without exactly one eligible supported asset are ignored. Search is capped at
 ten 50-entry pages and refuses a result if more history may exist at that bound. It does not infer
@@ -416,16 +422,25 @@ terminology. Technical causes are retained only in sanitized local diagnostics. 
 metadata/package work runs in a worker under `BusyGate`, with exact record, selected channel,
 dialog generation, and cancellation guards.
 
+The typed opposite-current result replaces the progress surface before package download. Its gold
+heading says **Use Milestone for this installation** or **Use Development for this installation**,
+plain copy identifies the version's current canonical channel and confirms that no files changed,
+and its only actions are a direct styled **Try Milestone** / **Try Development** retry and
+**Close**. Retry uses the same record, suggestion, and dialog generation with the canonical
+channel. It neither exposes logs/technical details nor mislabels a file-comparison failure as a
+channel mismatch.
+
 Verification uses one styled progress surface and supports safe cancellation until publication.
 Its three filesystem scans are distinguished as **Checking existing installation**,
 **Checking official package**, and **Confirming installation has not changed**, with file counts.
 The official scan hashes each file once and shares that immutable evidence between ownership and
 full-tree comparison. The visible summary never lists paths, digests, or comparison counts. An
 eligible result immediately proceeds to atomic metadata publication for the already-selected
-channel without a second confirmation. An ineligible result says
-**This copy could not be verified and will remain launch-only.** and offers **Close** /
-**View details/logs**. Detailed exact/modified/missing/protected/unknown/conflict information is
-bounded to the hidden operation capture and local logs.
+channel without a second confirmation. An ineligible result uses the standard gold heading **Updates can't be enabled** and explains the
+actual blocking category in plain language: version mismatch, missing official files, a file/folder
+conflict, or modified core application files. It confirms that no files changed, directs the user
+toward a separate managed installation, and offers only **Close**. Detailed
+exact/modified/missing/protected/unknown/conflict information remains bounded to local logs.
 
 Final revalidation and publication remain in the same cancellable operation as verification and
 reuse its progress surface and prepared immutable official evidence. Final revalidation is local:

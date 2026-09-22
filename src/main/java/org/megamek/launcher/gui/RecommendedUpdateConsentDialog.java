@@ -26,17 +26,17 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.util.Objects;
 
-/** Styled pre-download consent for the captured recommended update. */
+/** Styled consent for the complete captured recommended-update operation. */
 final class RecommendedUpdateConsentDialog extends JDialog {
-    private static final String CANCEL_ACTION = "cancelRecommendedUpdateDownload";
+    private static final String CANCEL_ACTION = "cancelRecommendedUpdate";
 
     private final GuiScale scale;
-    private final JButton download;
+    private final JButton update;
     private boolean approved;
 
     RecommendedUpdateConsentDialog(Frame owner, String application, String currentVersion,
                                    String newVersion, long downloadBytes, GuiScale scale) {
-        super(owner, "Download update", true);
+        super(owner, "Update application", true);
         this.scale = Objects.requireNonNull(scale, "scale");
         Objects.requireNonNull(application, "application");
         Objects.requireNonNull(currentVersion, "currentVersion");
@@ -46,7 +46,7 @@ final class RecommendedUpdateConsentDialog extends JDialog {
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         getAccessibleContext().setAccessibleName(getTitle());
         getAccessibleContext().setAccessibleDescription(
-                "Confirm downloading the displayed application update.");
+                "Confirm downloading, verifying, planning, and applying the displayed update.");
 
         Font base = UIManager.getFont("Label.font");
         if (base == null) base = new Font(Font.DIALOG, Font.PLAIN, 12);
@@ -62,8 +62,15 @@ final class RecommendedUpdateConsentDialog extends JDialog {
                         scale.scaleForGUI(18), scale.scaleForGUI(17),
                         scale.scaleForGUI(18))));
 
-        JLabel heading = label("Download update?", "recommendedUpdateHeading",
+        JLabel heading = label("Update this application?", "recommendedUpdateHeading",
                 scale.font(base, Font.BOLD, 23f), FirstLaunchPanel.TEXT);
+        JLabel operation = label("This will download, verify, plan, and apply the update.",
+                "recommendedUpdateOperation",
+                scale.font(base, Font.PLAIN, 14f), FirstLaunchPanel.TEXT);
+        JLabel closeApplications = label(
+                "Close MegaMek, MekHQ, and MegaMekLab before continuing.",
+                "recommendedUpdateCloseApplications",
+                scale.font(base, Font.PLAIN, 14f), FirstLaunchPanel.TEXT);
         JLabel product = label("Application: " + application,
                 "recommendedUpdateApplication",
                 scale.font(base, Font.BOLD, 14f), FirstLaunchPanel.TEXT);
@@ -79,6 +86,10 @@ final class RecommendedUpdateConsentDialog extends JDialog {
 
         summary.add(heading);
         summary.add(Box.createVerticalStrut(scale.scaleForGUI(13)));
+        summary.add(operation);
+        summary.add(Box.createVerticalStrut(scale.scaleForGUI(6)));
+        summary.add(closeApplications);
+        summary.add(Box.createVerticalStrut(scale.scaleForGUI(13)));
         summary.add(product);
         summary.add(Box.createVerticalStrut(scale.scaleForGUI(6)));
         summary.add(current);
@@ -87,13 +98,13 @@ final class RecommendedUpdateConsentDialog extends JDialog {
         summary.add(Box.createVerticalStrut(scale.scaleForGUI(6)));
         summary.add(size);
 
-        JButton cancel = button("Cancel", "cancelRecommendedUpdateDownloadButton", false);
-        download = button("Download", "downloadRecommendedUpdateButton", true);
-        download.setMnemonic(KeyEvent.VK_D);
+        JButton cancel = button("Cancel", "cancelRecommendedUpdateButton", false);
+        update = button("Update", "updateRecommendedUpdateButton", true);
+        update.setMnemonic(KeyEvent.VK_U);
         cancel.getAccessibleContext().setAccessibleDescription(
-                "Close without downloading the update.");
-        download.getAccessibleContext().setAccessibleDescription(
-                "Download the displayed update package.");
+                "Close without downloading or applying the update.");
+        update.getAccessibleContext().setAccessibleDescription(
+                "Download, verify, plan, and apply the displayed update.");
 
         JPanel actions = new JPanel();
         actions.setName("recommendedUpdateConsentActions");
@@ -102,7 +113,7 @@ final class RecommendedUpdateConsentDialog extends JDialog {
         actions.add(Box.createHorizontalGlue());
         actions.add(cancel);
         actions.add(Box.createHorizontalStrut(scale.scaleForGUI(10)));
-        actions.add(download);
+        actions.add(update);
 
         JPanel content = new JPanel(new BorderLayout(0, scale.scaleForGUI(14)));
         content.setName("recommendedUpdateConsentContent");
@@ -114,8 +125,8 @@ final class RecommendedUpdateConsentDialog extends JDialog {
         setContentPane(content);
 
         cancel.addActionListener(event -> cancel());
-        download.addActionListener(event -> approve());
-        getRootPane().setDefaultButton(download);
+        update.addActionListener(event -> approve());
+        getRootPane().setDefaultButton(update);
         getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(
                 KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), CANCEL_ACTION);
         getRootPane().getActionMap().put(CANCEL_ACTION, new AbstractAction() {
@@ -127,12 +138,12 @@ final class RecommendedUpdateConsentDialog extends JDialog {
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowOpened(WindowEvent event) {
-                SwingUtilities.invokeLater(download::requestFocusInWindow);
+                SwingUtilities.invokeLater(update::requestFocusInWindow);
             }
         });
 
         pack();
-        resizeAndClamp(scale.scaleForGUI(560, 330));
+        resizeAndClamp(scale.scaleForGUI(560, 370));
     }
 
     static boolean confirm(Frame owner, String application, String currentVersion,

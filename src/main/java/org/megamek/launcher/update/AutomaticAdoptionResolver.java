@@ -1,5 +1,7 @@
 package org.megamek.launcher.update;
 
+import org.megamek.launcher.channel.FollowChannel;
+import org.megamek.launcher.channel.OfficialYamlChannelCatalog;
 import org.megamek.launcher.diagnostics.SanitizedErrors;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationPhase;
@@ -25,16 +27,20 @@ public final class AutomaticAdoptionResolver {
     public static final int MAX_PAGES = 10;
     public static final int MAX_RELEASES = PAGE_SIZE * MAX_PAGES;
 
+    private final ReleaseTransport transport;
     private final ReleaseCatalog catalog;
 
     public AutomaticAdoptionResolver(ReleaseTransport transport) {
-        catalog = new ReleaseCatalog(Objects.requireNonNull(transport, "transport"));
+        this.transport = Objects.requireNonNull(transport, "transport");
+        catalog = new ReleaseCatalog(transport);
     }
 
     public Resolution resolve(OfficialRepository repository, String observedVersion,
-                              PrintStream diagnostics, OperationContext context)
+                              FollowChannel selectedChannel, PrintStream diagnostics,
+                              OperationContext context)
             throws InterruptedException {
         Objects.requireNonNull(repository, "repository");
+        Objects.requireNonNull(selectedChannel, "selectedChannel");
         Objects.requireNonNull(diagnostics, "diagnostics");
         Objects.requireNonNull(context, "context");
         Optional<VersionIdentity> observed = VersionIdentity.fromExact(observedVersion);
@@ -47,6 +53,21 @@ public final class AutomaticAdoptionResolver {
         int scanned = 0;
         int pages = 0;
         try {
+            OfficialYamlChannelCatalog.CurrentPointers pointers =
+                    new OfficialYamlChannelCatalog(transport).currentPointers();
+            OfficialYamlChannelCatalog.CurrentIdentity current =
+                    pointers.classify(selectedChannel, observed.get());
+            if (current == OfficialYamlChannelCatalog.CurrentIdentity.OPPOSITE_CURRENT) {
+                FollowChannel requiredChannel = pointers.opposite(selectedChannel);
+                String currentVersion = pointers.version(requiredChannel);
+                String detail = "observed version " + currentVersion + " is currently "
+                        + requiredChannel + ", not " + selectedChannel;
+                diagnostics.println("ADOPTION automatic-resolution "
+                        + SanitizedErrors.text(detail));
+                return new Resolution(Status.CHANNEL_MISMATCH, null, null,
+                        SanitizedErrors.text(detail),
+                        new ChannelMismatch(selectedChannel, requiredChannel, currentVersion));
+            }
             for (int page = 1; page <= MAX_PAGES; page++) {
                 context.checkpoint();
                 context.progress(OperationPhase.METADATA, scanned, MAX_RELEASES,
@@ -88,7 +109,7 @@ public final class AutomaticAdoptionResolver {
             diagnostics.printf("ADOPTION automatic-resolution matched tag=%s pages=%d "
                     + "entries=%d%n", release.tag(), pages, scanned);
             return new Resolution(Status.MATCHED, release, null,
-                    "matched one eligible immutable release");
+                    "matched one eligible immutable release", null);
         }
         return noMatch(Status.NO_UNIQUE_MATCH, null, diagnostics,
                 "official release search found " + candidates.size()
@@ -99,18 +120,19 @@ public final class AutomaticAdoptionResolver {
     private static Resolution noMatch(Status status, Throwable failure,
                                       PrintStream diagnostics, String detail) {
         diagnostics.println("ADOPTION automatic-resolution " + SanitizedErrors.text(detail));
-        return new Resolution(status, null, failure, SanitizedErrors.text(detail));
+        return new Resolution(status, null, failure, SanitizedErrors.text(detail), null);
     }
 
     public enum Status {
         MATCHED,
+        CHANNEL_MISMATCH,
         NO_UNIQUE_MATCH,
         REQUEST_FAILED,
         SEARCH_INCOMPLETE
     }
 
     public record Resolution(Status status, ReleaseCatalog.Release release, Throwable failure,
-                             String diagnostic) {
+                             String diagnostic, ChannelMismatch channelMismatch) {
         public Resolution {
             Objects.requireNonNull(status, "status");
             Objects.requireNonNull(diagnostic, "diagnostic");
@@ -118,10 +140,29 @@ public final class AutomaticAdoptionResolver {
                 throw new IllegalArgumentException(
                         "only a matched resolution may contain a release");
             }
+            if ((status == Status.CHANNEL_MISMATCH) != (channelMismatch != null)) {
+                throw new IllegalArgumentException(
+                        "only a channel mismatch may contain channel mismatch details");
+            }
         }
 
         public boolean matched() {
             return status == Status.MATCHED;
+        }
+    }
+
+    public record ChannelMismatch(FollowChannel selectedChannel,
+                                  FollowChannel requiredChannel,
+                                  String currentVersion) {
+        public ChannelMismatch {
+            Objects.requireNonNull(selectedChannel, "selectedChannel");
+            Objects.requireNonNull(requiredChannel, "requiredChannel");
+            if (selectedChannel == requiredChannel) {
+                throw new IllegalArgumentException("channel mismatch requires distinct channels");
+            }
+            if (currentVersion == null || currentVersion.isBlank()) {
+                throw new IllegalArgumentException("current version is required");
+            }
         }
     }
 }

@@ -77,7 +77,7 @@ class UpdateApplySwingTest {
     @TempDir Path temp;
 
     @Test
-    void applyWorkflowBindsBothConsentsToPreviewSnapshotAndRefreshesAfterSuccess()
+    void applyWorkflowUsesOneConsentBindsSnapshotAndSilentlyRefreshesInstallations()
             throws Exception {
         Fixture fixture = fixture(false);
         LauncherFrame frame = onEdt(() -> new LauncherFrame(fixture.services));
@@ -86,14 +86,21 @@ class UpdateApplySwingTest {
             navigateToInstallations(frame);
             JButton update = checkAndWaitForUpdate(frame);
             assertTrue(update.isEnabled());
+            Path preservedDocument =
+                    Path.of(fixture.first.canonicalRoot()).resolve("docs/change.txt");
+            Files.writeString(preservedDocument, "local customization");
 
             SwingUtilities.invokeLater(update::doClick);
-            JDialog firstConsent = waitForDialog("Download update");
+            JDialog firstConsent = waitForDialog("Update application");
             assertTrue(firstConsent instanceof RecommendedUpdateConsentDialog);
             assertEquals("recommendedUpdateConsentDialog", firstConsent.getName());
             assertEquals(FirstLaunchPanel.BACKGROUND,
                     firstConsent.getContentPane().getBackground());
             String firstText = componentText(firstConsent);
+            assertTrue(firstText.contains(
+                    "This will download, verify, plan, and apply the update."));
+            assertTrue(firstText.contains(
+                    "Close MegaMek, MekHQ, and MegaMekLab before continuing."));
             assertTrue(firstText.contains("Application: MegaMek"));
             assertTrue(firstText.contains("Current version: 1.0.0"));
             assertTrue(firstText.contains("New version: 2.0.0"));
@@ -108,65 +115,39 @@ class UpdateApplySwingTest {
             assertFalse(firstText.contains("digest"));
             assertFalse(firstText.contains("read-only"));
             assertFalse(firstText.contains("preview"));
-            assertFalse(firstText.contains("Apply"));
-            JButton cancelDownload = find(
-                    firstConsent, "cancelRecommendedUpdateDownloadButton");
-            JButton download = find(firstConsent, "downloadRecommendedUpdateButton");
-            assertTrue(cancelDownload instanceof FirstLaunchButton);
-            assertTrue(download instanceof FirstLaunchButton);
+            JButton cancelUpdate = find(
+                    firstConsent, "cancelRecommendedUpdateButton");
+            JButton confirmUpdate = find(firstConsent, "updateRecommendedUpdateButton");
+            assertTrue(cancelUpdate instanceof FirstLaunchButton);
+            assertTrue(confirmUpdate instanceof FirstLaunchButton);
             Container actions = find(firstConsent, "recommendedUpdateConsentActions");
-            assertTrue(actions.getComponentZOrder(cancelDownload)
-                    < actions.getComponentZOrder(download));
+            assertTrue(actions.getComponentZOrder(cancelUpdate)
+                    < actions.getComponentZOrder(confirmUpdate));
             assertTrue(actions.getComponent(0) instanceof javax.swing.Box.Filler,
                     "horizontal glue must right-align the grouped actions");
-            assertEquals(download, firstConsent.getRootPane().getDefaultButton());
+            assertEquals(confirmUpdate, firstConsent.getRootPane().getDefaultButton());
             click(firstConsent, "Cancel");
             waitUntil(() -> !firstConsent.isDisplayable());
             assertEquals(0, fixture.services.previewCalls);
             assertEquals(0, fixture.services.applyCalls);
             assertEquals(0, fixture.services.network.binaryRequests);
 
+            fixture.services.blockNextApply();
             SwingUtilities.invokeLater(update::doClick);
-            JDialog secondFirstConsent =
-                    waitForDialog("Download update");
-            click(secondFirstConsent, "Download");
-            JDialog applyConsent = waitForDialog("Authorize update Apply");
-            String applyText = componentText(applyConsent);
-            assertTrue(applyText.contains("destructive"));
-            assertTrue(applyText.contains("CLOSE ALL"));
-            assertTrue(applyText.contains("already downloaded"));
-            assertFalse(applyText.contains("AGAIN"));
-            assertTrue(applyText.contains("NOT be downloaded a second time"));
-            click(applyConsent, "Cancel");
-            waitUntil(() -> !applyConsent.isDisplayable());
-            assertEquals(1, fixture.services.previewCalls);
-            assertEquals(0, fixture.services.applyCalls,
-                    "second-consent cancellation must perform zero Apply calls");
-            waitUntil(update::isEnabled);
-            Path metadata = fixture.services.registry().resolveSibling(
-                    fixture.services.registry().getFileName() + ".metadata");
-            try (var entries = Files.list(metadata)) {
-                assertTrue(entries.noneMatch(path ->
-                                path.getFileName().toString().startsWith(".preview-")),
-                        "cancel after preparation must discard its exact workspace");
-            }
-
-            JButton finalUpdate = waitFor(() -> find(frame, "applyUpdateButton"));
-            SwingUtilities.invokeLater(finalUpdate::doClick);
-            JDialog finalFirstConsent =
-                    waitForDialog("Download update");
-            click(finalFirstConsent, "Download");
-            JDialog finalApplyConsent = waitForDialog("Authorize update Apply");
-
+            JDialog acceptedConsent = waitForDialog("Update application");
+            click(acceptedConsent, "Update");
+            assertTrue(fixture.services.applyStarted.await(5, TimeUnit.SECONDS),
+                    "acceptance must proceed automatically from preparation into Apply");
+            assertNull(showingDialog("Authorize update Apply"));
             fixture.services.selectNewPreference();
-            click(finalApplyConsent, "OK");
-            waitUntil(() -> fixture.services.applyCalls == 1);
-            JDialog complete = waitForDialog("Update complete");
-            assertTrue(componentText(complete).contains("Update completed"));
-            click(complete, "OK");
+            fixture.services.releaseApply.countDown();
             waitUntil(() -> fixture.services.loadHomeCalls >= 2);
+            waitFor(() -> find(frame, "installationCards"));
+            assertNull(showingDialog("Update complete"));
+            assertNull(showingProgressDialog());
 
-            assertEquals(2, fixture.services.previewCalls);
+            assertEquals(1, fixture.services.previewCalls);
+            assertEquals(1, fixture.services.applyCalls);
             assertEquals(fixture.first, fixture.services.appliedRecord);
             assertEquals(fixture.firstCurrent, fixture.services.appliedState);
             assertEquals("v2.0.0", fixture.services.appliedTag);
@@ -174,24 +155,22 @@ class UpdateApplySwingTest {
             assertEquals(fixture.services.asset.digest(), fixture.services.appliedDigest);
             assertEquals(RealUpdateService.CONFIRM, fixture.services.appliedConfirmation);
             assertFalse(fixture.services.applyOnEdt, "Apply backend must run off the EDT");
-            assertEquals(2, fixture.services.network.binaryRequests,
-                    "each of the two accepted preparation attempts downloads one package");
-            assertEquals(2L * fixture.services.archive.length,
+            assertEquals(1, fixture.services.network.binaryRequests,
+                    "the accepted attempt downloads exactly one package");
+            assertEquals(fixture.services.archive.length,
                     fixture.services.network.binaryBytes);
             assertEquals("v2.0.0", new RealUpdateService(fixture.services.network)
                     .snapshot(fixture.services.registry(), fixture.first.id()).current().tag());
             assertEquals("runtime-2", Files.readString(
                     Path.of(fixture.first.canonicalRoot()).resolve("lib/runtime.txt")));
+            assertEquals("local customization", Files.readString(preservedDocument),
+                    "a normal skipped decision remains preserved without a completion dialog");
             assertEquals(fixture.second.id(),
                     fixture.services.currentHome().defaultInstallationId());
-            waitUntil(() -> {
-                JButton button = find(frame, "homeButton");
-                return button != null && button.isEnabled();
-            });
-            JButton home = waitFor(() -> find(frame, "homeButton"));
-            SwingUtilities.invokeAndWait(home::doClick);
-            assertNull(find(frame, "mainInstallationName"));
+            assertNotNull(find(frame, "installationCards"),
+                    "clean success returns to the current Installations page");
         } finally {
+            fixture.services.releaseApply.countDown();
             dispose(frame);
         }
     }
@@ -206,14 +185,14 @@ class UpdateApplySwingTest {
             JButton recommended = checkAndWaitForUpdate(frame);
 
             SwingUtilities.invokeLater(recommended::doClick);
-            JDialog firstConsent = waitForDialog("Download update");
+            JDialog firstConsent = waitForDialog("Update application");
             cancelWithEscape(firstConsent);
             waitUntil(() -> !firstConsent.isDisplayable());
             assertEquals(0, fixture.services.network.binaryRequests,
                     "Escape before preparation must fetch no package body");
 
             SwingUtilities.invokeLater(recommended::doClick);
-            JDialog closedConsent = waitForDialog("Download update");
+            JDialog closedConsent = waitForDialog("Update application");
             SwingUtilities.invokeAndWait(() -> closedConsent.dispatchEvent(
                     new WindowEvent(closedConsent, WindowEvent.WINDOW_CLOSING)));
             waitUntil(() -> !closedConsent.isDisplayable());
@@ -222,15 +201,13 @@ class UpdateApplySwingTest {
             assertEquals(0, fixture.services.previewCalls);
 
             SwingUtilities.invokeLater(recommended::doClick);
-            click(waitForDialog("Download update"), "Download");
-            JDialog applyConsent = waitForDialog("Authorize update Apply");
-            String applyText = componentText(applyConsent);
-            assertTrue(applyText.contains("already downloaded"));
-            assertFalse(applyText.contains("AGAIN"));
-            click(applyConsent, "OK");
-            JDialog complete = waitForDialog("Update complete");
-            assertTrue(componentText(complete).contains("Update completed"));
-            click(complete, "OK");
+            click(waitForDialog("Update application"), "Update");
+            waitUntil(() -> fixture.services.applyCalls == 1);
+            waitUntil(() -> fixture.services.loadHomeCalls >= 2);
+            waitFor(() -> find(frame, "installationCards"));
+            assertNull(showingDialog("Authorize update Apply"));
+            assertNull(showingDialog("Update complete"));
+            assertNull(showingProgressDialog());
 
             assertEquals(1, fixture.services.network.binaryRequests);
             assertEquals(fixture.services.archive.length,
@@ -261,7 +238,7 @@ class UpdateApplySwingTest {
             navigateToInstallations(frame);
             JButton update = checkAndWaitForUpdate(frame);
             SwingUtilities.invokeLater(update::doClick);
-            click(waitForDialog("Download update"), "Download");
+            click(waitForDialog("Update application"), "Update");
             assertTrue(fixture.services.network.binaryStarted.await(5, TimeUnit.SECONDS));
 
             SwingUtilities.invokeAndWait(frame::dispose);
@@ -311,14 +288,17 @@ class UpdateApplySwingTest {
     void recommendedPreferenceDriftAfterPreparationFailsWithoutSecondPackageOrRootWrite()
             throws Exception {
         Fixture fixture = fixture(false);
+        fixture.services.blockNextApply();
         LauncherFrame frame = onEdt(() -> new LauncherFrame(fixture.services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             navigateToInstallations(frame);
             JButton recommended = checkAndWaitForUpdate(frame);
             SwingUtilities.invokeLater(recommended::doClick);
-            click(waitForDialog("Download update"), "Download");
-            JDialog applyConsent = waitForDialog("Authorize update Apply");
+            click(waitForDialog("Update application"), "Update");
+            assertTrue(fixture.services.applyStarted.await(5, TimeUnit.SECONDS),
+                    "test hook must pause after preparation and before backend revalidation");
+            assertNull(showingDialog("Authorize update Apply"));
 
             ChannelPreferenceStore channels = new ChannelPreferenceStore();
             RegistryData data = new RegistryStore().read(fixture.services.registry());
@@ -326,7 +306,7 @@ class UpdateApplySwingTest {
                     fixture.services.registry(), data, fixture.first).preference();
             channels.setCheckOnOpen(
                     fixture.services.registry(), fixture.first, selected, true);
-            click(applyConsent, "OK");
+            fixture.services.releaseApply.countDown();
             JDialog failed = waitForDialog("Update failed — recovery may be required");
             assertTrue(componentText(failed).contains("channel source")
                     || componentText(failed).contains("Channel check failed"));
@@ -338,6 +318,7 @@ class UpdateApplySwingTest {
             assertFalse(Files.exists(Path.of(fixture.first.canonicalRoot())
                     .resolve(RootCoordinator.UPDATE_NAMESPACE)));
         } finally {
+            fixture.services.releaseApply.countDown();
             dispose(frame);
         }
     }
@@ -353,8 +334,7 @@ class UpdateApplySwingTest {
             navigateToInstallations(frame);
             JButton update = checkAndWaitForUpdate(frame);
             SwingUtilities.invokeLater(update::doClick);
-            click(waitForDialog("Download update"), "Download");
-            click(waitForDialog("Authorize update Apply"), "OK");
+            click(waitForDialog("Update application"), "Update");
             waitUntil(() -> fixture.services.applyCalls == 1);
 
             JDialog failed = waitForDialog("Update failed — recovery may be required");
@@ -363,6 +343,45 @@ class UpdateApplySwingTest {
             waitUntil(() -> fixture.services.loadHomeCalls >= 2);
             assertNull(find(frame, "recoverUpdateButton"),
                     "a failure before mutation must not invent a pending recovery");
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void cleanupWarningRemainsInStyledProgressSurface() throws Exception {
+        Fixture fixture = fixture(false);
+        fixture.services.cleanupWarning =
+                "Update completed, but temporary package cleanup failed: fixture cleanup. "
+                        + "The installation is updated; do not retry Apply.";
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(fixture.services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            navigateToInstallations(frame);
+            JButton update = checkAndWaitForUpdate(frame);
+            SwingUtilities.invokeLater(update::doClick);
+            click(waitForDialog("Update application"), "Update");
+
+            JDialog warning = waitForDialog("Update complete — cleanup warning");
+            assertTrue(warning instanceof OperationProgressDialog);
+            assertEquals(OperationProgressDialog.BACKGROUND,
+                    warning.getContentPane().getBackground());
+            assertTrue(componentText(warning).contains(
+                    "The update was applied, but temporary files could not be removed. "
+                            + "Do not run Update again."));
+            assertFalse(componentText(warning).contains("skipped"));
+            assertFalse(componentText(warning).contains("Retained override"));
+            assertFalse(componentText(warning).contains("Build:"));
+            JButton close = find(warning, "operationCancelButton");
+            JButton logs = find(warning, "operationViewDetailsButton");
+            assertEquals("Close", close.getText());
+            assertTrue(close.isVisible());
+            assertEquals("View logs", logs.getText());
+            assertTrue(logs.isVisible());
+            assertNull(showingDialog("Update complete"));
+            waitUntil(() -> fixture.services.loadHomeCalls >= 2);
+            assertNotNull(find(frame, "installationCards"));
+            click(warning, "Close");
         } finally {
             dispose(frame);
         }
@@ -449,6 +468,29 @@ class UpdateApplySwingTest {
             for (Window window : Window.getWindows()) {
                 if (window instanceof JDialog dialog && dialog.isShowing()
                         && title.equals(dialog.getTitle())) {
+                    return dialog;
+                }
+            }
+            return null;
+        });
+    }
+
+    private static JDialog showingDialog(String title) throws Exception {
+        return onEdt(() -> {
+            for (Window window : Window.getWindows()) {
+                if (window instanceof JDialog dialog && dialog.isShowing()
+                        && title.equals(dialog.getTitle())) {
+                    return dialog;
+                }
+            }
+            return null;
+        });
+    }
+
+    private static JDialog showingProgressDialog() throws Exception {
+        return onEdt(() -> {
+            for (Window window : Window.getWindows()) {
+                if (window instanceof OperationProgressDialog dialog && dialog.isShowing()) {
                     return dialog;
                 }
             }
@@ -626,6 +668,10 @@ class UpdateApplySwingTest {
         private volatile int previewCalls;
         private volatile int applyCalls;
         private volatile boolean failApply;
+        private volatile boolean blockApply;
+        private volatile String cleanupWarning;
+        private final CountDownLatch applyStarted = new CountDownLatch(1);
+        private final CountDownLatch releaseApply = new CountDownLatch(1);
         private volatile InstallationRecord appliedRecord;
         private volatile CurrentUpdateState appliedState;
         private volatile String appliedTag;
@@ -699,6 +745,10 @@ class UpdateApplySwingTest {
                 throw new IllegalStateException(error);
             }
             preferred = second;
+        }
+
+        private void blockNextApply() {
+            blockApply = true;
         }
 
         @Override
@@ -778,7 +828,9 @@ class UpdateApplySwingTest {
                 prepared.close();
                 throw new IOException("simulated apply failure");
             }
-            return super.applyPrepared(prepared, confirmation, progress);
+            awaitApplyRelease(prepared);
+            return withCleanupWarning(
+                    super.applyPrepared(prepared, confirmation, progress));
         }
 
         @Override
@@ -800,7 +852,33 @@ class UpdateApplySwingTest {
                 prepared.close();
                 throw new IOException("simulated apply failure");
             }
-            return super.applyPrepared(prepared, confirmation, progress, context);
+            awaitApplyRelease(prepared);
+            return withCleanupWarning(
+                    super.applyPrepared(prepared, confirmation, progress, context));
+        }
+
+        private void awaitApplyRelease(PreparedUpdate prepared)
+                throws IOException, InterruptedException {
+            if (!blockApply) return;
+            applyStarted.countDown();
+            try {
+                releaseApply.await();
+            } catch (InterruptedException interrupted) {
+                try {
+                    prepared.close();
+                } catch (IOException cleanup) {
+                    interrupted.addSuppressed(cleanup);
+                }
+                throw interrupted;
+            }
+        }
+
+        private RealUpdateService.ApplyResult withCleanupWarning(
+                RealUpdateService.ApplyResult result) {
+            if (cleanupWarning == null) return result;
+            return new RealUpdateService.ApplyResult(
+                    result.record(), result.state(), result.decisions(),
+                    result.skippedDecisions(), result.retainedOverrides(), cleanupWarning);
         }
     }
 

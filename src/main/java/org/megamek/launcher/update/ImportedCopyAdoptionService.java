@@ -157,8 +157,15 @@ public final class ImportedCopyAdoptionService {
             }
             AutomaticAdoptionResolver.Resolution resolution =
                     new AutomaticAdoptionResolver(transport).resolve(repository,
-                            record.observedBuild(), diagnostics, context);
+                            record.observedBuild(), fixedChannel, diagnostics, context);
             if (resolution.matched()) return resolution.release().tag();
+            if (resolution.status()
+                    == AutomaticAdoptionResolver.Status.CHANNEL_MISMATCH) {
+                AutomaticAdoptionResolver.ChannelMismatch mismatch =
+                        resolution.channelMismatch();
+                throw new ChannelMismatchException(mismatch.currentVersion(),
+                        mismatch.selectedChannel(), mismatch.requiredChannel());
+            }
             Throwable technical = resolution.failure() == null
                     ? new IOException(resolution.diagnostic())
                     : resolution.failure();
@@ -306,7 +313,7 @@ public final class ImportedCopyAdoptionService {
             String version = displayVersion(record.observedBuild());
             String message = comparison.eligible()
                     ? "This copy can be managed safely. Existing files will not be changed."
-                    : "This copy could not be verified and will remain launch-only.";
+                    : comparison.reason();
             PreparedAdoption.Report report = new PreparedAdoption.Report(comparison.eligible(),
                     application, version, fixedChannel, message);
             VerifiedPackageFetcher.Workspace retainedWorkspace = workspace;
@@ -641,13 +648,13 @@ public final class ImportedCopyAdoptionService {
                 && !criticalModified;
         String reason;
         if (!identity) {
-            reason = "The detected application and version do not match this official release.";
+            reason = "This installation does not match the official release for its version.";
         } else if (!conflicts.isEmpty()) {
-            reason = "The copy contains an unsafe file or folder conflict.";
+            reason = "A file or folder conflict prevents this installation from being managed.";
         } else if (!missing.isEmpty()) {
-            reason = "An official application file is missing.";
+            reason = "This installation is missing files from the official release.";
         } else if (criticalModified) {
-            reason = "An application or dependency file differs from the official release.";
+            reason = "Core application files differ from the official release.";
         } else {
             reason = "Verified";
         }
@@ -849,6 +856,38 @@ public final class ImportedCopyAdoptionService {
 
         public CandidateResolutionException(String message, Throwable cause) {
             super(message, cause);
+        }
+    }
+
+    public static final class ChannelMismatchException extends IOException {
+        private final String currentVersion;
+        private final FollowChannel selectedChannel;
+        private final FollowChannel requiredChannel;
+
+        public ChannelMismatchException(String currentVersion,
+                                        FollowChannel selectedChannel,
+                                        FollowChannel requiredChannel) {
+            super("version " + currentVersion + " is currently " + requiredChannel
+                    + ", not " + selectedChannel);
+            this.currentVersion = Objects.requireNonNull(currentVersion);
+            this.selectedChannel = Objects.requireNonNull(selectedChannel);
+            this.requiredChannel = Objects.requireNonNull(requiredChannel);
+            if (selectedChannel == requiredChannel) {
+                throw new IllegalArgumentException(
+                        "channel mismatch requires distinct channels");
+            }
+        }
+
+        public String currentVersion() {
+            return currentVersion;
+        }
+
+        public FollowChannel selectedChannel() {
+            return selectedChannel;
+        }
+
+        public FollowChannel requiredChannel() {
+            return requiredChannel;
         }
     }
 

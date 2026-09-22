@@ -74,9 +74,11 @@ enabled, after which the direct per-card checkbox is the sole automatic-check se
 
 An official package folder copied without its launcher registry, ownership receipt, and
 fixed-channel sidecar may still identify its build during static inspection, but that identity
-does not recreate installation provenance or update eligibility. Version, title, prerelease state,
-and current canonical channel membership are never used to infer which track that copied folder
-was created to follow.
+does not recreate installation provenance or update eligibility. Version, title, and prerelease
+state never infer a channel. During explicit adoption only, the two canonical current pointers
+classify a matching current identity: a distinct opposite-current-only identity is rejected, a
+shared current identity is valid for either selection, and an identity matching neither pointer
+remains historical/unknown and may use the selected fixed channel.
 
 The existing-copy commands themselves perform no network, download, or archive extraction. The
 separate `releases` and `install-release` flow is bounded by
@@ -130,12 +132,19 @@ Development), the launcher searches bounded release-list metadata rather than gu
 `/tags/v<observed>`. It accepts exactly one eligible immutable tag whose normalized dotted version
 matches the observed build; leading zeroes are insignificant, but prerelease/build suffixes and
 component count are not discarded. Draft and ineligible releases do not qualify. A full final
-bounded page is inconclusive rather than permission to guess.
+bounded page is inconclusive rather than permission to guess. Before that scan, the same canonical
+current-pointer classification used by selected-channel release browsing is applied to the
+normalized observed identity. A selected-current match is allowed. If both pointers identify that
+version, either channel is allowed. A distinct identity known only as the opposite current channel
+is a typed mismatch and stops before package download. A version matching neither pointer is
+historical/unknown, so the user's selected fixed channel remains valid.
 
 Zero, multiple, incomplete, or failed searches leave the copy launch-only and expose only a simple
 message plus **Choose a different version…**. That explicit fallback opens the bounded official
 release browser and binds its exact selection to the same record and chosen future channel.
 Neither path classifies a historical release into a channel from its title or prerelease flag.
+The typed current-channel mismatch instead names the canonical channel, confirms no files changed,
+and offers a direct retry with that channel plus Close; it does not expose technical details.
 Nightly is unsupported. `ReleaseCatalog` must return one supported full
 `tar.gz` asset with a bounded size and either a valid published SHA-256 or no published digest.
 The verified fetcher downloads it

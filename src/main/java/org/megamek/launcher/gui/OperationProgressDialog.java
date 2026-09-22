@@ -270,6 +270,44 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         dispose();
     }
 
+    void showWarning(String heading, String message) {
+        if (heading == null || heading.isBlank()) {
+            throw new IllegalArgumentException("warning heading must not be blank");
+        }
+        if (message == null || message.isBlank()) {
+            throw new IllegalArgumentException("warning message must not be blank");
+        }
+        failure = null;
+        finished = true;
+        pending.set(null);
+        updateTimer.stop();
+        setTitle(heading);
+        progress.setVisible(false);
+        beforeProgress.setVisible(false);
+        afterProgress.setVisible(false);
+        phase.setText(heading);
+        detail.setBorder(BorderFactory.createEmptyBorder(
+                scale.scaleForGUI(8), 0, 0, 0));
+        detail.setText(concise(message));
+        loggingWarning.setVisible(false);
+        for (JButton button : contextualActions) {
+            button.setVisible(false);
+        }
+        viewDetails.setText("View logs");
+        viewDetails.getAccessibleContext().setAccessibleName("View logs");
+        viewDetails.getAccessibleContext().setAccessibleDescription(
+                "Open local operation logs.");
+        viewDetails.setVisible(true);
+        cancel.setText("Close");
+        cancel.getAccessibleContext().setAccessibleName("Close");
+        cancel.setEnabled(true);
+        cancel.setVisible(true);
+        setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        actions.revalidate();
+        getContentPane().revalidate();
+        getContentPane().repaint();
+    }
+
     void addActionButton(JButton button) {
         button.putClientProperty(OPERATION_CONTROL, Boolean.TRUE);
         styleButton(button);

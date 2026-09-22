@@ -16,6 +16,7 @@ import org.megamek.launcher.launch.RootCoordinator;
 import org.megamek.launcher.launch.ApplicationLauncher;
 import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.launch.ProcessRunner;
+import org.megamek.launcher.onboarding.ExistingImportService;
 import org.megamek.launcher.onboarding.InstallationInspector;
 import org.megamek.launcher.operation.OperationCancelledException;
 import org.megamek.launcher.operation.OperationContext;
@@ -70,6 +71,81 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RealUpdateServiceTest {
     @TempDir Path temp;
+
+    @Test
+    void updatedMilestoneCopyRetainsCurrentChannelProvenanceWhenReimported()
+            throws Exception {
+        Fixture managed = install("adoption-provenance", "v1.0.0",
+                packageFiles(1, Map.of("lib/runtime.txt", bytes("runtime-1"))));
+        Map<String, byte[]> v2Files = packageFiles(2, Map.of(
+                "lib/runtime.txt", bytes("runtime-2")));
+        byte[] v2Archive = archive("MegaMek-v2.0.0", v2Files);
+        RealUpdateService updater = service(
+                transport("v2.0.0", v2Archive), point -> {});
+        RealUpdateService.Snapshot updateSnapshot =
+                updater.snapshot(managed.registry, managed.id);
+
+        RealUpdateService.ApplyResult updated = updater.apply(updateSnapshot,
+                "v2.0.0", v2Archive.length, "sha256:" + sha(v2Archive),
+                RealUpdateService.CONFIRM, quiet());
+
+        assertEquals("v2.0.0", updated.state().tag());
+        assertEquals("2.0.0", updated.record().observedBuild());
+
+        Path importedRegistry = temp.resolve("fresh-import").resolve("registry.json");
+        RegistryStore importedRegistries = new RegistryStore();
+        ExistingImportService importer = new ExistingImportService(
+                importedRegistry, importedRegistries, new InstallationInspector());
+        OperationContext importContext =
+                OperationContext.none(OperationType.IMPORT_EXISTING);
+        ExistingImportService.Plan importPlan =
+                importer.prepare(managed.root, importContext);
+        InstallationRecord imported = importer.register(
+                importPlan, "Imported updated copy", importContext).record();
+        String v2Metadata = releaseJson("v2.0.0", v2Archive);
+        PackageTransport adoptionNetwork = new PackageTransport(
+                response("stable: 2.0.0\ndev: 3.0.0\n"),
+                response("stable: 2.0.0\ndev: 3.0.0\n"),
+                response("[" + v2Metadata + "]"),
+                response(v2Metadata), response(v2Metadata),
+                packageResponse(v2Archive));
+        ImportedCopyAdoptionService adoptions = new ImportedCopyAdoptionService(
+                importedRegistry, adoptionNetwork,
+                new RootCoordinator(temp.resolve("adoption-provenance-coordination")));
+
+        ImportedCopyAdoptionService.ChannelMismatchException mismatch =
+                assertThrows(ImportedCopyAdoptionService.ChannelMismatchException.class,
+                        () -> adoptions.prepareAutomatically(
+                                imported, OfficialRepository.MEGAMEK,
+                                FollowChannel.DEVELOPMENT, quiet(),
+                                OperationContext.none(OperationType.ADOPT_EXISTING)));
+
+        assertEquals("2.0.0", mismatch.currentVersion());
+        assertEquals(FollowChannel.DEVELOPMENT, mismatch.selectedChannel());
+        assertEquals(FollowChannel.MILESTONE, mismatch.requiredChannel());
+        assertEquals(0, adoptionNetwork.binaryRequests,
+                "known opposite-current provenance must reject before package download");
+        assertEquals(ImportedCopyAdoptionService.Availability.TRUE_IMPORTED,
+                adoptions.availability(importedRegistries.read(importedRegistry),
+                        imported, false));
+
+        try (PreparedAdoption prepared = adoptions.prepareAutomatically(
+                imported, OfficialRepository.MEGAMEK,
+                FollowChannel.MILESTONE, quiet(),
+                OperationContext.none(OperationType.ADOPT_EXISTING))) {
+            assertTrue(prepared.report().eligible());
+            ImportedCopyAdoptionService.CommitResult adopted =
+                    adoptions.commit(prepared);
+            assertEquals(FollowChannel.MILESTONE, adopted.channel());
+        }
+
+        assertEquals(1, adoptionNetwork.binaryRequests);
+        assertEquals(5, adoptionNetwork.metadataRequests,
+                "mismatch plus retry reads each pointer once and scans the release once");
+        ChannelPreferenceStore.ReadResult preference = new ChannelPreferenceStore().read(
+                importedRegistry, importedRegistries.read(importedRegistry), imported);
+        assertEquals(FollowChannel.MILESTONE, preference.preference().channel());
+    }
 
     @Test
     void preparedFacadeDownloadsOneBodyReextractsTrustedBytesAndReplansLocalData()
@@ -1325,13 +1401,16 @@ class RealUpdateServiceTest {
 
     private static Supplier<ReleaseTransport.Response> releaseResponse(String tag, byte[] archive)
             throws Exception {
-        String json = """
+        return response(releaseJson(tag, archive));
+    }
+
+    private static String releaseJson(String tag, byte[] archive) throws Exception {
+        return """
                 {"tag_name":"%s","name":"%s","draft":false,"prerelease":false,
                 "html_url":"https://github.com/MegaMek/megamek/releases/tag/%s",
                 "assets":[{"name":"MegaMek-%s.tar.gz","size":%d,"digest":"sha256:%s",
                 "browser_download_url":"https://github.com/MegaMek/megamek/releases/download/%s/MegaMek-%s.tar.gz"}]}
                 """.formatted(tag, tag, tag, tag, archive.length, sha(archive), tag, tag);
-        return response(json);
     }
 
     private static Supplier<ReleaseTransport.Response> packageResponse(byte[] archive) {

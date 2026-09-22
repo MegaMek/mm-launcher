@@ -2,8 +2,9 @@
 
 ## Authorization, eligibility, and source trust
 
-Real Apply is never automatic and does not update MM Launcher itself. The GUI **Update…** flow and
-the CLI command
+Real Apply is never unconsented and does not update MM Launcher itself. The GUI **Update…** flow
+uses one initial styled consent for the complete download, verification, internal planning, and
+Apply operation. The CLI command
 
 ```text
 apply-update --registry <json> [--id <uuid>] --from-tag <current-tag>
@@ -42,10 +43,13 @@ therefore reconstructed from verified bytes, never blessed. Apply then replans a
 installed bytes and retains the original runtime/pristine checks and per-operation transaction
 verification.
 
-The GUI shows captured installation name/path, source/target, the already-downloaded full size and
-digest, decision counts, destructive managed-file intent, preserved `SKIP` count, backup/recovery
-behavior, no-second-download statement, and the close-all-applications requirement before consent.
-Cancellation performs no Apply write. CLI requires the same exact confirmation.
+The initial GUI consent shows the application, current and target versions, rounded download size,
+full-operation intent, and close-all-applications requirement. Planning remains internal and does
+not introduce another UI authorization. After preparation, the GUI immediately supplies
+`CLOSE-ALL-SUITE-APPS-AND-APPLY`; the backend still validates that exact token and all captured
+installation, source, metadata, retained-package, and local-file bindings before mutation.
+Cancellation before the transaction cutoff performs no Apply write. CLI requires the same exact
+confirmation.
 There is no automatic release selection, background update, bundled JRE, arbitrary repository,
 custom URL, downgrade/upgrade version interpretation, elevation, process termination, or
 self-update.
@@ -56,6 +60,8 @@ same-filesystem backups, the registration commit barrier, and crash recovery.
 
 The shared operation context uses typed metadata/download/verify/extract/plan/await-consent/
 prepare-install/Apply/recover/cleanup/final phases; control flow never parses presentation text.
+The prepared handle's await-consent boundary is internal in the GUI because consent was already
+given before package transfer.
 Prepared GUI cancellation remains available while refreshing metadata, re-hashing the retained
 archive, re-extracting, rebuilding ownership, and replanning. The atomic cutoff runs before
 `transact` and therefore before `.mm-launcher-update`, `pending.json`, a transaction UUID, or a
@@ -75,6 +81,11 @@ blind Apply retry. If Apply itself failed, that original cause is preserved, cle
 secondary, and root transaction journals/backups remain available for recovery. A process crash
 may leave the exact workspace, but there is no persistent token, startup reuse, resume, or broad
 automatic temporary-directory deletion.
+
+Clean GUI success is silent: the progress dialog closes and the current Installations page reloads,
+including when normal `SKIP` or retained-override decisions exist. A committed update with a
+cleanup warning instead remains visible on the styled progress surface with a concise warning,
+Close, and logs access; it does not use a native completion dialog.
 
 ## Ownership and all-or-nothing runtime boundary
 

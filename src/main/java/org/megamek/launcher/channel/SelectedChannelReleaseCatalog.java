@@ -3,6 +3,7 @@ package org.megamek.launcher.channel;
 import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
 import org.megamek.launcher.release.ReleaseTransport;
+import org.megamek.launcher.release.VersionIdentity;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -40,11 +41,7 @@ public final class SelectedChannelReleaseCatalog {
         OfficialYamlChannelCatalog.CurrentPointers pointers =
                 new OfficialYamlChannelCatalog(transport).currentPointers();
         String selectedVersion = pointers.version(channel);
-        FollowChannel otherChannel = channel == FollowChannel.MILESTONE
-                ? FollowChannel.DEVELOPMENT : FollowChannel.MILESTONE;
         String selectedTag = "v" + selectedVersion;
-        String otherTag = "v" + pointers.version(otherChannel);
-        boolean sharedCurrentIdentity = selectedTag.equals(otherTag);
 
         ReleaseCatalog releases = new ReleaseCatalog(transport);
         ReleaseCatalog.Page history = releases.list(repository, page, perPage);
@@ -53,22 +50,33 @@ public final class SelectedChannelReleaseCatalog {
 
         for (ReleaseCatalog.Release release : history.releases()) {
             Identity identity = new Identity(repository, release.tag());
-            if (unique.containsKey(identity)
-                    || page > 1 && release.tag().equals(selectedTag)) {
+            if (unique.containsKey(identity)) {
                 continue;
             }
-            if (!sharedCurrentIdentity && release.tag().equals(otherTag)) {
+            OfficialYamlChannelCatalog.CurrentIdentity current =
+                    VersionIdentity.fromExact(release.tag())
+                            .map(releaseIdentity -> pointers.classify(
+                                    channel, releaseIdentity))
+                            .orElse(OfficialYamlChannelCatalog.CurrentIdentity.UNKNOWN);
+            if (current == OfficialYamlChannelCatalog.CurrentIdentity.OPPOSITE_CURRENT) {
                 continue;
             }
-            Classification classification = release.tag().equals(selectedTag)
-                    ? Classification.SELECTED_CHANNEL : Classification.UNKNOWN;
+            boolean selectedCurrent =
+                    current == OfficialYamlChannelCatalog.CurrentIdentity.SELECTED_CURRENT
+                            || current == OfficialYamlChannelCatalog.CurrentIdentity.SHARED_CURRENT;
+            if (selectedCurrent) {
+                if (page == 1 && release.tag().equals(selectedTag)
+                        && selectedFromHistory == null) {
+                    selectedFromHistory = new Entry(identity,
+                            Classification.SELECTED_CHANNEL, release,
+                            releases.assess(repository, release));
+                }
+                continue;
+            }
+            Classification classification = Classification.UNKNOWN;
             Entry entry = new Entry(identity, classification, release,
                     releases.assess(repository, release));
             unique.put(identity, entry);
-            if (classification == Classification.SELECTED_CHANNEL
-                    && selectedFromHistory == null) {
-                selectedFromHistory = entry;
-            }
         }
 
         List<Entry> rows = new ArrayList<>();
@@ -81,7 +89,6 @@ public final class SelectedChannelReleaseCatalog {
                         releases.assess(repository, exact));
             }
             rows.add(selected);
-            unique.remove(selected.identity());
         }
         rows.addAll(unique.values());
 

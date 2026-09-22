@@ -52,10 +52,14 @@ size-bounded transfer; this does not add independent authenticity.
 
 Successful imported-copy adoption chooses Milestone (default) or Development exactly once and
 publishes that fixed preference only after the local copy has matched one exact official
-ancestor. The ancestor release is not classified into a historical channel from its title,
-version, or prerelease flag; the chosen channel is only future local policy. Failed or cancelled
-adoption publishes no channel. Nightly adoption remains disabled until the durable Nightly
-identity/history contract exists, and there is no adoption-based channel switching.
+ancestor. Automatic adoption first compares the normalized observed identity with both canonical
+current pointers. A selected-current match is allowed, a shared stable/dev identity is valid for
+either selection, and a distinct opposite-current-only match is rejected as a typed channel
+mismatch before package download. An identity matching neither current pointer remains
+historical/unknown and may be adopted into the user-selected fixed channel. Title, prerelease flag,
+and ordering never classify that historical identity. Failed or cancelled adoption publishes no
+channel. Nightly adoption remains disabled until the durable Nightly identity/history contract
+exists, and there is no adoption-based channel switching.
 
 The source hierarchy is one-directional: the canonical release index is authoritative for release
 identity and historical/current channel membership; a build-produced embedded manifest is an
@@ -76,14 +80,18 @@ never “up to date.”
 Recommended Update captures installation binding, fixed channel provenance, fixed source,
 repository, target tag, asset name, size, digest, and notes URL. Preparation
 and Apply revalidate the captured source and metadata; a change requires a new attempt and consent.
-The route first shows a simple styled pre-download consent with only the application, current and
-new versions, and rounded MiB download size. Cancel, Escape, or window close fetches no package body;
-Download is the default action. It downloads the exact full package once, retains it only for that
-active attempt, prepares and verifies the plan internally, then uses a separate explicit Apply
-authorization. Under the captured root gate, Apply refreshes the
+The route first shows a simple styled update consent with the application, current and new
+versions, and rounded MiB download size. Its copy and **Update** action authorize download,
+verification, internal planning, and Apply as one complete operation. Cancel, Escape, or window
+close fetches no package body; Update is the default action. It downloads the exact full package
+once, retains it only for that active attempt, prepares and verifies the plan internally, then
+immediately calls Apply with the existing explicit backend confirmation token rather than asking
+for a second UI authorization. Under the captured root gate, Apply refreshes the
 channel/preference/target metadata and re-verifies/re-extracts the retained archive; it never
 silently downloads a second package or retargets. The advanced exact-release path remains
-available without changing the fixed channel.
+available without changing the fixed channel. Clean success silently reloads Installations;
+preserved decisions do not create a completion dialog, while a cleanup warning remains visible in
+the styled progress surface.
 
 For a new installation, one **Fetch releases** action reads both fixed YAML pointers and one
 bounded GitHub history page for the selected product. It includes the selected current identity

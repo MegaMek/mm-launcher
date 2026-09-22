@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
+import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.launch.ApplicationLauncher;
 import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.launch.ProcessRunner;
@@ -149,6 +150,41 @@ class ExistingImportSwingTest {
                     (Container) detail.getTopLevelAncestor(), "Close"));
             assertEquals("", ((JLabel) find(frame, "homeStatusLabel")).getText(),
                     "the operation dialog is the only failure status surface");
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void ineligibleAdoptionExplainsTheMismatchWithStandardStyling() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(
+                new LauncherServices(temp.resolve("ineligible-adoption-registry.json"))));
+        try {
+            onEdt(() -> {
+                frame.setVisible(true);
+                frame.showIneligibleAdoption(new PreparedAdoption.Report(
+                        false, "MekHQ", "0.50.7",
+                        org.megamek.launcher.channel.FollowChannel.DEVELOPMENT,
+                        "Core application files differ from the official release."));
+                return null;
+            });
+
+            JDialog dialog = waitFor(() -> findDialog(frame, "adoptionResultDialog"));
+            JLabel heading = (JLabel) find(dialog, "adoptionResultHeading");
+            JLabel message = (JLabel) find(dialog, "adoptionResultMessage");
+            assertEquals("Updates can't be enabled", dialog.getTitle());
+            assertEquals("Updates can't be enabled", heading.getText());
+            assertEquals(FirstLaunchPanel.GOLD, heading.getForeground());
+            assertEquals(java.awt.Font.PLAIN, message.getFont().getStyle());
+            assertTrue(message.getText().contains(
+                    "Core application files differ from the official release."));
+            assertTrue(message.getText().contains("No files were changed."));
+            assertFalse(message.getText().contains("currently a Milestone release"));
+            assertFalse(message.getText().contains("currently a Development release"));
+            assertNull(find(dialog, "viewAdoptionLogsButton"));
+            assertEquals(1, countButtonText(dialog, "Close"));
         } finally {
             dispose(frame);
         }
@@ -429,10 +465,91 @@ class ExistingImportSwingTest {
             assertTrue(preference.checkOnOpen());
             assertSame(preparationContext.get(), publicationContext.get(),
                     "verification and publication must use one active operation context");
-            assertEquals(6, requests.get(),
+            assertEquals(7, requests.get(),
                     "publication performs no remote metadata request");
             assertEquals(1, packageRequests.get(),
                     "publication reuses the verified download");
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void channelMismatchOffersDirectTruthfulRetryWithoutDownloading() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        AdoptionFixture fixture = adoptableMegaMekSuite("channel-mismatch-adoption");
+        Path registry = temp.resolve("channel-mismatch-adoption-registry.json");
+        AtomicInteger requests = new AtomicInteger();
+        AtomicInteger packageRequests = new AtomicInteger();
+        ReleaseTransport transport = channelMismatchAdoptionTransport(
+                fixture.archive(), requests, packageRequests);
+        LauncherServices services = new LauncherServices(
+                registry, new RegistryStore(), new InstallationInspector(), transport,
+                new JavaRuntime(new RecordingRunner()),
+                new ApplicationLauncher(new RecordingRunner()));
+        var record = services.register("Imported", fixture.root());
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            onEdt(() -> {
+                frame.showWindow();
+                return null;
+            });
+            JButton manage = waitFor(() -> findButton(frame, "manageInstallationsButton"));
+            onEdt(() -> {
+                manage.doClick();
+                return null;
+            });
+            JButton enable = waitFor(() -> findButton(frame,
+                    "enableManagedUpdatesButton-" + record.id()));
+            onEdt(() -> {
+                enable.doClick();
+                return null;
+            });
+            JDialog start = waitFor(() -> findDialog(frame, "adoptionCandidateDialog"));
+            onEdt(() -> {
+                JComboBox<?> channel = (JComboBox<?>) find(start, "adoptionChannelCombo");
+                channel.setSelectedItem(FollowChannel.DEVELOPMENT);
+                ((JButton) find(start, "continueAdoptionButton")).doClick();
+                return null;
+            });
+
+            JDialog mismatch = waitFor(() -> findDialog(frame, "adoptionResultDialog"));
+            JLabel heading = (JLabel) find(mismatch, "adoptionResultHeading");
+            JLabel message = (JLabel) find(mismatch, "adoptionResultMessage");
+            JButton retry = (JButton) find(mismatch, "retrySuggestedAdoptionButton");
+            assertEquals("Use Milestone for this installation", mismatch.getTitle());
+            assertEquals("Use Milestone for this installation", heading.getText());
+            assertEquals(FirstLaunchPanel.GOLD, heading.getForeground());
+            assertEquals(java.awt.Font.PLAIN, message.getFont().getStyle());
+            assertTrue(message.getText().contains(
+                    "Version 0.50.07 is currently a Milestone release"));
+            assertTrue(message.getText().contains("No files were changed."));
+            assertTrue(message.getText().contains("Select Milestone"));
+            assertEquals("Try Milestone", retry.getText());
+            assertEquals(1, countButtonText(mismatch, "Close"));
+            assertNull(find(mismatch, "operationViewDetailsButton"));
+            assertNull(find(mismatch, "browseAfterAdoptionFailureButton"));
+            assertEquals(0, packageRequests.get(),
+                    "channel mismatch must be decided before package transfer");
+            assertEquals(1, requests.get(),
+                    "channel mismatch needs only the canonical current pointers");
+
+            onEdt(() -> {
+                retry.doClick();
+                return null;
+            });
+
+            JLabel updateStatus = waitFor(() -> {
+                JLabel label = (JLabel) find(frame, "installationStatus-" + record.id());
+                return label != null && "Up to date".equals(label.getText()) ? label : null;
+            });
+            assertEquals("Up to date", updateStatus.getText());
+            assertEquals(1, packageRequests.get());
+            assertEquals(8, requests.get());
+            var preference = new ChannelPreferenceStore()
+                    .read(registry, services.readRegistry(), record).preference();
+            assertEquals(FollowChannel.MILESTONE, preference.channel());
         } finally {
             dispose(frame);
         }
@@ -645,6 +762,40 @@ class ExistingImportSwingTest {
                 """.formatted(archive.length, digest);
         Deque<java.util.function.Supplier<ReleaseTransport.Response>> responses =
                 new ArrayDeque<>(List.of(
+                        response("stable: 0.50.07\ndev: 0.51.0\n"),
+                        response("[" + metadata + "]"),
+                        response(metadata),
+                        response(metadata),
+                        binaryResponse(archive),
+                        response("stable: 0.50.07\ndev: 0.51.0\n"),
+                        response(metadata)));
+        return (uri, accept) -> {
+            requests.incrementAndGet();
+            if ("application/octet-stream".equals(accept)) packageRequests.incrementAndGet();
+            var response = responses.pollFirst();
+            if (response == null) throw new IOException("unexpected request: " + uri);
+            return response.get();
+        };
+    }
+
+    private static ReleaseTransport channelMismatchAdoptionTransport(
+            byte[] archive, AtomicInteger requests, AtomicInteger packageRequests)
+            throws Exception {
+        String digest = HexFormat.of().formatHex(
+                MessageDigest.getInstance("SHA-256").digest(archive));
+        String metadata = """
+                {"tag_name":"v0.50.07","name":"Version 0.50.07","draft":false,
+                "prerelease":false,
+                "html_url":"https://github.com/MegaMek/megamek/releases/tag/v0.50.07",
+                "assets":[{"name":"MegaMek-0.50.07.tar.gz","size":%d,
+                "digest":"sha256:%s",
+                "browser_download_url":"https://github.com/MegaMek/megamek/releases/download/\
+                v0.50.07/MegaMek-0.50.07.tar.gz"}]}
+                """.formatted(archive.length, digest);
+        Deque<java.util.function.Supplier<ReleaseTransport.Response>> responses =
+                new ArrayDeque<>(List.of(
+                        response("stable: 0.50.07\ndev: 0.51.0\n"),
+                        response("stable: 0.50.07\ndev: 0.51.0\n"),
                         response("[" + metadata + "]"),
                         response(metadata),
                         response(metadata),

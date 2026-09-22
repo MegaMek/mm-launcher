@@ -96,7 +96,9 @@ cleanup or transaction is claimed by **preview**.
 
 Normal GUI **Update…** and recommended-update attempts use the same planning/target-validation
 engine but deliberately have different ownership: an opaque, process-local, one-use handle retains
-that attempt's verified archive and observational extraction through the second confirmation.
+that attempt's verified archive and observational extraction through Apply. The initial styled
+update consent authorizes download, verification, internal planning, and Apply; there is no second
+UI confirmation after planning.
 Apply never trusts the extraction merely because preview passed; it refreshes metadata, re-verifies
 the retained compressed bytes and stable file identity, safely extracts again, and compares the
 result with the pristine captured manifest/inventory/inspection before a fresh local plan. This is
@@ -113,10 +115,12 @@ response, checkpoints archive hashing/extraction and local planning, and removes
 workspace off the EDT. Standalone preview ends as **Cancelled**, failed, or successful without an
 invented overall percentage.
 
-Prepared GUI Update continues from the same one downloaded body into await-consent and
-prepare-install phases. Declining the second consent cancels and discards that handle. Standalone
-GUI/CLI preview never exposes Apply and is not a cache token for another operation. Existing CLI
-arguments, output, and one-download compatibility are unchanged.
+Prepared GUI Update continues from the same one downloaded body directly into backend
+revalidation and prepare-install/Apply after internal planning. The existing typed await-consent
+boundary does not display or request a second consent. Standalone GUI/CLI preview never exposes
+Apply and is not a cache token for another operation. Existing CLI arguments, output, and
+one-download compatibility are unchanged. Clean GUI success closes progress and silently reloads
+Installations; only a non-null cleanup warning keeps the styled progress surface visible.
 
 Terminal preview errors/progress are persisted as sanitized local structured logs beside the
 registry, outside installation and receipt data. Logs remain available after dialog dismissal or

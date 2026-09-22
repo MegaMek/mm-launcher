@@ -1,6 +1,7 @@
 package org.megamek.launcher.update;
 
 import org.junit.jupiter.api.Test;
+import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.onboarding.Product;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationType;
@@ -27,17 +28,21 @@ class AutomaticAdoptionResolverTest {
     @Test
     void numericLeadingZerosMatchWithoutGuessingAnExactEndpoint() throws Exception {
         QueueTransport transport = new QueueTransport(200,
+                channels("0.50.7", "0.51.0"),
                 "[" + release("v0.50.07", "Unrelated title", false, true) + "]");
         AutomaticAdoptionResolver.Resolution result = resolve(transport, "0.50.7");
 
         assertEquals(AutomaticAdoptionResolver.Status.MATCHED, result.status());
         assertEquals("v0.50.07", result.release().tag());
-        assertEquals(1, transport.uris.size());
-        assertTrue(transport.uris.getFirst().toString().contains("/releases?per_page=50&page=1"));
-        assertFalse(transport.uris.getFirst().toString().contains("/releases/tags/"));
+        assertEquals(2, transport.uris.size());
+        assertEquals(org.megamek.launcher.channel.OfficialYamlChannelCatalog.SOURCE,
+                transport.uris.getFirst());
+        assertTrue(transport.uris.get(1).toString().contains("/releases?per_page=50&page=1"));
+        assertFalse(transport.uris.get(1).toString().contains("/releases/tags/"));
         assertFalse(transport.accepts.contains("application/octet-stream"));
 
         AutomaticAdoptionResolver.Resolution displayMatch = resolve(new QueueTransport(200,
+                channels("0.50.7", "0.51.0"),
                 "[" + release("release_0_50_07", "MegaMek 0.50.07",
                         false, true) + "]"), "0.50.7");
         assertEquals(AutomaticAdoptionResolver.Status.MATCHED, displayMatch.status());
@@ -51,9 +56,11 @@ class AutomaticAdoptionResolverTest {
                 release("v0.50.007", "0.50.7", false, false),
                 release("v0.50.7-beta", "0.50.7 beta", false, true)) + "]";
         AutomaticAdoptionResolver.Resolution finalBuild =
-                resolve(new QueueTransport(200, page), "0.50.7");
+                resolve(new QueueTransport(200,
+                        channels("0.51.0", "0.52.0"), page), "0.50.7");
         AutomaticAdoptionResolver.Resolution suffixed =
-                resolve(new QueueTransport(200, page), "0.50.7-rc1");
+                resolve(new QueueTransport(200,
+                        channels("0.51.0", "0.52.0"), page), "0.50.7-rc1");
 
         assertEquals(AutomaticAdoptionResolver.Status.NO_UNIQUE_MATCH, finalBuild.status());
         assertEquals(AutomaticAdoptionResolver.Status.NO_UNIQUE_MATCH, suffixed.status());
@@ -64,7 +71,58 @@ class AutomaticAdoptionResolverTest {
         String page = "[" + release("v0.50.07", "First", false, true) + ","
                 + release("v00.050.007", "Second", false, true) + "]";
         assertEquals(AutomaticAdoptionResolver.Status.NO_UNIQUE_MATCH,
-                resolve(new QueueTransport(200, page), "0.50.7").status());
+                resolve(new QueueTransport(200,
+                        channels("0.51.0", "0.52.0"), page), "0.50.7").status());
+    }
+
+    @Test
+    void oppositeCurrentIsTypedBeforeReleaseScanOrPackageRequest() throws Exception {
+        QueueTransport transport = new QueueTransport(200,
+                channels("0.51.0", "0.52.0"));
+
+        AutomaticAdoptionResolver.Resolution result =
+                new AutomaticAdoptionResolver(transport).resolve(
+                        OfficialRepository.MEKHQ, "0.51.0",
+                        FollowChannel.DEVELOPMENT,
+                        new PrintStream(new ByteArrayOutputStream()),
+                        OperationContext.none(OperationType.ADOPT_EXISTING));
+
+        assertEquals(AutomaticAdoptionResolver.Status.CHANNEL_MISMATCH, result.status());
+        assertEquals(FollowChannel.DEVELOPMENT,
+                result.channelMismatch().selectedChannel());
+        assertEquals(FollowChannel.MILESTONE,
+                result.channelMismatch().requiredChannel());
+        assertEquals("0.51.0", result.channelMismatch().currentVersion());
+        assertEquals(1, transport.uris.size(),
+                "known mismatch must stop before the release scan");
+        assertFalse(transport.accepts.contains("application/octet-stream"));
+    }
+
+    @Test
+    void sharedCurrentAndHistoricalUnknownAreAllowedForSelectedChannel() throws Exception {
+        QueueTransport shared = new QueueTransport(200,
+                channels("0.51.0", "0.51.0"),
+                "[" + release("v0.51.0", "Current", false, true) + "]");
+        AutomaticAdoptionResolver.Resolution sharedResult =
+                new AutomaticAdoptionResolver(shared).resolve(
+                        OfficialRepository.MEGAMEK, "0.51.0",
+                        FollowChannel.DEVELOPMENT,
+                        new PrintStream(new ByteArrayOutputStream()),
+                        OperationContext.none(OperationType.ADOPT_EXISTING));
+        assertEquals(AutomaticAdoptionResolver.Status.MATCHED, sharedResult.status());
+
+        QueueTransport historical = new QueueTransport(200,
+                channels("0.51.0", "0.52.0"),
+                "[" + release("v0.49.0", "Historical", false, true) + "]");
+        AutomaticAdoptionResolver.Resolution historicalResult =
+                new AutomaticAdoptionResolver(historical).resolve(
+                        OfficialRepository.MEGAMEK, "0.49.0",
+                        FollowChannel.DEVELOPMENT,
+                        new PrintStream(new ByteArrayOutputStream()),
+                        OperationContext.none(OperationType.ADOPT_EXISTING));
+        assertEquals(AutomaticAdoptionResolver.Status.MATCHED, historicalResult.status());
+        assertEquals(2, shared.uris.size());
+        assertEquals(2, historical.uris.size());
     }
 
     @Test
@@ -73,6 +131,7 @@ class AutomaticAdoptionResolverTest {
         ByteArrayOutputStream diagnostics = new ByteArrayOutputStream();
         AutomaticAdoptionResolver.Resolution result = new AutomaticAdoptionResolver(transport)
                 .resolve(OfficialRepository.MEGAMEK, "0.50.7",
+                        FollowChannel.MILESTONE,
                         new PrintStream(diagnostics),
                         OperationContext.none(OperationType.ADOPT_EXISTING));
 
@@ -84,20 +143,22 @@ class AutomaticAdoptionResolverTest {
 
     @Test
     void fullPaginationBoundNeverTreatsPartialHistoryAsUnique() throws Exception {
-        List<String> pages = new ArrayList<>();
+        List<String> responses = new ArrayList<>();
+        responses.add(channels("0.51.0", "0.52.0"));
         for (int page = 0; page < AutomaticAdoptionResolver.MAX_PAGES; page++) {
             List<String> releases = new ArrayList<>();
             for (int row = 0; row < AutomaticAdoptionResolver.PAGE_SIZE; row++) {
                 releases.add(release("v9." + page + "." + row,
                         "Other", false, true));
             }
-            pages.add("[" + String.join(",", releases) + "]");
+            responses.add("[" + String.join(",", releases) + "]");
         }
-        QueueTransport transport = new QueueTransport(200, pages.toArray(String[]::new));
+        QueueTransport transport = new QueueTransport(
+                200, responses.toArray(String[]::new));
 
         assertEquals(AutomaticAdoptionResolver.Status.SEARCH_INCOMPLETE,
                 resolve(transport, "0.50.7").status());
-        assertEquals(AutomaticAdoptionResolver.MAX_PAGES, transport.uris.size());
+        assertEquals(AutomaticAdoptionResolver.MAX_PAGES + 1, transport.uris.size());
     }
 
     @Test
@@ -118,9 +179,13 @@ class AutomaticAdoptionResolverTest {
     private static AutomaticAdoptionResolver.Resolution resolve(
             QueueTransport transport, String observed) throws Exception {
         return new AutomaticAdoptionResolver(transport).resolve(
-                OfficialRepository.MEGAMEK, observed,
+                OfficialRepository.MEGAMEK, observed, FollowChannel.MILESTONE,
                 new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING));
+    }
+
+    private static String channels(String milestone, String development) {
+        return "stable: " + milestone + "\ndev: " + development + "\n";
     }
 
     private static Product product(String key) {

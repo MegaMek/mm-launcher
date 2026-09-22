@@ -950,11 +950,11 @@ public final class LauncherFrame extends JFrame {
         if (checked == null || !checked.updateAvailable() || record == null
                 || eligibility == null || !eligibility.available()) return;
         ChannelUpdateChecker.Recommendation recommendation = checked.recommendation();
-        boolean download = RecommendedUpdateConsentDialog.confirm(
+        boolean update = RecommendedUpdateConsentDialog.confirm(
                 this, displayProduct(recommendation.repository().key()),
                 checked.currentTag(), recommendation.targetTag(),
                 recommendation.assetSize(), guiScale);
-        if (!download) return;
+        if (!update) return;
         runPreparedUpdate(record, eligibility.receipt(),
                 eligibility.current(), recommendation.targetTag(),
                 recommendation.assetName(),
@@ -1813,6 +1813,15 @@ public final class LauncherFrame extends JFrame {
                         showIneligibleAdoption(result.report());
                     }
                 }, error -> {
+                    if (error instanceof
+                            ImportedCopyAdoptionService.ChannelMismatchException mismatch) {
+                        progress.dispose();
+                        if (isCurrentAdoption(generation, record)) {
+                            showChannelMismatchAdoption(
+                                    record, suggestion, mismatch, generation);
+                        }
+                        return;
+                    }
                     progress.setTitle("This copy remains launch-only");
                     if (publicationAttempted.get()) {
                         progress.setFailureSummary(
@@ -1840,36 +1849,94 @@ public final class LauncherFrame extends JFrame {
         });
     }
 
-    private void showIneligibleAdoption(PreparedAdoption.Report report) {
-        JPanel body = adoptionResultBody(report.message());
+    void showIneligibleAdoption(PreparedAdoption.Report report) {
+        JPanel body = adoptionResultBody("Updates can't be enabled",
+                report.message()
+                        + "<br><br>No files were changed. You can keep using this installation, "
+                        + "or install a separate managed copy for updates.");
         JPanel actions = new JPanel(new java.awt.FlowLayout(
                 java.awt.FlowLayout.RIGHT, guiScale.scaleForGUI(8), 0));
         actions.setOpaque(false);
-        JButton logs = homeButton("View details/logs", "viewAdoptionLogsButton");
         JButton close = homeButton("Close", "closeAdoptionResultButton");
-        actions.add(logs);
         actions.add(close);
         body.add(actions, BorderLayout.SOUTH);
-        JDialog dialog = adoptionResultDialog("Copy remains launch-only", body);
+        JDialog dialog = adoptionResultDialog("Updates can't be enabled", body);
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-        logs.addActionListener(event -> showOperationLogs());
         close.addActionListener(event -> dialog.dispose());
+        installEscapeAction(dialog, "closeAdoptionResult", dialog::dispose);
         dialog.getRootPane().setDefaultButton(close);
         dialog.setVisible(true);
     }
 
-    private JPanel adoptionResultBody(String result) {
+    private void showChannelMismatchAdoption(
+            InstallationRecord record,
+            ImportedCopyAdoptionService.Suggestion suggestion,
+            ImportedCopyAdoptionService.ChannelMismatchException mismatch,
+            long generation) {
+        String headingText = "Use " + mismatch.requiredChannel()
+                + " for this installation";
+        JPanel body = adoptionResultBody(headingText,
+                "Version " + mismatch.currentVersion() + " is currently a "
+                        + mismatch.requiredChannel() + " release, not a "
+                        + mismatch.selectedChannel() + " release."
+                        + "<br><br>No files were changed. Select "
+                        + mismatch.requiredChannel()
+                        + " to verify this copy and enable managed updates.");
+        JPanel actions = new JPanel(new java.awt.FlowLayout(
+                java.awt.FlowLayout.RIGHT, guiScale.scaleForGUI(8), 0));
+        actions.setOpaque(false);
+        JButton close = homeButton("Close", "closeAdoptionResultButton");
+        JButton retry = homeButton("Try " + mismatch.requiredChannel(),
+                "retrySuggestedAdoptionButton");
+        retry.setFont(guiScale.font(retry.getFont(), Font.BOLD, 14f));
+        actions.add(close);
+        actions.add(retry);
+        body.add(actions, BorderLayout.SOUTH);
+        JDialog dialog = adoptionResultDialog(headingText, body);
+        dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        close.addActionListener(event -> dialog.dispose());
+        retry.addActionListener(event -> {
+            if (!isCurrentAdoption(generation, record)) {
+                dialog.dispose();
+                return;
+            }
+            retry.setEnabled(false);
+            close.setEnabled(false);
+            dialog.dispose();
+            prepareAdoption(record, suggestion, null,
+                    mismatch.requiredChannel(), generation);
+        });
+        installEscapeAction(dialog, "closeAdoptionChannelMismatch", dialog::dispose);
+        dialog.getRootPane().setDefaultButton(retry);
+        dialog.setVisible(true);
+    }
+
+    private JPanel adoptionResultBody(String headingText, String result) {
         JPanel body = new JPanel(new BorderLayout(0, guiScale.scaleForGUI(14)));
         body.setName("adoptionResultContent");
         body.setBackground(FirstLaunchPanel.BACKGROUND);
         body.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(18),
                 guiScale.scaleForGUI(20), guiScale.scaleForGUI(14),
                 guiScale.scaleForGUI(20)));
+
+        JPanel summary = new JPanel();
+        summary.setOpaque(false);
+        summary.setLayout(new BoxLayout(summary, BoxLayout.Y_AXIS));
+        JLabel heading = new JLabel(headingText);
+        heading.setName("adoptionResultHeading");
+        heading.setForeground(FirstLaunchPanel.GOLD);
+        heading.setFont(guiScale.font(heading.getFont(), Font.BOLD, 22f));
+        heading.setAlignmentX(Component.LEFT_ALIGNMENT);
+        summary.add(heading);
+        summary.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
+
         JLabel message = new JLabel("<html>" + result + "</html>");
         message.setName("adoptionResultMessage");
         message.setForeground(FirstLaunchPanel.TEXT);
-        message.setFont(guiScale.font(message.getFont(), Font.BOLD, 17f));
-        body.add(message, BorderLayout.CENTER);
+        message.setFont(guiScale.font(message.getFont(), Font.PLAIN, 14f));
+        message.setAlignmentX(Component.LEFT_ALIGNMENT);
+        summary.add(message);
+        body.add(summary, BorderLayout.CENTER);
         return body;
     }
 
@@ -1878,7 +1945,7 @@ public final class LauncherFrame extends JFrame {
         dialog.setName("adoptionResultDialog");
         dialog.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         dialog.setContentPane(body);
-        dialog.setSize(guiScale.scaleForGUI(590, 240));
+        dialog.setSize(guiScale.scaleForGUI(640, 275));
         dialog.setLocationRelativeTo(this);
         return dialog;
     }
@@ -2920,7 +2987,8 @@ public final class LauncherFrame extends JFrame {
         releases.setName("previewReleaseList");
         JButton fetch = button("Fetch releases", "fetchPreviewReleasesButton");
         JButton next = button("Next page", "nextPreviewReleasePageButton");
-        JButton inspect = button("Download and preview…", "runPreviewButton");
+        JButton inspect = button(applyWorkflow ? "Update…" : "Download and preview…",
+                "runPreviewButton");
         next.setEnabled(false);
         inspect.setEnabled(false);
         JLabel pageLabel = new JLabel("No network request until Fetch releases is selected.");
@@ -2967,6 +3035,17 @@ public final class LauncherFrame extends JFrame {
             ReleaseChoice choice = releases.getSelectedValue();
             if (choice == null || !choice.assessment().eligible()) return;
             ReleaseCatalog.Asset asset = choice.assessment().asset();
+            if (applyWorkflow) {
+                boolean update = RecommendedUpdateConsentDialog.confirm(
+                        this, displayProduct(repository.key()),
+                        sourceCurrent == null ? sourceReceipt.tag() : sourceCurrent.tag(),
+                        choice.release().tag(), asset.size(), guiScale);
+                if (!update) return;
+                dialog.dispose();
+                runPreparedUpdate(sourceRecord, sourceReceipt, sourceCurrent,
+                        choice.release().tag(), asset.name(), asset.size(), asset.digest(), null);
+                return;
+            }
             int answer = JOptionPane.showConfirmDialog(dialog,
                     "Current verified source: "
                             + (sourceCurrent == null ? sourceReceipt.tag() : sourceCurrent.tag())
@@ -2976,20 +3055,12 @@ public final class LauncherFrame extends JFrame {
                             + "\nDownload: " + NumberFormat.getIntegerInstance().format(asset.size())
                             + " bytes (a full release package; time depends on your connection)"
                             + "\n\nDownload, verify, and inspect in external temporary storage?"
-                            + "\nThis step is READ-ONLY: no installed files or metadata will change."
-                            + (applyWorkflow
-                            ? "\nA separate destructive Apply confirmation follows the report."
-                            : ""),
+                            + "\nThis step is READ-ONLY: no installed files or metadata will change.",
                     "Confirm read-only preview download", JOptionPane.OK_CANCEL_OPTION,
                     JOptionPane.WARNING_MESSAGE);
             if (answer != JOptionPane.OK_OPTION) return;
             dialog.dispose();
-            if (applyWorkflow) {
-                runPreparedUpdate(sourceRecord, sourceReceipt, sourceCurrent,
-                        choice.release().tag(), asset.name(), asset.size(), asset.digest(), null);
-            } else {
-                runUpdatePreview(sourceRecord, sourceReceipt, choice.release().tag(), false);
-            }
+            runUpdatePreview(sourceRecord, sourceReceipt, choice.release().tag(), false);
         });
         dialog.setVisible(true);
     }
@@ -3013,39 +3084,6 @@ public final class LauncherFrame extends JFrame {
                     progress.append("\nPREVIEW FAILED: " + errorDetail(error) + "\n");
                     progress.setTitle("Update preview failed");
                 }, stream::close);
-    }
-
-    private boolean showApplyConsent(UpdatePreviewService.Preview preview,
-                                     ChannelUpdateChecker.Result recommended) {
-        if (preview.currentState() == null) {
-            showError("Update unavailable",
-                    new IOException("preview did not include current verified provenance"));
-            return false;
-        }
-        long skipped = preview.counts().get(org.megamek.launcher.plan.Action.SKIP);
-        String message = "Installation: " + preview.record().name()
-                + "\nFolder: " + preview.record().canonicalRoot()
-                + "\nCurrent verified source: " + preview.baseline().tag()
-                + "\nTarget: " + preview.targetRelease().tag()
-                + "\nFull package already downloaded and verified: "
-                + NumberFormat.getIntegerInstance().format(preview.targetAsset().size()) + " bytes"
-                + "\nManaged changes: ADD "
-                + preview.counts().get(org.megamek.launcher.plan.Action.ADD)
-                + ", REPLACE " + preview.counts().get(org.megamek.launcher.plan.Action.REPLACE)
-                + ", REMOVE " + preview.counts().get(org.megamek.launcher.plan.Action.REMOVE)
-                + ", preserved SKIP " + skipped
-                + "\n\nApplying is destructive to unmodified managed package files. Verified "
-                + "backups and a recovery journal are created first. Protected, unknown, and "
-                + "modified data are retained."
-                + "\n\nCLOSE ALL MegaMek, MekHQ, and MegaMekLab windows now, including copies "
-                + "started manually. The launcher coordinates its own launches, but cannot "
-                + "guarantee detection of older or externally started applications."
-                + "\n\nMetadata, source provenance, local files, and this exact retained package "
-                + "will be checked again. The package will NOT be downloaded a second time."
-                + "\n\nApply this exact verified package to the installation named above?";
-        int answer = JOptionPane.showConfirmDialog(this, message, "Authorize update Apply",
-                JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
-        return answer == JOptionPane.OK_OPTION;
     }
 
     private void runPreparedUpdate(
@@ -3076,19 +3114,6 @@ public final class LauncherFrame extends JFrame {
                         prepared = null;
                         discardPrepared(discarded, context);
                     }
-                    AtomicReference<Boolean> authorized = new AtomicReference<>(false);
-                    PreparedUpdate captured = prepared;
-                    SwingUtilities.invokeAndWait(() -> {
-                        if (isDisplayable()) {
-                            authorized.set(showApplyConsent(captured.preview(), recommended));
-                        }
-                    });
-                    if (!authorized.get()) {
-                        context.requestCancellation();
-                        PreparedUpdate discarded = prepared;
-                        prepared = null;
-                        discardPrepared(discarded, context);
-                    }
                     SwingUtilities.invokeLater(() ->
                             progress.setTitle("Applying verified update"));
                     PreparedUpdate applying = prepared;
@@ -3108,22 +3133,15 @@ public final class LauncherFrame extends JFrame {
                     throw failure;
                 }
             }, result -> {
-                progress.dispose();
-                String completed = result.skippedDecisions() == 0
-                        ? "Update completed and the managed package is pristine."
-                        : "Update completed with " + result.skippedDecisions()
-                        + " skipped data/collision decisions preserved.";
                 if (result.cleanupWarning() != null) {
-                    completed += "\n\n" + result.cleanupWarning();
+                    progress.append("\nCLEANUP WARNING: " + result.cleanupWarning() + "\n");
+                    progress.showWarning("Update complete — cleanup warning",
+                            "The update was applied, but temporary files could not be removed. "
+                                    + "Do not run Update again.");
+                } else {
+                    progress.dispose();
                 }
-                JOptionPane.showMessageDialog(LauncherFrame.this,
-                        completed + "\nRetained override history: "
-                                + result.retainedOverrides() + "\nBuild: "
-                                + result.record().observedBuild(),
-                        result.cleanupWarning() == null
-                                ? "Update complete" : "Update complete - cleanup warning",
-                        result.cleanupWarning() == null
-                                ? JOptionPane.INFORMATION_MESSAGE : JOptionPane.WARNING_MESSAGE);
+                page = Page.INSTALLATIONS;
                 reload();
             }, failure -> {
                     progress.append("\nUPDATE ATTEMPT FAILED: " + errorDetail(failure)

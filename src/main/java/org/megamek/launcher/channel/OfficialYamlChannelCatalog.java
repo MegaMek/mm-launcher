@@ -12,6 +12,7 @@ import org.yaml.snakeyaml.events.NodeEvent;
 import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
 import org.megamek.launcher.release.ReleaseTransport;
+import org.megamek.launcher.release.VersionIdentity;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -143,6 +144,48 @@ public final class OfficialYamlChannelCatalog implements ChannelCatalog {
                 case DEVELOPMENT -> developmentVersion;
             };
         }
+
+        /**
+         * Classifies one normalized release identity using only the two canonical current
+         * pointers. Anything not identified by either pointer remains historical/unknown.
+         */
+        public CurrentIdentity classify(FollowChannel selectedChannel,
+                                        VersionIdentity releaseIdentity) {
+            if (selectedChannel == null || releaseIdentity == null) {
+                throw new IllegalArgumentException(
+                        "selected channel and release identity are required");
+            }
+            VersionIdentity milestone = pointerIdentity(milestoneVersion);
+            VersionIdentity development = pointerIdentity(developmentVersion);
+            boolean milestoneMatch = milestone.equals(releaseIdentity);
+            boolean developmentMatch = development.equals(releaseIdentity);
+            if (milestoneMatch && developmentMatch) return CurrentIdentity.SHARED_CURRENT;
+            boolean selectedMatch = selectedChannel == FollowChannel.MILESTONE
+                    ? milestoneMatch : developmentMatch;
+            if (selectedMatch) return CurrentIdentity.SELECTED_CURRENT;
+            if (milestoneMatch || developmentMatch) return CurrentIdentity.OPPOSITE_CURRENT;
+            return CurrentIdentity.UNKNOWN;
+        }
+
+        public FollowChannel opposite(FollowChannel selectedChannel) {
+            if (selectedChannel == null) {
+                throw new IllegalArgumentException("selected channel is required");
+            }
+            return selectedChannel == FollowChannel.MILESTONE
+                    ? FollowChannel.DEVELOPMENT : FollowChannel.MILESTONE;
+        }
+
+        private static VersionIdentity pointerIdentity(String version) {
+            return VersionIdentity.fromExact(version).orElseThrow(
+                    () -> new IllegalArgumentException("invalid current release pointer"));
+        }
+    }
+
+    public enum CurrentIdentity {
+        SELECTED_CURRENT,
+        SHARED_CURRENT,
+        OPPOSITE_CURRENT,
+        UNKNOWN
     }
 
     Map<FollowChannel, String> versions() throws IOException, InterruptedException {
