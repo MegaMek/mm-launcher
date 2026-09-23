@@ -1469,6 +1469,14 @@ public final class LauncherFrame extends JFrame {
         item.setBackground(HomeLaunchSplitButton.POPUP_BACKGROUND);
         item.setForeground(HomeLaunchSplitButton.POPUP_FOREGROUND);
         item.setIconTextGap(0);
+        // BasicMenuItemUI.installDefaults() also pulls the active look and
+        // feel's "MenuItem.margin" onto every item, independent of the
+        // checkIcon/arrowIcon/iconTextGap already zeroed out above. Most
+        // look and feels size that margin to leave room for an icon column,
+        // which is exactly the leftover left-hand space these icon-less
+        // items don't need. Zero it so only the explicit border below
+        // controls spacing.
+        item.setMargin(new java.awt.Insets(0, 0, 0, 0));
         item.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(9),
                 guiScale.scaleForGUI(12), guiScale.scaleForGUI(9),
                 guiScale.scaleForGUI(12)));
