@@ -42,7 +42,6 @@ import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JMenuItem;
-import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
@@ -2109,12 +2108,11 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void removeFromLauncher(InstallationRecord record) {
-        int answer = JOptionPane.showConfirmDialog(this,
+        boolean confirmed = LauncherAlertDialog.showConfirm(this, guiScale, "Remove from launcher",
                 "Remove “" + record.name()
                         + "” from the launcher?\nIts files will stay in the installation folder.",
-                "Remove from launcher", JOptionPane.OK_CANCEL_OPTION,
-                JOptionPane.WARNING_MESSAGE);
-        if (answer != JOptionPane.OK_OPTION) return;
+                "Remove");
+        if (!confirmed) return;
         run("Removing from launcher", () -> services.removeFromLauncher(record), result -> {
             selectedInstallationId = null;
             transientHomeMessage = result.warning() == null
@@ -2126,11 +2124,11 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void uninstall(InstallationRecord record) {
-        int answer = JOptionPane.showConfirmDialog(this,
+        boolean confirmed = LauncherAlertDialog.showConfirm(this, guiScale, "Uninstall",
                 "Uninstall " + record.name() + "?\nOfficial application files will be removed. "
                         + "Saves, settings, custom files, and modified files will be kept.",
-                "Uninstall", JOptionPane.OK_CANCEL_OPTION, JOptionPane.WARNING_MESSAGE);
-        if (answer != JOptionPane.OK_OPTION) return;
+                "Uninstall");
+        if (!confirmed) return;
         OperationProgressDialog progress = new OperationProgressDialog(this,
                 "Uninstalling", "uninstallProgressLog", this::showOperationLogs);
         progress.setVisible(true);
@@ -2386,8 +2384,8 @@ public final class LauncherFrame extends JFrame {
 
     void launchDirectly(InstallationRecord record, String productKey) {
         if (!gate.tryEnter()) {
-            JOptionPane.showMessageDialog(this, "Another operation is already running.",
-                    "Please wait", JOptionPane.INFORMATION_MESSAGE);
+            LauncherAlertDialog.showMessage(this, guiScale, "Please wait",
+                    "Another operation is already running.");
             return;
         }
         InstallationRecord capturedRecord = record;
@@ -2512,22 +2510,21 @@ public final class LauncherFrame extends JFrame {
         QuickInstallOption.Key key = option.key();
         String detail = errorDetail(error);
         boolean javaProblem = detail.toLowerCase(java.util.Locale.ROOT).contains("java");
-        Object[] choices = javaProblem
-                ? new Object[]{"Open Settings", "Retry", "Cancel"}
-                : new Object[]{"Retry", "Cancel"};
-        int answer = JOptionPane.showOptionDialog(this,
+        String[] choices = javaProblem
+                ? new String[]{"Cancel", "Retry", "Open Settings"}
+                : new String[]{"Cancel", "Retry"};
+        String answer = LauncherAlertDialog.show(this,
+                javaProblem ? "Java setup required" : "Could not prepare download",
                 (javaProblem
                         ? "A compatible external Java 21 or newer could not be verified."
                         : quickChoiceName(key.repository(), key.channel())
                         + " could not be prepared.")
                         + "\n\n" + detail
                         + "\n\nNo package was downloaded and no destination was created.",
-                javaProblem ? "Java setup required" : "Could not prepare download",
-                JOptionPane.DEFAULT_OPTION, JOptionPane.ERROR_MESSAGE,
-                null, choices, choices[0]);
-        if (javaProblem && answer == 0) {
+                guiScale, choices);
+        if (javaProblem && "Open Settings".equals(answer)) {
             navigateTo(Page.SETTINGS);
-        } else if (answer == (javaProblem ? 1 : 0)) {
+        } else if ("Retry".equals(answer)) {
             prepareCapturedNormalInstall(option, target);
         } else {
             resumeFirstLaunchOptions();
@@ -2538,21 +2535,20 @@ public final class LauncherFrame extends JFrame {
                                    Path target, Throwable error) {
         String detail = errorDetail(error);
         boolean javaProblem = detail.toLowerCase(java.util.Locale.ROOT).contains("java");
-        Object[] choices = javaProblem
-                ? new Object[]{"Open Settings", "Retry", "Cancel"}
-                : new Object[]{"Retry", "Cancel"};
-        int answer = JOptionPane.showOptionDialog(this,
+        String[] choices = javaProblem
+                ? new String[]{"Cancel", "Retry", "Open Settings"}
+                : new String[]{"Cancel", "Retry"};
+        String answer = LauncherAlertDialog.show(this,
+                javaProblem ? "Java setup required" : "Could not prepare download",
                 (javaProblem
                         ? "A compatible external Java 21 or newer could not be verified."
                         : quickChoiceName(repository, channel) + " could not be checked.")
                         + "\n\n" + detail
                         + "\n\nNo package was downloaded and no destination was created.",
-                javaProblem ? "Java setup required" : "Could not prepare download",
-                JOptionPane.DEFAULT_OPTION, JOptionPane.ERROR_MESSAGE,
-                null, choices, choices[0]);
-        if (javaProblem && answer == 0) {
+                guiScale, choices);
+        if (javaProblem && "Open Settings".equals(answer)) {
             navigateTo(Page.SETTINGS);
-        } else if (answer == (javaProblem ? 1 : 0)) {
+        } else if ("Retry".equals(answer)) {
             prepareNormalInstall(repository, channel, target);
         } else {
             resumeFirstLaunchOptions();
@@ -3029,9 +3025,8 @@ public final class LauncherFrame extends JFrame {
         private <T> void startTask(String description, Callable<T> operation,
                                    Consumer<T> success) {
             if (!gate.tryEnter()) {
-                JOptionPane.showMessageDialog(dialog,
-                        "Another operation is already running.",
-                        "Please wait", JOptionPane.INFORMATION_MESSAGE);
+                LauncherAlertDialog.showMessage(dialog, guiScale, "Please wait",
+                        "Another operation is already running.");
                 return;
             }
             long request = ++generation;
@@ -3196,7 +3191,8 @@ public final class LauncherFrame extends JFrame {
                         choice.release().tag(), asset.name(), asset.size(), asset.digest(), null);
                 return;
             }
-            int answer = JOptionPane.showConfirmDialog(dialog,
+            boolean download = LauncherAlertDialog.showConfirm(dialog, guiScale,
+                    "Confirm read-only preview download",
                     "Current verified source: "
                             + (sourceCurrent == null ? sourceReceipt.tag() : sourceCurrent.tag())
                             + " / " + (sourceCurrent == null ? sourceReceipt.assetName()
@@ -3206,9 +3202,8 @@ public final class LauncherFrame extends JFrame {
                             + " bytes (a full release package; time depends on your connection)"
                             + "\n\nDownload, verify, and inspect in external temporary storage?"
                             + "\nThis step is READ-ONLY: no installed files or metadata will change.",
-                    "Confirm read-only preview download", JOptionPane.OK_CANCEL_OPTION,
-                    JOptionPane.WARNING_MESSAGE);
-            if (answer != JOptionPane.OK_OPTION) return;
+                    "Download");
+            if (!download) return;
             dialog.dispose();
             runUpdatePreview(sourceRecord, sourceReceipt, choice.release().tag(), false);
         });
@@ -3322,15 +3317,15 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void recoverUpdate(InstallationRecord record) {
-        int answer = JOptionPane.showConfirmDialog(this,
+        boolean confirmed = LauncherAlertDialog.showConfirm(this, guiScale,
+                "Confirm update recovery",
                 "Close ALL MegaMek, MekHQ, and MegaMekLab applications, including ones started "
                         + "outside this launcher.\n\nRecovery never kills a process and refuses a "
                         + "verified live launcher-started child. It completes a fully applied "
                         + "transaction or rolls back with verified backups; unexpected edits "
                         + "remain untouched and block recovery.\n\nContinue?",
-                "Confirm update recovery", JOptionPane.OK_CANCEL_OPTION,
-                JOptionPane.WARNING_MESSAGE);
-        if (answer != JOptionPane.OK_OPTION) return;
+                "Recover");
+        if (!confirmed) return;
         OperationProgressDialog progress = new OperationProgressDialog(this,
                 "Recovering update", "recoveryProgressLog", this::showOperationLogs);
         progress.append("Recovery is non-cancellable once replay or cleanup begins.\n");
@@ -3343,8 +3338,8 @@ public final class LauncherFrame extends JFrame {
                         record, RealUpdateService.CONFIRM, context),
                 result -> {
                     progress.dispose();
-                    JOptionPane.showMessageDialog(this, result.outcome(), "Recovery complete",
-                            JOptionPane.INFORMATION_MESSAGE);
+                    LauncherAlertDialog.showMessage(this, guiScale, "Recovery complete",
+                            result.outcome());
                     reload();
                 }, error -> progress.setTitle("Update recovery failed"), () -> {
                 });
@@ -3416,9 +3411,9 @@ public final class LauncherFrame extends JFrame {
                         progress.dispose();
                         progress.append("\nInstalled and registered at "
                                 + result.destination() + "\n");
-                        JOptionPane.showMessageDialog(LauncherFrame.this,
-                                "Installed and registered successfully.\nNothing was launched.",
-                                "Install complete", JOptionPane.INFORMATION_MESSAGE);
+                        LauncherAlertDialog.showMessage(LauncherFrame.this, guiScale,
+                                "Install complete",
+                                "Installed and registered successfully.\nNothing was launched.");
                         reload();
                     }, error -> {
                         boolean published = Files.exists(destination,
@@ -3456,8 +3451,8 @@ public final class LauncherFrame extends JFrame {
                                   boolean persistLog) {
         if (!gate.tryEnter()) {
             progress.dispose();
-            JOptionPane.showMessageDialog(this, "Another operation is already running.",
-                    "Please wait", JOptionPane.INFORMATION_MESSAGE);
+            LauncherAlertDialog.showMessage(this, guiScale, "Please wait",
+                    "Another operation is already running.");
             return;
         }
         LauncherServices.LoggedOperation logged = persistLog ? services.beginOperation(
@@ -3585,8 +3580,8 @@ public final class LauncherFrame extends JFrame {
                          Consumer<Throwable> failure, Runnable completion,
                          boolean showAutomaticError, boolean updateStatus) {
         if (!gate.tryEnter()) {
-            JOptionPane.showMessageDialog(this, "Another operation is already running.",
-                    "Please wait", JOptionPane.INFORMATION_MESSAGE);
+            LauncherAlertDialog.showMessage(this, guiScale, "Please wait",
+                    "Another operation is already running.");
             return;
         }
         if (updateStatus) status.setText(description + "…");
@@ -3674,32 +3669,13 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void showError(String title, Throwable error, boolean record) {
-        JTextArea area = textArea(SanitizedErrors.display(error));
-        area.setName("errorDetails");
-        JScrollPane scroll = new JScrollPane(area);
-        scroll.setPreferredSize(new Dimension(640, 220));
-        JButton copy = button("Copy sanitized details", "copyErrorDetailsButton");
-        copy.addActionListener(event -> copySanitized(area.getText()));
-        JButton logs = button("View logs", "viewOperationLogsButton");
-        logs.addActionListener(event -> showOperationLogs());
-        JLabel logging = new JLabel(record ? "Saving local diagnostics..." :
-                "Local operation diagnostics are available when recording succeeded.");
-        logging.setName("errorLoggingStatus");
-        JPanel actions = new JPanel();
-        actions.add(copy);
-        actions.add(logs);
-        JPanel body = new JPanel(new BorderLayout(8, 8));
-        body.add(scroll, BorderLayout.CENTER);
-        body.add(logging, BorderLayout.NORTH);
-        body.add(actions, BorderLayout.SOUTH);
-        JOptionPane pane = new JOptionPane(body, JOptionPane.ERROR_MESSAGE);
-        JDialog errorDialog = pane.createDialog(this, title);
-        errorDialog.setModal(false);
-        errorDialog.setVisible(true);
+        String details = SanitizedErrors.display(error);
+        String loggingStatus = record ? "Saving local diagnostics..."
+                : "Local operation diagnostics are available when recording succeeded.";
+        LauncherErrorDialog errorDialog = LauncherErrorDialog.show(this, title, details,
+                loggingStatus, guiScale, () -> copySanitized(details), this::showOperationLogs);
         if (record) {
-            recordErrorAsync(title, error, message -> {
-                if (errorDialog.isDisplayable()) logging.setText(message);
-            });
+            recordErrorAsync(title, error, errorDialog::updateLoggingStatus);
         }
     }
 
