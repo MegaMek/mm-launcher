@@ -28,6 +28,7 @@ import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.text.Normalizer;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -37,6 +38,8 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
@@ -213,7 +216,7 @@ public final class ImportedCopyAdoptionService {
             throw new IOException("another adoption attempt is already active for this copy");
         }
         VerifiedPackageFetcher.Workspace workspace = null;
-        Path attemptDirectory = null;
+        AttemptDirectory attemptDirectory = null;
         boolean retained = false;
         Throwable preparationFailure = null;
         try (OperationContext.WorkerRegistration ignored = context.activate()) {
@@ -232,11 +235,8 @@ public final class ImportedCopyAdoptionService {
                         RootSnapshot.Scan.INITIAL_IMPORTED_COPY);
             }
             Path workspaceParent = requireWorkspaceParent(before);
-            attemptDirectory = Files.createTempDirectory(workspaceParent,
-                    ".adoption-attempt-");
-            StrictPathSafety.requireDirectory(attemptDirectory,
-                    "adoption attempt directory");
-            requireNoRootOverlap(attemptDirectory, before);
+            attemptDirectory = AttemptDirectory.create(workspaceParent);
+            requireNoRootOverlap(attemptDirectory.root(), before);
 
             context.phase(OperationPhase.METADATA,
                     "Finding the exact official release");
@@ -259,7 +259,7 @@ public final class ImportedCopyAdoptionService {
                             asset.digest(), asset.url());
             try {
                 workspace = new VerifiedPackageFetcher(transport).fetch(
-                        repository, release.tag(), attemptDirectory, "package-",
+                        repository, release.tag(), attemptDirectory.root(), "package-",
                         diagnostics, expectedAsset, context);
             } catch (IOException error) {
                 throw new CandidateResolutionException(
@@ -281,24 +281,17 @@ public final class ImportedCopyAdoptionService {
             PreparedAdoption.Report report = new PreparedAdoption.Report(comparison.eligible(),
                     application, version, fixedChannel, comparison.reason());
             VerifiedPackageFetcher.Workspace retainedWorkspace = workspace;
-            Path retainedDirectory = attemptDirectory;
+            AttemptDirectory retainedDirectory = attemptDirectory;
             PreparedAdoption prepared = new PreparedAdoption(owner, record, repository,
                     fixedChannel, release, asset, retainedWorkspace, ownership,
                     officialInspection, officialSnapshot, local, comparison, report, () -> {
-                IOException cleanupFailure = null;
                 try {
-                    retainedWorkspace.close();
-                } catch (IOException error) {
-                    cleanupFailure = error;
+                    IOException cleanupFailure =
+                            cleanupAttempt(retainedWorkspace, retainedDirectory);
+                    if (cleanupFailure != null) throw cleanupFailure;
                 } finally {
                     active.remove(record.id());
                 }
-                try {
-                    Files.deleteIfExists(retainedDirectory);
-                } catch (IOException error) {
-                    cleanupFailure = add(cleanupFailure, error);
-                }
-                if (cleanupFailure != null) throw cleanupFailure;
             });
             retained = true;
             return prepared;
@@ -308,29 +301,95 @@ public final class ImportedCopyAdoptionService {
         } finally {
             if (!retained) {
                 active.remove(expected.id());
-                IOException cleanupFailure = null;
-                if (workspace != null) {
-                    try {
-                        workspace.close();
-                    } catch (IOException error) {
-                        cleanupFailure = error;
-                    }
-                }
-                if (attemptDirectory != null) {
-                    try {
-                        Files.deleteIfExists(attemptDirectory);
-                    } catch (IOException error) {
-                        cleanupFailure = add(cleanupFailure, error);
-                    }
-                }
+                IOException cleanupFailure = cleanupAttempt(workspace, attemptDirectory);
                 if (cleanupFailure != null) {
                     if (preparationFailure != null) {
                         preparationFailure.addSuppressed(cleanupFailure);
+                        diagnostics.println("ADOPTION preparation; temporary cleanup warning: "
+                                + detail(cleanupFailure));
                     } else {
                         throw cleanupFailure;
                     }
                 }
             }
+        }
+    }
+
+    private IOException cleanupAttempt(VerifiedPackageFetcher.Workspace workspace,
+                                       AttemptDirectory attemptDirectory) {
+        IOException failure = null;
+        boolean owned = true;
+        if (attemptDirectory != null) {
+            try {
+                owned = attemptDirectory.stillOwned();
+            } catch (IOException | RuntimeException error) {
+                failure = cleanupError(error);
+                owned = false;
+            }
+        }
+        // Workspace.close resolves its nested staging directory by path. Check the parent
+        // identity first so a replaced attempt root cannot redirect that cleanup elsewhere.
+        if (workspace != null && owned) {
+            try {
+                workspace.close();
+            } catch (IOException | RuntimeException error) {
+                failure = add(failure, cleanupError(error));
+            }
+        }
+        if (attemptDirectory != null && owned) {
+            try {
+                attemptDirectory.delete();
+            } catch (IOException | RuntimeException error) {
+                failure = add(failure, cleanupError(error));
+            }
+            try {
+                failureHook.hit("AFTER_ATTEMPT_CLEANUP");
+            } catch (IOException | RuntimeException error) {
+                failure = add(failure, cleanupError(error));
+            }
+        }
+        return failure;
+    }
+
+    private static IOException cleanupError(Exception error) {
+        return error instanceof IOException io ? io
+                : new IOException("adoption attempt cleanup failed", error);
+    }
+
+    /**
+     * Captures only the newly created, private attempt root. Refuse replacement of that root
+     * or a linked ancestor; the existing update-owned tree deleter checks every child without
+     * following links. Neither the workspace parent nor an installation root is a cleanup target.
+     */
+    private record AttemptDirectory(Path root, Object identity, Path marker) {
+        static AttemptDirectory create(Path parent) throws IOException {
+            Path root = Files.createTempDirectory(parent, ".adoption-attempt-");
+            StrictPathSafety.requireDirectory(root, "adoption attempt directory");
+            Object identity = Files.readAttributes(root, BasicFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS).fileKey();
+            // Some filesystems do not supply fileKey. A private marker also prevents an
+            // ordinary replacement directory at the same pathname from being claimed.
+            Path marker = Files.createTempFile(root, ".adoption-owner-", ".marker");
+            return new AttemptDirectory(root, identity, marker);
+        }
+
+        boolean stillOwned() throws IOException {
+            if (!Files.exists(root, LinkOption.NOFOLLOW_LINKS)) return false;
+            StrictPathSafety.requireDirectory(root, "adoption attempt directory");
+            Object current = Files.readAttributes(root, BasicFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS).fileKey();
+            if (identity != null && !identity.equals(current)) {
+                throw new IOException("adoption attempt directory was replaced: " + root);
+            }
+            if (!Files.isRegularFile(marker, LinkOption.NOFOLLOW_LINKS)) {
+                throw new IOException("adoption attempt ownership marker is missing: " + root);
+            }
+            return true;
+        }
+
+        void delete() throws IOException {
+            if (!stillOwned()) return;
+            RealUpdateFiles.deleteOwnedTree(root);
         }
     }
 
@@ -438,7 +497,8 @@ public final class ImportedCopyAdoptionService {
                     prepared.release().tag(), prepared.asset().name(),
                     prepared.asset().size(),
                     prepared.workspace().resolvedDigest().hex(),
-                    ownership.manifest(), ownership.excludedPaths(), overrides, List.of(),
+                    ownership.manifest(), ownership.excludedPaths(), overrides,
+                    comparison.caseOverrides(),
                     attemptId);
             states.write(registry, record, receipt, current);
             currentPublished = true;
@@ -597,38 +657,82 @@ public final class ImportedCopyAdoptionService {
         List<PathMatch> modified = new ArrayList<>();
         List<String> missing = new ArrayList<>();
         List<String> conflicts = new ArrayList<>();
+        Map<String, CaseOverride> casePrefixes = new TreeMap<>();
         int exact = 0;
+        // Empty managed directories matter too: if an official directory already exists
+        // under another spelling, a later release must not traverse it as a fresh path.
+        for (EntryEvidence directory : officialSnapshot.entries()) {
+            if (!directory.directory() || !managedDirectory(directory.path())) continue;
+            EntryEvidence localDirectory = localByAlias.get(key(directory.path()));
+            if (localDirectory == null) continue;
+            if (!localDirectory.directory()) {
+                conflicts.add(directory.path());
+            } else if (!localDirectory.path().equals(directory.path())) {
+                recordCasePrefix(casePrefixes, directory.path(), localDirectory.path());
+                if (key(directory.path()).equals("lib")
+                        || OwnershipPolicy.runtimePath(directory.path())) {
+                    conflicts.add(directory.path());
+                }
+            }
+        }
         for (FileEntry file : ownership.manifest().files()) {
             String alias = key(file.path());
             officialAliases.add(alias);
+            boolean criticalPath = criticalAliases.contains(alias)
+                    || OwnershipPolicy.runtimePath(file.path());
+            // Check every existing component, not just the leaf. A file in place of a
+            // directory (or a directory in place of the official file) is never a rename.
+            // The snapshots already reject links, special entries and duplicate aliases.
+            boolean structuralConflict = false;
+            int end = file.path().indexOf('/');
+            while (end >= 0) {
+                String prefix = file.path().substring(0, end);
+                EntryEvidence parent = localByAlias.get(key(prefix));
+                if (parent != null) {
+                    if (!parent.directory()) structuralConflict = true;
+                    else if (!parent.path().equals(prefix)) {
+                        recordCasePrefix(casePrefixes, prefix, parent.path());
+                        if (criticalPath) structuralConflict = true;
+                    }
+                }
+                end = file.path().indexOf('/', end + 1);
+            }
             EntryEvidence evidence = localByAlias.get(alias);
-            if (evidence == null) {
-                String conflictingParent = conflictingParent(file.path(), localByAlias);
-                if (conflictingParent == null) missing.add(file.path());
-                else conflicts.add(file.path());
+            if (evidence != null && evidence.regularFile()
+                    && !evidence.path().equals(file.path())) {
+                recordCasePrefix(casePrefixes, file.path(), evidence.path());
+                if (criticalPath) structuralConflict = true;
+            }
+            if (structuralConflict || evidence != null && !evidence.regularFile()) {
+                conflicts.add(file.path());
                 continue;
             }
-            if (!evidence.path().equals(file.path()) || !evidence.regularFile()) {
-                conflicts.add(file.path());
-            } else if (file.sha256().equals(evidence.sha256())) {
+            if (evidence == null) {
+                missing.add(file.path());
+                continue;
+            }
+            if (file.sha256().equals(evidence.sha256())) {
                 exact++;
             } else {
                 modified.add(new PathMatch(file.path(), file.sha256(),
-                        criticalAliases.contains(alias)
-                                || OwnershipPolicy.runtimePath(file.path())));
+                        criticalPath));
             }
         }
         for (EntryEvidence officialEntry : officialSnapshot.entries()) {
             String alias = key(officialEntry.path());
-            officialAliases.add(alias);
             if (!officialEntry.regularFile() || !criticalAliases.contains(alias)
                     || ownership.manifest().files().stream()
                     .anyMatch(file -> key(file.path()).equals(alias))) {
                 continue;
             }
+            officialAliases.add(alias);
             EntryEvidence evidence = localByAlias.get(alias);
             if (evidence == null) {
-                missing.add(officialEntry.path());
+                if (conflictingParent(officialEntry.path(), localByAlias) == null) {
+                    missing.add(officialEntry.path());
+                } else {
+                    conflicts.add(officialEntry.path());
+                }
             } else if (!evidence.path().equals(officialEntry.path())
                     || !evidence.regularFile()) {
                 conflicts.add(officialEntry.path());
@@ -661,15 +765,40 @@ public final class ImportedCopyAdoptionService {
             reason = "A file or folder conflict prevents this installation from being managed.";
         } else if (criticalModified) {
             reason = "Core application files differ from the official release.";
-        } else if (!missing.isEmpty()) {
-            reason = "This copy can be managed safely. " + missing.size()
+        } else if (missing.stream().anyMatch(path -> !affectedByCase(path, casePrefixes))) {
+            long restorable = missing.stream()
+                    .filter(path -> !affectedByCase(path, casePrefixes)).count();
+            reason = "This copy can be managed safely. " + restorable
                     + " missing file(s) will be restored by the next update.";
         } else {
             reason = "This copy can be managed safely. Existing files will not be changed.";
         }
         return new Comparison(eligible, identity, exact, List.copyOf(modified),
                 List.copyOf(missing), List.copyOf(unknown), List.copyOf(conflicts),
-                protectedFiles, reason);
+                List.copyOf(casePrefixes.values()), protectedFiles, reason);
+    }
+
+    /** Keep only the outermost case-affected managed prefixes, like preview-pair validation. */
+    private static void recordCasePrefix(Map<String, CaseOverride> cases,
+                                         String official, String local) {
+        String folded = key(official);
+        if (cases.keySet().stream().anyMatch(prefix ->
+                folded.startsWith(prefix + "/"))) return;
+        cases.keySet().removeIf(prefix -> prefix.startsWith(folded + "/"));
+        cases.put(folded, new CaseOverride(folded, local,
+                List.copyOf(new TreeSet<>(List.of(local, official)))));
+    }
+
+    private static boolean affectedByCase(String path, Map<String, CaseOverride> cases) {
+        String folded = key(path);
+        return cases.keySet().stream().anyMatch(prefix ->
+                folded.equals(prefix) || folded.startsWith(prefix + "/"));
+    }
+
+    private static boolean managedDirectory(String path) {
+        String folded = key(path);
+        return OwnershipPolicy.managed(path)
+                || Set.of("data", "docs", "licenses", "lib").contains(folded);
     }
 
     private static Set<String> criticalAliases(Inspection official,
@@ -680,10 +809,8 @@ public final class ImportedCopyAdoptionService {
             product.classPath().forEach(path -> critical.add(key(path)));
         }
         for (EntryEvidence entry : officialSnapshot.entries()) {
-            if (!entry.regularFile() || protectedPath(entry.path())) continue;
-            String path = entry.path().toLowerCase(Locale.ROOT);
-            if (path.endsWith(".jar") || path.endsWith(".exe") || path.endsWith(".sh")
-                    || path.endsWith(".bat") || path.endsWith(".cmd")) {
+            if (entry.regularFile() && OwnershipPolicy.managed(entry.path())
+                    && OwnershipPolicy.runtimePath(entry.path())) {
                 critical.add(key(entry.path()));
             }
         }
@@ -723,16 +850,19 @@ public final class ImportedCopyAdoptionService {
                                       Comparison comparison)
             throws org.megamek.launcher.operation.OperationCancelledException {
         diagnostics.printf("ADOPTION comparison exact=%d modified=%d missing=%d unknown=%d "
-                        + "protected=%d conflicts=%d identity=%s eligible=%s%n",
+                        + "protected=%d conflicts=%d caseOverrides=%d identity=%s eligible=%s%n",
                 comparison.exact(), comparison.modified().size(), comparison.missing().size(),
                 comparison.unknown().size(), comparison.protectedFiles(),
-                comparison.conflicts().size(), comparison.productIdentity(),
+                comparison.conflicts().size(), comparison.caseOverrides().size(),
+                comparison.productIdentity(),
                 comparison.eligible());
         List<String> details = new ArrayList<>();
         comparison.modified().forEach(item -> details.add("modified " + item.path()));
         comparison.missing().forEach(path -> details.add("missing " + path));
         comparison.unknown().forEach(path -> details.add("unknown " + path));
         comparison.conflicts().forEach(path -> details.add("conflict " + path));
+        comparison.caseOverrides().forEach(item -> details.add("case override "
+                + item.localPrefix() + " / " + item.officialSpellings()));
         for (String detail : details.stream().limit(DIAGNOSTIC_PATH_LIMIT).toList()) {
             context.progress(OperationPhase.PLAN, -1, -1, ProgressUnit.NONE,
                     "Adoption detail: " + detail);
@@ -905,7 +1035,15 @@ public final class ImportedCopyAdoptionService {
 
     record Comparison(boolean eligible, boolean productIdentity, int exact,
                       List<PathMatch> modified, List<String> missing, List<String> unknown,
-                      List<String> conflicts, int protectedFiles, String reason) {
+                      List<String> conflicts, List<CaseOverride> caseOverrides,
+                      int protectedFiles, String reason) {
+        Comparison {
+            modified = List.copyOf(modified);
+            missing = List.copyOf(missing);
+            unknown = List.copyOf(unknown);
+            conflicts = List.copyOf(conflicts);
+            caseOverrides = List.copyOf(caseOverrides);
+        }
     }
 
     @FunctionalInterface

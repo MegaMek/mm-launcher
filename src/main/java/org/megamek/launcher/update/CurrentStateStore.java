@@ -185,7 +185,10 @@ final class CurrentStateStore {
             ManifestReader.validatePortablePath(item.localPrefix(), "case override prefix",
                     "current provenance");
             String folded = key(item.localPrefix());
-            if (!folded.equals(item.foldedPrefix()) || !OwnershipPolicy.managed(item.localPrefix())
+            // Managed directory roots can themselves be the outermost case-only prefix.
+            if (!folded.equals(item.foldedPrefix())
+                    || !(OwnershipPolicy.managed(item.localPrefix())
+                    || Set.of("data", "docs", "licenses").contains(folded))
                     || !caseKeys.add(folded) || item.officialSpellings().isEmpty()) {
                 throw new IOException("invalid case-prefix override binding");
             }

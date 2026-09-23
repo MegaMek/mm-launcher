@@ -8,6 +8,7 @@ import org.megamek.launcher.release.ReleaseCatalog;
 import org.megamek.launcher.release.VerifiedPackageFetcher;
 
 import java.io.IOException;
+import java.io.PrintStream;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -64,6 +65,24 @@ public final class PreparedAdoption implements AutoCloseable {
             throw new IllegalStateException("prepared adoption is no longer active");
         }
         return report;
+    }
+
+    /**
+     * Discards a completed ineligible verification. Cleanup is best effort here: it cannot
+     * change the verified comparison into a technical failure shown to the user.
+     */
+    public Report discardIneligible(PrintStream diagnostics) {
+        Report result = report();
+        if (result.eligible()) {
+            throw new IllegalStateException("eligible adoption must be committed or closed");
+        }
+        Objects.requireNonNull(diagnostics, "diagnostics");
+        try {
+            close();
+        } catch (IOException error) {
+            diagnostics.println("ADOPTION ineligible; temporary cleanup warning: " + error);
+        }
+        return result;
     }
 
     void claim(Object expectedOwner) throws IOException {

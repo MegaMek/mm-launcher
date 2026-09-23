@@ -3,6 +3,7 @@ package org.megamek.launcher.update;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
@@ -272,6 +273,146 @@ class ImportedCopyAdoptionServiceTest {
     }
 
     @Test
+    void attemptCleanupRemovesNestedResidualEntriesWithoutTouchingNeighboringFiles()
+            throws Exception {
+        byte[] jar = jar(null);
+        Fixture fixture = fixture(jar, "official-data", "local-setting",
+                transport(archive(jar, "official-data", "official-setting")), point -> {});
+        Path neighbor = Files.writeString(temp.resolve("unrelated-user-file"), "keep");
+        PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
+                org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
+                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                OperationContext.none(OperationType.ADOPT_EXISTING));
+        Path attempt = prepared.workspace().staging().getParent();
+        Files.createDirectories(attempt.resolve("residual/nested"));
+        Files.writeString(attempt.resolve("residual/nested/owned.txt"), "temporary");
+
+        prepared.close();
+
+        assertFalse(Files.exists(attempt), "remove the entire exact attempt-owned tree");
+        assertEquals("keep", Files.readString(neighbor));
+        assertNoProvenance(fixture);
+    }
+
+    @Test
+    void replacedAttemptRootCannotRedirectNestedWorkspaceCleanup() throws Exception {
+        byte[] jar = jar(null);
+        Fixture fixture = fixture(jar, "official-data", "local-setting",
+                transport(archive(jar, "official-data", "official-setting")), point -> {});
+        PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
+                org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
+                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                OperationContext.none(OperationType.ADOPT_EXISTING));
+        Path staging = prepared.workspace().staging();
+        Path attempt = staging.getParent();
+        Path original = attempt.resolveSibling(attempt.getFileName() + ".saved");
+        Files.move(attempt, original);
+        Path impostorStaging = Files.createDirectories(attempt.resolve(staging.getFileName()));
+        Path userFile = Files.writeString(impostorStaging.resolve("user-file"), "keep");
+
+        assertThrows(IOException.class, prepared::close);
+        assertEquals("keep", Files.readString(userFile),
+                "nested workspace close must not enter a replaced attempt root");
+        Files.delete(userFile);
+        Files.delete(impostorStaging);
+        Files.delete(attempt);
+        Files.move(original, attempt);
+        prepared.close();
+        assertFalse(Files.exists(attempt));
+        assertNoProvenance(fixture);
+    }
+
+    @Test
+    void attemptCleanupRefusesLinksAndNeverTraversesTheOutsideTarget() throws Exception {
+        byte[] jar = jar(null);
+        Fixture fixture = fixture(jar, "official-data", "local-setting",
+                transport(archive(jar, "official-data", "official-setting")), point -> {});
+        PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
+                org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
+                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                OperationContext.none(OperationType.ADOPT_EXISTING));
+        Path attempt = prepared.workspace().staging().getParent();
+        Path outside = Files.createDirectory(temp.resolve("outside-owned-attempt"));
+        Path neighbor = Files.writeString(outside.resolve("do-not-delete"), "keep");
+        Path link = attempt.resolve("unexpected-link");
+        try {
+            Files.createSymbolicLink(link, outside);
+        } catch (IOException | UnsupportedOperationException | SecurityException unavailable) {
+            prepared.close();
+            Assumptions.assumeTrue(false, "symlinks unavailable: " + unavailable);
+        }
+
+        assertThrows(IOException.class, prepared::close);
+        assertEquals("keep", Files.readString(neighbor));
+        assertTrue(Files.exists(link, java.nio.file.LinkOption.NOFOLLOW_LINKS));
+        Files.delete(link);
+        prepared.close();
+        assertFalse(Files.exists(attempt));
+        assertEquals("keep", Files.readString(neighbor));
+    }
+
+    @Test
+    void ineligibleReportSurvivesInjectedCleanupFailureWithDetailsOnlyInDiagnostics()
+            throws Exception {
+        byte[] jar = jar(null);
+        byte[] wrong = jarVersion(9, 9, 9, null);
+        String privatePath = temp.resolve(".adoption-attempt-private").toString();
+        Fixture fixture = fixture(jar, "official-data", "local-setting",
+                transport(archive(wrong, "official-data", "official-setting")),
+                point -> {
+                    if ("AFTER_ATTEMPT_CLEANUP".equals(point)) {
+                        throw new IOException("injected cleanup failure: " + privatePath);
+                    }
+                });
+        ByteArrayOutputStream logs = new ByteArrayOutputStream();
+        PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
+                org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
+                FollowChannel.MILESTONE, new PrintStream(logs),
+                OperationContext.none(OperationType.ADOPT_EXISTING));
+        Path attempt = prepared.workspace().staging().getParent();
+
+        PreparedAdoption.Report result = prepared.discardIneligible(new PrintStream(logs));
+
+        assertFalse(result.eligible());
+        assertFalse(result.message().contains(privatePath));
+        assertTrue(logs.toString().contains("temporary cleanup warning"));
+        assertTrue(logs.toString().contains(privatePath));
+        assertFalse(Files.exists(attempt));
+        assertNoProvenance(fixture);
+    }
+
+    @Test
+    void preparationFailureKeepsItsTypeWhenAttemptCleanupAlsoFails() throws Exception {
+        byte[] jar = jar(null);
+        String privatePath = temp.resolve(".adoption-attempt-private").toString();
+        Fixture fixture = fixture(jar, "official-data", "local-setting",
+                new QueueTransport(), point -> {
+                    if ("AFTER_ATTEMPT_CLEANUP".equals(point)) {
+                        throw new IOException("injected cleanup failure: " + privatePath);
+                    }
+                });
+        ByteArrayOutputStream logs = new ByteArrayOutputStream();
+
+        ImportedCopyAdoptionService.CandidateResolutionException failure = assertThrows(
+                ImportedCopyAdoptionService.CandidateResolutionException.class,
+                () -> fixture.service().prepare(fixture.record(),
+                        org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
+                        FollowChannel.MILESTONE, new PrintStream(logs),
+                        OperationContext.none(OperationType.ADOPT_EXISTING)));
+
+        assertEquals(ImportedCopyAdoptionService.AUTOMATIC_MATCH_UNAVAILABLE,
+                failure.getMessage());
+        assertFalse(failure.getMessage().contains(privatePath));
+        assertEquals(1, failure.getSuppressed().length);
+        assertTrue(logs.toString().contains("temporary cleanup warning"));
+        try (var children = Files.list(temp)) {
+            assertFalse(children.anyMatch(path ->
+                    path.getFileName().toString().startsWith(".adoption-attempt-")));
+        }
+        assertNoProvenance(fixture);
+    }
+
+    @Test
     void automaticResolutionUsesListBeforeExactMetadataAndDownloadsOnePackage()
             throws Exception {
         byte[] jar = jarVersion(0, 50, 7, null);
@@ -371,6 +512,120 @@ class ImportedCopyAdoptionServiceTest {
                     "a mixed dependency JAR must block adoption");
         }
         assertNoProvenance(dependency);
+    }
+
+    @Test
+    void caseOnlyRuntimePathAndStructuralManagedConflictRemainIneligible() throws Exception {
+        byte[] jar = jar(null);
+        byte[] official = archive(jar, "official-data", "setting",
+                Map.of("lib/runtime.txt", "runtime"));
+        Fixture runtime = fixture(jar, "official-data", "setting",
+                transport(official), point -> {});
+        Files.writeString(runtime.root().resolve("lib/Runtime.txt"), "runtime");
+        try (PreparedAdoption prepared = runtime.service().prepare(runtime.record(),
+                org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
+                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                OperationContext.none(OperationType.ADOPT_EXISTING))) {
+            assertFalse(prepared.report().eligible());
+            assertTrue(prepared.comparison().conflicts().contains("lib/runtime.txt"));
+        }
+        assertNoProvenance(runtime);
+
+        Fixture structural = fixture(jar, "official-data", "setting",
+                transport(archive(jar, "official-data", "setting")), point -> {});
+        Files.delete(structural.root().resolve("data/base.txt"));
+        Files.createDirectory(structural.root().resolve("data/base.txt"));
+        Files.writeString(structural.root().resolve("data/base.txt/unknown.txt"), "unknown");
+        try (PreparedAdoption prepared = structural.service().prepare(structural.record(),
+                org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
+                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                OperationContext.none(OperationType.ADOPT_EXISTING))) {
+            assertFalse(prepared.report().eligible());
+            assertTrue(prepared.comparison().conflicts().contains("data/base.txt"));
+        }
+        assertNoProvenance(structural);
+
+        Fixture parent = fixture(jar, "official-data", "setting",
+                transport(archive(jar, "official-data", "setting",
+                        Map.of("docs/manual.txt", "manual"))), point -> {});
+        Files.writeString(parent.root().resolve("docs"), "local-file-parent");
+        try (PreparedAdoption prepared = parent.service().prepare(parent.record(),
+                org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
+                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                OperationContext.none(OperationType.ADOPT_EXISTING))) {
+            assertFalse(prepared.report().eligible());
+            assertTrue(prepared.comparison().conflicts().contains("docs/manual.txt"));
+        }
+        assertNoProvenance(parent);
+    }
+
+    @Test
+    void caseOnlyManagedFileRetainsContentOverrideAndExcludedScriptIsUnknown()
+            throws Exception {
+        byte[] jar = jar(null);
+        byte[] archive = archive(jar, "official-data", "setting",
+                Map.of("bin/MegaMek.bat", "official-script"));
+        Fixture fixture = fixture(jar, "official-data", "setting",
+                transport(archive), point -> {});
+        Files.delete(fixture.root().resolve("data/base.txt"));
+        Files.writeString(fixture.root().resolve("data/Base.txt"), "user-data");
+        Files.createDirectories(fixture.root().resolve("bin"));
+        Files.writeString(fixture.root().resolve("bin/MegaMek.bat"), "user-script");
+        Map<String, Evidence> before = rootEvidence(fixture.root());
+
+        try (PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
+                org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
+                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                OperationContext.none(OperationType.ADOPT_EXISTING))) {
+            assertTrue(prepared.report().eligible());
+            assertEquals(List.of(new CaseOverride("data/base.txt", "data/Base.txt",
+                    List.of("data/Base.txt", "data/base.txt"))),
+                    prepared.comparison().caseOverrides());
+            assertTrue(prepared.comparison().unknown().contains("bin/MegaMek.bat"));
+            fixture.service().commit(prepared);
+        }
+        RegistryData data = fixture.registries().read(fixture.registry());
+        OwnershipReceipt receipt = fixture.receipts().read(
+                fixture.registry(), data, fixture.record());
+        CurrentUpdateState current = new CurrentStateStore(fixture.receipts()).read(
+                fixture.registry(), data, fixture.record(), receipt);
+        assertEquals(List.of(new CaseOverride("data/base.txt", "data/Base.txt",
+                List.of("data/Base.txt", "data/base.txt"))), current.caseOverrides());
+        assertEquals(List.of(new org.megamek.launcher.sandbox.OverrideEntry(
+                "data/base.txt", org.megamek.launcher.sandbox.OverrideEntry.Kind.MODIFIED,
+                List.of(receipt.officialManifest().files().stream()
+                        .filter(file -> file.path().equals("data/base.txt"))
+                        .findFirst().orElseThrow().sha256()))), current.overrides());
+        assertTrue(current.excludedOfficialPaths().contains("bin/MegaMek.bat"));
+        assertEquals(before, rootEvidence(fixture.root()));
+    }
+
+    @Test
+    void outermostManagedDirectoryCaseIsPublishedWithoutFileOverrides()
+            throws Exception {
+        byte[] jar = jar(null);
+        Fixture fixture = fixture(jar, "official-data", "setting",
+                transport(archive(jar, "official-data", "setting",
+                        Map.of("docs/Guide.txt", "guide"))), point -> {});
+        Files.createDirectories(fixture.root().resolve("Docs"));
+        Files.writeString(fixture.root().resolve("Docs/Guide.txt"), "guide");
+        try (PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
+                org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
+                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                OperationContext.none(OperationType.ADOPT_EXISTING))) {
+            assertTrue(prepared.report().eligible());
+            assertEquals(List.of(new CaseOverride("docs", "Docs",
+                    List.of("Docs", "docs"))), prepared.comparison().caseOverrides());
+            fixture.service().commit(prepared);
+        }
+        RegistryData data = fixture.registries().read(fixture.registry());
+        OwnershipReceipt receipt = fixture.receipts().read(
+                fixture.registry(), data, fixture.record());
+        CurrentUpdateState current = new CurrentStateStore(fixture.receipts()).read(
+                fixture.registry(), data, fixture.record(), receipt);
+        assertEquals(List.of(new CaseOverride("docs", "Docs",
+                List.of("Docs", "docs"))), current.caseOverrides());
+        assertTrue(current.overrides().isEmpty());
     }
 
     @Test
@@ -647,6 +902,11 @@ class ImportedCopyAdoptionServiceTest {
     }
 
     private static byte[] archive(byte[] jar, String data, String setting) throws IOException {
+        return archive(jar, data, setting, Map.of());
+    }
+
+    private static byte[] archive(byte[] jar, String data, String setting,
+                                  Map<String, String> extras) throws IOException {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (GzipCompressorOutputStream gzip = new GzipCompressorOutputStream(bytes);
              TarArchiveOutputStream tar = new TarArchiveOutputStream(gzip)) {
@@ -660,6 +920,10 @@ class ImportedCopyAdoptionServiceTest {
                     data.getBytes(StandardCharsets.UTF_8));
             add(tar, "MegaMek-1.2.3/mmconf/user.cfg",
                     setting.getBytes(StandardCharsets.UTF_8));
+            for (var entry : extras.entrySet()) {
+                add(tar, "MegaMek-1.2.3/" + entry.getKey(),
+                        entry.getValue().getBytes(StandardCharsets.UTF_8));
+            }
         }
         return bytes.toByteArray();
     }

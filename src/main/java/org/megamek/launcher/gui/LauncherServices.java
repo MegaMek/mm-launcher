@@ -252,6 +252,11 @@ public class LauncherServices {
         return store.read(registry);
     }
 
+    public InstallationRecord renameInstallation(InstallationRecord record, String name)
+            throws IOException {
+        return store.rename(registry, record, name);
+    }
+
     public HomeState loadHome() throws IOException {
         if (Files.exists(registry, LinkOption.NOFOLLOW_LINKS)) {
             uninstalls.recoverCommitted();

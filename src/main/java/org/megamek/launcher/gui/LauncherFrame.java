@@ -756,24 +756,63 @@ public final class LauncherFrame extends JFrame {
     }
 
     private String homeAlternativeLabel(InstallationRecord record, String productKey) {
-        String name = record.name() == null || record.name().isBlank()
-                ? "Registered copy" : record.name();
-        String version = record.observedBuild() == null || record.observedBuild().isBlank()
-                ? "Unknown version" : record.observedBuild();
+        String name = installationDisplayName(record);
+        String version = knownInstallationVersion(record);
         String channel = homeChannelLabel(record);
         InstallationCheck check = installationChecks.get(record.id());
         LauncherServices.InstallationStatus local = installationLocalStatus(record);
         String update = !managedUpdatesAvailable(local) || check == null
                 ? null : channelStatus(check.result(), check.error());
         String product = displayProduct(productKey);
-        String versionLabel = VersionDisplay.programChannelVersion(product, channel, version);
-        String generatedPrefix = product + (channel == null ? " (" : " " + channel + " (");
-        boolean generatedName = name.equalsIgnoreCase(product + " existing installation")
-                || name.equalsIgnoreCase(versionLabel)
-                || name.regionMatches(true, 0, generatedPrefix, 0, generatedPrefix.length())
-                && name.endsWith(")");
-        String label = generatedName ? name : name + " · " + versionLabel;
+        String details = VersionDisplay.programChannelVersion(product, channel,
+                version == null ? "Unknown version" : version);
+        String label = name.equalsIgnoreCase(product)
+                ? name + (version == null ? "" : " · " + version)
+                        + (channel == null ? "" : " · " + channel)
+                : name + " · " + details;
         return label + (update == null ? "" : " · " + update);
+    }
+
+    private static String knownInstallationVersion(InstallationRecord record) {
+        String version = record.observedBuild();
+        return version == null || version.isBlank() || version.equalsIgnoreCase("unknown")
+                ? null : version;
+    }
+
+    private String installationDisplayName(InstallationRecord record) {
+        String name = record.name();
+        String version = knownInstallationVersion(record);
+        if (version != null && name.endsWith(" (" + version + ")")) {
+            name = name.substring(0, name.length() - version.length() - 3);
+        }
+        String channel = homeChannelLabel(record);
+        if (channel != null) {
+            for (Product product : record.products()) {
+                String prefix = displayProduct(product.key()) + " " + channel + " (";
+                if (name.startsWith(prefix) && hasVersionSuffix(name, prefix)) {
+                    name = displayProduct(product.key());
+                    break;
+                }
+            }
+        }
+        for (Product product : record.products()) {
+            String prefix = displayProduct(product.key()) + " (";
+            if (name.startsWith(prefix) && hasVersionSuffix(name, prefix)) {
+                name = displayProduct(product.key());
+                break;
+            }
+        }
+        String candidate = name;
+        if (channel != null && record.products().stream().anyMatch(product ->
+                candidate.equalsIgnoreCase(displayProduct(product.key()) + " " + channel))) {
+            name = name.substring(0, name.length() - channel.length() - 1);
+        }
+        return name;
+    }
+
+    private static boolean hasVersionSuffix(String name, String prefix) {
+        return name.endsWith(")") && name.substring(prefix.length(), name.length() - 1)
+                .matches("[vV]?\\d+(?:\\.\\d+)*(?:[-+][A-Za-z0-9.-]+)?");
     }
 
     private String homeChannelLabel(InstallationRecord record) {
@@ -1086,17 +1125,38 @@ public final class LauncherFrame extends JFrame {
                         guiScale.scaleForGUI(14), guiScale.scaleForGUI(12),
                         guiScale.scaleForGUI(14))));
         card.setAlignmentX(Component.CENTER_ALIGNMENT);
-        card.getAccessibleContext().setAccessibleName(
-                record.name() + " " + record.observedBuild());
+        LauncherServices.InstallationStatus local = installationLocalStatus(record);
+        String version = knownInstallationVersion(record);
+        String channel = hasFixedChannel(local) ? installationChannel(local) : null;
+        String displayName = installationDisplayName(record);
+        card.getAccessibleContext().setAccessibleName(displayName
+                + (version == null ? "" : " " + version)
+                + (channel == null ? "" : " " + channel));
 
         JPanel summary = new JPanel();
         summary.setOpaque(false);
         summary.setLayout(new BoxLayout(summary, BoxLayout.Y_AXIS));
-        JLabel name = new JLabel(record.name() + "  " + record.observedBuild());
+        JPanel titleRow = new JPanel();
+        titleRow.setLayout(new BoxLayout(titleRow, BoxLayout.X_AXIS));
+        titleRow.setOpaque(false);
+        titleRow.setAlignmentX(Component.LEFT_ALIGNMENT);
+        JLabel name = new JLabel(displayName);
+        name.setName("installationName-" + record.id());
         name.setForeground(FirstLaunchPanel.TEXT);
         name.setFont(guiScale.font(name.getFont(), Font.BOLD, 18f));
-        summary.add(name);
-        LauncherServices.InstallationStatus local = installationLocalStatus(record);
+        titleRow.add(name);
+        if (version != null || channel != null) {
+            titleRow.add(Box.createHorizontalStrut(guiScale.scaleForGUI(10)));
+            JLabel details = new JLabel((version == null ? "" : version)
+                    + (version != null && channel != null ? " · " : "")
+                    + (channel == null ? "" : channel));
+            details.setName("installationDetails-" + record.id());
+            details.setForeground(FirstLaunchPanel.MUTED);
+            details.setFont(guiScale.font(details.getFont(), Font.PLAIN, 14f));
+            titleRow.add(details);
+        }
+        summary.add(titleRow);
+        summary.add(Box.createVerticalStrut(guiScale.scaleForGUI(5)));
         boolean ownershipProvenance = hasOwnershipProvenance(local);
         boolean fixedChannel = hasFixedChannel(local);
         boolean updateManaged = managedUpdatesAvailable(local);
@@ -1107,11 +1167,12 @@ public final class LauncherFrame extends JFrame {
         String provenance = trueImported
                 ? "Imported copy · Launch only · Updates unavailable"
                 : fixedChannel
-                ? "Channel: " + installationChannel(local) + " · " + products
+                ? products
                 : "Managed setup incomplete · Launch only · Updates unavailable";
         JLabel metadata = new JLabel(provenance);
         metadata.setName("installationProvenance-" + record.id());
         metadata.setForeground(FirstLaunchPanel.MUTED);
+        metadata.setAlignmentX(Component.LEFT_ALIGNMENT);
         summary.add(metadata);
         String markers = record.products().stream().map(Product::key)
                 .filter(key -> (state.preferredApplications() != null
@@ -1124,14 +1185,20 @@ public final class LauncherFrame extends JFrame {
             JLabel preferred = new JLabel(markers);
             preferred.setName("preferredApplicationMarkers");
             preferred.setForeground(FirstLaunchPanel.GOLD);
+            preferred.setAlignmentX(Component.LEFT_ALIGNMENT);
             summary.add(preferred);
         }
-        JLabel updateStatus = new JLabel(installationUpdateStatus(record, local));
-        updateStatus.setName("installationStatus-" + record.id());
-        updateStatus.setForeground(local != null
-                && (local.pendingUpdate() || local.pendingUninstall())
-                ? FirstLaunchPanel.GOLD : FirstLaunchPanel.MUTED);
-        summary.add(updateStatus);
+        String updateText = installationUpdateStatus(record, local);
+        if (!provenance.toLowerCase(java.util.Locale.ROOT)
+                .contains(updateText.toLowerCase(java.util.Locale.ROOT))) {
+            JLabel updateStatus = new JLabel(updateText);
+            updateStatus.setName("installationStatus-" + record.id());
+            updateStatus.setForeground(local != null
+                    && (local.pendingUpdate() || local.pendingUninstall())
+                    ? FirstLaunchPanel.GOLD : FirstLaunchPanel.MUTED);
+            updateStatus.setAlignmentX(Component.LEFT_ALIGNMENT);
+            summary.add(updateStatus);
+        }
         if (updateManaged) {
             ChannelPreference expectedPreference = local.channelPreference().preference();
             Boolean pendingSelection = checkPreferenceSaves.get(record.id());
@@ -1368,6 +1435,10 @@ public final class LauncherFrame extends JFrame {
                 "Open " + record.name() + " in the platform file manager");
         location.addActionListener(event -> openLocation(record));
         menu.add(location);
+        JMenuItem rename = installationMenuItem("Rename…");
+        rename.setName("renameInstallation-" + record.id());
+        rename.addActionListener(event -> renameInstallation(record));
+        menu.add(rename);
         JMenuItem remove = installationMenuItem("Remove from launcher…");
         remove.addActionListener(event -> removeFromLauncher(record));
         menu.add(remove);
@@ -1540,6 +1611,8 @@ public final class LauncherFrame extends JFrame {
                 new FollowChannel[]{FollowChannel.MILESTONE, FollowChannel.DEVELOPMENT},
                 guiScale);
         channel.setName("adoptionChannelCombo");
+        channel.setPreferredSize(new Dimension(
+                guiScale.scaleForGUI(180), channel.getPreferredSize().height));
         channel.setSelectedItem(FollowChannel.MILESTONE);
         channel.getAccessibleContext().setAccessibleName("Future update channel");
         channel.getAccessibleContext().setAccessibleDescription(
@@ -1786,8 +1859,8 @@ public final class LauncherFrame extends JFrame {
                             context.cleanupPhase(
                                     "Discarding the completed verification workspace");
                             callerOwnsPrepared = false;
-                            prepared.close();
-                            return new AdoptionExecution(report, false);
+                            return new AdoptionExecution(
+                                    prepared.discardIneligible(stream), false);
                         }
                         publicationAttempted.set(true);
                         // commitAdoption claims the one-use handle before revalidation and
@@ -1946,8 +2019,77 @@ public final class LauncherFrame extends JFrame {
         dialog.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         dialog.setContentPane(body);
         dialog.setSize(guiScale.scaleForGUI(640, 275));
+        dialog.setResizable(false);
         dialog.setLocationRelativeTo(this);
         return dialog;
+    }
+
+    private void renameInstallation(InstallationRecord record) {
+        JDialog dialog = new JDialog(this, "Rename installation", false);
+        dialog.setName("renameInstallationDialog");
+        dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        dialog.setResizable(false);
+        JPanel body = new JPanel(new BorderLayout(guiScale.scaleForGUI(12),
+                guiScale.scaleForGUI(12)));
+        body.setBackground(FirstLaunchPanel.BACKGROUND);
+        body.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(20),
+                guiScale.scaleForGUI(22), guiScale.scaleForGUI(18),
+                guiScale.scaleForGUI(22)));
+        JLabel heading = new JLabel("Name this installation");
+        heading.setForeground(FirstLaunchPanel.GOLD);
+        heading.setFont(guiScale.font(heading.getFont(), Font.BOLD, 20f));
+        body.add(heading, BorderLayout.NORTH);
+
+        JPanel fields = new JPanel();
+        fields.setLayout(new BoxLayout(fields, BoxLayout.Y_AXIS));
+        fields.setOpaque(false);
+        JTextField name = new JTextField(installationDisplayName(record));
+        name.setName("installationNameField");
+        name.setForeground(FirstLaunchPanel.TEXT);
+        name.setBackground(FirstLaunchPanel.PANEL);
+        name.setCaretColor(FirstLaunchPanel.TEXT);
+        name.setFont(guiScale.font(name.getFont(), Font.PLAIN, 15f));
+        name.getAccessibleContext().setAccessibleName("Installation name");
+        fields.add(name);
+        fields.add(Box.createVerticalStrut(guiScale.scaleForGUI(7)));
+        JLabel hint = new JLabel("Only the launcher label changes, not the installation folder.");
+        hint.setForeground(FirstLaunchPanel.MUTED);
+        fields.add(hint);
+        body.add(fields, BorderLayout.CENTER);
+
+        JPanel actions = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT,
+                guiScale.scaleForGUI(8), 0));
+        actions.setOpaque(false);
+        JButton cancel = homeButton("Cancel", "cancelRenameButton");
+        cancel.addActionListener(event -> dialog.dispose());
+        JButton save = homeButton("Save name", "saveInstallationNameButton");
+        save.addActionListener(event -> {
+            String requested = name.getText().strip();
+            if (requested.isEmpty() || requested.length() > 120
+                    || requested.chars().anyMatch(Character::isISOControl)) {
+                hint.setText("Use a name of 1–120 printable characters.");
+                hint.setForeground(FirstLaunchPanel.GOLD);
+                name.requestFocusInWindow();
+                return;
+            }
+            if (requested.equals(record.name())) {
+                dialog.dispose();
+                return;
+            }
+            dialog.dispose();
+            run("Renaming installation", () -> services.renameInstallation(record, requested),
+                    ignored -> reload(), ignored -> {}, () -> {}, true, false);
+        });
+        actions.add(cancel);
+        actions.add(save);
+        body.add(actions, BorderLayout.SOUTH);
+        dialog.setContentPane(body);
+        dialog.getRootPane().setDefaultButton(save);
+        dialog.setSize(guiScale.scaleForGUI(530, 190));
+        dialog.setLocationRelativeTo(this);
+        dialog.setVisible(true);
+        name.selectAll();
+        name.requestFocusInWindow();
     }
 
     private void openLocation(InstallationRecord record) {
@@ -3395,7 +3537,11 @@ public final class LauncherFrame extends JFrame {
                 }
                 if (result.problem() != null) {
                     failure.accept(result.problem());
-                    progress.showFailure(result.problem(), result.loggingWarning());
+                    // Some failures (notably a known adoption channel mismatch) close
+                    // progress and present their own styled result instead.
+                    if (progress.isDisplayable()) {
+                        progress.showFailure(result.problem(), result.loggingWarning());
+                    }
                     return;
                 }
                 success.accept(result.value());

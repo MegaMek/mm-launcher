@@ -107,6 +107,12 @@ runtime prefixes (which therefore stop Apply). Data case-prefix overrides are pe
 with their local spelling and all official spellings. Later previews and updates skip the folded
 prefix before traversing it, so advancing `data/Icons` to `data/icons` cannot cause a V2→V3 alias
 exception, mixed spelling, accidental removal, or later overwrite.
+Fresh-registry adoption of an updater-produced root reconstructs these outermost case-only
+data/docs/licenses prefixes from its verified official package and the actual local spellings,
+including both spellings in sticky current provenance. If such a file is also modified, adoption
+keeps both its case prefix and ordinary official-hash override. Case-only managed runtime remains
+ineligible. Excluded official paths, including modified `bin/*.bat` launch scripts, remain
+unmanaged/untouched and are not treated as critical solely by extension.
 
 Latest current provenance is stored atomically beside the immutable receipt as
 `<registry>.metadata/<uuid>.current.json`. It binds the original identity/repository and records

@@ -58,7 +58,13 @@ class ChannelSwingIntegrationTest {
             SwingUtilities.invokeAndWait(installations::doClick);
             JLabel provenance = waitFor(() -> (JLabel) findNamed(frame,
                     "installationProvenance-" + services.record.id()));
-            assertTrue(provenance.getText().startsWith("Channel: Milestone"));
+            assertEquals("MegaMek", provenance.getText());
+            JLabel details = waitFor(() -> (JLabel) findNamed(frame,
+                    "installationDetails-" + services.record.id()));
+            JLabel name = waitFor(() -> (JLabel) findNamed(frame,
+                    "installationName-" + services.record.id()));
+            assertEquals("MegaMek", name.getText());
+            assertEquals("0.51.0 · Milestone", details.getText());
             assertNull(onEdt(() -> find(frame, "chooseChannelButton")));
             assertNull(onEdt(() -> find(frame, "channelChoiceCombo")));
             JCheckBox checks = waitFor(() -> (JCheckBox) findNamed(
@@ -355,7 +361,8 @@ class ChannelSwingIntegrationTest {
             Product product = new Product("megamek", "MegaMek.jar", "megamek.MegaMek",
                     "0.51.0", List.of());
             record = new InstallationRecord("00000000-0000-0000-0000-000000000001",
-                    "Channel fixture", registry.getParent().resolve("copy").toString(),
+                    "MegaMek Milestone (0.51.0)",
+                    registry.getParent().resolve("copy").toString(),
                     "0.51.0", List.of(product), "keep", false,
                     "2026-09-16T00:00:00Z");
             inspection = new Inspection(record.canonicalRoot(), record.products(),

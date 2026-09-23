@@ -31,9 +31,15 @@ identity under the registry lock and uses flushed atomic replacement.
 Installations has a centered title without explanatory subtitle and a scrollable dark-teal/gold
 card surface. Cards use their content height rather than filling fixed vertical blocks; the
 automatic-check checkbox aligns with summary text and compact actions sit at the top-right.
-Every physical record shows name,
-version, applications, per-application preferred markers, and applicable check/recovery state.
-Managed records show **Channel: Milestone/Development** read-only. Imported records show
+Every physical record shows its editable launcher-only name, known version, and fixed channel
+beside one another on a left-aligned title row with a small gap before applications,
+per-application preferred markers, and applicable check/recovery state. Repeated
+launch-only/unavailable status is omitted when the provenance line already says it.
+Version and channel are omitted when unknown; the channel
+is not repeated on the applications row. Existing saved names are preserved, while a matching
+generated version suffix is suppressed in the display to avoid duplication. The **Rename…**
+action changes only the registry label, not the installation folder or application files; names
+must be unique. Imported records show
 **Imported copy · Launch only · Updates unavailable** and omit a channel rather than inferring one.
 Top-level actions are **Install another version** and **Import existing installation**. Exact actions include **Use as preferred for …**, Check/Retry, Update, update recovery,
 **Open location**, and **Remove from launcher…** when applicable. Managed/adopted cards also place
@@ -429,6 +435,10 @@ and its only actions are a direct styled **Try Milestone** / **Try Development**
 **Close**. Retry uses the same record, suggestion, and dialog generation with the canonical
 channel. It neither exposes logs/technical details nor mislabels a file-comparison failure as a
 channel mismatch.
+Both the channel-mismatch and ineligible result dialogs are fixed-size (not resizable),
+retain their centered dark styling, default action and Escape-to-close behavior, and
+offer no technical-details action. A disposed progress surface must not be updated again
+after either result takes over.
 
 Verification uses one styled progress surface and supports safe cancellation until publication.
 Its three filesystem scans are distinguished as **Checking existing installation**,
@@ -436,11 +446,17 @@ Its three filesystem scans are distinguished as **Checking existing installation
 The official scan hashes each file once and shares that immutable evidence between ownership and
 full-tree comparison. The visible summary never lists paths, digests, or comparison counts. An
 eligible result immediately proceeds to atomic metadata publication for the already-selected
-channel without a second confirmation. An ineligible result uses the standard gold heading **Updates can't be enabled** and explains the
-actual blocking category in plain language: version mismatch, missing official files, a file/folder
+channel without a second confirmation. This includes read-only reconstruction of sticky
+case-only managed data/docs/licenses prefixes (with any modified-file history); excluded
+`bin/*.bat` scripts remain outside managed ownership even when local bytes differ.
+Case-only runtime paths and structural conflicts still block adoption. An ineligible result uses
+the standard gold heading **Updates can't be enabled** and explains the
+actual blocking category in plain language: version mismatch, a file/folder
 conflict, or modified core application files. It confirms that no files changed, directs the user
 toward a separate managed installation, and offers only **Close**. Detailed
-exact/modified/missing/protected/unknown/conflict information remains bounded to local logs.
+exact/modified/missing/protected/unknown/conflict/case-prefix information remains bounded to local logs.
+An ineligible verification stays in this result even if discarding its owned temporary
+workspace reports a cleanup warning; only local diagnostics include that warning.
 
 Final revalidation and publication remain in the same cancellable operation as verification and
 reuse its progress surface and prepared immutable official evidence. Final revalidation is local:

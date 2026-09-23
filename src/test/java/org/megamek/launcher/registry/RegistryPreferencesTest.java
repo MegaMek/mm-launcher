@@ -24,6 +24,31 @@ class RegistryPreferencesTest {
     @TempDir Path temp;
 
     @Test
+    void renameChangesOnlyTheLabelAndRejectsStaleOrDuplicateNames() throws Exception {
+        InstallationRecord first = record(temp.resolve("first"), "MekHQ (0.51.0)",
+                product("mekhq"));
+        InstallationRecord second = record(temp.resolve("second"), "Other",
+                product("megamek"));
+        Path registry = write(new RegistryData(RegistryStore.SCHEMA, first.id(),
+                Map.of("mekhq", first.id()), List.of(first, second)));
+        RegistryStore store = new RegistryStore();
+        InstallationRecord renamed = store.rename(registry, first, "Campaign copy");
+        RegistryData saved = store.read(registry);
+        assertEquals("Campaign copy", renamed.name());
+        assertEquals(first.canonicalRoot(), renamed.canonicalRoot());
+        assertEquals(first.observedBuild(), renamed.observedBuild());
+        assertEquals(first.products(), renamed.products());
+        assertEquals(first.registeredAt(), renamed.registeredAt());
+        assertEquals(List.of(renamed, second), saved.installations());
+        assertEquals(first.id(), saved.preferredInstallationIds().get("mekhq"));
+        byte[] before = Files.readAllBytes(registry);
+        assertThrows(IOException.class, () -> store.rename(registry, first, "Stale"));
+        assertThrows(IOException.class, () -> store.rename(registry, renamed, "Other"));
+        assertThrows(IOException.class, () -> store.rename(registry, renamed, " "));
+        assertArrayEquals(before, Files.readAllBytes(registry));
+    }
+
+    @Test
     void oldSchemaIsRejectedWithoutWriting() throws Exception {
         InstallationRecord suite = record(temp.resolve("suite"), "Suite",
                 product("megamek"), product("lab"));

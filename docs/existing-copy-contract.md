@@ -164,7 +164,14 @@ simply absent locally does not block adoption: it carries no unknown content to 
 ordinary managed-update planner already restores any official path missing from the installation,
 so a missing file is no riskier here than for any later update. Modified non-runtime managed paths
 are allowed only as explicit `MODIFIED` overrides seeded with the pristine official ancestor hash.
-Unknown regular files are retained. Protected saves, campaigns, userdata, custom content,
+Case-only differences in managed data/docs/licenses are reconstructed from the actual local
+spelling and official spelling at the outermost affected prefix, then published as sticky
+`CaseOverride` history. A differently spelled file with modified bytes also retains its ordinary
+`MODIFIED` override and official hash; equal bytes need only the case override. Case-only runtime
+paths (`lib/` or managed root binaries) and file/parent structural conflicts remain ineligible.
+Official files outside ownership, including `bin/*.bat` scripts, do not become critical merely
+because of their extension: differing local scripts remain excluded and untouched, not managed
+overrides. Unknown regular files are retained. Protected saves, campaigns, userdata, custom content,
 configuration, logs, and backups remain excluded and unmanaged.
 
 The opaque prepared handle is one-use, process-local, non-serializable, and bound to its creating
@@ -181,8 +188,12 @@ begins. Local drift discards the attempt.
 Publication writes only launcher metadata outside the application root: immutable ownership
 receipt, explicit current ancestor and override history, adoption binding, then fixed channel as
 the final eligibility barrier. Exact-value rollback removes only attempt-owned publications after
-an injected or ordinary failure. A cancelled, ineligible, or failed attempt removes its owned
+an injected or ordinary failure. A cancelled, ineligible, or failed attempt discards its owned
 temporary workspace and remains launch-only; application bytes and timestamps are never changed.
+Cleanup targets only the exact randomly created attempt directory, validates its root and
+non-link entries, and never traverses an installation or neighboring files. If cleanup fails,
+the original typed mismatch or ineligible comparison remains the user-facing result; the
+cleanup warning belongs only in local diagnostics.
 Success makes the existing Check/Preview/Update services available but performs no update and no
 launch. Normal result UI contains only the safe/ineligible statement; bounded
 exact/modified/missing/protected/unknown/conflict details are local diagnostics only.

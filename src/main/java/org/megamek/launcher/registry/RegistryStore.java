@@ -161,6 +161,37 @@ public final class RegistryStore {
         });
     }
 
+    public InstallationRecord rename(Path registry, InstallationRecord expected, String name)
+            throws IOException {
+        validateName(name);
+        if (expected == null) throw new IOException("selected installation is required");
+        InstallationRecord[] result = new InstallationRecord[1];
+        mutate(registry.toAbsolutePath().normalize(), current -> {
+            List<InstallationRecord> records = new ArrayList<>(current.installations());
+            int index = -1;
+            for (int i = 0; i < records.size(); i++) {
+                InstallationRecord record = records.get(i);
+                if (record.id().equals(expected.id())) {
+                    if (!record.equals(expected)) {
+                        throw failure("installation changed; reload before renaming");
+                    }
+                    index = i;
+                } else if (record.name().equals(name)) {
+                    throw failure("another installation already has that name");
+                }
+            }
+            if (index < 0) throw failure("selected installation was removed");
+            InstallationRecord prior = records.get(index);
+            result[0] = new InstallationRecord(prior.id(), name, prior.canonicalRoot(),
+                    prior.observedBuild(), prior.products(), prior.pin(),
+                    prior.updateEligible(), prior.registeredAt());
+            records.set(index, result[0]);
+            return new RegistryData(SCHEMA, current.defaultInstallationId(),
+                    current.preferredInstallationIds(), records);
+        });
+        return result[0];
+    }
+
     /**
      * Sets one application preference without changing the legacy default.  The complete captured
      * record is revalidated under the registry lock so a stale card or Home action cannot retarget

@@ -184,7 +184,12 @@ class ExistingImportSwingTest {
             assertFalse(message.getText().contains("currently a Milestone release"));
             assertFalse(message.getText().contains("currently a Development release"));
             assertNull(find(dialog, "viewAdoptionLogsButton"));
+            assertNull(find(dialog, "operationViewDetailsButton"));
+            assertNull(find(dialog, "retrySuggestedAdoptionButton"));
+            assertFalse(dialog.isResizable());
             assertEquals(1, countButtonText(dialog, "Close"));
+            assertEquals(find(dialog, "closeAdoptionResultButton"),
+                    dialog.getRootPane().getDefaultButton());
         } finally {
             dispose(frame);
         }
@@ -272,6 +277,17 @@ class ExistingImportSwingTest {
                         "installationProvenance-" + record.id()));
                 assertEquals("Imported copy · Launch only · Updates unavailable",
                         provenance.getText());
+                assertNull(find(frame, "installationStatus-" + record.id()),
+                        "the imported-copy provenance already explains launch-only status");
+                JLabel title = (JLabel) find(frame, "installationName-" + record.id());
+                int[] positions = onEdt(() -> new int[]{
+                        SwingUtilities.convertPoint(title, 0, 0, frame).x,
+                        SwingUtilities.convertPoint(provenance, 0, 0, frame).x,
+                        SwingUtilities.convertPoint(provenance, 0, 0, frame).y
+                                - SwingUtilities.convertPoint(title, 0, title.getHeight(), frame).y
+                });
+                assertEquals(positions[0], positions[1], "title and body share the left edge");
+                assertTrue(positions[2] > 0, "the title has space before the body");
                 assertNotNull(waitFor(() -> findButton(frame,
                         "enableManagedUpdatesButton-" + record.id())));
                 assertNull(find(frame, "checkOnOpenCheckbox-" + record.id()));
@@ -484,10 +500,29 @@ class ExistingImportSwingTest {
         AtomicInteger packageRequests = new AtomicInteger();
         ReleaseTransport transport = channelMismatchAdoptionTransport(
                 fixture.archive(), requests, packageRequests);
+        String privatePath = temp.resolve(".adoption-attempt-private").toString();
         LauncherServices services = new LauncherServices(
                 registry, new RegistryStore(), new InstallationInspector(), transport,
                 new JavaRuntime(new RecordingRunner()),
-                new ApplicationLauncher(new RecordingRunner()));
+                new ApplicationLauncher(new RecordingRunner())) {
+            @Override public PreparedAdoption prepareAutomaticAdoption(
+                    org.megamek.launcher.registry.InstallationRecord selected,
+                    org.megamek.launcher.release.OfficialRepository repository,
+                    FollowChannel channel, PrintStream progress, OperationContext context)
+                    throws IOException, InterruptedException,
+                    org.megamek.launcher.manifest.ManifestException {
+                try {
+                    return super.prepareAutomaticAdoption(
+                            selected, repository, channel, progress, context);
+                } catch (ImportedCopyAdoptionService.ChannelMismatchException mismatch) {
+                    // The resolver rejects before creating an attempt directory; simulate
+                    // a late cleanup diagnostic without changing the typed primary result.
+                    mismatch.addSuppressed(
+                            new IOException("injected cleanup failure: " + privatePath));
+                    throw mismatch;
+                }
+            }
+        };
         var record = services.register("Imported", fixture.root());
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
@@ -528,8 +563,14 @@ class ExistingImportSwingTest {
             assertTrue(message.getText().contains("Select Milestone"));
             assertEquals("Try Milestone", retry.getText());
             assertEquals(1, countButtonText(mismatch, "Close"));
+            assertFalse(mismatch.isResizable());
+            assertEquals(retry, mismatch.getRootPane().getDefaultButton());
+            assertFalse(message.getText().contains(privatePath));
             assertNull(find(mismatch, "operationViewDetailsButton"));
             assertNull(find(mismatch, "browseAfterAdoptionFailureButton"));
+            assertFalse(hasShowingDialog(frame, "Verifying imported copy"));
+            assertFalse(hasShowingDialog(frame, "This copy remains launch-only"));
+            assertFalse(hasShowingDialog(frame, "Details"));
             assertEquals(0, packageRequests.get(),
                     "channel mismatch must be decided before package transfer");
             assertEquals(1, requests.get(),

@@ -148,6 +148,103 @@ class RealUpdateServiceTest {
     }
 
     @Test
+    void reimportOfUpdaterCaseOverridesAndExcludedScriptsReconstructsStickyProvenance()
+            throws Exception {
+        Map<String, byte[]> v1 = packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime-1"),
+                "data/images/units/meks/Archer.png", bytes("archer"),
+                "data/Icons/icon.png", bytes("icon"),
+                "bin/MegaMek.bat", bytes("old-script"),
+                "bin/MegaMekLab.bat", bytes("old-lab-script"),
+                "bin/MekHQ.bat", bytes("old-hq-script")));
+        Fixture managed = install("case-reimport", "v1.0.0", v1);
+        for (String script : List.of("bin/MegaMek.bat", "bin/MegaMekLab.bat",
+                "bin/MekHQ.bat")) {
+            Files.writeString(managed.root.resolve(script), "local-" + script);
+        }
+        Map<String, byte[]> v2 = packageFiles(2, Map.of(
+                "lib/runtime.txt", bytes("runtime-2"),
+                "data/images/units/meks/archer.png", bytes("archer"),
+                "data/icons/icon.png", bytes("icon"),
+                "bin/MegaMek.bat", bytes("new-script"),
+                "bin/MegaMekLab.bat", bytes("new-lab-script"),
+                "bin/MekHQ.bat", bytes("new-hq-script")));
+        RealUpdateService.ApplyResult updated = apply(managed, "v2.0.0", v2, point -> {});
+        assertEquals(2, updated.state().caseOverrides().size());
+        for (String script : List.of("bin/MegaMek.bat", "bin/MegaMekLab.bat",
+                "bin/MekHQ.bat")) {
+            assertEquals("local-" + script, Files.readString(managed.root.resolve(script)));
+            assertTrue(updated.state().excludedOfficialPaths().contains(script));
+        }
+
+        Path importedRegistry = temp.resolve("fresh-case-reimport").resolve("registry.json");
+        RegistryStore importedRegistries = new RegistryStore();
+        ExistingImportService importer = new ExistingImportService(
+                importedRegistry, importedRegistries, new InstallationInspector());
+        OperationContext importContext = OperationContext.none(OperationType.IMPORT_EXISTING);
+        InstallationRecord imported = importer.register(
+                importer.prepare(managed.root, importContext), "Reimported", importContext)
+                .record();
+        assertEquals("2.0.0", imported.observedBuild());
+        Map<String, String> before = fileHashes(managed.root);
+        byte[] v2Archive = archive("MegaMek-v2.0.0", v2);
+        PackageTransport network = new PackageTransport(
+                releaseResponse("v2.0.0", v2Archive),
+                releaseResponse("v2.0.0", v2Archive),
+                packageResponse(v2Archive));
+        ImportedCopyAdoptionService adoption = new ImportedCopyAdoptionService(
+                importedRegistry, network,
+                new RootCoordinator(temp.resolve("case-reimport-coordination")));
+        try (PreparedAdoption prepared = adoption.prepare(
+                imported, OfficialRepository.MEGAMEK, "v2.0.0", FollowChannel.MILESTONE,
+                quiet(), OperationContext.none(OperationType.ADOPT_EXISTING))) {
+            assertTrue(prepared.report().eligible(), prepared.report().message());
+            assertEquals(updated.state().caseOverrides(),
+                    prepared.comparison().caseOverrides());
+            for (String script : List.of("bin/MegaMek.bat", "bin/MegaMekLab.bat",
+                    "bin/MekHQ.bat")) {
+                assertTrue(prepared.comparison().unknown().contains(script));
+            }
+            adoption.commit(prepared);
+        }
+        assertEquals(1, network.binaryRequests);
+        assertEquals(before, fileHashes(managed.root),
+                "adoption must not write any application bytes");
+        RegistryData data = importedRegistries.read(importedRegistry);
+        OwnershipReceipt receipt = new ReceiptStore().read(importedRegistry, data, imported);
+        CurrentUpdateState current = new CurrentStateStore(new ReceiptStore()).read(
+                importedRegistry, data, imported, receipt);
+        assertEquals(updated.state().caseOverrides(), current.caseOverrides());
+        assertTrue(current.overrides().isEmpty());
+        for (String script : List.of("bin/MegaMek.bat", "bin/MegaMekLab.bat",
+                "bin/MekHQ.bat")) {
+            assertTrue(current.excludedOfficialPaths().contains(script));
+            assertFalse(current.officialManifest().files().stream().anyMatch(
+                    file -> file.path().equals(script)));
+            assertEquals("local-" + script, Files.readString(managed.root.resolve(script)));
+        }
+
+        Map<String, byte[]> v3 = packageFiles(3, Map.of(
+                "lib/runtime.txt", bytes("runtime-3"),
+                "data/images/units/meks/archer.png", bytes("new-archer"),
+                "data/icons/icon.png", bytes("new-icon"),
+                "bin/MegaMek.bat", bytes("third-script"),
+                "bin/MegaMekLab.bat", bytes("third-lab-script"),
+                "bin/MekHQ.bat", bytes("third-hq-script")));
+        UpdatePreviewService.Preview preview = new UpdatePreviewService(
+                transport("v3.0.0", v3)).preview(
+                importedRegistry, imported.id(), "v3.0.0", quiet());
+        assertTrue(preview.decisions().stream().anyMatch(item ->
+                item.path().equals("data/images/units/meks/archer.png")
+                        && item.action() == Action.SKIP
+                        && item.reason().contains("sticky")));
+        assertTrue(preview.decisions().stream().anyMatch(item ->
+                item.path().equals("data/icons/icon.png") && item.action() == Action.SKIP
+                        && item.reason().contains("sticky")));
+        assertEquals(before, fileHashes(managed.root));
+    }
+
+    @Test
     void preparedFacadeDownloadsOneBodyReextractsTrustedBytesAndReplansLocalData()
             throws Exception {
         Fixture fixture = install("prepared-once", "v1", packageFiles(1, Map.of(
@@ -1324,6 +1421,17 @@ class RealUpdateServiceTest {
             Files.createDirectories(target.getParent());
             Files.write(target, entry.getValue());
         }
+    }
+
+    private static Map<String, String> fileHashes(Path root) throws Exception {
+        Map<String, String> hashes = new LinkedHashMap<>();
+        try (var paths = Files.walk(root)) {
+            for (Path path : paths.filter(Files::isRegularFile).sorted().toList()) {
+                hashes.put(root.relativize(path).toString().replace('\\', '/'),
+                        sha(Files.readAllBytes(path)));
+            }
+        }
+        return hashes;
     }
 
     private Path fakeJava(String name) throws IOException {
