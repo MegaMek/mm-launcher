@@ -11,6 +11,7 @@ import org.gradle.api.provider.MapProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.SetProperty
 import org.gradle.api.tasks.Classpath
+import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.InputFiles
@@ -25,7 +26,9 @@ import org.gradle.api.tasks.bundling.Compression
 import org.gradle.api.tasks.bundling.Tar
 import org.gradle.api.tasks.bundling.Zip
 import org.gradle.api.tasks.testing.Test
+import org.gradle.internal.os.OperatingSystem
 import org.gradle.jvm.tasks.Jar
+import org.gradle.jvm.toolchain.JavaToolchainService
 import org.gradle.process.CommandLineArgumentProvider
 import org.apache.tools.ant.filters.FixCrLfFilter
 import org.apache.tools.ant.filters.ReplaceTokens
@@ -502,6 +505,126 @@ val buildArchive = tasks.register("buildArchive") {
     group = "distribution"
     description = "Builds the all-platform archive and its exact SHA-256 file."
     dependsOn(archiveChecksum)
+}
+
+// ---------------------------------------------------------------------------
+// Windows MSI installer (jpackage). This is an additional, independently
+// verified artifact alongside the portable tar.gz above; it does not replace
+// it and does not participate in buildArchive/verifyDistributionConfiguration.
+//
+// It bundles a jlink-trimmed Java runtime (via jpackage's automatic runtime
+// detection) so installed users never need a system Java. It always installs
+// per-user (no admin/UAC prompt), so the launcher's self-updater can run
+// `msiexec /i ... /qn` unattended after downloading a new version.
+//
+// windowsInstallerUpgradeCode MUST NEVER CHANGE. Windows Installer uses this
+// GUID to recognize "this is the same product, install it in place" during a
+// silent upgrade; changing it turns every future update into a side-by-side
+// install instead of an in-place replacement.
+// ---------------------------------------------------------------------------
+val windowsInstallerUpgradeCode = "616FFD64-0D7F-4FBE-9BB9-63FD6D9D32FA"
+
+val windowsInstallerInputDirectory = layout.buildDirectory.dir("packaging/windows-installer/input")
+val stageWindowsInstallerInput = tasks.register<Sync>("stageWindowsInstallerInput") {
+    group = "distribution"
+    description = "Stages the exact jpackage --input payload for the Windows MSI installer."
+    dependsOn(stageCommonPayload)
+    into(windowsInstallerInputDirectory)
+    duplicatesStrategy = DuplicatesStrategy.FAIL
+    from(commonPayloadDirectory.map { it.dir("lib") })
+}
+
+val windowsInstallerOutputDirectory = layout.buildDirectory.dir("packaging/windows-installer")
+val windowsInstallerProductName = "MM Launcher"
+// jpackage names its MSI output "<name>-<app-version>.msi" verbatim, spaces
+// included; this must track --name/--app-version below exactly, or the
+// checksum task will look for a file that was never produced.
+val windowsInstallerFileName = "$windowsInstallerProductName-$macBundleVersion.msi"
+
+val windowsInstallerMsi = tasks.register<Exec>("windowsInstallerMsi") {
+    group = "distribution"
+    description = "Builds the per-user Windows MSI installer with a bundled Java runtime via jpackage."
+    dependsOn(stageWindowsInstallerInput)
+
+    val wixBinaryDirectory = file(".tools/wix314")
+    val toolchainLauncher = project.extensions
+        .getByType(JavaToolchainService::class.java)
+        .launcherFor(java.toolchain)
+    val mainJarFileName = tasks.named<Jar>("jar").get().archiveFileName.get()
+    val inputDirectory = windowsInstallerInputDirectory
+    val outputDirectory = windowsInstallerOutputDirectory
+    val appVersion = macBundleVersion
+    val upgradeCode = windowsInstallerUpgradeCode
+    val fileName = windowsInstallerFileName
+
+    onlyIf {
+        val supported = OperatingSystem.current().isWindows
+        if (!supported) {
+            logger.warn("windowsInstallerMsi skipped: Windows MSI packaging only runs on Windows.")
+        }
+        supported
+    }
+
+    inputs.dir(inputDirectory)
+    inputs.property("upgradeCode", upgradeCode)
+    inputs.property("appVersion", appVersion)
+    outputs.file(outputDirectory.map { it.file(fileName) })
+    outputs.cacheIf { false }
+
+    doFirst {
+        check(wixBinaryDirectory.isDirectory) {
+            "WiX Toolset 3.x binaries (candle.exe/light.exe) are required at " +
+                "${wixBinaryDirectory.absolutePath}. Download wix314-binaries.zip from " +
+                "https://github.com/wixtoolset/wix3/releases and extract it there."
+        }
+        val javaExecutable = toolchainLauncher.get().executablePath.asFile
+        val jpackageExecutable = File(javaExecutable.parentFile, "jpackage.exe")
+        check(jpackageExecutable.isFile) {
+            "jpackage was not found next to the configured Java toolchain at $jpackageExecutable."
+        }
+
+        val destination = outputDirectory.get().asFile
+        destination.deleteRecursively()
+        destination.mkdirs()
+
+        executable(jpackageExecutable)
+        args(
+            "--type", "msi",
+            "--input", inputDirectory.get().asFile.absolutePath,
+            "--dest", destination.absolutePath,
+            "--name", windowsInstallerProductName,
+            "--app-version", appVersion,
+            "--vendor", "MegaMek",
+            "--copyright", "MegaMek",
+            "--description", "MM Launcher graphical desktop launcher",
+            "--main-jar", mainJarFileName,
+            "--main-class", "org.megamek.launcher.DesktopLauncher",
+            "--win-per-user-install",
+            "--win-menu",
+            "--win-shortcut",
+            "--win-upgrade-uuid", upgradeCode
+        )
+        environment(
+            "PATH",
+            wixBinaryDirectory.absolutePath + File.pathSeparator + (System.getenv("PATH") ?: "")
+        )
+    }
+}
+
+val windowsInstallerChecksum = tasks.register<Sha256File>("windowsInstallerChecksum") {
+    group = "distribution"
+    description = "Writes the exact SHA-256 checksum for the Windows MSI installer."
+    dependsOn(windowsInstallerMsi)
+    archiveFile.set(windowsInstallerOutputDirectory.map { it.file(windowsInstallerFileName) })
+    checksumFile.set(
+        windowsInstallerOutputDirectory.map { it.file("$windowsInstallerFileName.sha256") }
+    )
+}
+
+val buildWindowsInstaller = tasks.register("buildWindowsInstaller") {
+    group = "distribution"
+    description = "Builds the Windows MSI installer and its exact SHA-256 file."
+    dependsOn(windowsInstallerChecksum)
 }
 
 val verifyDistributionConfiguration = tasks.register<VerifyDistributionConfiguration>(
