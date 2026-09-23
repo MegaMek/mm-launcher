@@ -361,6 +361,9 @@ launch4j {
     restartOnCrash.set(false)
     requires64Bit.set(true)
     jreMinVersion.set("21")
+    // Borrowed from the MegaMek project icon until a dedicated launcher icon
+    // exists; MegaMek is the recognizable "face" of the project.
+    icon.set(file("src/distribution/windows/icon.ico").absolutePath)
     manifest.set(file("src/distribution/windows/launcher.manifest").absolutePath)
     downloadUrl.set(
         "https://github.com/MegaMek/megamek/wiki/" +
@@ -556,6 +559,9 @@ val windowsInstallerMsi = tasks.register<Exec>("windowsInstallerMsi") {
     val appVersion = macBundleVersion
     val upgradeCode = windowsInstallerUpgradeCode
     val fileName = windowsInstallerFileName
+    // Borrowed from the MegaMek project icon until a dedicated launcher icon
+    // exists; MegaMek is the recognizable "face" of the project.
+    val iconFile = file("src/distribution/windows/icon.ico")
 
     onlyIf {
         val supported = OperatingSystem.current().isWindows
@@ -566,6 +572,7 @@ val windowsInstallerMsi = tasks.register<Exec>("windowsInstallerMsi") {
     }
 
     inputs.dir(inputDirectory)
+    inputs.file(iconFile)
     inputs.property("upgradeCode", upgradeCode)
     inputs.property("appVersion", appVersion)
     outputs.file(outputDirectory.map { it.file(fileName) })
@@ -576,6 +583,9 @@ val windowsInstallerMsi = tasks.register<Exec>("windowsInstallerMsi") {
             "WiX Toolset 3.x binaries (candle.exe/light.exe) are required at " +
                 "${wixBinaryDirectory.absolutePath}. Download wix314-binaries.zip from " +
                 "https://github.com/wixtoolset/wix3/releases and extract it there."
+        }
+        check(iconFile.isFile) {
+            "The Windows installer icon is missing at ${iconFile.absolutePath}."
         }
         val javaExecutable = toolchainLauncher.get().executablePath.asFile
         val jpackageExecutable = File(javaExecutable.parentFile, "jpackage.exe")
@@ -599,6 +609,7 @@ val windowsInstallerMsi = tasks.register<Exec>("windowsInstallerMsi") {
             "--description", "MM Launcher graphical desktop launcher",
             "--main-jar", mainJarFileName,
             "--main-class", "org.megamek.launcher.DesktopLauncher",
+            "--icon", iconFile.absolutePath,
             "--win-per-user-install",
             "--win-menu",
             "--win-shortcut",
