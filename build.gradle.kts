@@ -610,6 +610,18 @@ val windowsInstallerMsi = tasks.register<Exec>("windowsInstallerMsi") {
             "--main-jar", mainJarFileName,
             "--main-class", "org.megamek.launcher.DesktopLauncher",
             "--icon", iconFile.absolutePath,
+            // The bundled runtime must also run MegaMek/MekHQ/MegaMekLab once launched from
+            // here (they reuse this exact JVM; see JavaRuntime.validateCurrentExternal). Those
+            // games depend on JDK modules (e.g. java.xml) that mm-launcher itself never
+            // references, so jpackage's default jdeps-based auto-trimming would silently omit
+            // them. Bundle the full standard module set instead of a launcher-only subset.
+            "--add-modules", "ALL-MODULE-PATH",
+            // jpackage's default jlink options include --strip-native-commands, which removes
+            // bin/java(.exe) from the bundled runtime entirely. JavaRuntime.currentExecutable()
+            // resolves exactly that file from java.home, so without this override the launcher
+            // could never find a Java to launch the games with. Keep every other default
+            // (debug/header/man-page stripping) and only drop --strip-native-commands.
+            "--jlink-options", "--strip-debug --no-header-files --no-man-pages",
             "--win-per-user-install",
             "--win-menu",
             "--win-shortcut",
