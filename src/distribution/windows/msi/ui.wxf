@@ -21,8 +21,24 @@
                        Name="DesktopShortcutOptOut" Type="string" Value="1" KeyPath="yes"/>
       </Component>
     </DirectoryRef>
+    <!-- build.gradle.kts WindowsInstallerMsi passes the install-dir argument
+         Programs/MegaMek Launcher. The generated jpackage MSI Directory table
+         has TARGETDIR / LocalAppDataFolder / dir3b50371ef2d03bb0b1971278ecbab3a3
+         (Name=Programs) / INSTALLDIR (Name=MegaMek Launcher).
+         This is jpackage's generated ID, not one derived here: if jpackage
+         changes it, inspect the new Directory table before updating this ref.
+         Remove only the empty installer-owned Programs directory; never its
+         contents or the containing LocalAppDataFolder. -->
+    <DirectoryRef Id="dir3b50371ef2d03bb0b1971278ecbab3a3">
+      <Component Id="LauncherProgramsFolderCleanup" Guid="B65FBBC1-16ED-4FA8-8B83-83DAED6597B1">
+        <RegistryValue Root="HKCU" Key="Software\MegaMek\MegaMek Launcher\Installer"
+                       Name="ProgramsFolderOwned" Type="integer" Value="1" KeyPath="yes"/>
+        <RemoveFolder Id="RemoveEmptyLauncherProgramsFolder" On="uninstall"/>
+      </Component>
+    </DirectoryRef>
     <FeatureRef Id="DefaultFeature">
       <ComponentRef Id="DesktopOptOutPreference"/>
+      <ComponentRef Id="LauncherProgramsFolderCleanup"/>
     </FeatureRef>
     <InstallExecuteSequence>
       <!-- AppSearch precedes jpackage's early RemoveExistingProducts (sequence 798).
@@ -38,6 +54,62 @@
     <UI Id="JpUI">
       <TextStyle Id="LauncherFont" FaceName="Segoe UI" Size="9"/>
       <Property Id="DefaultUIFont" Value="LauncherFont"/>
+      <Property Id="ErrorDialog" Value="LauncherError"/>
+      <!-- Windows Installer invokes these two dialogs outside the wizard flow. -->
+      <!-- Native error-dialog style lets Windows Installer supply the message,
+           select and position its response buttons, and use system error sounds. -->
+      <Dialog Id="LauncherError" Width="370" Height="270" Title="MegaMek Launcher Setup"
+              ErrorDialog="yes">
+        <Control Id="ErrorText" Type="Text" X="20" Y="55" Width="330" Height="130"
+                 TabSkip="no" NoPrefix="yes" Text="[ErrorText]"/>
+        <Control Id="A" Type="PushButton" X="150" Y="243" Width="70" Height="18"
+                 TabSkip="yes" Text="Abort">
+          <Publish Event="EndDialog" Value="ErrorAbort">1</Publish>
+        </Control>
+        <Control Id="C" Type="PushButton" X="150" Y="243" Width="70" Height="18"
+                 TabSkip="yes" Text="Cancel">
+          <Publish Event="EndDialog" Value="ErrorCancel">1</Publish>
+        </Control>
+        <Control Id="I" Type="PushButton" X="150" Y="243" Width="70" Height="18"
+                 TabSkip="yes" Text="Ignore">
+          <Publish Event="EndDialog" Value="ErrorIgnore">1</Publish>
+        </Control>
+        <Control Id="N" Type="PushButton" X="150" Y="243" Width="70" Height="18"
+                 TabSkip="yes" Text="No">
+          <Publish Event="EndDialog" Value="ErrorNo">1</Publish>
+        </Control>
+        <Control Id="O" Type="PushButton" X="150" Y="243" Width="70" Height="18"
+                 TabSkip="yes" Text="OK">
+          <Publish Event="EndDialog" Value="ErrorOk">1</Publish>
+        </Control>
+        <Control Id="R" Type="PushButton" X="150" Y="243" Width="70" Height="18"
+                 TabSkip="yes" Text="Retry">
+          <Publish Event="EndDialog" Value="ErrorRetry">1</Publish>
+        </Control>
+        <Control Id="Y" Type="PushButton" X="150" Y="243" Width="70" Height="18"
+                 TabSkip="yes" Text="Yes">
+          <Publish Event="EndDialog" Value="ErrorYes">1</Publish>
+        </Control>
+      </Dialog>
+      <Dialog Id="FilesInUse" Width="370" Height="270" Title="Files in Use"
+              KeepModeless="yes">
+        <Control Id="Message" Type="Text" X="20" Y="32" Width="330" Height="38"
+                 Text="Close these applications to continue installing MegaMek Launcher:"/>
+        <Control Id="Processes" Type="ListBox" X="20" Y="77" Width="330" Height="116"
+                 Property="FileInUseProcess"/>
+        <Control Id="Retry" Type="PushButton" X="134" Y="243" Width="64" Height="18"
+                 Default="yes" Text="Retry">
+          <Publish Event="EndDialog" Value="Retry">1</Publish>
+        </Control>
+        <Control Id="Ignore" Type="PushButton" X="205" Y="243" Width="64" Height="18"
+                 Text="Ignore">
+          <Publish Event="EndDialog" Value="Ignore">1</Publish>
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="276" Y="243" Width="84" Height="18"
+                 Cancel="yes" Text="Cancel setup">
+          <Publish Event="EndDialog" Value="Exit">1</Publish>
+        </Control>
+      </Dialog>
       <Dialog Id="LauncherWelcome" Width="370" Height="270" Title="MegaMek Launcher Setup">
         <!-- Artwork occupies only the left strip; the controls sit directly on
              the native light dialog surface, not on a baked image panel. -->
@@ -73,7 +145,7 @@
           <Subscribe Event="SetProgress" Attribute="Progress"/>
         </Control>
       </Dialog>
-      <Dialog Id="LauncherFinished" Width="370" Height="270" Title="MegaMek Launcher Setup Complete">
+      <Dialog Id="Exit" Width="370" Height="270" Title="MegaMek Launcher Setup Complete">
         <Control Id="Art" Type="Bitmap" X="0" Y="0" Width="180" Height="234"
                  Text="LauncherWizardDialog"/>
         <Control Id="Title" Type="Text" X="190" Y="46" Width="165" Height="65"
@@ -92,9 +164,17 @@
           <Publish Event="EndDialog" Value="Return" Order="3">1</Publish>
         </Control>
       </Dialog>
-      <Dialog Id="LauncherFailed" Width="370" Height="270" Title="MegaMek Launcher Setup">
+      <Dialog Id="FatalError" Width="370" Height="270" Title="MegaMek Launcher Setup">
         <Control Id="Message" Type="Text" X="20" Y="50" Width="330" Height="90"
                  Text="Setup could not finish. No launcher was started."/>
+        <Control Id="Close" Type="PushButton" X="296" Y="243" Width="64" Height="18"
+                 Default="yes" Text="Close">
+          <Publish Event="EndDialog" Value="Return">1</Publish>
+        </Control>
+      </Dialog>
+      <Dialog Id="UserExit" Width="370" Height="270" Title="MegaMek Launcher Setup">
+        <Control Id="Message" Type="Text" X="20" Y="50" Width="330" Height="90"
+                 Text="Setup was cancelled. No launcher was started."/>
         <Control Id="Close" Type="PushButton" X="296" Y="243" Width="64" Height="18"
                  Default="yes" Text="Close">
           <Publish Event="EndDialog" Value="Return">1</Publish>
@@ -106,9 +186,15 @@
         </Custom>
         <Show Dialog="LauncherWelcome" Before="LauncherProgress">NOT Installed</Show>
         <Show Dialog="LauncherProgress" Before="ExecuteAction">NOT Installed</Show>
-        <Show Dialog="LauncherFinished" OnExit="success">NOT REMOVE</Show>
-        <Show Dialog="LauncherFailed" OnExit="error">1</Show>
+        <Show Dialog="Exit" OnExit="success">NOT REMOVE</Show>
+        <Show Dialog="FatalError" OnExit="error">1</Show>
+        <Show Dialog="UserExit" OnExit="cancel">1</Show>
       </InstallUISequence>
+      <AdminUISequence>
+        <Show Dialog="Exit" OnExit="success">1</Show>
+        <Show Dialog="FatalError" OnExit="error">1</Show>
+        <Show Dialog="UserExit" OnExit="cancel">1</Show>
+      </AdminUISequence>
     </UI>
   </Fragment>
 </Wix>
