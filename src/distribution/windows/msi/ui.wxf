@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- jpackage/WiX 3 UI override. No InstallDirDlg: per-user folder is fixed. -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <Binary Id="LauncherWizardDialog" SourceFile="$(env.MM_LAUNCHER_ART_DIR)/wizard-dialog.bmp"/>
+    <Binary Id="LauncherWizardBanner" SourceFile="$(env.MM_LAUNCHER_ART_DIR)/wizard-banner.bmp"/>
+    <Property Id="LAUNCH_AFTER_INSTALL" Value="1"/>
+    <!-- jpackage owns the DesktopFolder shortcut. Its component is conditional on
+         JP_INSTALL_DESKTOP_SHORTCUT; only persist the opt-out, not a second shortcut. -->
+    <Property Id="LAUNCHER_DESKTOP_OPTOUT">
+      <RegistrySearch Id="PreviousDesktopOptOut" Root="HKCU"
+                      Key="Software\MegaMek\MegaMek Launcher\Installer"
+                      Name="DesktopShortcutOptOut" Type="raw"/>
+    </Property>
+    <CustomAction Id="RestoreDesktopOptOut" Property="JP_INSTALL_DESKTOP_SHORTCUT"
+                  Value="{}"/>
+    <DirectoryRef Id="TARGETDIR">
+      <Component Id="DesktopOptOutPreference" Guid="8B67C1E0-7B4B-4DC3-95D0-F19EBA63BB36">
+        <Condition>NOT JP_INSTALL_DESKTOP_SHORTCUT</Condition>
+        <RegistryValue Root="HKCU" Key="Software\MegaMek\MegaMek Launcher\Installer"
+                       Name="DesktopShortcutOptOut" Type="string" Value="1" KeyPath="yes"/>
+      </Component>
+    </DirectoryRef>
+    <FeatureRef Id="DefaultFeature">
+      <ComponentRef Id="DesktopOptOutPreference"/>
+    </FeatureRef>
+    <InstallExecuteSequence>
+      <!-- AppSearch precedes jpackage's early RemoveExistingProducts (sequence 798).
+           UI choice wins in interactive installs; silent upgrades read the old marker. -->
+      <Custom Action="RestoreDesktopOptOut" After="AppSearch">
+        LAUNCHER_DESKTOP_OPTOUT = 1 AND UILevel &lt; 5 AND NOT Installed
+      </Custom>
+    </InstallExecuteSequence>
+    <CustomAction Id="SetLauncherTarget" Property="WixShellExecTarget"
+                  Value="[INSTALLDIR]MegaMek Launcher.exe"/>
+    <CustomAction Id="LaunchMegaMekLauncher" BinaryKey="WixCA"
+                  DllEntry="WixShellExec" Impersonate="yes" Return="ignore"/>
+    <UI Id="JpUI">
+      <TextStyle Id="LauncherFont" FaceName="Segoe UI" Size="9"/>
+      <Property Id="DefaultUIFont" Value="LauncherFont"/>
+      <Dialog Id="LauncherWelcome" Width="370" Height="270" Title="MegaMek Launcher Setup">
+        <!-- Artwork occupies only the left strip; the controls sit directly on
+             the native light dialog surface, not on a baked image panel. -->
+        <Control Id="Art" Type="Bitmap" X="0" Y="0" Width="180" Height="234"
+                 Text="LauncherWizardDialog"/>
+        <Control Id="Detail" Type="Text" X="190" Y="46" Width="165" Height="130"
+                 Text="Install MegaMek Launcher for this user in:&#10;&#10;[INSTALLDIR]"/>
+        <Control Id="DesktopShortcut" Type="CheckBox" X="190" Y="180" Width="165" Height="20"
+                 Property="JP_INSTALL_DESKTOP_SHORTCUT" CheckBoxValue="1"
+                 Text="Create a desktop shortcut"/>
+        <Control Id="Install" Type="PushButton" X="228" Y="243" Width="66" Height="18"
+                 Default="yes" Text="Install">
+          <Publish Event="EndDialog" Value="Return">1</Publish>
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="18"
+                 Cancel="yes" Text="Cancel">
+          <Publish Event="EndDialog" Value="Exit">1</Publish>
+        </Control>
+      </Dialog>
+      <!-- A Show action before ExecuteAction MUST be modeless: a modal dialog
+           without EndDialog blocks the UI sequence and never installs files. -->
+      <Dialog Id="LauncherProgress" Width="370" Height="270" Modeless="yes"
+              Title="Installing MegaMek Launcher">
+        <Control Id="Banner" Type="Bitmap" X="0" Y="0" Width="370" Height="44"
+                 Text="LauncherWizardBanner"/>
+        <Control Id="Title" Type="Text" X="15" Y="56" Width="335" Height="24" TabSkip="no"
+                 Text="Installing MegaMek Launcher"/>
+        <Control Id="ActionText" Type="Text" X="15" Y="97" Width="335" Height="22">
+          <Subscribe Event="ActionText" Attribute="Text"/>
+        </Control>
+        <Control Id="ProgressBar" Type="ProgressBar" X="15" Y="126" Width="335" Height="15"
+                 ProgressBlocks="yes" Text="Progress">
+          <Subscribe Event="SetProgress" Attribute="Progress"/>
+        </Control>
+      </Dialog>
+      <Dialog Id="LauncherFinished" Width="370" Height="270" Title="MegaMek Launcher Setup Complete">
+        <Control Id="Art" Type="Bitmap" X="0" Y="0" Width="180" Height="234"
+                 Text="LauncherWizardDialog"/>
+        <Control Id="Title" Type="Text" X="190" Y="46" Width="165" Height="65"
+                 Text="MegaMek Launcher is installed."/>
+        <Control Id="Launch" Type="CheckBox" X="190" Y="148" Width="165" Height="20"
+                 Property="LAUNCH_AFTER_INSTALL" CheckBoxValue="1"
+                 Text="Launch MegaMek Launcher"/>
+        <Control Id="Finish" Type="PushButton" X="296" Y="243" Width="64" Height="18"
+                 Default="yes" Text="Finish">
+          <Publish Event="DoAction" Value="SetLauncherTarget" Order="1">
+            LAUNCH_AFTER_INSTALL = 1 AND UILevel = 5 AND NOT REMOVE
+          </Publish>
+          <Publish Event="DoAction" Value="LaunchMegaMekLauncher" Order="2">
+            LAUNCH_AFTER_INSTALL = 1 AND UILevel = 5 AND NOT REMOVE
+          </Publish>
+          <Publish Event="EndDialog" Value="Return" Order="3">1</Publish>
+        </Control>
+      </Dialog>
+      <Dialog Id="LauncherFailed" Width="370" Height="270" Title="MegaMek Launcher Setup">
+        <Control Id="Message" Type="Text" X="20" Y="50" Width="330" Height="90"
+                 Text="Setup could not finish. No launcher was started."/>
+        <Control Id="Close" Type="PushButton" X="296" Y="243" Width="64" Height="18"
+                 Default="yes" Text="Close">
+          <Publish Event="EndDialog" Value="Return">1</Publish>
+        </Control>
+      </Dialog>
+      <InstallUISequence>
+        <Custom Action="RestoreDesktopOptOut" After="AppSearch">
+          LAUNCHER_DESKTOP_OPTOUT = 1 AND NOT Installed
+        </Custom>
+        <Show Dialog="LauncherWelcome" Before="LauncherProgress">NOT Installed</Show>
+        <Show Dialog="LauncherProgress" Before="ExecuteAction">NOT Installed</Show>
+        <Show Dialog="LauncherFinished" OnExit="success">NOT REMOVE</Show>
+        <Show Dialog="LauncherFailed" OnExit="error">1</Show>
+      </InstallUISequence>
+    </UI>
+  </Fragment>
+</Wix>

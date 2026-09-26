@@ -1,8 +1,62 @@
 # Portable archive distribution contract
 
+## Additional CI artifacts
+
+The generic archive documented below remains Java-free. CI additionally
+builds `MegaMek-Launcher-<version>-windows-x64.msi` and four
+`MegaMek-Launcher-<version>-<platform>-portable.tar.gz` archives (`windows-x64`,
+`linux-x64`, `macos-intel`, `macos-apple-silicon`), each with an exact-name
+`.sha256` file. Native archives are built on their respective runner, not
+cross-compiled. Each includes a host-native Java 21 jlink image using
+`ALL-MODULE-PATH` (including `bin/java`, `lib/modules`, and `legal/`).
+Windows uses the Launch4j bundled `runtime` path; Linux uses root `runtime`;
+macOS uses `MegaMek Launcher.app/Contents/runtime`. Scripts prefer the local
+runtime and retain the external-Java fallback for the generic archive.
+Each native portable archive carries only its host's entry point. The Windows
+archive retains `MegaMek Launcher.app/Contents/app/lib` for WindowsBootstrap's
+relative payload lookup, but does not include the macOS script or Info.plist
+or the Linux script. The generic archive still contains all three entry points.
+`verifyPortableArchive` extracts, checks the checksum and runtime structure,
+and runs a diagnostic with an invalid `JAVA_HOME` and unusable `PATH`.
+The MSI uses jpackage's own full-module runtime and WiX 3.14; CI never
+installs it. Neither CI job publishes a release. The Java image carries
+its own upstream `legal/` notices. Signing and notarization remain pending.
+The MSI keeps the permanent upgrade UUID and per-user fixed binary directory
+`%LOCALAPPDATA%\Programs\MegaMek Launcher` (no folder chooser). This is
+separate from mutable registry state under `%LOCALAPPDATA%\MegaMek Launcher`,
+which MSI removal must not own. Its self-contained WiX 3 UI override shows
+`[INSTALLDIR]` on Welcome after MSI directory costing, then a modeless progress
+dialog before `ExecuteAction` (a modal dialog there would block the install).
+Welcome has a checked-by-default Create a desktop shortcut option. This uses
+jpackage's own conditional `DesktopFolder` shortcut component, not a shell
+script: unchecking it disables that component. An HKCU installer-owned opt-out
+registry component records only the unchecked choice; AppSearch restores it
+before jpackage's early `RemoveExistingProducts` during silent `/qn` upgrades.
+An interactive upgrade may change that choice on Welcome. Removing the MSI
+removes only its owned shortcut and preference component, not unrelated desktop
+entries. The Start menu shortcut is independent. The interactive completion
+screen displays a checked Launch MegaMek Launcher box on the interactive finish
+dialog; only the finish button publishes the launcher custom action. Both
+options use one native WiX CheckBox control each, with the label inside its
+clickable area. The cropped artwork occupies only the left side of Welcome and
+Finish; the right-side controls sit on the native light dialog background, not
+a baked cream panel. Silent `/qn` MSI upgrades cannot run that UI action.
+The installed EXE and MSI icon share an ICO derivative of MegaMek.png; the
+left-strip wizard BMP and progress banner derive from bundled first-launch art.
+The MSI artifact keeps the Gradle version in its filename, while Windows
+Installer ProductVersion uses the numeric portion (for example, `0.1.0` for
+`0.1.0-SNAPSHOT`), as required by jpackage/MSI.
+Regenerate the BMPs with Pillow using
+`python src/distribution/windows/msi/generate_art.py`; the source artwork stays
+in `artwork/`. Static MSI table inspection cannot certify an interactive
+installation; this build never runs `msiexec`. These icons
+do not change Windows Explorer's `.msi` file association. The internal
+`mm-launcher` CLI name remains compatible.
+The macOS app bundle includes a MegaMek.png-derived ICNS in `Contents/Resources`.
+
 ## Scope
 
-MM Launcher produces one versioned all-platform `tar.gz`. The user extracts the archive and starts
+MegaMek Launcher produces one versioned all-platform `tar.gz`. The user extracts the archive and starts
 the entry point for Windows, macOS, or Linux from one fixed root. It is not an installer, does not
 write startup integration, does not elevate, and does not contain or install a Java runtime. This
 matches the current MegaMek/MekHQ single-archive distribution model; it does not infer any broader
@@ -19,19 +73,19 @@ intentionally disabled; the dedicated archive task owns the portable desktop dis
 The two declared outputs include the dynamic project version:
 
 ```text
-MM-Launcher-<version>.tar.gz
-MM-Launcher-<version>.tar.gz.sha256
+MegaMek-Launcher-<version>.tar.gz
+MegaMek-Launcher-<version>.tar.gz.sha256
 ```
 
-The archive has one top-level `MM Launcher/` root:
+The archive has one top-level `MegaMek Launcher/` root:
 
 ```text
-MM Launcher/
-├── MM Launcher.exe
-├── MM Launcher.app/
+MegaMek Launcher/
+├── MegaMek Launcher.exe
+├── MegaMek Launcher.app/
 │   └── Contents/
 │       ├── Info.plist
-│       ├── MacOS/MM Launcher
+│       ├── MacOS/MegaMek Launcher
 │       └── app/lib/*.jar
 ├── mm-launcher
 ├── README.txt
@@ -39,7 +93,7 @@ MM Launcher/
 └── third-party-licenses/
 ```
 
-`MM Launcher.app/Contents/app/lib/` is the one shared application/dependency payload. Owning the
+`MegaMek Launcher.app/Contents/app/lib/` is the one shared application/dependency payload. Owning the
 payload inside the app bundle keeps the macOS app self-contained. The sibling Windows executable
 and Linux script resolve that exact same directory. They use no cross-root symbolic links or hard
 links, and the app does not depend on sibling mutable files. Windows and Linux users must keep the
@@ -72,8 +126,8 @@ use neither `eval` nor constructed shell commands. The desktop entry point accep
 existing optional `--registry <absolute-path>` GUI override. Diagnostics are:
 
 ```text
-MM Launcher --version [--report <new-absolute-file>]
-MM Launcher --startup-check [--registry <absolute-path>] [--report <new-absolute-file>]
+MegaMek Launcher --version [--report <new-absolute-file>]
+MegaMek Launcher --startup-check [--registry <absolute-path>] [--report <new-absolute-file>]
 ```
 
 Diagnostics do not open Swing, access the network, or create registry state. `--report` exists so
@@ -82,7 +136,7 @@ new file and will not overwrite an existing file. Diagnostic output includes onl
 Java feature, packaged-code status, the code-source file name, and whether a registry override was
 validated—never an absolute machine path, environment dump, or secret.
 
-Java selected here starts MM Launcher itself. It does not alter the independent per-game Java
+Java selected here starts MegaMek Launcher itself. It does not alter the independent per-game Java
 selection, persistence, update/apply gates, recovery, or other launcher security behavior.
 
 ## Program files, user data, and integration
@@ -139,7 +193,7 @@ Windows ARM and Linux ARM are not qualified by this matrix.
 
 Dependency JARs stay unmodified and retain embedded `META-INF` legal material. Packaging also
 extracts available dependency `LICENSE`, `NOTICE`, and `DEPENDENCIES` files into the one common
-`third-party-licenses/` location. This is not a claim about MM Launcher's own source license: the
+`third-party-licenses/` location. This is not a claim about MegaMek Launcher's own source license: the
 repository currently has no tracked root `LICENSE` or `NOTICE`, so a public licensing decision is
 a future release prerequisite. No project copyright, trademark, icon, signing identity, or
 notarization identity is invented by the packaging.

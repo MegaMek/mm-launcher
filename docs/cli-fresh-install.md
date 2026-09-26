@@ -1,4 +1,4 @@
-# MM Launcher command-line prototype
+# MegaMek Launcher command-line prototype
 
 This walkthrough downloads one explicitly selected official release into a **new** folder,
 validates it, and registers it for later launch. There is no automatic launch, bundled Java, or
@@ -8,7 +8,7 @@ installation; explicit receipt-backed updates use the separate
 
 ## 1. Build and choose local state
 
-MM Launcher itself requires Java 21 or newer. That exact runtime is also the automatic game-launch
+MegaMek Launcher itself requires Java 21 or newer. That exact runtime is also the automatic game-launch
 fallback when no explicit default is saved. Package installation does not validate Java. Run the
 steps in the same PowerShell window and stop on any error.
 
@@ -84,7 +84,7 @@ target, no downgrade is offered. The former `channel-set` compatibility command 
 ## 3. Preview launch arguments
 
 Copy the `id=` from successful installation output, then choose a program present in the package.
-By default, preview validates and uses the exact runtime executing MM Launcher. To override it for
+By default, preview validates and uses the exact runtime executing MegaMek Launcher. To override it for
 all copies, use `java-discover` followed by
 `java-select --registry $registry --java <Java-home-or-executable>`.
 

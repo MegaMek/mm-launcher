@@ -3,11 +3,13 @@ package org.megamek.launcher.gui;
 import org.megamek.launcher.onboarding.PlatformInstallLocations;
 
 import javax.swing.SwingUtilities;
+import javax.swing.JOptionPane;
 import javax.swing.UIManager;
 import java.awt.GraphicsEnvironment;
 import java.io.PrintStream;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
+import java.io.IOException;
 
 public final class GuiLauncher {
     private GuiLauncher() {
@@ -32,6 +34,20 @@ public final class GuiLauncher {
             } catch (ReflectiveOperationException | javax.swing.UnsupportedLookAndFeelException ignored) {
                 // The cross-platform Swing look and feel remains usable.
             }
+            if (selection.defaultRegistry()) {
+                try {
+                    DefaultRegistryMigration.migrate(selection.registry(), legacyRegistry());
+                } catch (IOException migrationError) {
+                    error.println("ERROR: launcher state migration stopped: "
+                            + migrationError.getMessage());
+                    JOptionPane.showMessageDialog(null,
+                            "MegaMek Launcher cannot safely migrate previous launcher state.\n"
+                                    + migrationError.getMessage()
+                                    + "\nNo old state was removed. Resolve the conflict before retrying.",
+                            "MegaMek Launcher", JOptionPane.ERROR_MESSAGE);
+                    return;
+                }
+            }
             PlatformInstallLocations installLocations = selection.defaultRegistry()
                     ? PlatformInstallLocations.system(selection.registry())
                     : PlatformInstallLocations.customRegistry();
@@ -55,6 +71,14 @@ public final class GuiLauncher {
     }
 
     public static Path defaultRegistry() {
+        return stateRegistry("MegaMek Launcher");
+    }
+
+    static Path legacyRegistry() {
+        return stateRegistry("MegaMek");
+    }
+
+    private static Path stateRegistry(String name) {
         String os = System.getProperty("os.name", "").toLowerCase();
         String base;
         if (os.contains("win") && System.getenv("LOCALAPPDATA") != null) {
@@ -65,11 +89,11 @@ public final class GuiLauncher {
         } else {
             base = System.getenv("XDG_STATE_HOME");
             if (base == null || base.isBlank()) {
-                return absoluteUserHome().resolve(".megamek")
+                return absoluteUserHome().resolve(name.equals("MegaMek") ? ".megamek" : ".megamek-launcher")
                         .resolve("launcher-registry.json").toAbsolutePath().normalize();
             }
         }
-        return Path.of(base, "MegaMek", "launcher-registry.json").toAbsolutePath().normalize();
+        return Path.of(base, name, "launcher-registry.json").toAbsolutePath().normalize();
     }
 
     private static Path absoluteUserHome() {

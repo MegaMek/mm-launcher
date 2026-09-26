@@ -1,13 +1,21 @@
 #!/bin/sh
 set -eu
 
-APP_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)
-SHARED_LIB="$APP_ROOT/MM Launcher.app/Contents/app/lib"
+SCRIPT_DIR=${0%/*}
+[ "$SCRIPT_DIR" != "$0" ] || SCRIPT_DIR=.
+[ -n "$SCRIPT_DIR" ] || SCRIPT_DIR=/
+APP_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR" && pwd -P)
+SHARED_LIB="$APP_ROOT/MegaMek Launcher.app/Contents/app/lib"
+
+if [ -x "$APP_ROOT/runtime/bin/java" ]; then
+    unset JDK_JAVA_OPTIONS JAVA_TOOL_OPTIONS _JAVA_OPTIONS
+    exec "$APP_ROOT/runtime/bin/java" -cp "$SHARED_LIB/*" org.megamek.launcher.DesktopLauncher "$@"
+fi
 
 find_java() {
     if [ -n "${JAVA_HOME:-}" ]; then
         if [ ! -x "${JAVA_HOME}/bin/java" ]; then
-            printf '%s\n' "MM Launcher: JAVA_HOME does not contain an executable bin/java." >&2
+            printf '%s\n' "MegaMek Launcher: JAVA_HOME does not contain an executable bin/java." >&2
             return 1
         fi
         printf '%s\n' "${JAVA_HOME}/bin/java"
@@ -17,7 +25,7 @@ find_java() {
 }
 
 JAVA_COMMAND=$(find_java) || {
-    printf '%s\n' "MM Launcher requires an external Java 21 or newer runtime." >&2
+    printf '%s\n' "MegaMek Launcher requires an external Java 21 or newer runtime." >&2
     exit 2
 }
 
@@ -28,12 +36,12 @@ JAVA_FEATURE=$(
 )
 case "$JAVA_FEATURE" in
     ''|*[!0-9]*)
-        printf '%s\n' "MM Launcher could not determine the selected Java version." >&2
+        printf '%s\n' "MegaMek Launcher could not determine the selected Java version." >&2
         exit 2
         ;;
 esac
 if [ "$JAVA_FEATURE" -lt 21 ]; then
-    printf '%s\n' "MM Launcher requires Java 21 or newer; found Java ${JAVA_FEATURE}." >&2
+    printf '%s\n' "MegaMek Launcher requires Java 21 or newer; found Java ${JAVA_FEATURE}." >&2
     exit 2
 fi
 

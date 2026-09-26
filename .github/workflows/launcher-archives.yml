@@ -1,4 +1,4 @@
-name: Launcher archive
+name: Launcher distributions
 
 on:
   workflow_dispatch:
@@ -41,16 +41,30 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Build archive and checksum
+      - name: Install WiX 3.14 binaries for jpackage MSI
+        shell: pwsh
+        run: |
+          $url = 'https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip'
+          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP/wix314-binaries.zip"
+          $expected = '6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31'
+          $actual = (Get-FileHash -LiteralPath "$env:RUNNER_TEMP/wix314-binaries.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -cne $expected) { throw "WiX archive SHA-256 mismatch: $actual" }
+          New-Item -ItemType Directory -Force .tools/wix314 | Out-Null
+          Expand-Archive "$env:RUNNER_TEMP/wix314-binaries.zip" -DestinationPath .tools/wix314
+          if (!(Test-Path .tools/wix314/candle.exe) -or !(Test-Path .tools/wix314/light.exe)) {
+            throw 'WiX binaries are missing after extraction.'
+          }
+
+      - name: Build generic archive and Windows MSI (never install MSI)
         shell: pwsh
         run: >-
           .\gradlew.bat "-PbuildIdentifier=${{ github.sha }}"
-          buildArchive
+          buildArchive buildWindowsInstaller
 
       - name: Report producer archive SHA-256
         shell: pwsh
         run: |
-          $archives = @(Get-ChildItem -LiteralPath build/distributions -File -Filter 'MM-Launcher-*.tar.gz')
+          $archives = @(Get-ChildItem -LiteralPath build/distributions -File -Filter 'MegaMek-Launcher-*.tar.gz')
           if ($archives.Count -ne 1) {
               throw "Expected exactly one produced tar.gz, found $($archives.Count)."
           }
@@ -69,10 +83,73 @@ jobs:
       - name: Upload the one archive and checksum
         uses: actions/upload-artifact@v4
         with:
-          name: MM-Launcher-all-platform
+          name: MegaMek-Launcher-all-platform
           path: |
-            build/distributions/MM-Launcher-*.tar.gz
-            build/distributions/MM-Launcher-*.tar.gz.sha256
+            build/distributions/MegaMek-Launcher-*.tar.gz
+            build/distributions/MegaMek-Launcher-*.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Verify MSI checksum and upload pair
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem build/distributions -File -Filter 'MegaMek-Launcher-*-windows-x64.msi')
+          if ($files.Count -ne 1) { throw "Expected one MSI; found $($files.Count)." }
+          $line = [IO.File]::ReadAllText("$($files[0].FullName).sha256").Trim()
+          $actual = (Get-FileHash $files[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($line -cne "$actual  $($files[0].Name)") { throw 'MSI checksum mismatch.' }
+          # Inspect the MSI database only: never execute msiexec on a CI or user host.
+          $installer = New-Object -ComObject WindowsInstaller.Installer
+          $database = $installer.OpenDatabase($files[0].FullName, 0)
+          function MsiValues([string]$query) {
+            $view = $database.OpenView($query)
+            [void]$view.Execute()
+            $values = @()
+            while ($record = $view.Fetch()) { $values += $record.StringData(1) }
+            [void]$view.Close()
+            return $values
+          }
+          $productName = @(MsiValues "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='ProductName'")
+          if ($productName.Count -ne 1 -or $productName[0] -cne 'MegaMek Launcher') {
+            throw 'MSI Installed Apps identity is incorrect.'
+          }
+          $upgradeCode = @(MsiValues "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='UpgradeCode'")
+          if ($upgradeCode.Count -ne 1 -or $upgradeCode[0] -cne '{616FFD64-0D7F-4FBE-9BB9-63FD6D9D32FA}') {
+            throw 'MSI upgrade code changed.'
+          }
+          $shortcuts = @(MsiValues "SELECT ``Name`` FROM ``Shortcut``")
+          if ($shortcuts.Count -ne 2 -or @($shortcuts | Where-Object { $_ -notlike '*|MegaMek Launcher' }).Count -ne 0) {
+            throw 'MSI Start Menu/desktop shortcut identity is incorrect.'
+          }
+          $executables = @(MsiValues "SELECT ``FileName`` FROM ``File``")
+          if (@($executables | Where-Object { $_ -like '*|MegaMek Launcher.exe' }).Count -ne 1) {
+            throw 'MSI installed executable identity is incorrect.'
+          }
+          $finish = @(MsiValues "SELECT ``Dialog`` FROM ``Dialog`` WHERE ``Dialog``='LauncherFinished'")
+          if ($finish.Count -ne 1 -or $finish[0] -cne 'LauncherFinished') {
+            throw 'MSI interactive finish dialog is missing.'
+          }
+          $view = $database.OpenView("SELECT ``Event``, ``Argument``, ``Condition`` FROM ``ControlEvent`` WHERE ``Dialog_``='LauncherFinished'")
+          $view.Execute()
+          $launch = $false
+          while ($record = $view.Fetch()) {
+            if ($record.StringData(1) -eq 'DoAction' -and $record.StringData(2) -eq 'LaunchMegaMekLauncher' -and
+                $record.StringData(3) -eq 'LAUNCH_AFTER_INSTALL = 1 AND UILevel = 5 AND NOT REMOVE') { $launch = $true }
+          }
+          $view.Close()
+          if (!$launch) { throw 'MSI launch must be guarded by interactive finish checkbox.' }
+          if (@(MsiValues "SELECT ``Action`` FROM ``InstallExecuteSequence`` WHERE ``Action``='LaunchMegaMekLauncher'").Count -ne 0) {
+            throw 'Silent MSI execute sequence must never launch the application.'
+          }
+          Write-Host "MSI SHA-256: $actual"
+
+      - name: Upload Windows MSI and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaMek-Launcher-windows-x64-msi
+          path: |
+            build/distributions/MegaMek-Launcher-*-windows-x64.msi
+            build/distributions/MegaMek-Launcher-*-windows-x64.msi.sha256
           if-no-files-found: error
           retention-days: 14
 
@@ -110,7 +187,7 @@ jobs:
       - name: Download producer artifact
         uses: actions/download-artifact@v4
         with:
-          name: MM-Launcher-all-platform
+          name: MegaMek-Launcher-all-platform
           path: provided
 
       - name: Set up Java 21
@@ -125,7 +202,7 @@ jobs:
       - name: Validate inputs and report archive SHA-256
         shell: pwsh
         run: |
-          $archives = @(Get-ChildItem -LiteralPath provided -File -Filter 'MM-Launcher-*.tar.gz')
+          $archives = @(Get-ChildItem -LiteralPath provided -File -Filter 'MegaMek-Launcher-*.tar.gz')
           if ($archives.Count -ne 1) {
               throw "Expected exactly one provided tar.gz, found $($archives.Count)."
           }
@@ -154,7 +231,7 @@ jobs:
           "-PverificationPlatform=${{ matrix.platform }}"
           "-PprovidedArchive=$env:PROVIDED_ARCHIVE"
           "-PprovidedChecksum=$env:PROVIDED_CHECKSUM"
-          test verifyProvidedArchive
+          test verifyProvidedArchive verifyPortableArchive
 
       - name: Test source and verify provided archive on Linux with Xvfb
         if: runner.os == 'Linux'
@@ -164,7 +241,7 @@ jobs:
           "-PverificationPlatform=${{ matrix.platform }}"
           "-PprovidedArchive=${PROVIDED_ARCHIVE}"
           "-PprovidedChecksum=${PROVIDED_CHECKSUM}"
-          test verifyProvidedArchive
+          test verifyProvidedArchive verifyPortableArchive
 
       - name: Test source and verify provided archive on macOS
         if: runner.os == 'macOS'
@@ -174,13 +251,33 @@ jobs:
           "-PverificationPlatform=${{ matrix.platform }}"
           "-PprovidedArchive=${PROVIDED_ARCHIVE}"
           "-PprovidedChecksum=${PROVIDED_CHECKSUM}"
-          test verifyProvidedArchive
+          test verifyProvidedArchive verifyPortableArchive
+
+      - name: Verify host-native portable checksum
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem build/distributions -File -Filter 'MegaMek-Launcher-*-portable.tar.gz')
+          if ($files.Count -ne 1) { throw "Expected one portable archive; found $($files.Count)." }
+          $line = [IO.File]::ReadAllText("$($files[0].FullName).sha256").Trim()
+          $actual = (Get-FileHash $files[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($line -cne "$actual  $($files[0].Name)") { throw 'Portable checksum mismatch.' }
+          Write-Host "Portable SHA-256: $actual"
+
+      - name: Upload host-native portable archive and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaMek-Launcher-${{ matrix.id }}-portable
+          path: |
+            build/distributions/MegaMek-Launcher-*-portable.tar.gz
+            build/distributions/MegaMek-Launcher-*-portable.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 14
 
       - name: Upload platform test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: MM-Launcher-test-reports-${{ matrix.id }}
+          name: MegaMek-Launcher-test-reports-${{ matrix.id }}
           path: build/test-results/**/*.xml
           if-no-files-found: warn
           retention-days: 14

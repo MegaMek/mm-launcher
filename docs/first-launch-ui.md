@@ -134,7 +134,7 @@ For the ordinary GUI registry, the default managed payload/support-data destinat
 `${XDG_DATA_HOME:-~/.local/share}/MegaMek/<product channel>` on Linux. Linux ignores a relative
 `XDG_DATA_HOME`. The product/channel child keeps managed application files distinct from
 registry/receipt files that may share the support root; Linux state remains in its state-data
-location. This macOS location is not the `MM Launcher.app` resource tree.
+location. This macOS location is not the `MegaMek Launcher.app` resource tree.
 Explicit `gui --registry` overrides and custom `LauncherServices` registries instead keep the
 isolated `<registry parent>/installations/<product channel>` layout.
 

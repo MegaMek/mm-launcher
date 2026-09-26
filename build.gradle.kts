@@ -1,4 +1,5 @@
 import java.io.File
+import java.nio.file.Files
 import java.security.MessageDigest
 import javax.inject.Inject
 import org.gradle.api.DefaultTask
@@ -11,10 +12,11 @@ import org.gradle.api.provider.MapProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.provider.SetProperty
 import org.gradle.api.tasks.Classpath
-import org.gradle.api.tasks.Exec
 import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.InputDirectory
 import org.gradle.api.tasks.InputFile
 import org.gradle.api.tasks.InputFiles
+import org.gradle.api.tasks.Internal
 import org.gradle.api.tasks.OutputDirectory
 import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.PathSensitive
@@ -30,6 +32,8 @@ import org.gradle.internal.os.OperatingSystem
 import org.gradle.jvm.tasks.Jar
 import org.gradle.jvm.toolchain.JavaToolchainService
 import org.gradle.process.CommandLineArgumentProvider
+import org.gradle.process.ExecOperations
+import edu.sc.seis.launch4j.tasks.Launch4jLibraryTask
 import org.apache.tools.ant.filters.FixCrLfFilter
 import org.apache.tools.ant.filters.ReplaceTokens
 
@@ -96,6 +100,144 @@ abstract class Sha256File : DefaultTask() {
         val outputFile = checksumFile.get().asFile
         outputFile.parentFile.mkdirs()
         outputFile.writeText("$hash  ${inputFile.name}\n", Charsets.US_ASCII)
+    }
+}
+
+abstract class LinkPortableRuntime : DefaultTask() {
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val modules: DirectoryProperty
+
+    @get:Internal
+    abstract val jlink: RegularFileProperty
+
+    @get:OutputDirectory
+    abstract val runtime: DirectoryProperty
+
+    @get:Inject
+    abstract val execOperations: ExecOperations
+
+    @get:Inject
+    abstract val fileSystem: FileSystemOperations
+
+    @TaskAction
+    fun link() {
+        val destination = runtime.get().asFile
+        fileSystem.delete { delete(destination) }
+        execOperations.exec {
+            executable = jlink.get().asFile.absolutePath
+            args("--module-path", modules.get().asFile.absolutePath,
+                "--add-modules", "ALL-MODULE-PATH",
+                "--strip-debug", "--no-header-files", "--no-man-pages",
+                "--output", destination.absolutePath)
+        }
+        check(File(destination, "bin/java${if (OperatingSystem.current().isWindows) ".exe" else ""}").isFile) {
+            "Portable runtime must contain bin/java."
+        }
+        check(File(destination, "legal").isDirectory) {
+            "Portable runtime legal notices are missing."
+        }
+    }
+}
+
+abstract class WindowsInstallerMsi : DefaultTask() {
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val inputDirectory: DirectoryProperty
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val iconFile: RegularFileProperty
+
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val wixResources: DirectoryProperty
+
+    // Checked explicitly at execution time so missing local tools get actionable errors.
+    @get:Internal
+    abstract val wixBinaryDirectory: DirectoryProperty
+
+    @get:Internal
+    abstract val jpackageExecutable: RegularFileProperty
+
+    @get:Input
+    abstract val mainJarFileName: Property<String>
+
+    @get:Input
+    abstract val appVersion: Property<String>
+
+    @get:Input
+    abstract val upgradeCode: Property<String>
+
+    @get:OutputFile
+    abstract val installerFile: RegularFileProperty
+
+    @get:Inject
+    abstract val execOperations: ExecOperations
+
+    @TaskAction
+    fun packageInstaller() {
+        val wix = wixBinaryDirectory.get().asFile
+        check(wix.isDirectory && File(wix, "candle.exe").isFile && File(wix, "light.exe").isFile) {
+            "WiX Toolset 3.x binaries (candle.exe/light.exe) are required at " +
+                "${wix.absolutePath}. Download wix314-binaries.zip from " +
+                "https://github.com/wixtoolset/wix3/releases and extract it there."
+        }
+        val icon = iconFile.get().asFile
+        check(icon.isFile) { "The Windows installer icon is missing at ${icon.absolutePath}." }
+        val jpackage = jpackageExecutable.get().asFile
+        check(jpackage.isFile) {
+            "jpackage was not found next to the configured Java toolchain at $jpackage."
+        }
+
+        val installer = installerFile.get().asFile
+        val destination = inputDirectory.get().asFile.parentFile
+        destination.mkdirs()
+        // --input is a sibling within this directory; never delete the destination tree.
+        // Remove only the previous MSI so jpackage cannot reuse or reject an existing output.
+        check(!installer.exists() || installer.delete()) {
+            "Could not remove previous Windows installer at ${installer.absolutePath}."
+        }
+        val generated = File(destination, "MegaMek Launcher-${appVersion.get()}.msi")
+        check(!generated.exists() || generated.delete()) {
+            "Could not remove previous jpackage output at ${generated.absolutePath}."
+        }
+        execOperations.exec {
+            executable = jpackage.absolutePath
+            args(
+                "--type", "msi",
+                "--input", inputDirectory.get().asFile.absolutePath,
+                "--dest", destination.absolutePath,
+                "--name", "MegaMek Launcher",
+                "--app-version", appVersion.get(),
+                "--vendor", "MegaMek",
+                "--copyright", "MegaMek",
+                "--description", "MegaMek Launcher graphical desktop launcher",
+                "--main-jar", mainJarFileName.get(),
+                "--main-class", "org.megamek.launcher.DesktopLauncher",
+                "--icon", icon.absolutePath,
+                "--resource-dir", wixResources.get().asFile.absolutePath,
+                // Games launched from the bundled JVM need modules beyond the launcher's own set.
+                "--add-modules", "ALL-MODULE-PATH",
+                // Keep bin/java.exe for the launcher to run games with the bundled runtime.
+                "--jlink-options", "--strip-debug --no-header-files --no-man-pages",
+                "--win-per-user-install",
+                // Keep installer-owned files away from %LOCALAPPDATA%\MegaMek Launcher
+                // (the mutable registry and its sidecars).
+                "--install-dir", "Programs/MegaMek Launcher",
+                "--win-menu",
+                "--win-shortcut",
+                "--win-upgrade-uuid", upgradeCode.get()
+            )
+            environment(
+                "PATH",
+                wix.absolutePath + File.pathSeparator + (System.getenv("PATH") ?: "")
+            )
+            environment("MM_LAUNCHER_ART_DIR", wixResources.get().asFile.absolutePath)
+        }
+        check(generated.isFile) { "jpackage did not produce ${generated.absolutePath}." }
+        installer.parentFile.mkdirs()
+        Files.move(generated.toPath(), installer.toPath())
     }
 }
 
@@ -300,7 +442,7 @@ tasks.named<Jar>("jar") {
     manifest {
         attributes(
             "Main-Class" to "org.megamek.launcher.DesktopLauncher",
-            "Implementation-Title" to "MM Launcher",
+            "Implementation-Title" to "MegaMek Launcher",
             "Implementation-Version" to project.version.toString(),
             "Build-Identifier" to buildIdentifier,
             "Class-Path" to runtimeClasspath.get().files
@@ -348,7 +490,7 @@ val macBundleVersion = project.version.toString()
 
 launch4j {
     mainClassName.set("org.megamek.launcher.WindowsBootstrap")
-    outfile.set("MM Launcher.exe")
+    outfile.set("MegaMek Launcher.exe")
     outputDirectory.set(layout.buildDirectory.dir("launch4j"))
     setJarTask(windowsBootstrapJar.get())
     dontWrapJar.set(false)
@@ -371,18 +513,44 @@ launch4j {
     )
     supportUrl.set("https://megamek.org")
     messagesJreNotFoundError.set(
-        "MM Launcher requires an external Java 21 or newer runtime. " +
-            "Install Java, then start MM Launcher again."
+        "MegaMek Launcher requires an external Java 21 or newer runtime. " +
+            "Install Java, then start MegaMek Launcher again."
     )
     messagesJreVersionError.set(
-        "MM Launcher requires Java 21 or newer. The discovered Java runtime is too old."
+        "MegaMek Launcher requires Java 21 or newer. The discovered Java runtime is too old."
     )
-    messagesStartupError.set("MM Launcher could not start its Java application.")
-    messagesLauncherError.set("MM Launcher encountered a launcher error.")
-    productName.set("MM Launcher")
-    fileDescription.set("MM Launcher graphical desktop launcher")
-    internalName.set("MM Launcher")
-    windowTitle.set("MM Launcher")
+    messagesStartupError.set("MegaMek Launcher could not start its Java application.")
+    messagesLauncherError.set("MegaMek Launcher encountered a launcher error.")
+    productName.set("MegaMek Launcher")
+    fileDescription.set("MegaMek Launcher graphical desktop launcher")
+    internalName.set("MegaMek Launcher")
+    windowTitle.set("MegaMek Launcher")
+    version.set(windowsFileVersion)
+    textVersion.set(project.version.toString())
+}
+
+val createPortableExe = tasks.register<Launch4jLibraryTask>("createPortableExe") {
+    group = "distribution"
+    description = "Builds the Windows bootstrap locked to the portable bundled runtime."
+    setJarTask(windowsBootstrapJar.get())
+    mainClassName.set("org.megamek.launcher.WindowsBootstrap")
+    outfile.set("MegaMek Launcher.exe")
+    outputDirectory.set(layout.buildDirectory.dir("launch4j-portable"))
+    dontWrapJar.set(false)
+    headerType.set("gui")
+    classpath.set(emptyList())
+    chdir.set(".")
+    stayAlive.set(true)
+    restartOnCrash.set(false)
+    requires64Bit.set(true)
+    jreMinVersion.set("21")
+    bundledJrePath.set("runtime")
+    icon.set(file("src/distribution/windows/icon.ico").absolutePath)
+    manifest.set(file("src/distribution/windows/launcher.manifest").absolutePath)
+    productName.set("MegaMek Launcher")
+    fileDescription.set("MegaMek Launcher graphical desktop launcher")
+    internalName.set("MegaMek Launcher")
+    windowTitle.set("MegaMek Launcher")
     version.set(windowsFileVersion)
     textVersion.set(project.version.toString())
 }
@@ -420,7 +588,7 @@ val stageCommonPayload = tasks.register<Sync>("stageCommonPayload") {
 }
 
 val archiveStageDirectory =
-    layout.buildDirectory.dir("packaging/stage/all-platform/MM Launcher")
+    layout.buildDirectory.dir("packaging/stage/all-platform/MegaMek Launcher")
 
 val stageArchive = tasks.register<Sync>("stageArchive") {
     group = "distribution"
@@ -436,9 +604,9 @@ val stageArchive = tasks.register<Sync>("stageArchive") {
         exclude("lib/**")
     }
     from(commonPayloadDirectory.map { it.dir("lib") }) {
-        into("MM Launcher.app/Contents/app/lib")
+        into("MegaMek Launcher.app/Contents/app/lib")
     }
-    from(layout.buildDirectory.file("launch4j/MM Launcher.exe"))
+    from(layout.buildDirectory.file("launch4j/MegaMek Launcher.exe"))
     from("src/distribution/linux/mm-launcher") {
         filter<FixCrLfFilter>(
             "eol" to FixCrLfFilter.CrLf.newInstance("lf"),
@@ -446,15 +614,18 @@ val stageArchive = tasks.register<Sync>("stageArchive") {
         )
     }
     from("src/distribution/macos/Info.plist") {
-        into("MM Launcher.app/Contents")
+        into("MegaMek Launcher.app/Contents")
         filter<ReplaceTokens>(
             "tokens" to mapOf(
                 "BUNDLE_VERSION" to macBundleVersion
             )
         )
     }
-    from("src/distribution/macos/MM Launcher") {
-        into("MM Launcher.app/Contents/MacOS")
+    from("src/distribution/macos/MegaMekLauncher.icns") {
+        into("MegaMek Launcher.app/Contents/Resources")
+    }
+    from("src/distribution/macos/MegaMek Launcher") {
+        into("MegaMek Launcher.app/Contents/MacOS")
         filter<FixCrLfFilter>(
             "eol" to FixCrLfFilter.CrLf.newInstance("lf"),
             "fixlast" to true
@@ -462,7 +633,7 @@ val stageArchive = tasks.register<Sync>("stageArchive") {
     }
     filesMatching(listOf(
         "mm-launcher",
-        "MM Launcher.app/Contents/MacOS/MM Launcher"
+        "MegaMek Launcher.app/Contents/MacOS/MegaMek Launcher"
     )) {
         permissions {
             unix("rwxr-xr-x")
@@ -471,7 +642,7 @@ val stageArchive = tasks.register<Sync>("stageArchive") {
 }
 
 val distributionsDirectory = layout.buildDirectory.dir("distributions")
-val releaseArchiveFileName = "MM-Launcher-${project.version}.tar.gz"
+val releaseArchiveFileName = "MegaMek-Launcher-${project.version}.tar.gz"
 
 val releaseArchive = tasks.register<Tar>("releaseArchive") {
     group = "distribution"
@@ -480,12 +651,14 @@ val releaseArchive = tasks.register<Tar>("releaseArchive") {
     destinationDirectory.set(distributionsDirectory)
     archiveFileName.set(releaseArchiveFileName)
     compression = Compression.GZIP
-    from(archiveStageDirectory.map { it.asFile.parentFile })
+    from(archiveStageDirectory) {
+        into("MegaMek Launcher")
+    }
     eachFile {
         permissions {
             unix(
-                if (isDirectory || path == "MM Launcher/mm-launcher"
-                    || path == "MM Launcher/MM Launcher.app/Contents/MacOS/MM Launcher"
+                if (isDirectory || path == "MegaMek Launcher/mm-launcher"
+                    || path == "MegaMek Launcher/MegaMek Launcher.app/Contents/MacOS/MegaMek Launcher"
                 ) {
                     "rwxr-xr-x"
                 } else {
@@ -508,6 +681,139 @@ val buildArchive = tasks.register("buildArchive") {
     group = "distribution"
     description = "Builds the all-platform archive and its exact SHA-256 file."
     dependsOn(archiveChecksum)
+}
+
+// Native runtimes are linked on the target runner, never copied across OSes.
+// Include all JDK modules: games started by the launcher use the same bin/java
+// and require modules that the launcher itself does not reference.
+val nativePlatform = when {
+    OperatingSystem.current().isWindows -> "windows-x64"
+    OperatingSystem.current().isLinux -> "linux-x64"
+    OperatingSystem.current().isMacOsX ->
+        if (System.getProperty("os.arch") == "aarch64") "macos-apple-silicon" else "macos-intel"
+    else -> error("Unsupported portable runtime host")
+}
+val javaHome = extensions.getByType(JavaToolchainService::class.java)
+    .launcherFor(java.toolchain).map { it.metadata.installationPath.asFile }
+val nativeRuntimeDirectory = layout.buildDirectory.dir("packaging/native-runtime")
+val linkPortableRuntime = tasks.register<LinkPortableRuntime>("linkPortableRuntime") {
+    group = "distribution"
+    description = "Links a complete host-native Java 21 runtime including bin/java and legal notices."
+    modules.set(layout.dir(javaHome.map { File(it, "jmods") }))
+    jlink.set(layout.file(javaHome.map {
+        File(it, "bin/jlink${if (OperatingSystem.current().isWindows) ".exe" else ""}")
+    }))
+    runtime.set(nativeRuntimeDirectory)
+    // A native runtime must never be restored from a different architecture's cache.
+    outputs.cacheIf { false }
+}
+
+val portableStageDirectory = layout.buildDirectory.dir("packaging/stage/$nativePlatform/MegaMek Launcher")
+val stagePortableArchive = tasks.register<Sync>("stagePortableArchive") {
+    group = "distribution"
+    dependsOn(linkPortableRuntime)
+    into(portableStageDirectory)
+    if (OperatingSystem.current().isWindows) {
+        dependsOn(stageCommonPayload, createPortableExe)
+        from(commonPayloadDirectory) {
+            exclude("lib/**")
+        }
+        // WindowsBootstrap resolves the shared JARs relative to the EXE;
+        // retain that location without shipping the other OS entry points.
+        from(commonPayloadDirectory.map { it.dir("lib") }) {
+            into("MegaMek Launcher.app/Contents/app/lib")
+        }
+        from(layout.buildDirectory.file("launch4j-portable/MegaMek Launcher.exe"))
+    } else {
+        // Non-Windows runners do not invoke Launch4j or cross-package Windows
+        // binaries: each native archive contains only its own entry point.
+        dependsOn(stageCommonPayload)
+        from(commonPayloadDirectory) { exclude("lib/**") }
+        from(commonPayloadDirectory.map { it.dir("lib") }) {
+            into("MegaMek Launcher.app/Contents/app/lib")
+        }
+        if (OperatingSystem.current().isLinux) {
+            from("src/distribution/linux/mm-launcher") {
+                filter<FixCrLfFilter>("eol" to FixCrLfFilter.CrLf.newInstance("lf"),
+                    "fixlast" to true)
+            }
+        } else {
+            from("src/distribution/macos/Info.plist") {
+                into("MegaMek Launcher.app/Contents")
+                filter<ReplaceTokens>("tokens" to mapOf("BUNDLE_VERSION" to macBundleVersion))
+            }
+            from("src/distribution/macos/MegaMekLauncher.icns") {
+                into("MegaMek Launcher.app/Contents/Resources")
+            }
+            from("src/distribution/macos/MegaMek Launcher") {
+                into("MegaMek Launcher.app/Contents/MacOS")
+                filter<FixCrLfFilter>("eol" to FixCrLfFilter.CrLf.newInstance("lf"),
+                    "fixlast" to true)
+            }
+        }
+    }
+    from(nativeRuntimeDirectory) {
+        into(if (nativePlatform.startsWith("macos-"))
+            "MegaMek Launcher.app/Contents/runtime" else "runtime")
+    }
+    eachFile {
+        val runtimePath = path.substringAfter("runtime/", "")
+        if (path.contains("runtime/") &&
+            (runtimePath.startsWith("bin/") ||
+                runtimePath == "lib/jspawnhelper" || runtimePath == "lib/jexec")) {
+            permissions { unix("rwxr-xr-x") }
+        }
+    }
+}
+
+val portableArchiveFileName = "MegaMek-Launcher-${project.version}-$nativePlatform-portable.tar.gz"
+val portableArchive = tasks.register<Tar>("portableArchive") {
+    group = "distribution"
+    description = "Builds the host-native Java-bundled portable tar.gz."
+    dependsOn(stagePortableArchive)
+    destinationDirectory.set(distributionsDirectory)
+    archiveFileName.set(portableArchiveFileName)
+    compression = Compression.GZIP
+    from(portableStageDirectory) {
+        into("MegaMek Launcher")
+    }
+    eachFile {
+        val runtimePath = path.substringAfter("runtime/", "")
+        permissions {
+            unix(if (isDirectory || path == "MegaMek Launcher/mm-launcher" ||
+                    path == "MegaMek Launcher/MegaMek Launcher.app/Contents/MacOS/MegaMek Launcher" ||
+                    (path.contains("runtime/") &&
+                        (runtimePath.startsWith("bin/") ||
+                            runtimePath == "lib/jspawnhelper" ||
+                            runtimePath == "lib/jexec"))) "rwxr-xr-x" else "rw-r--r--")
+        }
+    }
+}
+val portableArchiveChecksum = tasks.register<Sha256File>("portableArchiveChecksum") {
+    group = "distribution"
+    dependsOn(portableArchive)
+    archiveFile.set(portableArchive.flatMap { it.archiveFile })
+    checksumFile.set(distributionsDirectory.map { it.file("$portableArchiveFileName.sha256") })
+}
+tasks.register("buildPortableArchive") {
+    group = "distribution"
+    dependsOn(portableArchiveChecksum)
+}
+
+tasks.register<Test>("verifyPortableArchive") {
+    group = "verification"
+    description = "Extracts and starts the host-native archive with external Java unavailable."
+    dependsOn(portableArchiveChecksum, tasks.named("testClasses"))
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    useJUnitPlatform()
+    filter { includeTestsMatching("org.megamek.launcher.distribution.PortableDistributionTest") }
+    systemProperty("portable.path", distributionsDirectory.get()
+        .file(portableArchiveFileName).asFile.absolutePath)
+    systemProperty("portable.checksum", distributionsDirectory.get()
+        .file("$portableArchiveFileName.sha256").asFile.absolutePath)
+    systemProperty("portable.name", portableArchiveFileName)
+    systemProperty("portable.platform", nativePlatform)
 }
 
 // ---------------------------------------------------------------------------
@@ -537,110 +843,43 @@ val stageWindowsInstallerInput = tasks.register<Sync>("stageWindowsInstallerInpu
     from(commonPayloadDirectory.map { it.dir("lib") })
 }
 
-val windowsInstallerOutputDirectory = layout.buildDirectory.dir("packaging/windows-installer")
-val windowsInstallerProductName = "MM Launcher"
-// jpackage names its MSI output "<name>-<app-version>.msi" verbatim, spaces
-// included; this must track --name/--app-version below exactly, or the
-// checksum task will look for a file that was never produced.
-val windowsInstallerFileName = "$windowsInstallerProductName-$macBundleVersion.msi"
+// jpackage first writes "MegaMek Launcher-<app-version>.msi" into the packaging
+// directory; WindowsInstallerMsi moves it to this versioned CI artifact name.
+val windowsInstallerFileName = "MegaMek-Launcher-${project.version}-windows-x64.msi"
+// ProductVersion must be numeric even when the Gradle artifact is a SNAPSHOT.
+val windowsInstallerAppVersion = project.version.toString().substringBefore('-')
 
-val windowsInstallerMsi = tasks.register<Exec>("windowsInstallerMsi") {
+val windowsInstallerMsi = tasks.register<WindowsInstallerMsi>("windowsInstallerMsi") {
     group = "distribution"
     description = "Builds the per-user Windows MSI installer with a bundled Java runtime via jpackage."
     dependsOn(stageWindowsInstallerInput)
 
-    val wixBinaryDirectory = file(".tools/wix314")
     val toolchainLauncher = project.extensions
         .getByType(JavaToolchainService::class.java)
         .launcherFor(java.toolchain)
-    val mainJarFileName = tasks.named<Jar>("jar").get().archiveFileName.get()
-    val inputDirectory = windowsInstallerInputDirectory
-    val outputDirectory = windowsInstallerOutputDirectory
-    val appVersion = macBundleVersion
-    val upgradeCode = windowsInstallerUpgradeCode
-    val fileName = windowsInstallerFileName
-    // Borrowed from the MegaMek project icon until a dedicated launcher icon
-    // exists; MegaMek is the recognizable "face" of the project.
-    val iconFile = file("src/distribution/windows/icon.ico")
-
-    onlyIf {
-        val supported = OperatingSystem.current().isWindows
-        if (!supported) {
-            logger.warn("windowsInstallerMsi skipped: Windows MSI packaging only runs on Windows.")
-        }
-        supported
-    }
-
-    inputs.dir(inputDirectory)
-    inputs.file(iconFile)
-    inputs.property("upgradeCode", upgradeCode)
-    inputs.property("appVersion", appVersion)
-    outputs.file(outputDirectory.map { it.file(fileName) })
+    wixBinaryDirectory.set(layout.projectDirectory.dir(".tools/wix314"))
+    jpackageExecutable.set(layout.file(toolchainLauncher.map {
+        File(it.executablePath.asFile.parentFile, "jpackage.exe")
+    }))
+    mainJarFileName.set(tasks.named<Jar>("jar").flatMap { it.archiveFileName })
+    inputDirectory.set(windowsInstallerInputDirectory)
+    installerFile.set(distributionsDirectory.map { it.file(windowsInstallerFileName) })
+    appVersion.set(windowsInstallerAppVersion)
+    upgradeCode.set(windowsInstallerUpgradeCode)
+    // Borrowed from the MegaMek project icon until a dedicated launcher icon exists.
+    iconFile.set(layout.projectDirectory.file("src/distribution/windows/icon.ico"))
+    wixResources.set(layout.projectDirectory.dir("src/distribution/windows/msi"))
+    onlyIf { OperatingSystem.current().isWindows }
     outputs.cacheIf { false }
-
-    doFirst {
-        check(wixBinaryDirectory.isDirectory) {
-            "WiX Toolset 3.x binaries (candle.exe/light.exe) are required at " +
-                "${wixBinaryDirectory.absolutePath}. Download wix314-binaries.zip from " +
-                "https://github.com/wixtoolset/wix3/releases and extract it there."
-        }
-        check(iconFile.isFile) {
-            "The Windows installer icon is missing at ${iconFile.absolutePath}."
-        }
-        val javaExecutable = toolchainLauncher.get().executablePath.asFile
-        val jpackageExecutable = File(javaExecutable.parentFile, "jpackage.exe")
-        check(jpackageExecutable.isFile) {
-            "jpackage was not found next to the configured Java toolchain at $jpackageExecutable."
-        }
-
-        val destination = outputDirectory.get().asFile
-        destination.deleteRecursively()
-        destination.mkdirs()
-
-        executable(jpackageExecutable)
-        args(
-            "--type", "msi",
-            "--input", inputDirectory.get().asFile.absolutePath,
-            "--dest", destination.absolutePath,
-            "--name", windowsInstallerProductName,
-            "--app-version", appVersion,
-            "--vendor", "MegaMek",
-            "--copyright", "MegaMek",
-            "--description", "MM Launcher graphical desktop launcher",
-            "--main-jar", mainJarFileName,
-            "--main-class", "org.megamek.launcher.DesktopLauncher",
-            "--icon", iconFile.absolutePath,
-            // The bundled runtime must also run MegaMek/MekHQ/MegaMekLab once launched from
-            // here (they reuse this exact JVM; see JavaRuntime.validateCurrentExternal). Those
-            // games depend on JDK modules (e.g. java.xml) that mm-launcher itself never
-            // references, so jpackage's default jdeps-based auto-trimming would silently omit
-            // them. Bundle the full standard module set instead of a launcher-only subset.
-            "--add-modules", "ALL-MODULE-PATH",
-            // jpackage's default jlink options include --strip-native-commands, which removes
-            // bin/java(.exe) from the bundled runtime entirely. JavaRuntime.currentExecutable()
-            // resolves exactly that file from java.home, so without this override the launcher
-            // could never find a Java to launch the games with. Keep every other default
-            // (debug/header/man-page stripping) and only drop --strip-native-commands.
-            "--jlink-options", "--strip-debug --no-header-files --no-man-pages",
-            "--win-per-user-install",
-            "--win-menu",
-            "--win-shortcut",
-            "--win-upgrade-uuid", upgradeCode
-        )
-        environment(
-            "PATH",
-            wixBinaryDirectory.absolutePath + File.pathSeparator + (System.getenv("PATH") ?: "")
-        )
-    }
 }
 
 val windowsInstallerChecksum = tasks.register<Sha256File>("windowsInstallerChecksum") {
     group = "distribution"
     description = "Writes the exact SHA-256 checksum for the Windows MSI installer."
     dependsOn(windowsInstallerMsi)
-    archiveFile.set(windowsInstallerOutputDirectory.map { it.file(windowsInstallerFileName) })
+    archiveFile.set(distributionsDirectory.map { it.file(windowsInstallerFileName) })
     checksumFile.set(
-        windowsInstallerOutputDirectory.map { it.file("$windowsInstallerFileName.sha256") }
+        distributionsDirectory.map { it.file("$windowsInstallerFileName.sha256") }
     )
 }
 

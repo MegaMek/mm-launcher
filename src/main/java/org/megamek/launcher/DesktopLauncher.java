@@ -49,9 +49,9 @@ public final class DesktopLauncher {
             return starter.start(guiArgs, err);
         } catch (IllegalArgumentException | IOException e) {
             err.println("ERROR: " + e.getMessage());
-            err.println("Usage: MM Launcher [--registry <absolute-path>]");
-            err.println("       MM Launcher --version [--report <new-absolute-file>]");
-            err.println("       MM Launcher --startup-check "
+            err.println("Usage: MegaMek Launcher [--registry <absolute-path>]");
+            err.println("       MegaMek Launcher --version [--report <new-absolute-file>]");
+            err.println("       MegaMek Launcher --startup-check "
                     + "[--registry <absolute-path>] [--report <new-absolute-file>]");
             return 2;
         }
@@ -104,7 +104,7 @@ public final class DesktopLauncher {
                     + " codeSource=" + information.codeSourceName()
                     + " registryOverride=" + (registry == null ? "none" : "validated");
         } else {
-            result = "MM Launcher " + information.version()
+            result = "MegaMek Launcher " + information.version()
                     + " (build " + information.buildIdentifier() + ")";
         }
 

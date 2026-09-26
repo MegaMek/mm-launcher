@@ -39,12 +39,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Tag("archive")
 class ArchiveDistributionTest {
-    private static final String ROOT = "MM Launcher";
-    private static final String APP = ROOT + "/MM Launcher.app";
+    private static final String ROOT = "MegaMek Launcher";
+    private static final String APP = ROOT + "/MegaMek Launcher.app";
     private static final String LIB_ROOT = APP + "/Contents/app/lib/";
     private static final String LINUX_ENTRYPOINT = ROOT + "/mm-launcher";
     private static final String MAC_ENTRYPOINT =
-            APP + "/Contents/MacOS/MM Launcher";
+            APP + "/Contents/MacOS/MegaMek Launcher";
     private static final Duration PROCESS_TIMEOUT = Duration.ofSeconds(30);
     private static final Set<PosixFilePermission> EXECUTABLE_PERMISSIONS =
             EnumSet.of(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE,
@@ -114,7 +114,7 @@ class ArchiveDistributionTest {
     void archiveContainsAllThreeEntrypointsWithPortableMetadataAndModes() throws Exception {
         ArchiveView archive = readArchive();
 
-        ArchiveEntry windows = archive.required(ROOT + "/MM Launcher.exe");
+        ArchiveEntry windows = archive.required(ROOT + "/MegaMek Launcher.exe");
         byte[] windowsBytes = archive.bytes(windows);
         assertTrue(windowsBytes.length > 2
                         && windowsBytes[0] == 'M' && windowsBytes[1] == 'Z',
@@ -125,7 +125,7 @@ class ArchiveDistributionTest {
         assertScript(archive.bytes(linux));
         String linuxScript = new String(archive.bytes(linux), StandardCharsets.UTF_8);
         assertTrue(linuxScript.contains(
-                "SHARED_LIB=\"$APP_ROOT/MM Launcher.app/Contents/app/lib\""));
+                "SHARED_LIB=\"$APP_ROOT/MegaMek Launcher.app/Contents/app/lib\""));
         assertTrue(linuxScript.contains("-cp \"$SHARED_LIB/*\""));
 
         ArchiveEntry mac = archive.required(MAC_ENTRYPOINT);
@@ -137,7 +137,9 @@ class ArchiveDistributionTest {
         ArchiveEntry plistEntry = archive.required(APP + "/Contents/Info.plist");
         String plist = new String(archive.bytes(plistEntry), StandardCharsets.UTF_8);
         assertEquals("APPL", plistValue(plist, "CFBundlePackageType"));
-        assertEquals("MM Launcher", plistValue(plist, "CFBundleExecutable"));
+        assertEquals("MegaMek Launcher", plistValue(plist, "CFBundleExecutable"));
+        assertEquals("MegaMekLauncher.icns", plistValue(plist, "CFBundleIconFile"));
+        archive.required(APP + "/Contents/Resources/MegaMekLauncher.icns");
         assertEquals("org.megamek.launcher", plistValue(plist, "CFBundleIdentifier"));
         assertFalse(plist.contains("@BUNDLE_VERSION@"));
 
@@ -206,9 +208,9 @@ class ArchiveDistributionTest {
         Files.createDirectories(userHome);
 
         Path entrypoint = switch (platform()) {
-            case "windows" -> root.resolve("MM Launcher.exe");
+            case "windows" -> root.resolve("MegaMek Launcher.exe");
             case "linux" -> root.resolve("mm-launcher");
-            case "mac" -> root.resolve("MM Launcher.app/Contents/MacOS/MM Launcher");
+            case "mac" -> root.resolve("MegaMek Launcher.app/Contents/MacOS/MegaMek Launcher");
             default -> throw new IllegalStateException("unknown verification platform");
         };
         ProcessResult result = run(
@@ -243,7 +245,7 @@ class ArchiveDistributionTest {
         extractArchive(extraction);
         Path root = extraction.resolve(ROOT);
         Path entrypoint = platform().equals("mac")
-                ? root.resolve("MM Launcher.app/Contents/MacOS/MM Launcher")
+                ? root.resolve("MegaMek Launcher.app/Contents/MacOS/MegaMek Launcher")
                 : root.resolve("mm-launcher");
         Path cwd = temp.resolve("fixture cwd");
         Files.createDirectories(cwd);
@@ -272,6 +274,8 @@ class ArchiveDistributionTest {
         assertTrue(script.startsWith("#!/bin/sh\n"));
         assertFalse(script.contains("\r"), "POSIX bootstrap must use LF line endings");
         assertFalse(script.contains("eval"));
+        assertTrue(script.contains("[ -n \"$SCRIPT_DIR\" ] || SCRIPT_DIR=/"),
+                "a root-level /mm-launcher must resolve SCRIPT_DIR to /");
         assertTrue(script.contains("\"$JAVA_COMMAND\""));
         assertTrue(script.contains("\"$@\""));
     }

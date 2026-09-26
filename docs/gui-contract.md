@@ -196,7 +196,7 @@ For the exact ordinary GUI registry, normal destinations are
 `${XDG_DATA_HOME:-~/.local/share}/MegaMek/<product channel>` on Linux. Missing or relative
 `LOCALAPPDATA` is an explicit Windows placement error; macOS requires an absolute nonblank home;
 Linux ignores relative `XDG_DATA_HOME` and uses the absolute-home fallback. These are
-launcher-managed application payload/support-data directories, not `MM Launcher.app` resources.
+launcher-managed application payload/support-data directories, not `MegaMek Launcher.app` resources.
 An explicit `gui --registry` path, even when supplied to an otherwise ordinary GUI launch, and
 custom `LauncherServices` registries use
 `<registry parent>/installations/<product channel>` for isolation. Destination selection performs

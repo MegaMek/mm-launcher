@@ -6,15 +6,17 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleDisplayName</key>
-    <string>MM Launcher</string>
+    <string>MegaMek Launcher</string>
     <key>CFBundleExecutable</key>
-    <string>MM Launcher</string>
+    <string>MegaMek Launcher</string>
+    <key>CFBundleIconFile</key>
+    <string>MegaMekLauncher.icns</string>
     <key>CFBundleIdentifier</key>
     <string>org.megamek.launcher</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>MM Launcher</string>
+    <string>MegaMek Launcher</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

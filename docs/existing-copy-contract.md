@@ -108,7 +108,7 @@ $installationId = Read-Host "Paste its UUID from id= above (without id=)"
 $installationId = ([guid]::Parse($installationId.Trim())).ToString()
 ```
 
-Then use the README's explicit launch steps. The exact Java runtime executing MM Launcher is used
+Then use the README's explicit launch steps. The exact Java runtime executing MegaMek Launcher is used
 automatically unless an explicit launcher-wide default is later selected.
 Inspection may report
 `confidence=recognized-packaging-optional-transitive-missing`; that is normal for supported suite

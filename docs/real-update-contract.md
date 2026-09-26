@@ -2,7 +2,7 @@
 
 ## Authorization, eligibility, and source trust
 
-Real Apply is never unconsented and does not update MM Launcher itself. The GUI **Update…** flow
+Real Apply is never unconsented and does not update MegaMek Launcher itself. The GUI **Update…** flow
 uses one initial styled consent for the complete download, verification, internal planning, and
 Apply operation. The CLI command
 

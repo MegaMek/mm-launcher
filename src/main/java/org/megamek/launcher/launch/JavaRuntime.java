@@ -60,7 +60,7 @@ public final class JavaRuntime {
         return resolveExecutable(requested, "launcher Java");
     }
 
-    /** Validates only the runtime executing MM Launcher and returns its feature version. */
+    /** Validates only the runtime executing MegaMek Launcher and returns its feature version. */
     public int currentFeature() throws IOException, InterruptedException {
         Path executable = currentExecutable();
         return validate(executable, executable.getParent());

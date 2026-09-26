@@ -99,7 +99,7 @@ class DesktopLauncherTest {
                 new PrintStream(bytes), output(), (args, error) -> 99);
 
         assertEquals(0, result);
-        assertTrue(Files.readString(report).startsWith("MM Launcher "));
+        assertTrue(Files.readString(report).startsWith("MegaMek Launcher "));
         assertEquals(Files.readString(report).strip(), bytes.toString(StandardCharsets.UTF_8).strip());
     }
 

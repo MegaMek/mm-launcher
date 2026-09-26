@@ -8,4 +8,4 @@ META-INF/LICENSE*, META-INF/NOTICE*, and META-INF/DEPENDENCIES* files are also
 provided under third-party-licenses/<jar-name>/ for convenient review.
 
 This notice describes dependency material only. It does not assert a license
-for MM Launcher's own source or grant trademark rights.
+for MegaMek Launcher's own source or grant trademark rights.

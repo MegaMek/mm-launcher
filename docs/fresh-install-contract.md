@@ -77,7 +77,7 @@ managed payload/support-data root is `%LOCALAPPDATA%\MegaMek` on Windows,
 Explicit `gui --registry` overrides and custom `LauncherServices` registries retain
 `<registry parent>/installations` for disposable isolation. This placement does not move existing
 records, install a payload directly as the shared `MegaMek` support root, or place payloads inside
-`MM Launcher.app`. Registry/receipt files remain outside each product/channel child. Leaf names
+`MegaMek Launcher.app`. Registry/receipt files remain outside each product/channel child. Leaf names
 include the selected product and channel, such as
 `MekHQ Milestone`, `MegaMek Development`, or `MegaMekLab Milestone`, so different quick choices
 do not collide or misdescribe their contents.
@@ -145,7 +145,7 @@ workaround is specified in `../ci.md`.
 Normal installation and existing-copy import do not read, resolve, execute, or validate Java.
 Missing or corrupt launcher settings therefore cannot invalidate an installation quote or prevent
 package publication. Java is resolved only for launch or explicit launch preview. With no saved
-default, the exact Java runtime executing MM Launcher is validated and used automatically without
+default, the exact Java runtime executing MegaMek Launcher is validated and used automatically without
 being persisted; an explicit default remains launcher-wide and has no per-copy override.
 
 Before publication, policy-version-1 hashes are made only from the pristine verified extracted

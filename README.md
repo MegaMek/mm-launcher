@@ -1,24 +1,75 @@
 # MegaMek graphical launcher
 
+## CI distributions
+
+CI produces six versioned distribution/checksum pairs: one Windows x64 MSI,
+the existing all-platform tar.gz (requires external Java 21), and four
+Java-bundled host-native portable tar.gz archives for Windows x64, Linux x64,
+macOS Intel, and macOS Apple Silicon. The bundled portable builds contain
+Java 21 `bin/java` and the full JDK module set, so the launcher and games can
+use the bundled Java without a system installation. Download the archive
+matching your machine, extract it, and use the same OS entry point described
+below. Each native archive includes only that OS entry point; the Windows
+archive keeps the shared `MegaMek Launcher.app/Contents/app/lib` payload path for
+its executable without shipping the other OS scripts.
+`buildPortableArchive verifyPortableArchive` builds and checks the current
+host's portable archive; `buildWindowsInstaller` builds (but does not install)
+the MSI on Windows with WiX 3.14 in `.tools/wix314`.
+
+The Windows MSI is an additional per-user installation (bundled Java, fixed
+install folder, persistent upgrade UUID). Installed Apps, Start Menu, the
+desktop shortcut, and executable are named **MegaMek Launcher**; the icon on
+the installed application and installer is derived from MegaMek.png. The macOS
+app bundle uses an ICNS derivative of that same source. The
+interactive WiX wizard uses composed crops of the launcher first-launch artwork,
+shows the costed per-user binary path on Welcome, advances through a modeless
+installation progress dialog, and has a
+checked **Launch MegaMek Launcher** option on its completion screen. This
+launch is an interactive finish-button action only: `msiexec /qn` self-upgrades
+never launch the app. It does not change the `.msi` file association or prompt
+for an install directory. `mm-launcher` remains the compatible internal CLI
+and Linux script name.
+
+The desktop default registry is `%LOCALAPPDATA%\MegaMek Launcher\launcher-registry.json`
+on Windows, `~/Library/Application Support/MegaMek Launcher/launcher-registry.json`
+on macOS, and `$XDG_STATE_HOME/MegaMek Launcher/launcher-registry.json` on Linux
+(fallback `~/.megamek-launcher/launcher-registry.json`). On first default GUI
+launch, a valid schema-3 registry from the previous `MegaMek` location is
+copied along with its launcher settings, receipt/metadata directory, and logs
+to a new directory via atomic rename. The old state remains intact as a
+backup; registered game files are never moved or removed. An unsupported old
+schema (including schema 1) is left untouched, so it cannot block a new
+install. Unknown future schemas, corrupt schema-3 data, symlinks, pending writes or conflicting new
+state stop migration visibly without resetting either location. Custom
+`--registry` paths do not migrate. Future versions should continue reading
+schema 3 where compatible; any eventual schema change needs an explicit,
+version-aware and backed-up migration, never a speculative unknown-schema
+conversion.
+
+These unsigned, non-notarized CI artifacts are not a release; signing,
+notarization, and source licensing remain outstanding. The generic archive
+and its read-only cross-runner verification remain unchanged.
+
 ## Portable archive prototype
 
-MM Launcher is distributed as one versioned all-platform portable archive, not an installer.
+MegaMek Launcher is also distributed as one versioned all-platform portable archive.
 Install an external **64-bit Java 21 or newer** runtime, download
-`MM-Launcher-0.1.0-SNAPSHOT.tar.gz`, extract it, and keep the fixed `MM Launcher/` tree intact.
+`MegaMek-Launcher-0.1.0-SNAPSHOT.tar.gz`, extract it, and keep the fixed `MegaMek Launcher/` tree intact.
 Choose the entry point for the current OS:
 
-- Windows: `MM Launcher.exe`
-- macOS: `MM Launcher.app`
+- Windows: `MegaMek Launcher.exe`
+- macOS: `MegaMek Launcher.app`
 - Linux: `./mm-launcher`
 
 The one shared application/dependency payload is inside
-`MM Launcher.app/Contents/app/lib/`. This keeps the macOS app self-contained; the sibling Windows
+`MegaMek Launcher.app/Contents/app/lib/`. This keeps the macOS app self-contained; the sibling Windows
 and Linux entry points deliberately use that same payload. Do not move the Windows executable or
 Linux script away from the sibling app folder.
 
 The macOS and Windows prototypes are unsigned, and the macOS app is not notarized. Do not bypass
 Gatekeeper or other OS security controls. Signing, notarization, and a public source-license
-decision remain release prerequisites. No Java runtime is bundled or downloaded by a launcher.
+decision remain release prerequisites. The generic archive is Java-free; the
+MSI and host-native archives bundle Java, but the launcher does not download a JRE.
 
 The support goal is all three OSes. The archive's Windows x64 entry point and native startup smoke
 are validated locally on Windows. Native CI is prepared to download and validate the exact same
@@ -33,7 +84,7 @@ point with:
   -p 'C:\repos\megamek\mm-launcher' buildArchive verifyArchive
 ```
 
-The only current outputs are `MM-Launcher-<version>.tar.gz` and its exact-name `.sha256` file under
+The generic archive outputs are `MegaMek-Launcher-<version>.tar.gz` and its exact-name `.sha256` file under
 `build/distributions/`. `verifyArchive` checks all three entry points, the single shared payload,
 and checksum, then runs the current host's native entry point. `verifyProvidedArchive` is the
 separate read-only CI mode and requires explicit `-PprovidedArchive=<path>` and
@@ -63,9 +114,9 @@ nonzero exit restores the window and shows the explicit sanitized error. A busy 
 minimize and retains the **Please wait** response. This is normal window minimization, not tray
 integration, disposal, detachment, or launcher exit.
 
-Registry schema 3 stores those targets by application key and stable installation UUID. It is a
-clean pre-release schema: older shapes, including records containing per-copy Java, are rejected
-without migration. Missing or stale
+Registry schema 3 stores those targets by application key and stable installation UUID. Older
+shapes, including records containing per-copy Java, remain rejected; only the same schema 3
+is relocated between default launcher data directories. Missing or stale
 targets use the first matching record as a side-effect-free runtime fallback. Registration fills
 only still-unset application preferences; removal safely retargets affected preferences to the
 first remaining compatible copy. Strict parsing, canonical roots, locked mutation, and atomic
@@ -90,7 +141,7 @@ repeat an obvious post-install “ready” message or place status text above na
 Settings contains only **Game Java** and **Diagnostics**. **Change default Java** validates and
 atomically stores the sole external Java 21+ executable for every installation. Launch and
 explicit launch preview resolve and revalidate this setting; installation records contain no Java
-path or feature. With no saved default, the exact Java runtime executing MM Launcher is the
+path or feature. With no saved default, the exact Java runtime executing MegaMek Launcher is the
 automatic effective runtime and is not persisted. An invalid or corrupt explicit setting fails
 visibly instead of silently falling back. The
 pre-release settings schema contains no global update
@@ -99,7 +150,8 @@ left-aligned sections; the Java version and
 regular-font path share a row with the change action, and **View logs** opens a styled local viewer.
 Settings displays the effective runtime whether it is automatic or explicitly selected. The
 selector uses the same dark-teal/gold controls. No JRE is
-downloaded, installed, or bundled; Java acquisition remains deferred.
+downloaded or installed by the application; installed/native launcher
+distributions already bundle a runtime.
 
 Determinate download bars show only a localized percentage; the detail line uses human-readable
 sizes (for example, **Downloaded 282 MB of 690 MB**). Extraction remains indeterminate and reports
@@ -202,7 +254,7 @@ because registry and receipt metadata may use files in the same support root; th
 installed directly as the `MegaMek` root. An explicit
 `gui --registry` override, and custom registries supplied to `LauncherServices`, intentionally
 retain `<registry parent>/installations/<product channel>` for disposable isolation. The macOS
-path is managed payload/support data, not content inside `MM Launcher.app`.
+path is managed payload/support data, not content inside `MegaMek Launcher.app`.
 Confirmation is required before any package byte or destination/state write. Metadata drift, an
 appeared destination, or registry/Main drift rejects the attempt for fresh consent; no choice
 falls back to another repository/channel, a different tag, or “latest.” MekHQ requires the exact

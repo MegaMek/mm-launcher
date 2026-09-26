@@ -17,7 +17,7 @@ import java.util.Comparator;
  */
 public final class WindowsBootstrap {
     private static final Path SHARED_LIB = Path.of(
-            "MM Launcher.app", "Contents", "app", "lib");
+            "MegaMek Launcher.app", "Contents", "app", "lib");
 
     private WindowsBootstrap() {
     }
@@ -27,7 +27,7 @@ public final class WindowsBootstrap {
             Path lib = SHARED_LIB.toAbsolutePath().normalize();
             if (!Files.isDirectory(lib)) {
                 throw new IllegalStateException(
-                        "MM Launcher shared payload is missing at " + lib + ".");
+                        "MegaMek Launcher shared payload is missing at " + lib + ".");
             }
             URL[] jars;
             try (var files = Files.list(lib)) {
@@ -41,7 +41,7 @@ public final class WindowsBootstrap {
             }
             if (jars.length == 0) {
                 throw new IllegalStateException(
-                        "MM Launcher shared payload at " + lib
+                        "MegaMek Launcher shared payload at " + lib
                                 + " contains no application JARs.");
             }
 

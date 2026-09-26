@@ -36,6 +36,7 @@ class WorkflowStructureTest {
                 "actions/checkout@v4",
                 "actions/setup-java@v4",
                 "gradle/actions/setup-gradle@v4",
+                "actions/upload-artifact@v4",
                 "actions/upload-artifact@v4"
         ), actions(producer));
         assertEquals(1, count(text, "buildArchive"),
@@ -58,16 +59,29 @@ class WorkflowStructureTest {
                 "actions/download-artifact@v4",
                 "actions/setup-java@v4",
                 "gradle/actions/setup-gradle@v4",
+                "actions/upload-artifact@v4",
                 "actions/upload-artifact@v4"
         ), actions(verifier));
 
         assertEquals(3, count(text, "verifyProvidedArchive"));
         assertEquals(4, count(text, "-PbuildIdentifier=${{ github.sha }}"),
                 "the producer and all verifier commands must use the same build identity");
-        assertTrue(text.contains("name: MM-Launcher-all-platform"));
+        assertTrue(text.contains("name: MegaMek-Launcher-all-platform"));
         assertTrue(text.contains("Archive SHA-256: $actual"));
         assertTrue(text.contains("xvfb-run -a ./gradlew"));
-        assertTrue(text.contains("MM-Launcher-test-reports-${{ matrix.id }}"));
+        assertTrue(text.contains("MegaMek-Launcher-test-reports-${{ matrix.id }}"));
+        assertTrue(text.contains("buildArchive buildWindowsInstaller"));
+        assertEquals(3, count(text, "verifyPortableArchive"));
+        assertTrue(text.contains("name: MegaMek-Launcher-windows-x64-msi"));
+        assertTrue(text.contains("name: MegaMek-Launcher-${{ matrix.id }}-portable"));
+        assertTrue(text.contains("MSI checksum mismatch"));
+        assertTrue(text.contains("Portable checksum mismatch"));
+        String wixStep = producer.path("steps").get(3).path("run").asText();
+        assertTrue(wixStep.contains("wix3141rtm/wix314-binaries.zip"));
+        assertTrue(wixStep.contains("6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31"));
+        assertTrue(wixStep.indexOf("Get-FileHash") < wixStep.indexOf("Expand-Archive"));
+        assertTrue(wixStep.indexOf("throw \"WiX archive SHA-256 mismatch")
+                < wixStep.indexOf("Expand-Archive"));
 
         assertFalse(text.contains("windowsArchive"));
         assertFalse(text.contains("linuxArchive"));
@@ -75,12 +89,11 @@ class WorkflowStructureTest {
         assertFalse(text.contains("buildAllArchives"));
         assertFalse(text.contains("verifyArchives"));
         assertFalse(text.contains("createExe"));
-        assertFalse(text.contains(".zip"));
         assertFalse(text.contains("pull_request_target"));
         assertFalse(text.contains("contents: write"));
         assertFalse(text.contains("secrets."));
-        assertFalse(text.toLowerCase().contains("release"),
-                "workflow must not create or publish a release");
+        assertFalse(text.contains("gh release"));
+        assertFalse(text.contains("actions/create-release"));
     }
 
     private static List<String> actions(JsonNode job) {
