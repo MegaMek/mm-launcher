@@ -205,6 +205,8 @@ abstract class WindowsInstallerMsi : DefaultTask() {
         execOperations.exec {
             executable = jpackage.absolutePath
             args(
+                // Surface WiX light diagnostics on CI failures instead of only its exit code.
+                "--verbose",
                 "--type", "msi",
                 "--input", inputDirectory.get().asFile.absolutePath,
                 "--dest", destination.absolutePath,
