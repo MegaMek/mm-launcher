@@ -27,3 +27,7 @@ project README; no startup integration is installed automatically.
 
 This prototype is unsigned and not notarized. Do not bypass operating-system
 security controls. Obtain a signed/notarized build when one becomes available.
+
+MegaMek Launcher source code is licensed under the GNU GPL version 3 or
+any later version. See LICENSE.code for the full license text. Separate
+third-party dependency notices are in THIRD-PARTY-NOTICES.txt.

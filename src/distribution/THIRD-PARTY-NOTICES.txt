@@ -7,5 +7,5 @@ artifacts remain available inside each JAR under META-INF. Copies of embedded
 META-INF/LICENSE*, META-INF/NOTICE*, and META-INF/DEPENDENCIES* files are also
 provided under third-party-licenses/<jar-name>/ for convenient review.
 
-This notice describes dependency material only. It does not assert a license
-for MegaMek Launcher's own source or grant trademark rights.
+This notice describes dependency material only. MegaMek Launcher's source
+code license is in LICENSE.code; neither document grants trademark rights.

@@ -62,8 +62,10 @@ schema 3 where compatible; any eventual schema change needs an explicit,
 version-aware and backed-up migration, never a speculative unknown-schema
 conversion.
 
-These unsigned, non-notarized CI artifacts are not a release; signing,
-notarization, and source licensing remain outstanding. The generic archive
+These unsigned, non-notarized CI artifacts are not a release; signing and
+notarization remain outstanding. MegaMek Launcher source code is GPL
+version 3 or later (see [LICENSE.code](LICENSE.code)); distributions carry
+the same license text alongside dependency notices. The generic archive
 and its read-only cross-runner verification remain unchanged.
 
 ## Portable archive prototype
