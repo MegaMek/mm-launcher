@@ -128,6 +128,8 @@ class LauncherServicesTest {
         assertEquals(mega, home.preferredApplications().get("megamek"));
         assertEquals(bundle, home.preferredApplications().get("mekhq"));
         assertEquals(bundle, home.preferredApplications().get("lab"));
+        assertEquals(java.util.List.of("mekhq", "megamek", "lab"),
+                java.util.List.copyOf(home.preferredApplications().keySet()));
     }
 
     @Test

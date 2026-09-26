@@ -1,0 +1,161 @@
+package org.megamek.launcher.update;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Base64;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+class WindowsMsiUpdateTest {
+    @TempDir Path temp;
+
+    private Path report(String content) throws IOException {
+        Path path = temp.resolve("msi-update-result.txt");
+        Files.writeString(path, content);
+        return path;
+    }
+
+    @Test void pendingAndUnknownResultsRemainForReview() throws Exception {
+        Path path = report("pending");
+        assertThrows(IOException.class, () -> WindowsMsiUpdate.consumeReport(path, "0.1.1",
+                () -> fail("pending must not verify MSI")));
+        assertEquals("pending", Files.readString(path));
+        Files.writeString(path, "installed:0.1.1garbage");
+        assertThrows(IOException.class, () -> WindowsMsiUpdate.consumeReport(path, "0.1.1",
+                () -> fail("corrupt result must not verify MSI")));
+        assertTrue(Files.exists(path));
+        Files.delete(path);
+        Path link = temp.resolve("msi-update-result.txt");
+        try {
+            Files.createSymbolicLink(link, reportTarget());
+        } catch (UnsupportedOperationException | IOException | SecurityException unavailable) {
+            return; // symlinks can require Windows developer mode / elevated privilege
+        }
+        assertThrows(IOException.class, () -> WindowsMsiUpdate.consumeReport(link, "0.1.1",
+                () -> fail("link must not verify MSI")));
+        assertTrue(Files.isSymbolicLink(link));
+    }
+
+    private Path reportTarget() throws IOException {
+        Path target = temp.resolve("target");
+        Files.writeString(target, "installed:0.1.1");
+        return target;
+    }
+
+    @Test void completedFailureIsShownOnceAndDoesNotBlockRetry() throws Exception {
+        Path path = report("1603");
+        var result = WindowsMsiUpdate.consumeReport(path, "0.1.0",
+                () -> fail("failure must not verify MSI"));
+        assertFalse(result.installed());
+        assertTrue(result.message().contains("1603"));
+        assertFalse(Files.exists(path));
+        assertNull(WindowsMsiUpdate.consumeReport(path, "0.1.0", () -> {}));
+        report("handoff failed: staged MSI digest changed");
+        var handoff = WindowsMsiUpdate.consumeReport(path, "0.1.0",
+                () -> fail("handoff failure must not verify MSI"));
+        assertFalse(handoff.installed());
+        assertTrue(handoff.message().contains("staged MSI digest changed"));
+        assertFalse(Files.exists(path));
+    }
+
+    @Test void installedResultRequiresMatchingAndConfirmedVersionEvenOffline() throws Exception {
+        Path path = report("installed:0.1.1");
+        var mismatch = WindowsMsiUpdate.consumeReport(path, "0.1.0",
+                () -> fail("mismatch must not verify MSI"));
+        assertFalse(mismatch.installed());
+        assertFalse(Files.exists(path));
+        report("installed:0.1.1");
+        var unconfirmed = WindowsMsiUpdate.consumeReport(path, "0.1.1",
+                () -> { throw new IOException("MSI version mismatch"); });
+        assertFalse(unconfirmed.installed());
+        assertTrue(unconfirmed.message().contains("MSI version mismatch"));
+        assertFalse(Files.exists(path));
+        report("installed:0.1.1");
+        assertTrue(WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {}).installed());
+        assertFalse(Files.exists(path));
+    }
+
+    @Test void cleanupWarningIsSuccessAndCannotMaskAReportChange() throws Exception {
+        Path path = report("installation succeeded; staged MSI cleanup failed");
+        var warning = WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {});
+        assertTrue(warning.installed());
+        assertTrue(warning.message().contains("cleanup failed"));
+        assertFalse(Files.exists(path));
+        report("installed:0.1.1");
+        assertThrows(IOException.class, () -> WindowsMsiUpdate.consumeReport(path, "0.1.1",
+                () -> Files.writeString(path, "pending")));
+        assertEquals("pending", Files.readString(path));
+        Files.writeString(path, "installed:0.1.1" + " ".repeat(4096));
+        assertThrows(IOException.class, () -> WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {}));
+        assertTrue(Files.exists(path));
+    }
+
+    private static byte[] release(String digest, String url) {
+        return ("""
+                {"tag_name":"0.1.1","draft":false,"prerelease":false,"assets":[
+                {"name":"MegaMek-Launcher-0.1.1-windows-x64.msi","size":42,
+                "digest":"%s","browser_download_url":"%s"}]}
+                """.formatted(digest, url)).getBytes(StandardCharsets.UTF_8);
+    }
+
+    @Test void requiresOfficialMsiAndPublishedChecksum() throws IOException {
+        WindowsMsiUpdate updater = new WindowsMsiUpdate();
+        String official = "https://github.com/MegaMek/mm-launcher/releases/download/"
+                + "0.1.1/MegaMek-Launcher-0.1.1-windows-x64.msi";
+        String digest = "sha256:" + "a".repeat(64);
+        assertNull(updater.parseCandidate(release(digest, official), "0.1.1"));
+        assertEquals("0.1.1", updater.parseCandidate(release(digest, official), "0.1.0").version());
+        assertThrows(IOException.class, () -> updater.parseCandidate(release("", official), "0.1.0"));
+        assertThrows(IOException.class, () -> updater.parseCandidate(
+                release(digest, "https://example.org/update.msi"), "0.1.0"));
+    }
+
+    @Test void comparesAllThreeNumericMsiComponents() throws IOException {
+        assertTrue(WindowsMsiUpdate.compare("0.1.1", "0.1.0") > 0);
+        assertTrue(WindowsMsiUpdate.compare("1.0.0", "0.99.99") > 0);
+        assertTrue(WindowsMsiUpdate.compare("0.1.0", "0.1.1") < 0);
+        assertEquals(0, WindowsMsiUpdate.compare("0.1.1", "0.1.1"));
+        assertThrows(IOException.class, () -> WindowsMsiUpdate.compare("0.1.1-SNAPSHOT", "0.1.0"));
+        assertThrows(IOException.class, () -> WindowsMsiUpdate.compare("v0.1.1", "0.1.0"));
+    }
+
+    @Test void handoffQuotesSpacedMsiPathWithoutBackslashesAndWaitsForExit() {
+        String script = WindowsMsiUpdate.handoffScript(
+                Path.of("C:\\Users\\Example User\\AppData\\Local\\Temp\\mm-launcher-msi-test",
+                        "MegaMek-Launcher-0.1.1-windows-x64.msi"),
+                "0.1.1", "a".repeat(64), Path.of("C:\\Users\\Example User\\result.txt"), 12345);
+        assertTrue(script.contains("('\"'+$msi+'\"')"));
+        assertFalse(script.contains("'\\\"'"));
+        assertTrue(script.contains("while(Get-Process -Id 12345"));
+        assertTrue(script.indexOf("while(Get-Process") < script.indexOf("Start-Process msiexec.exe"));
+        assertTrue(script.contains("[IO.Directory]::Delete($dir)"));
+        assertTrue(script.contains("'handoff failed: '"));
+        assertTrue(script.contains("'installed:0.1.1'"));
+        assertTrue(script.contains("[IO.File]::Replace($tmp,$report,$null)"));
+        assertTrue(script.indexOf("[IO.Directory]::Delete($dir)")
+                < script.indexOf("[IO.File]::Replace($tmp,$report,$null)"));
+    }
+
+    @Test void cannotDiscardAnUnownedPath() {
+        assertThrows(IOException.class, () -> new WindowsMsiUpdate().discard(
+                Path.of("C:\\Users\\Example User\\unrelated.msi")));
+    }
+
+    @Test void powershellArgumentListPreservesSpacedMsiPath() throws Exception {
+        org.junit.jupiter.api.Assumptions.assumeTrue(System.getProperty("os.name", "").startsWith("Windows"));
+        String path = "C:\\Users\\Example User\\Temp\\MegaMek Launcher 0.1.1.msi";
+        String script = "$msi='" + path + "'; $arguments=" + WindowsMsiUpdate.installerArguments("$msi")
+                + "; [Console]::Out.Write($arguments[1])";
+        String encoded = Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
+        Process process = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive",
+                "-EncodedCommand", encoded).start();
+        assertTrue(process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS));
+        assertEquals(0, process.exitValue());
+        assertEquals("\"" + path + "\"",
+                new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8));
+    }
+}

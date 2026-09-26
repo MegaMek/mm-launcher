@@ -26,6 +26,7 @@ import org.megamek.launcher.update.PreparedUpdate;
 import org.megamek.launcher.update.UpdatePreviewService;
 import org.megamek.launcher.update.RealUpdateService;
 import org.megamek.launcher.update.UninstallService;
+import org.megamek.launcher.update.WindowsMsiUpdate;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
@@ -42,6 +43,7 @@ import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JMenuItem;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
@@ -126,6 +128,8 @@ public final class LauncherFrame extends JFrame {
     private Throwable launcherSettingsError;
     private boolean settingsLoading;
     private String transientHomeMessage;
+    private boolean launcherUpdateChecked;
+    private final WindowsMsiUpdate launcherUpdater = new WindowsMsiUpdate();
 
     public LauncherFrame(LauncherServices services) {
         this(services, new SwingExistingImportPrompts(),
@@ -235,6 +239,10 @@ public final class LauncherFrame extends JFrame {
                             message -> status.setText("Artwork unavailable. " + message));
                 }
                 maybeCheckManagedCopiesOnOpen();
+                if (!launcherUpdateChecked && WindowsMsiUpdate.available()) {
+                    launcherUpdateChecked = true;
+                    checkLauncherUpdate(false);
+                }
             } else {
                 renderLoadError(loaded.error());
             }
@@ -676,7 +684,7 @@ public final class LauncherFrame extends JFrame {
             targets.putAll(state.preferredApplications());
         }
         // Compatibility for synthetic HomeState values used by older callers/tests.
-        for (String key : List.of("megamek", "mekhq", "lab")) {
+        for (String key : List.of("mekhq", "megamek", "lab")) {
             if (targets.containsKey(key)) continue;
             String preferredId = state.registry().preferredInstallationIds().get(key);
             InstallationRecord fallback = state.registry().installations().stream()
@@ -701,9 +709,9 @@ public final class LauncherFrame extends JFrame {
         boolean pendingUninstall = false;
         boolean unavailable = state.preferredError() != null
                 && targets.containsValue(state.preferred());
-        for (Map.Entry<String, InstallationRecord> target : targets.entrySet()) {
-            String productKey = target.getKey();
-            InstallationRecord record = target.getValue();
+        for (String productKey : List.of("mekhq", "megamek", "lab")) {
+            InstallationRecord record = targets.get(productKey);
+            if (record == null) continue;
             String channel = homeChannelLabel(record);
             HomeLaunchSplitButton launch = new HomeLaunchSplitButton(guiScale, productKey,
                     displayProduct(productKey), record.observedBuild(), channel,
@@ -2260,6 +2268,15 @@ public final class LauncherFrame extends JFrame {
             logs.addActionListener(event -> showOperationLogs());
             diagnostics.add(logs);
             center.add(diagnostics);
+            if (WindowsMsiUpdate.available()) {
+                center.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
+                JPanel updater = settingsSection("Launcher update");
+                JButton check = homeButton("Check for launcher update", "checkLauncherUpdateButton");
+                check.setAlignmentX(Component.LEFT_ALIGNMENT);
+                check.addActionListener(event -> checkLauncherUpdate(true));
+                updater.add(check);
+                center.add(updater);
+            }
         } else {
             JLabel unavailable = new JLabel("Settings could not be read and were not reset.");
             unavailable.setName("settingsErrorMessage");
@@ -2271,6 +2288,23 @@ public final class LauncherFrame extends JFrame {
             retry.addActionListener(event -> loadSettingsPage());
             center.add(retry);
         }
+        JPanel community = settingsSection("Community");
+        JButton discord = homeButton("Join Discord", "openDiscordButton");
+        discord.setAlignmentX(Component.LEFT_ALIGNMENT);
+        discord.getAccessibleContext().setAccessibleDescription(
+                "Opens the MegaMek community Discord invitation in your browser");
+        discord.addActionListener(event -> run("Opening Discord", () -> {
+            java.awt.Desktop desktop = java.awt.Desktop.isDesktopSupported()
+                    ? java.awt.Desktop.getDesktop() : null;
+            if (desktop == null || !desktop.isSupported(java.awt.Desktop.Action.BROWSE)) {
+                throw new IOException("Opening web links is not supported on this system");
+            }
+            desktop.browse(java.net.URI.create("https://discord.gg/u2vJ5U2QpD"));
+            return null;
+        }, ignored -> { }));
+        community.add(discord);
+        center.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
+        center.add(community);
         JScrollPane scroll = new JScrollPane(center);
         scroll.setName("settingsScrollPane");
         scroll.setBorder(BorderFactory.createEmptyBorder());
@@ -2290,6 +2324,7 @@ public final class LauncherFrame extends JFrame {
                 Dimension preferred = getPreferredSize();
                 return new Dimension(Integer.MAX_VALUE, preferred.height);
             }
+
         };
         section.setName("settings" + titleText.replace(" ", "") + "Section");
         section.setLayout(new BoxLayout(section, BoxLayout.Y_AXIS));
@@ -2306,6 +2341,80 @@ public final class LauncherFrame extends JFrame {
         section.add(Box.createVerticalStrut(guiScale.scaleForGUI(7)));
         return section;
     }
+
+    private Path launcherUpdateReport() {
+        return services.registry().toAbsolutePath().getParent().resolve("msi-update-result.txt");
+    }
+
+    private void checkLauncherUpdate(boolean explicit) {
+        run("Checking launcher release", () -> {
+            WindowsMsiUpdate.ReportResult result = WindowsMsiUpdate.consumeReport(
+                    launcherUpdateReport(), WindowsMsiUpdate.currentVersion());
+            if (result != null && !result.installed()) {
+                throw new IOException(result.message());
+            }
+            try {
+                return new LauncherCheck(launcherUpdater.check(), result == null ? null : result.message());
+            } catch (IOException | InterruptedException error) {
+                if (result != null && result.message() != null) {
+                    throw new IOException(result.message() + "\nLauncher release lookup also failed: "
+                            + error.getMessage(), error);
+                }
+                throw error;
+            }
+        }, checked -> {
+            if (checked.warning() != null) {
+                JOptionPane.showMessageDialog(this, checked.warning(), "Launcher MSI cleanup warning",
+                        JOptionPane.WARNING_MESSAGE);
+            }
+            WindowsMsiUpdate.Candidate candidate = checked.candidate();
+            if (candidate == null) {
+                status.setText("Launcher is up to date.");
+                return;
+            }
+            int choice = JOptionPane.showConfirmDialog(this,
+                    "Official MegaMek Launcher " + candidate.version()
+                            + " is available. Download and install the Windows MSI update?\n"
+                            + "The launcher will close before Windows Installer starts.",
+                    "Launcher update", JOptionPane.YES_NO_OPTION);
+            if (choice != JOptionPane.YES_OPTION) return;
+            run("Verifying launcher MSI", () -> launcherUpdater.stage(candidate), msi -> {
+                int install = JOptionPane.showConfirmDialog(this,
+                        "Verified official MSI " + candidate.version()
+                                + ". Close the launcher and install now?",
+                        "Install launcher update", JOptionPane.YES_NO_OPTION);
+                if (install != JOptionPane.YES_OPTION) {
+                    try {
+                        launcherUpdater.discard(msi);
+                    } catch (IOException error) {
+                        showError("Discarding staged launcher MSI failed", error);
+                    }
+                    return;
+                }
+                run("Starting Windows Installer handoff", () -> {
+                    launcherUpdater.handoff(msi, candidate.version(),
+                            candidate.sha256(), launcherUpdateReport());
+                    return null;
+                }, ignored -> {
+                    dispose();
+                    System.exit(0);
+                }, error -> {
+                    try {
+                        launcherUpdater.discard(msi);
+                    } catch (IOException cleanup) {
+                        error.addSuppressed(cleanup);
+                    }
+                });
+            });
+        }, error -> {
+            if (!explicit) {
+                status.setText("Launcher update: " + SanitizedErrors.text(error.getMessage()));
+                recordErrorAsync("Automatic launcher update check", error, ignored -> {});
+            }
+        }, () -> {}, explicit, explicit);
+    }
+
+    private record LauncherCheck(WindowsMsiUpdate.Candidate candidate, String warning) {}
 
     private void chooseDefaultJava() {
         run("Finding Java runtimes", services::javaCandidates,

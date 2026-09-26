@@ -268,7 +268,7 @@ public class LauncherServices {
         }
         HomeState legacy = loadInstallation(data, store.resolve(data, null));
         Map<String, InstallationRecord> preferredApplications = new LinkedHashMap<>();
-        for (String productKey : List.of("megamek", "mekhq", "lab")) {
+        for (String productKey : List.of("mekhq", "megamek", "lab")) {
             if (data.installations().stream().noneMatch(record -> record.products().stream()
                     .anyMatch(product -> productKey.equals(product.key())))) continue;
             preferredApplications.put(productKey, store.resolvePreferred(data, productKey));
@@ -300,7 +300,7 @@ public class LauncherServices {
         }
         return new HomeState(data, legacy.preferred(), legacy.currentInspection(),
                 legacy.preferredError(), legacy.previewEligibility(), legacy.pendingUpdate(),
-                legacy.channelPreference(), Map.copyOf(preferredApplications),
+                legacy.channelPreference(), java.util.Collections.unmodifiableMap(preferredApplications),
                 Map.copyOf(statuses));
     }
 

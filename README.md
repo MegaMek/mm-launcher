@@ -30,6 +30,22 @@ never launch the app. It does not change the `.msi` file association or prompt
 for an install directory. `mm-launcher` remains the compatible internal CLI
 and Linux script name.
 
+Only the Windows MSI installation checks the official MegaMek/mm-launcher
+GitHub latest stable release for a newer numeric MSI version. The GUI prompts
+before downloading and again before installing; it requires an exact release
+MSI asset with a published SHA-256, checks the staged MSI's upgrade code,
+product name and product version using Windows Installer, then exits before
+the silent per-user upgrade begins. Settings offers a manual check and the
+next launch reports a failed Windows Installer exit code and acknowledges the
+completed result so a later manual check can retry. A successful installation
+with staged MSI cleanup failure is reported as a cleanup warning, not as an
+installation failure. Pending or unrecognized results remain for review; a
+completed result is acknowledged before the release lookup, even when offline.
+If no compatible
+official release exists, no upgrade is attempted. Portable archives, macOS
+and Linux do not self-update. MSI upgrades replace installer-owned binaries,
+not the `%LOCALAPPDATA%` launcher registry, logs or installed games.
+
 The desktop default registry is `%LOCALAPPDATA%\MegaMek Launcher\launcher-registry.json`
 on Windows, `~/Library/Application Support/MegaMek Launcher/launcher-registry.json`
 on macOS, and `$XDG_STATE_HOME/MegaMek Launcher/launcher-registry.json` on Linux
