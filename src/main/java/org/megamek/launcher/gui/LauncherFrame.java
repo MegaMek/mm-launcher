@@ -80,6 +80,7 @@ import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
+import javax.swing.Scrollable;
 import javax.swing.KeyStroke;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
@@ -110,10 +111,12 @@ import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.text.NumberFormat;
+import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.HashSet;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
@@ -122,7 +125,11 @@ import java.util.function.Consumer;
 
 public final class LauncherFrame extends JFrame {
     private static final int LOG_LIMIT = 64_000;
+    private static final DateTimeFormatter NEWS_DATE =
+            DateTimeFormatter.ofPattern("MMM d, uuuu", Locale.ENGLISH);
+    static final String DISCORD_INVITE_URL = "https://discord.gg/megamek";
     private final LauncherServices services;
+    private final LauncherNewsFeed newsFeed;
     private final ExistingImportPrompts existingImportPrompts;
     private final NormalInstallLocationPrompts normalInstallLocationPrompts;
     private final BusyGate gate = new BusyGate();
@@ -160,35 +167,48 @@ public final class LauncherFrame extends JFrame {
     private LauncherServices.SettingsView launcherSettings;
     private Throwable launcherSettingsError;
     private boolean settingsLoading;
+    private boolean newsRequested;
+    private boolean newsLoading;
+    private List<LauncherNewsFeed.Article> newsArticles = List.of();
+    private Throwable newsError;
     private String transientHomeMessage;
     private boolean launcherUpdateChecked;
     private final WindowsMsiUpdate launcherUpdater = new WindowsMsiUpdate();
 
     public LauncherFrame(LauncherServices services) {
         this(services, new SwingExistingImportPrompts(),
-                new SwingNormalInstallLocationPrompts());
+                new SwingNormalInstallLocationPrompts(), new LauncherNewsFeed());
     }
 
     LauncherFrame(LauncherServices services, ExistingImportPrompts existingImportPrompts) {
-        this(services, existingImportPrompts, new SwingNormalInstallLocationPrompts());
+        this(services, existingImportPrompts, new SwingNormalInstallLocationPrompts(),
+                new LauncherNewsFeed());
     }
 
     LauncherFrame(LauncherServices services,
                   NormalInstallLocationPrompts normalInstallLocationPrompts) {
-        this(services, new SwingExistingImportPrompts(), normalInstallLocationPrompts);
+        this(services, new SwingExistingImportPrompts(), normalInstallLocationPrompts,
+                new LauncherNewsFeed());
+    }
+
+    LauncherFrame(LauncherServices services, LauncherNewsFeed newsFeed) {
+        this(services, new SwingExistingImportPrompts(),
+                new SwingNormalInstallLocationPrompts(), newsFeed);
     }
 
     private LauncherFrame(LauncherServices services,
                           ExistingImportPrompts existingImportPrompts,
-                          NormalInstallLocationPrompts normalInstallLocationPrompts) {
-        super("MegaMek Launcher");
+                          NormalInstallLocationPrompts normalInstallLocationPrompts,
+                          LauncherNewsFeed newsFeed) {
+        super(titleFor(LauncherFrame.class.getPackage().getImplementationVersion()));
         this.services = services;
+        this.newsFeed = newsFeed;
         this.existingImportPrompts = existingImportPrompts;
         this.normalInstallLocationPrompts = normalInstallLocationPrompts;
         setName("launcherFrame");
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         setMinimumSize(guiScale.scaleForGUI(680, 470));
-        setPreferredSize(guiScale.scaleForGUI(820, 560));
+        setPreferredSize(guiScale.scaleForGUI(1180, 820));
         content.setBorder(BorderFactory.createEmptyBorder(20, 24, 18, 24));
         setContentPane(content);
         addWindowListener(new WindowAdapter() {
@@ -224,6 +244,11 @@ public final class LauncherFrame extends JFrame {
         });
     }
 
+    static String titleFor(String version) {
+        return "MegaMek Launcher" + (version == null || version.isBlank()
+                ? " (development build)" : " " + version);
+    }
+
     private void prepareExactNormalInstall(OfficialRepository repository,
                                            FollowChannel futureChannel, String tag,
                                            Path destination) {
@@ -234,7 +259,10 @@ public final class LauncherFrame extends JFrame {
     }
 
     public void showWindow() {
-        setVisible(true);
+        if (!isVisible()) {
+            setVisible(true);
+            fitWindowToScreen(getSize());
+        }
         reload();
     }
 
@@ -367,9 +395,39 @@ public final class LauncherFrame extends JFrame {
             launcherSettings = null;
             launcherSettingsError = null;
             loadSettingsPage();
+            loadNews();
             return;
         }
         renderCurrentPage();
+    }
+
+    private void loadNews() {
+        if (newsRequested) return;
+        newsRequested = true;
+        newsLoading = true;
+        renderSettingsPage();
+        new SwingWorker<List<LauncherNewsFeed.Article>, Void>() {
+            @Override protected List<LauncherNewsFeed.Article> doInBackground()
+                    throws IOException, InterruptedException {
+                return newsFeed.latest();
+            }
+
+            @Override protected void done() {
+                newsLoading = false;
+                try {
+                    newsArticles = get();
+                } catch (java.util.concurrent.ExecutionException error) {
+                    newsError = error.getCause();
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    newsError = error;
+                }
+                if (newsError != null) {
+                    recordErrorAsync("Loading MegaMek news", newsError, ignored -> {});
+                }
+                if (isDisplayable() && page == Page.SETTINGS) renderSettingsPage();
+            }
+        }.execute();
     }
 
     private void loadSettingsPage() {
@@ -477,8 +535,9 @@ public final class LauncherFrame extends JFrame {
             homeSizeInitialized = true;
             Dimension preferred = firstLaunch.getPreferredSize();
             java.awt.Insets frameInsets = getInsets();
-            fitWindowToScreen(new Dimension(preferred.width + frameInsets.left + frameInsets.right,
-                    preferred.height + frameInsets.top + frameInsets.bottom));
+            fitWindowToScreen(new Dimension(
+                    Math.max(getWidth(), preferred.width + frameInsets.left + frameInsets.right),
+                    Math.max(getHeight(), preferred.height + frameInsets.top + frameInsets.bottom)));
         }
     }
 
@@ -2252,15 +2311,24 @@ public final class LauncherFrame extends JFrame {
         heading.setBackground(FirstLaunchPanel.BACKGROUND);
         for (Component child : heading.getComponents()) child.setForeground(FirstLaunchPanel.TEXT);
         content.add(heading, BorderLayout.NORTH);
-        JPanel center = new JPanel();
-        center.setLayout(new BoxLayout(center, BoxLayout.Y_AXIS));
+        ResponsiveSettingsSections center = new ResponsiveSettingsSections(guiScale);
         center.setName("settingsSections");
         center.setBackground(FirstLaunchPanel.BACKGROUND);
+        JPanel left = new JPanel();
+        left.setLayout(new BoxLayout(left, BoxLayout.Y_AXIS));
+        left.setOpaque(false);
+        left.setName("settingsLeftColumn");
+        JPanel right = new JPanel();
+        right.setLayout(new BoxLayout(right, BoxLayout.Y_AXIS));
+        right.setOpaque(false);
+        right.setName("settingsRightColumn");
+        center.add(left);
+        center.add(right);
         if (settingsLoading) {
             JLabel loading = new JLabel("Loading settings…");
             loading.setName("settingsLoadingMessage");
             loading.setForeground(FirstLaunchPanel.MUTED);
-            center.add(loading);
+            left.add(loading);
         } else if (launcherSettings != null) {
             JPanel java = settingsSection("Game Java");
             JLabel runtime = new JLabel("Java " + launcherSettings.defaultJavaFeature());
@@ -2287,28 +2355,30 @@ public final class LauncherFrame extends JFrame {
             javaRow.add(javaPath, BorderLayout.CENTER);
             JButton changeJava = homeButton("Change default Java",
                     "changeDefaultJavaButton");
+            changeJava.setAlignmentX(Component.LEFT_ALIGNMENT);
             changeJava.addActionListener(event -> chooseDefaultJava());
-            javaRow.add(changeJava, BorderLayout.EAST);
             javaRow.setMaximumSize(new Dimension(Integer.MAX_VALUE,
-                    changeJava.getPreferredSize().height));
+                    javaPath.getPreferredSize().height));
             java.add(javaRow);
-            center.add(java);
-            center.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
+            java.add(Box.createVerticalStrut(guiScale.scaleForGUI(6)));
+            java.add(changeJava);
+            left.add(java);
+            left.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
 
             JPanel diagnostics = settingsSection("Diagnostics");
             JButton logs = homeButton("View logs", "viewOperationLogsButton");
             logs.setAlignmentX(Component.LEFT_ALIGNMENT);
             logs.addActionListener(event -> showOperationLogs());
             diagnostics.add(logs);
-            center.add(diagnostics);
+            left.add(diagnostics);
             if (WindowsMsiUpdate.available()) {
-                center.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
+                left.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
                 JPanel updater = settingsSection("Launcher update");
                 JButton check = homeButton("Check for launcher update", "checkLauncherUpdateButton");
                 check.setAlignmentX(Component.LEFT_ALIGNMENT);
                 check.addActionListener(event -> checkLauncherUpdate(true));
                 updater.add(check);
-                center.add(updater);
+                left.add(updater);
             }
         } else {
             JLabel unavailable = new JLabel("Settings could not be read and were not reset.");
@@ -2316,28 +2386,57 @@ public final class LauncherFrame extends JFrame {
             unavailable.setForeground(FirstLaunchPanel.GOLD);
             unavailable.setToolTipText(launcherSettingsError == null ? null
                     : errorDetail(launcherSettingsError));
-            center.add(unavailable);
+            left.add(unavailable);
             JButton retry = homeButton("Retry settings", "retrySettingsButton");
             retry.addActionListener(event -> loadSettingsPage());
-            center.add(retry);
+            left.add(retry);
         }
         JPanel community = settingsSection("Community");
         JButton discord = homeButton("Join Discord", "openDiscordButton");
         discord.setAlignmentX(Component.LEFT_ALIGNMENT);
         discord.getAccessibleContext().setAccessibleDescription(
                 "Opens the MegaMek community Discord invitation in your browser");
-        discord.addActionListener(event -> run("Opening Discord", () -> {
-            java.awt.Desktop desktop = java.awt.Desktop.isDesktopSupported()
-                    ? java.awt.Desktop.getDesktop() : null;
-            if (desktop == null || !desktop.isSupported(java.awt.Desktop.Action.BROWSE)) {
-                throw new IOException("Opening web links is not supported on this system");
-            }
-            desktop.browse(java.net.URI.create("https://discord.gg/u2vJ5U2QpD"));
-            return null;
-        }, ignored -> { }));
+        discord.addActionListener(event -> openWebsite(
+                java.net.URI.create(DISCORD_INVITE_URL), "Discord"));
         community.add(discord);
-        center.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
-        center.add(community);
+        right.add(community);
+
+        JPanel news = settingsSection("Latest news");
+        if (newsLoading || !newsRequested) {
+            JLabel loading = new JLabel("Loading MegaMek news...");
+            loading.setName("newsLoadingMessage");
+            loading.setForeground(FirstLaunchPanel.MUTED);
+            news.add(loading);
+        } else if (newsError != null) {
+            JLabel unavailable = new JLabel("News is unavailable right now.");
+            unavailable.setName("newsUnavailableMessage");
+            unavailable.setForeground(FirstLaunchPanel.MUTED);
+            unavailable.setToolTipText(errorDetail(newsError));
+            news.add(unavailable);
+        } else {
+            for (int i = 0; i < newsArticles.size(); i++) {
+                LauncherNewsFeed.Article article = newsArticles.get(i);
+                String headline = NEWS_DATE.format(article.published())
+                        + " - " + article.title();
+                JButton link = homeButton(headline.length() > 42
+                                ? headline.substring(0, 39) + "..." : headline,
+                        "newsArticleButton" + i);
+                link.setAlignmentX(Component.LEFT_ALIGNMENT);
+                link.setToolTipText(headline);
+                link.getAccessibleContext().setAccessibleName(headline);
+                link.addActionListener(event -> openWebsite(article.link(), "MegaMek news"));
+                news.add(link);
+                news.add(Box.createVerticalStrut(guiScale.scaleForGUI(4)));
+            }
+        }
+        JButton archive = homeButton("All news", "allNewsButton");
+        archive.setAlignmentX(Component.LEFT_ALIGNMENT);
+        archive.getAccessibleContext().setAccessibleDescription(
+                "Open the MegaMek blog archive in your browser");
+        archive.addActionListener(event -> openWebsite(LauncherNewsFeed.ARCHIVE, "news archive"));
+        news.add(archive);
+        right.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
+        right.add(news);
         JScrollPane scroll = new JScrollPane(center);
         scroll.setName("settingsScrollPane");
         scroll.setBorder(BorderFactory.createEmptyBorder());
@@ -2350,6 +2449,18 @@ public final class LauncherFrame extends JFrame {
         content.repaint();
     }
 
+    private void openWebsite(java.net.URI address, String description) {
+        run("Opening " + description, () -> {
+            java.awt.Desktop desktop = java.awt.Desktop.isDesktopSupported()
+                    ? java.awt.Desktop.getDesktop() : null;
+            if (desktop == null || !desktop.isSupported(java.awt.Desktop.Action.BROWSE)) {
+                throw new IOException("Opening web links is not supported on this system");
+            }
+            desktop.browse(address);
+            return null;
+        }, ignored -> {});
+    }
+
     private JPanel settingsSection(String titleText) {
         JPanel section = new JPanel() {
             @Override
@@ -2357,7 +2468,6 @@ public final class LauncherFrame extends JFrame {
                 Dimension preferred = getPreferredSize();
                 return new Dimension(Integer.MAX_VALUE, preferred.height);
             }
-
         };
         section.setName("settings" + titleText.replace(" ", "") + "Section");
         section.setLayout(new BoxLayout(section, BoxLayout.Y_AXIS));
@@ -2374,6 +2484,89 @@ public final class LauncherFrame extends JFrame {
         section.add(Box.createVerticalStrut(guiScale.scaleForGUI(7)));
         return section;
     }
+
+            /**
+             * Keep the two independent section groups equal in width without letting a long
+             * Java path or headline dictate the viewport width. At narrow sizes the groups
+             * follow their natural reading/tab order (left, then right).
+             */
+            private static final class ResponsiveSettingsSections extends JPanel implements Scrollable {
+                private final int gap;
+                private final int breakpoint;
+
+                private ResponsiveSettingsSections(GuiScale scale) {
+                    gap = scale.scaleForGUI(12);
+                    breakpoint = scale.scaleForGUI(800);
+                    setLayout(null);
+                }
+
+                private boolean twoColumns(int width) {
+                    return width >= breakpoint;
+                }
+
+                private int availableWidth() {
+                    if (getParent() instanceof javax.swing.JViewport viewport && viewport.getWidth() > 0) {
+                        return viewport.getWidth();
+                    }
+                    return getWidth() > 0 ? getWidth() : breakpoint;
+                }
+
+                private int columnHeight(Component column) {
+                    return column.getPreferredSize().height;
+                }
+
+                @Override
+                public void doLayout() {
+                    if (getComponentCount() != 2) return;
+                    int width = getWidth();
+                    Component left = getComponent(0);
+                    Component right = getComponent(1);
+                    if (twoColumns(width)) {
+                        int leftWidth = (width - gap) / 2;
+                        int rightWidth = width - gap - leftWidth;
+                        left.setBounds(0, 0, leftWidth, columnHeight(left));
+                        right.setBounds(leftWidth + gap, 0, rightWidth, columnHeight(right));
+                    } else {
+                        left.setBounds(0, 0, width, columnHeight(left));
+                        right.setBounds(0, left.getHeight() + gap, width, columnHeight(right));
+                    }
+                }
+
+                @Override
+                public Dimension getPreferredSize() {
+                    if (getComponentCount() != 2) return new Dimension(availableWidth(), 0);
+                    int width = availableWidth();
+                    int leftHeight = columnHeight(getComponent(0));
+                    int rightHeight = columnHeight(getComponent(1));
+                    return new Dimension(width, twoColumns(width)
+                            ? Math.max(leftHeight, rightHeight) : leftHeight + gap + rightHeight);
+                }
+
+                @Override
+                public Dimension getPreferredScrollableViewportSize() {
+                    return getPreferredSize();
+                }
+
+                @Override
+                public int getScrollableUnitIncrement(Rectangle visibleRect, int orientation, int direction) {
+                    return 24;
+                }
+
+                @Override
+                public int getScrollableBlockIncrement(Rectangle visibleRect, int orientation, int direction) {
+                    return Math.max(24, visibleRect.height - 24);
+                }
+
+                @Override
+                public boolean getScrollableTracksViewportWidth() {
+                    return true;
+                }
+
+                @Override
+                public boolean getScrollableTracksViewportHeight() {
+                    return false;
+                }
+            }
 
     private Path launcherUpdateReport() {
         return services.registry().toAbsolutePath().getParent().resolve("msi-update-result.txt");
@@ -4166,12 +4359,29 @@ public final class LauncherFrame extends JFrame {
             setLayout(new java.awt.GridLayout(0, columns, gap, gap));
         }
 
+        private int columnsForWidth(int width, int count) {
+            if (width <= 0) return 1;
+            int cell = scale.scaleForGUI(300);
+            return Math.max(1, Math.min(Math.min(3, count),
+                    (width + gap) / (cell + gap)));
+        }
+
+        private int availableWidth() {
+            if (getWidth() > 0) return getWidth();
+            Container parent = getParent();
+            if (parent == null) return 0;
+            int width = parent.getWidth();
+            if (width == 0 && parent.getParent() != null) {
+                width = parent.getParent().getWidth();
+            }
+            java.awt.Insets insets = parent.getInsets();
+            return Math.max(0, width - insets.left - insets.right);
+        }
+
         @Override
         public void doLayout() {
             int count = Math.max(1, getComponentCount());
-            int cell = scale.scaleForGUI(300);
-            int next = Math.max(1, Math.min(Math.min(3, count),
-                    Math.max(1, (getWidth() + gap) / (cell + gap))));
+            int next = columnsForWidth(availableWidth(), count);
             if (next != columns) {
                 columns = next;
                 java.awt.GridLayout layout = (java.awt.GridLayout) getLayout();
@@ -4192,7 +4402,7 @@ public final class LauncherFrame extends JFrame {
                 width = Math.max(width, preferred.width);
                 height = Math.max(height, preferred.height);
             }
-            int usedColumns = Math.max(1, Math.min(columns, count));
+            int usedColumns = columnsForWidth(availableWidth(), count);
             int rows = (count + usedColumns - 1) / usedColumns;
             return new Dimension(width * usedColumns + gap * (usedColumns - 1),
                     height * rows + gap * (rows - 1));

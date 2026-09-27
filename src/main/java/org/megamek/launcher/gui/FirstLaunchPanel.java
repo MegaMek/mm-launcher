@@ -254,6 +254,7 @@ final class FirstLaunchPanel extends JPanel {
         private final ArtworkPanel artwork;
         private final JPanel deck;
         private final JScrollPane scroller;
+        private int lastDeckWidth = -1;
 
         private ManagedHomePanel(BufferedImage image, GuiScale scale, JPanel controls) {
             this.scale = scale;
@@ -283,6 +284,17 @@ final class FirstLaunchPanel extends JPanel {
 
         @Override
         public void doLayout() {
+            // The deck's preferred height depends on the width available to its
+            // responsive actions. Give it the current width before asking for
+            // that height (the viewport lays out its children afterwards).
+            if (getWidth() != lastDeckWidth) {
+                lastDeckWidth = getWidth();
+                deck.setSize(getWidth(), deck.getHeight());
+                // BoxLayout caches its children's preferred/maximum heights.
+                // Those change when launch actions wrap to another row count.
+                deck.getComponent(0).invalidate();
+                deck.invalidate();
+            }
             int minimumArt = Math.min(scale.scaleForGUI(180),
                     Math.max(0, getHeight() * 35 / 100));
             int maximumDeck = Math.max(0, getHeight() - minimumArt);
@@ -291,6 +303,7 @@ final class FirstLaunchPanel extends JPanel {
             artwork.setBounds(0, 0, getWidth(), artHeight);
             scroller.setBounds(0, artHeight, getWidth(), deckHeight);
         }
+
     }
 
     private static final class ManagedDeckPanel extends JPanel implements Scrollable {

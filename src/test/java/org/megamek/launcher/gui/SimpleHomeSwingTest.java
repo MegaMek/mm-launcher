@@ -51,6 +51,7 @@ import org.megamek.launcher.registry.RegistryData;
 import org.megamek.launcher.registry.RegistryStore;
 import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
+import org.megamek.launcher.release.ReleaseTransport;
 import org.megamek.launcher.update.UpdatePreviewService;
 
 import javax.imageio.ImageIO;
@@ -79,9 +80,11 @@ import java.awt.event.WindowEvent;
 import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.io.ByteArrayInputStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -742,6 +745,278 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    void managedHomeFitsAllActionsAtTheInitialAndConstrainedWindowSizes() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing layout requires a display");
+        FakeServices services = new FakeServices(temp.resolve("home-window-size.json"));
+        services.installed = true;
+        services.main = services.first;
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            waitButton(frame, "launch-lab-button");
+            onEdt(() -> {
+                Rectangle available = GuiScale.usableBounds(frame.getGraphicsConfiguration());
+                assertTrue(available.contains(frame.getBounds()));
+                if (available.width >= 1250 && available.height >= 870) {
+                    assertTrue(frame.getWidth() >= 1180);
+                    assertTrue(frame.getHeight() >= 820);
+                }
+                frame.setSize(1044, 714);
+                frame.validate();
+                assertCompactLaunches(frame, true);
+                assertHomeActionsVisible(frame);
+                frame.setSize(1100, 760);
+                frame.validate();
+                assertCompactLaunches(frame, true);
+                assertHomeActionsVisible(frame);
+                frame.setSize(720, 600);
+                frame.validate();
+                assertCompactLaunches(frame, false);
+                assertHomeActionsVisible(frame);
+                return null;
+            });
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    private static void assertHomeActionsVisible(LauncherFrame frame) {
+        javax.swing.JScrollPane scroller = find(frame, "managedHomeDeckScroller");
+        for (Component action : List.<Component>of(find(frame, "managedHomeNavigation"),
+                find(frame, "launch-lab-button"))) {
+            Rectangle bounds = SwingUtilities.convertRectangle(action.getParent(),
+                    action.getBounds(), scroller.getViewport().getView());
+            assertTrue(scroller.getViewport().getViewRect().contains(bounds),
+                    () -> action.getName() + " should be visible without scrolling: "
+                            + bounds + " viewport=" + scroller.getViewport().getViewRect());
+        }
+    }
+
+    private static void assertCompactLaunches(LauncherFrame frame, boolean threeColumns) {
+        JPanel actions = find(frame, "homeLaunchActions");
+        assertEquals(3, actions.getComponentCount());
+        int buttonHeight = actions.getComponent(0).getPreferredSize().height;
+        for (Component button : actions.getComponents()) {
+            assertTrue(button.getHeight() <= buttonHeight + 2,
+                    "launch buttons must not be stretched to a multi-row deck height");
+        }
+        if (threeColumns) {
+            assertEquals(actions.getComponent(0).getY(), actions.getComponent(2).getY());
+            assertTrue(actions.getComponent(0).getX() < actions.getComponent(2).getX());
+        } else {
+            assertTrue(actions.getComponent(2).getY() > actions.getComponent(0).getY());
+        }
+    }
+
+    @Test
+    void settingsColumnsStayEqualAndStackWithoutLosingNavigation() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing bounds require a display");
+        FakeServices services = new FakeServices(temp.resolve("settings-layout.json"));
+        services.installed = true;
+        services.main = services.first;
+        CountDownLatch releaseNews = new CountDownLatch(1);
+        LauncherNewsFeed feed = new LauncherNewsFeed((uri, accept) -> {
+            if (!releaseNews.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                throw new IOException("Test news release timed out");
+            }
+            return new ReleaseTransport.Response(503, Map.of(),
+                    new ByteArrayInputStream(new byte[0]));
+        });
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, feed));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
+            assertNotNull(waitFor(() -> find(frame, "changeDefaultJavaButton")));
+            // The news worker is still pending while settings finishes loading.
+            onEdt(() -> {
+                frame.setSize(1080, 760);
+                frame.validate();
+                assertSettingsGeometry(frame, true, "newsLoadingMessage");
+                frame.setSize(720, 600);
+                frame.validate();
+                assertSettingsGeometry(frame, false, "newsLoadingMessage");
+                return null;
+            });
+            releaseNews.countDown();
+            assertNotNull(waitFor(() -> find(frame, "newsUnavailableMessage")));
+            onEdt(() -> {
+                frame.setSize(1080, 760);
+                frame.validate();
+                assertSettingsGeometry(frame, true, "newsUnavailableMessage");
+                frame.setSize(720, 600);
+                frame.validate();
+                assertSettingsGeometry(frame, false, "newsUnavailableMessage");
+                return null;
+            });
+        } finally {
+            releaseNews.countDown();
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void settingsLoadingAndErrorKeepResponsiveGroupsAndNewsActions() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
+        FakeServices services = new FakeServices(temp.resolve("settings-error-layout.json"));
+        services.installed = true;
+        services.main = services.first;
+        services.releaseSettings = new CountDownLatch(1);
+        services.settingsFailure = new IOException("Unreadable test settings");
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services,
+                new LauncherNewsFeed((uri, accept) ->
+                        new ReleaseTransport.Response(503, Map.of(),
+                                new ByteArrayInputStream(new byte[0])))));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
+            onEdt(() -> {
+                frame.setSize(1080, 760);
+                frame.validate();
+                assertEquals(0, ((JPanel) find(frame, "settingsRightColumn")).getY());
+                assertNotNull(find(frame, "settingsLoadingMessage"));
+                assertNotNull(find(frame, "allNewsButton"));
+                return null;
+            });
+            services.releaseSettings.countDown();
+            assertNotNull(waitFor(() -> find(frame, "settingsErrorMessage")));
+            onEdt(() -> {
+                frame.setSize(720, 600);
+                frame.validate();
+                JPanel left = find(frame, "settingsLeftColumn");
+                JPanel right = find(frame, "settingsRightColumn");
+                assertEquals(left.getWidth(), right.getWidth());
+                assertTrue(right.getY() >= left.getHeight());
+                assertNotNull(find(frame, "retrySettingsButton"));
+                assertNotNull(find(frame, "allNewsButton"));
+                return null;
+            });
+        } finally {
+            services.releaseSettings.countDown();
+            dispose(frame);
+        }
+    }
+
+    private static void assertSettingsGeometry(LauncherFrame frame, boolean wide, String newsState) {
+        JPanel left = find(frame, "settingsLeftColumn");
+        JPanel right = find(frame, "settingsRightColumn");
+        javax.swing.JScrollPane scroll = find(frame, "settingsScrollPane");
+        Component navigation = find(frame, "homeButton");
+        assertNotNull(find(frame, newsState));
+        assertNotNull(find(frame, "allNewsButton"));
+        assertNotNull(find(frame, "defaultJavaPath"));
+        assertNotNull(find(frame, "viewOperationLogsButton"));
+        Component newsAction = find(frame, newsState.equals("newsArticleButton0")
+                ? "newsArticleButton0" : "allNewsButton");
+        Rectangle actionBounds = SwingUtilities.convertRectangle(newsAction.getParent(),
+                newsAction.getBounds(), right);
+        assertTrue(actionBounds.x + actionBounds.width <= right.getWidth(),
+                "news action must fit inside its column");
+        assertEquals(0, left.getX());
+        if (wide) {
+            assertEquals(0, left.getY());
+            assertEquals(0, right.getY());
+            assertTrue(Math.abs(left.getWidth() - right.getWidth()) <= 1);
+            assertTrue(right.getX() >= left.getX() + left.getWidth());
+            assertTrue(find(frame, "settingsCommunitySection").getY()
+                    < find(frame, "settingsLatestnewsSection").getY());
+        } else {
+            assertEquals(left.getWidth(), right.getWidth());
+            assertEquals(0, right.getX());
+            assertTrue(right.getY() >= left.getY() + left.getHeight());
+            assertFalse(scroll.getHorizontalScrollBar().isVisible());
+        }
+        Rectangle nav = SwingUtilities.convertRectangle(navigation.getParent(),
+                navigation.getBounds(), frame.getContentPane());
+        Rectangle viewport = SwingUtilities.convertRectangle(scroll.getParent(),
+                scroll.getBounds(), frame.getContentPane());
+        assertTrue(nav.y >= viewport.y + viewport.height,
+                "bottom navigation stays outside and below the scrolling settings");
+        assertTrue(nav.y + nav.height <= frame.getContentPane().getHeight());
+    }
+
+    @Test
+    void latestNewsLoadsIndependentlyOfSettingsAndOnlyOncePerWindow() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
+        FakeServices services = new FakeServices(temp.resolve("news.json"));
+        services.installed = true;
+        services.main = services.first;
+        CountDownLatch releaseNews = new CountDownLatch(1);
+        CountDownLatch newsStarted = new CountDownLatch(1);
+        AtomicInteger requests = new AtomicInteger();
+        byte[] xml = ("<feed xmlns=\"http://www.w3.org/2005/Atom\"><entry>"
+                + "<title>MegaMek update</title><published>2026-08-14T00:00:00Z</published>"
+                + "<link rel=\"alternate\" href=\"https://megamek.org/news\"/>"
+                + "</entry></feed>").getBytes(StandardCharsets.UTF_8);
+        LauncherNewsFeed feed = new LauncherNewsFeed((uri, accept) -> {
+            requests.incrementAndGet();
+            newsStarted.countDown();
+            if (!releaseNews.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                throw new IOException("Test news release timed out");
+            }
+            return new ReleaseTransport.Response(200, Map.of(),
+                    new ByteArrayInputStream(xml));
+        });
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, feed));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
+            assertTrue(newsStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            assertNotNull(waitButton(frame, "allNewsButton"));
+            assertNotNull(onEdt(() -> find(frame, "newsLoadingMessage")));
+            assertNotNull(onEdt(() -> find(frame, "homeButton")),
+                    "the news request does not block Settings navigation");
+            releaseNews.countDown();
+            JButton headline = waitButton(frame, "newsArticleButton0");
+            assertEquals("Aug 14, 2026 - MegaMek update", headline.getText());
+            onEdt(() -> {
+                frame.setSize(1080, 760);
+                frame.validate();
+                assertSettingsGeometry(frame, true, "newsArticleButton0");
+                frame.setSize(720, 600);
+                frame.validate();
+                assertSettingsGeometry(frame, false, "newsArticleButton0");
+                return null;
+            });
+            assertEquals(1, requests.get());
+            SwingUtilities.invokeAndWait(waitButton(frame, "homeButton")::doClick);
+            SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
+            assertNotNull(waitButton(frame, "newsArticleButton0"));
+            assertEquals(1, requests.get());
+        } finally {
+            releaseNews.countDown();
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void unavailableNewsLeavesArchiveAndSettingsUsable() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
+        FakeServices services = new FakeServices(temp.resolve("news-unavailable.json"));
+        services.installed = true;
+        services.main = services.first;
+        LauncherNewsFeed feed = new LauncherNewsFeed((uri, accept) ->
+                new ReleaseTransport.Response(503, Map.of(), new ByteArrayInputStream(new byte[0])));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, feed));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
+            assertNotNull(waitFor(() -> find(frame, "newsUnavailableMessage")));
+            assertNotNull(waitButton(frame, "allNewsButton"));
+            assertNotNull(waitButton(frame, "changeDefaultJavaButton"));
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void launcherTitleShowsPackagedVersionOrDevelopmentBuild() {
+        assertEquals("MegaMek Launcher 0.14.0", LauncherFrame.titleFor("0.14.0"));
+        assertEquals("MegaMek Launcher (development build)", LauncherFrame.titleFor(null));
+    }
+
+    @Test
     void directLaunchMinimizesSafelyAndOnlyRestoresForFailureOrBusyGate()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
@@ -871,6 +1146,8 @@ class SimpleHomeSwingTest {
         private volatile IOException launchFailure;
         private volatile boolean installBecameMain = true;
         private volatile IOException installFailure;
+        private volatile CountDownLatch releaseSettings;
+        private volatile IOException settingsFailure;
 
         private FakeServices(Path registry) {
             super(registry);
@@ -900,6 +1177,13 @@ class SimpleHomeSwingTest {
                     products, null);
             records = List.of(firstWithoutJava, second);
             main = first;
+        }
+
+        @Override public SettingsView settingsView() throws IOException, InterruptedException {
+            CountDownLatch release = releaseSettings;
+            if (release != null) release.await();
+            if (settingsFailure != null) throw settingsFailure;
+            return super.settingsView();
         }
 
         @Override public QuickInstallSnapshot quickInstallSnapshot()

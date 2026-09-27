@@ -29,6 +29,9 @@ launch is an interactive finish-button action only: `msiexec /qn` self-upgrades
 never launch the app. It does not change the `.msi` file association or prompt
 for an install directory. `mm-launcher` remains the compatible internal CLI
 and Linux script name.
+Version 0.14.0 is a newer MSI for upgrading existing 0.1.3 installations;
+rebuilding the same version does not allow a same-version MSI reinstall. The upgrade
+keeps the fixed upgrade UUID and install location and leaves user data intact.
 
 Only the Windows MSI installation checks the official MegaMek/mm-launcher
 GitHub latest stable release for a newer numeric MSI version. The GUI prompts
@@ -156,7 +159,15 @@ Managed Home has one top-left information area for useful aggregate update state
 **N installations have updates**, or **Some installations could not be checked**. It does not
 repeat an obvious post-install “ready” message or place status text above navigation.
 
-Settings contains only **Game Java** and **Diagnostics**. **Change default Java** validates and
+The title bar shows the packaged MegaMek Launcher version (or "development build" outside a
+packaged release). Settings also includes **Launcher update** on Windows MSI, **Community**,
+and **Latest news**. Latest news reads the official MegaMek Atom feed once per launcher window,
+independently of installation checks, and shows up to three dated headlines linking to official
+posts. **All news** opens the blog archive even if the feed cannot be loaded; news never blocks
+the launcher. At wide window sizes Settings places Game Java, Diagnostics, and
+Launcher update in one column beside Community and Latest news in an equally wide
+column; narrower windows stack the groups in reading order above the fixed bottom
+navigation. **Change default Java** validates and
 atomically stores the sole external Java 21+ executable for every installation. Launch and
 explicit launch preview resolve and revalidate this setting; installation records contain no Java
 path or feature. With no saved default, the exact Java runtime executing MegaMek Launcher is the
@@ -164,8 +175,8 @@ automatic effective runtime and is not persisted. An invalid or corrupt explicit
 visibly instead of silently falling back. The
 pre-release settings schema contains no global update
 fields and deliberately does not migrate older settings schemas. Settings presents unboxed,
-left-aligned sections; the Java version and
-regular-font path share a row with the change action, and **View logs** opens a styled local viewer.
+left-aligned sections; the Java version and regular-font path appear above
+the left-aligned change action, and **View logs** opens a styled local viewer.
 Settings displays the effective runtime whether it is automatic or explicitly selected. The
 selector uses the same dark-teal/gold controls. No JRE is
 downloaded or installed by the application; installed/native launcher
@@ -212,7 +223,9 @@ applications it actually contains; later or concurrent operations never replace 
 preferences. Imported copies are launch-only and create no receipt/channel provenance. Home uses
 the union of products statically detected across registered copies. There is no simple/advanced
 mode toggle. The layout adapts to narrow windows and Java's per-monitor HiDPI scaling. See the
-[first-launch presentation notes](docs/first-launch-ui.md).
+[first-launch presentation notes](docs/first-launch-ui.md). New windows request a
+1180-by-820 logical-pixel size, capped to the current monitor's usable work area; users can
+resize them, but the size is not yet saved across launcher restarts.
 
 Managed Home keeps that composition: full-width cover artwork on top and a compact, scrollable
 dark control deck below, with no duplicate header/footer or left artwork rail. It renders the

@@ -246,6 +246,16 @@ class LauncherSwingSmokeTest {
             assertTrue(((JLabel) component(frame, "defaultJavaStatus")).getText()
                     .startsWith("Java "));
             JButton changeDefaultJava = waitForButton(frame, "changeDefaultJavaButton");
+            SwingUtilities.invokeAndWait(() -> {
+                JPanel javaRow = component(frame, "defaultJavaRow");
+                java.awt.Component javaPath = component(frame, "defaultJavaPath");
+                assertEquals(gameJava, changeDefaultJava.getParent());
+                assertTrue(changeDefaultJava.getY() >= javaRow.getY() + javaRow.getHeight());
+                assertEquals(javaRow.getX(), changeDefaultJava.getX());
+                assertTrue(javaPath.getWidth() > changeDefaultJava.getWidth(),
+                        "the path has its own full row");
+            });
+            assertEquals("https://discord.gg/megamek", LauncherFrame.DISCORD_INVITE_URL);
             SwingUtilities.invokeAndWait(changeDefaultJava::doClick);
             JDialog javaSelector = owned(frame, "Change default Java");
             assertEquals(FirstLaunchPanel.BACKGROUND,

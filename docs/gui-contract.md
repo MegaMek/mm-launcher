@@ -54,11 +54,20 @@ record/preference binding, stays selected as requested while disabled for saving
 authoritative value on failure. Imported, incomplete, corrupt, missing-channel, and otherwise
 ineligible records show no checkbox. The action menu has no update-check editor.
 
-Settings has only Game Java and Diagnostics; it has no Updates section or automatic-check
-control. The effective game Java
+The title bar shows the packaged launcher version (0.14.0) or identifies a development build. Settings
+uses equal-width, top-aligned columns at wide window sizes: Game Java, Diagnostics, and
+Launcher update (Windows MSI) on the left; Community and Latest news on the right.
+At narrow sizes these groups stack in that reading order, with the bottom navigation
+remaining visible and the sections scrolling vertically as needed. Loading and error
+states keep the same layout. Settings
+includes Game Java, Diagnostics, Launcher update on Windows MSI, Community, and Latest news;
+there is no global automatic-check control. Latest news loads up to three dated headlines from
+MegaMek's official Atom feed in the background once per window, links to the full posts, and
+always offers the blog archive when offline. Remote article HTML is not rendered in the launcher
+and news loading never delays navigation. The effective game Java
 section shows the feature and canonical selectable/tooltipped executable without exposing
 persistence implementation details. Its heading and contents are left aligned, the path uses the
-regular UI font, and the change action shares the same row. A successful **Change default Java** validates Java 21+ off the EDT
+regular UI font, and the change action sits below the path on the left. A successful **Change default Java** validates Java 21+ off the EDT
 before atomic publication. It is the sole explicit runtime for every registered copy and changes
 take effect on the next launch. If no default is saved, the exact Java runtime executing MM
 Launcher is displayed and used automatically without persistence. Invalid or corrupt explicit
