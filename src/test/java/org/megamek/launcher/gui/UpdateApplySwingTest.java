@@ -200,7 +200,7 @@ class UpdateApplySwingTest {
                     "a normal skipped decision remains preserved without a completion dialog");
             assertEquals(fixture.second.id(),
                     fixture.services.currentHome().defaultInstallationId());
-            assertNotNull(find(frame, "installationCards"),
+            assertNotNull(waitFor(() -> find(frame, "installationCards")),
                     "clean success returns to the current Installations page");
         } finally {
             fixture.services.releaseApply.countDown();
