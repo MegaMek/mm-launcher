@@ -978,6 +978,14 @@ val stageWindowsInstallerInput = tasks.register<Sync>("stageWindowsInstallerInpu
 val windowsInstallerFileName = "MegaMek-Launcher-${project.version}-windows-x64.msi"
 // ProductVersion must be numeric even when the Gradle artifact is a SNAPSHOT.
 val windowsInstallerAppVersion = project.version.toString().substringBefore('-')
+// macOS requires a positive first component; offsetting the major preserves
+// upgrade order when the launcher advances from 0.x to 1.x.
+val macInstallerAppVersion = windowsInstallerAppVersion.split(".").let { components ->
+    check(components.size == 3 && components.all { it.toIntOrNull() != null && it.toInt() >= 0 }) {
+        "macOS installer requires a numeric major.minor.patch version."
+    }
+    "${Math.addExact(components[0].toInt(), 1)}.${components[1]}.${components[2]}"
+}
 
 val windowsInstallerMsi = tasks.register<WindowsInstallerMsi>("windowsInstallerMsi") {
     group = "distribution"
@@ -1049,7 +1057,7 @@ if (OperatingSystem.current().isLinux || OperatingSystem.current().isMacOsX) {
             jpackageExecutable.set(layout.file(javaHome.map { File(it, "bin/jpackage") }))
             packageType.set(type)
             mainJarFileName.set(tasks.named<Jar>("jar").flatMap { it.archiveFileName })
-            appVersion.set(windowsInstallerAppVersion)
+            appVersion.set(if (type == "pkg") macInstallerAppVersion else windowsInstallerAppVersion)
             installerFile.set(distributionsDirectory.map { it.file(fileName) })
             outputs.cacheIf { false }
         }
