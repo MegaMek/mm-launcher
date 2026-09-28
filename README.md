@@ -3,26 +3,19 @@
 ## CI distributions
 
 The official source repository is [MegaMek/mm-launcher](https://github.com/MegaMek/mm-launcher).
-The `Launcher distributions` workflow builds on source pushes, pull requests, and manual
-dispatch. It uploads unsigned archives, the Windows MSI, checksums, and test reports
-as temporary Actions artifacts; it does not create a GitHub release, install an MSI,
-or sign binaries. Run `./gradlew test buildArchive verifyArchive` locally (use
-`.\gradlew.bat` on Windows). The Windows MSI build additionally requires WiX 3.14;
-the workflow downloads and verifies those binaries before running `buildWindowsInstaller`.
-
-CI produces six versioned distribution/checksum pairs: one Windows x64 MSI,
-the existing all-platform tar.gz (requires external Java 21), and four
-Java-bundled host-native portable tar.gz archives for Windows x64, Linux x64,
-macOS Intel, and macOS Apple Silicon. The bundled portable builds contain
-Java 21 `bin/java` and the full JDK module set, so the launcher and games can
-use the bundled Java without a system installation. Download the archive
-matching your machine, extract it, and use the same OS entry point described
-below. Each native archive includes only that OS entry point; the Windows
-archive keeps the shared `MegaMek Launcher.app/Contents/app/lib` payload path for
-its executable without shipping the other OS scripts.
-`buildPortableArchive verifyPortableArchive` builds and checks the current
-host's portable archive; `buildWindowsInstaller` builds (but does not install)
-the MSI on Windows with WiX 3.14 in `.tools/wix314`.
+The `Launcher native installers` workflow builds on pushes to `main`, pull requests,
+and manual dispatch. PR branch pushes run once through the pull-request event rather
+than also starting a duplicate push matrix. CI produces **only** five unsigned native installer/checksum
+pairs: Windows x64 `.msi`, Linux x64 `.deb` and `.rpm`, and macOS `.pkg` on both
+Intel and Apple Silicon. It does not build, verify, or upload portable archives,
+install packages on CI runners, create a release, sign, or notarize. Each
+installer contains a host-native Java 21 image with all JDK modules and `bin/java`
+for games launched by the application; no external Java is required.
+Run `./gradlew test buildDebInstaller buildRpmInstaller` on Linux,
+`./gradlew test buildPkgInstaller` on macOS, or
+`.\gradlew.bat test buildWindowsInstaller` on Windows. Windows packaging requires
+WiX 3.14 in `.tools/wix314`; CI verifies the downloaded binaries.
+The former archive tasks remain available for development but are not CI outputs.
 
 The Windows MSI is an additional per-user installation (bundled Java, fixed
 install folder, persistent upgrade UUID). Installed Apps, Start Menu, the
@@ -40,6 +33,16 @@ and Linux script name.
 Version 0.14.5 is a newer MSI for upgrading existing 0.14.4 (or earlier) installations;
 rebuilding the same version does not allow a same-version MSI reinstall. The upgrade
 keeps the fixed upgrade UUID and install location and leaves user data intact.
+
+The Linux installers use the stable `megamek-launcher` package identity under
+`/opt`, while macOS uses bundle identifier `org.megamek.launcher` under
+`/Applications`. macOS's internal package version offsets the numeric major
+by one (for example, launcher 0.14.5 uses package version 1.14.5) because
+Apple does not accept a zero major; the downloadable filename retains the
+launcher version. They contain only program files. Neither installer owns the
+per-user registry, logs, settings, or any registered game installation;
+upgrades must leave those separate locations untouched. macOS and Linux
+installers do not self-update.
 
 Only the Windows MSI installation checks the official MegaMek/mm-launcher
 GitHub latest stable release for a newer numeric MSI version. The GUI prompts
@@ -76,12 +79,12 @@ conversion.
 These unsigned, non-notarized CI artifacts are not a release; signing and
 notarization remain outstanding. MegaMek Launcher source code is GPL
 version 3 or later (see [LICENSE.code](LICENSE.code)); distributions carry
-the same license text alongside dependency notices. The generic archive
-and its read-only cross-runner verification remain unchanged.
+the same license text alongside dependency notices. Archive builds and their
+read-only verification remain developer-only.
 
-## Portable archive prototype
+## Developer-only portable archive prototype
 
-MegaMek Launcher is also distributed as one versioned all-platform portable archive.
+The developer-only archive tasks can build a versioned all-platform portable archive.
 Install an external **64-bit Java 21 or newer** runtime, download
 `MegaMek-Launcher-0.1.0-SNAPSHOT.tar.gz`, extract it, and keep the fixed `MegaMek Launcher/` tree intact.
 Choose the entry point for the current OS:
@@ -98,12 +101,11 @@ Linux script away from the sibling app folder.
 The macOS and Windows prototypes are unsigned, and the macOS app is not notarized. Do not bypass
 Gatekeeper or other OS security controls. Signing, notarization, and a public source-license
 decision remain release prerequisites. The generic archive is Java-free; the
-MSI and host-native archives bundle Java, but the launcher does not download a JRE.
+native installers bundle Java, but the launcher does not download a JRE.
 
 The support goal is all three OSes. The archive's Windows x64 entry point and native startup smoke
-are validated locally on Windows. Native CI is prepared to download and validate the exact same
-archive bytes on Windows x64, Linux x64, macOS Intel, and macOS Apple Silicon. Those CI runs remain
-pending and user-owned; this Windows checkpoint does not certify native macOS or Linux execution.
+were validated locally on Windows. CI now builds and inspects native installers instead
+of running portable archive verification across runners.
 
 Build the one archive and its checksum, then verify its full structure and current native entry
 point with:
@@ -117,7 +119,8 @@ The generic archive outputs are `MegaMek-Launcher-<version>.tar.gz` and its exac
 `build/distributions/`. `verifyArchive` checks all three entry points, the single shared payload,
 and checksum, then runs the current host's native entry point. `verifyProvidedArchive` is the
 separate read-only CI mode and requires explicit `-PprovidedArchive=<path>` and
-`-PprovidedChecksum=<path>` inputs; it never depends on packaging. `--version` and
+`-PprovidedChecksum=<path>` inputs; it never depends on packaging. It is not
+used by installer CI. `--version` and
 `--startup-check` are side-effect-free packaged diagnostics. The desktop launchers also accept
 `--registry <absolute-path>` as an isolated test/development override.
 

@@ -111,6 +111,7 @@ class LauncherSwingSmokeTest {
             assertNotNull(existing, "first Home exposes the secondary import action");
             assertEquals("Use existing installation", existing.getText());
             FirstLaunchSplitButton split = (FirstLaunchSplitButton) options.getParent();
+            waitFor(() -> options.isEnabled() && split.isShowing());
             SwingUtilities.invokeAndWait(options::doClick);
             waitFor(() -> split.popupMenu().isVisible());
             assertEquals(5, split.popupMenu().getComponentCount());
@@ -953,7 +954,8 @@ class LauncherSwingSmokeTest {
     }
 
     private static void waitFor(java.util.function.BooleanSupplier condition) throws Exception {
-        for (int attempt = 0; attempt < 100; attempt++) {
+        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(8).toNanos();
+        while (System.nanoTime() < deadline) {
             boolean[] matched = new boolean[1];
             SwingUtilities.invokeAndWait(() -> matched[0] = condition.getAsBoolean());
             if (matched[0]) return;

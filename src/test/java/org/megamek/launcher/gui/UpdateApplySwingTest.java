@@ -200,7 +200,7 @@ class UpdateApplySwingTest {
                     "a normal skipped decision remains preserved without a completion dialog");
             assertEquals(fixture.second.id(),
                     fixture.services.currentHome().defaultInstallationId());
-            assertNotNull(find(frame, "installationCards"),
+            assertNotNull(waitFor(() -> find(frame, "installationCards")),
                     "clean success returns to the current Installations page");
         } finally {
             fixture.services.releaseApply.countDown();
@@ -357,6 +357,32 @@ class UpdateApplySwingTest {
     }
 
     @Test
+    void queuedApplyTitleCannotOverwriteFailureTitle() throws Exception {
+        Fixture fixture = fixture(true);
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(fixture.services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            onEdt(() -> {
+                OperationProgressDialog dialog = new OperationProgressDialog(frame,
+                        "Preparing update", "applyUpdateProgressLog", () -> {});
+                dialog.setVisible(true);
+                dialog.setTitleIfCurrent("Preparing update", "Applying verified update");
+                assertEquals("Applying verified update", dialog.getTitle());
+                dialog.setTitle("Update failed — recovery may be required");
+                dialog.setTitleIfCurrent("Preparing update", "Applying verified update");
+                assertEquals("Update failed — recovery may be required", dialog.getTitle());
+                dialog.showFailure(new IOException("simulated apply failure"));
+                dialog.setTitleIfCurrent("Preparing update", "Applying verified update");
+                assertEquals("Update failed — recovery may be required", dialog.getTitle());
+                dialog.dispose();
+                return null;
+            });
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
     void applyFailureBeforeMutationDoesNotInventRecovery()
             throws Exception {
         Fixture fixture = fixture(true);
@@ -370,8 +396,19 @@ class UpdateApplySwingTest {
             click(waitForDialog("Update application"), "Update");
             waitUntil(() -> fixture.services.applyCalls == 1);
 
-            JDialog failed = waitForDialog("Update failed — recovery may be required");
-            assertTrue(failed.getTitle().contains("recovery"));
+            // The Apply count precedes package cleanup. Wait for the failure
+            // surface itself, not an unrelated home reload or a worker milestone.
+            JDialog failed = waitFor(() -> {
+                for (Window window : Window.getWindows()) {
+                    if (window instanceof OperationProgressDialog dialog
+                            && dialog.isShowing()) {
+                        JButton close = find(dialog, "operationCancelButton");
+                        if (close != null && "Close".equals(close.getText())) return dialog;
+                    }
+                }
+                return null;
+            }, Duration.ofSeconds(60));
+            assertEquals("Update failed — recovery may be required", failed.getTitle());
             assertNotNull(find(failed, "operationViewDetailsButton"));
             waitUntil(() -> fixture.services.loadHomeCalls >= 2);
             assertNull(find(frame, "recoverUpdateButton"),
@@ -497,15 +534,29 @@ class UpdateApplySwingTest {
     }
 
     private static JDialog waitForDialog(String title) throws Exception {
-        return waitFor(() -> {
-            for (Window window : Window.getWindows()) {
-                if (window instanceof JDialog dialog && dialog.isShowing()
-                        && title.equals(dialog.getTitle())) {
-                    return dialog;
+        try {
+            return waitFor(() -> {
+                for (Window window : Window.getWindows()) {
+                    if (window instanceof JDialog dialog && dialog.isShowing()
+                            && title.equals(dialog.getTitle())) {
+                        return dialog;
+                    }
                 }
-            }
-            return null;
-        });
+                return null;
+            });
+        } catch (AssertionError timeout) {
+            String visible = onEdt(() -> java.util.Arrays.stream(Window.getWindows())
+                    .filter(Window::isShowing).filter(JDialog.class::isInstance)
+                    .map(JDialog.class::cast).map(JDialog::getTitle)
+                    .toList().toString());
+            String workers = Thread.getAllStackTraces().entrySet().stream()
+                    .filter(entry -> entry.getKey().getName().contains("SwingWorker"))
+                    .map(entry -> entry.getKey().getName() + ": "
+                            + java.util.Arrays.toString(entry.getValue()))
+                    .collect(java.util.stream.Collectors.joining("\n"));
+            throw new AssertionError("timed out waiting for dialog " + title
+                    + "; showing dialogs: " + visible + "; workers: " + workers, timeout);
+        }
     }
 
     private static JDialog showingDialog(String title) throws Exception {
@@ -532,7 +583,12 @@ class UpdateApplySwingTest {
     }
 
     private static <T> T waitFor(java.util.function.Supplier<T> probe) throws Exception {
-        long deadline = System.nanoTime() + Duration.ofSeconds(8).toNanos();
+        return waitFor(probe, Duration.ofSeconds(8));
+    }
+
+    private static <T> T waitFor(java.util.function.Supplier<T> probe, Duration timeout)
+            throws Exception {
+        long deadline = System.nanoTime() + timeout.toNanos();
         while (System.nanoTime() < deadline) {
             AtomicReference<T> value = new AtomicReference<>();
             SwingUtilities.invokeAndWait(() -> value.set(probe.get()));

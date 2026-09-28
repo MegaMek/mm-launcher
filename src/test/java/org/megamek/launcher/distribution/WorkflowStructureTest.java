@@ -53,7 +53,7 @@ class WorkflowStructureTest {
             Path.of(".github", "workflows", "launcher-archives.yml");
 
     @Test
-    void workflowBuildsOnceThenVerifiesTheSameArtifactOnEveryDeclaredRunner()
+    void workflowBuildsAndVerifiesNativeInstallersOnEveryDeclaredRunner()
             throws Exception {
         String text = Files.readString(WORKFLOW, StandardCharsets.UTF_8);
         JsonNode root = new ObjectMapper(new YAMLFactory()).readTree(text);
@@ -61,61 +61,104 @@ class WorkflowStructureTest {
         assertTrue(root.path("on").has("workflow_dispatch"));
         assertTrue(root.path("on").has("push"));
         assertTrue(root.path("on").has("pull_request"));
+        JsonNode pushBranches = root.path("on").path("push").path("branches");
+        assertEquals(1, pushBranches.size(),
+                "PR branches must not launch duplicate push matrix builds");
+        assertEquals("main", pushBranches.path(0).asText());
         assertEquals("read", root.path("permissions").path("contents").asText());
 
-        JsonNode producer = root.path("jobs").path("build-archive");
-        assertEquals("windows-2025", producer.path("runs-on").asText());
-        assertEquals(List.of(
-                "actions/checkout@v4",
-                "actions/setup-java@v4",
-                "gradle/actions/setup-gradle@v4",
-                "actions/upload-artifact@v4",
-                "actions/upload-artifact@v4"
-        ), actions(producer));
-        assertEquals(1, count(text, "buildArchive"),
-                "the workflow must select the producer only once");
-
-        JsonNode verifier = root.path("jobs").path("verify-archive");
-        assertEquals("build-archive", verifier.path("needs").asText());
+        JsonNode jobs = root.path("jobs");
+        assertEquals(1, jobs.size(), "only the native installer matrix should run");
+        JsonNode installers = jobs.path("installers");
+        assertEquals("${{ matrix.os }}", installers.path("runs-on").asText());
+        List<String> ids = new ArrayList<>();
         List<String> runners = new ArrayList<>();
-        List<String> platforms = new ArrayList<>();
-        for (JsonNode row : verifier.path("strategy").path("matrix").path("include")) {
+        List<String> extensions = new ArrayList<>();
+        for (JsonNode row : installers.path("strategy").path("matrix").path("include")) {
+            ids.add(row.path("id").asText());
             runners.add(row.path("os").asText());
-            platforms.add(row.path("platform").asText());
+            assertFalse(row.has("tasks"), "matrix tasks must not imply they drive build commands");
+            extensions.add(row.path("extensions").asText());
         }
-        assertEquals(List.of(
-                "windows-2025", "ubuntu-24.04", "macos-15-intel", "macos-15"
-        ), runners);
-        assertEquals(List.of("windows", "linux", "mac", "mac"), platforms);
+        assertEquals(List.of("windows-x64", "linux-x64", "macos-intel", "macos-apple-silicon"), ids);
+        assertEquals(List.of("windows-2025", "ubuntu-24.04", "macos-15-intel", "macos-15"), runners);
+        assertEquals(List.of("msi", "deb,rpm", "pkg", "pkg"), extensions);
         assertEquals(List.of(
                 "actions/checkout@v4",
-                "actions/download-artifact@v4",
                 "actions/setup-java@v4",
                 "gradle/actions/setup-gradle@v4",
                 "actions/upload-artifact@v4",
                 "actions/upload-artifact@v4"
-        ), actions(verifier));
+        ), actions(installers));
+        assertEquals("temurin", installers.path("steps").get(1).path("with").path("distribution").asText());
+        assertEquals("21", installers.path("steps").get(1).path("with").path("java-version").asText());
 
-        assertEquals(3, count(text, "verifyProvidedArchive"));
-        assertEquals(4, count(text, "-PbuildIdentifier=${{ github.sha }}"),
-                "the producer and all verifier commands must use the same build identity");
-        assertTrue(text.contains("name: MegaMek-Launcher-all-platform"));
-        assertTrue(text.contains("Archive SHA-256: $actual"));
-        assertTrue(text.contains("xvfb-run -a ./gradlew"));
-        assertTrue(text.contains("MegaMek-Launcher-test-reports-${{ matrix.id }}"));
-        assertTrue(text.contains("buildArchive buildWindowsInstaller"));
-        assertEquals(3, count(text, "verifyPortableArchive"));
-        assertTrue(text.contains("name: MegaMek-Launcher-windows-x64-msi"));
-        assertTrue(text.contains("name: MegaMek-Launcher-${{ matrix.id }}-portable"));
-        assertTrue(text.contains("MSI checksum mismatch"));
-        assertTrue(text.contains("Portable checksum mismatch"));
-        String wixStep = producer.path("steps").get(3).path("run").asText();
+        JsonNode wix = step(installers, "Install verified WiX 3.14 binaries");
+        assertEquals("runner.os == 'Windows'", wix.path("if").asText());
+        String wixStep = wix.path("run").asText();
         assertTrue(wixStep.contains("wix3141rtm/wix314-binaries.zip"));
         assertTrue(wixStep.contains("6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31"));
         assertTrue(wixStep.indexOf("Get-FileHash") < wixStep.indexOf("Expand-Archive"));
         assertTrue(wixStep.indexOf("throw \"WiX archive SHA-256 mismatch")
                 < wixStep.indexOf("Expand-Archive"));
+        JsonNode linuxTools = step(installers, "Install Linux packaging tools");
+        assertEquals("runner.os == 'Linux'", linuxTools.path("if").asText());
+        assertTrue(linuxTools.path("run").asText().contains("sudo apt-get install -y rpm fakeroot"));
 
+        assertTrue(step(installers, "Build Windows installer (never install)")
+                .path("run").asText().contains("buildWindowsInstaller"));
+        assertTrue(step(installers, "Build Linux installers (never install)")
+                .path("run").asText().contains("buildDebInstaller buildRpmInstaller"));
+        assertTrue(step(installers, "Build macOS installer (never install)")
+                .path("run").asText().contains("buildPkgInstaller"));
+        assertEquals(6, count(text, "-PbuildIdentifier=${{ github.sha }}"));
+
+        JsonNode verify = step(installers, "Verify exact installer/checksum pairs without installing");
+        assertEquals("${{ matrix.id }}", verify.path("env").path("PLATFORM").asText());
+        assertEquals("${{ matrix.extensions }}", verify.path("env").path("EXTENSIONS").asText());
+        String inspection = verify.path("run").asText();
+        assertTrue(inspection.contains("$files.Count -ne $types.Count"));
+        assertTrue(inspection.contains("$matchesForType.Count -ne 1"));
+        assertTrue(inspection.contains("ReadAllText(\"$($file.FullName).sha256\")"));
+        assertTrue(inspection.contains("if ($line -cne \"$actual  $($file.Name)\")"));
+        assertTrue(inspection.contains("OpenDatabase($file.FullName, 0)"), "MSI inspection must be read-only");
+        assertTrue(inspection.contains("pkgutil --expand-full"));
+        assertTrue(inspection.contains("dpkg-deb --field"));
+        assertTrue(inspection.contains("rpm -qp"));
+        assertFalse(inspection.matches("(?s).*\\n\\s*(?:&\\s*)?msiexec(?:\\.exe)?\\b.*"),
+                "verification must not execute the MSI");
+
+        JsonNode upload = step(installers, "Upload native installers and SHA-256 files only");
+        assertEquals("actions/upload-artifact@v4", upload.path("uses").asText());
+        assertEquals("MegaMek-Launcher-${{ matrix.id }}-installers",
+                upload.path("with").path("name").asText());
+        assertEquals("error", upload.path("with").path("if-no-files-found").asText());
+        String paths = upload.path("with").path("path").asText();
+        List<String> expectedPaths = new ArrayList<>();
+        for (String extension : List.of("msi", "deb", "rpm", "pkg")) {
+            String base = "build/distributions/MegaMek-Launcher-*-${{ matrix.id }}." + extension;
+            expectedPaths.add(base);
+            expectedPaths.add(base + ".sha256");
+        }
+        assertEquals(expectedPaths, paths.lines().map(String::trim).filter(line -> !line.isEmpty()).toList());
+        assertTrue(step(installers, "Test source on Windows").path("run").asText().contains(" test"));
+        assertTrue(step(installers, "Test source on Linux with Xvfb").path("run").asText()
+                .contains("xvfb-run -a ./gradlew \"-PbuildIdentifier=${{ github.sha }}\" test"));
+        assertTrue(step(installers, "Test source on macOS").path("run").asText().contains(" test"));
+        assertTrue(text.indexOf("Upload native installers and SHA-256 files only")
+                < text.indexOf("Test source on Windows"),
+                "hosted GUI test failures must not prevent installer artifacts from being inspected and uploaded");
+        JsonNode reports = step(installers, "Upload platform test reports");
+        assertEquals("always()", reports.path("if").asText());
+        assertEquals("MegaMek-Launcher-test-reports-${{ matrix.id }}",
+                reports.path("with").path("name").asText());
+        assertEquals("build/test-results/**/*.xml", reports.path("with").path("path").asText());
+
+        assertFalse(text.contains("buildArchive"));
+        assertFalse(text.contains("verifyProvidedArchive"));
+        assertFalse(text.contains("verifyPortableArchive"));
+        assertFalse(text.contains("actions/download-artifact"));
+        assertFalse(text.contains("-portable"));
         assertFalse(text.contains("windowsArchive"));
         assertFalse(text.contains("linuxArchive"));
         assertFalse(text.contains("macArchive"));
@@ -127,6 +170,15 @@ class WorkflowStructureTest {
         assertFalse(text.contains("secrets."));
         assertFalse(text.contains("gh release"));
         assertFalse(text.contains("actions/create-release"));
+    }
+
+    private static JsonNode step(JsonNode job, String name) {
+        for (JsonNode step : job.path("steps")) {
+            if (name.equals(step.path("name").asText())) {
+                return step;
+            }
+        }
+        throw new AssertionError("Missing workflow step: " + name);
     }
 
     private static List<String> actions(JsonNode job) {

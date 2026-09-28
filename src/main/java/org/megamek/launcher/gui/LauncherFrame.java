@@ -2101,6 +2101,12 @@ public final class LauncherFrame extends JFrame {
         });
         installEscapeAction(dialog, "closeAdoptionChannelMismatch", dialog::dispose);
         dialog.getRootPane().setDefaultButton(retry);
+        dialog.addWindowListener(new WindowAdapter() {
+            @Override public void windowOpened(WindowEvent event) {
+                retry.requestFocusInWindow();
+                dialog.getRootPane().setDefaultButton(retry);
+            }
+        });
         dialog.setVisible(true);
     }
 
@@ -3642,7 +3648,8 @@ public final class LauncherFrame extends JFrame {
                         discardPrepared(discarded, context);
                     }
                     SwingUtilities.invokeLater(() ->
-                            progress.setTitle("Applying verified update"));
+                            progress.setTitleIfCurrent("Preparing update",
+                                    "Applying verified update"));
                     PreparedUpdate applying = prepared;
                     prepared = null; // applyPrepared now owns cleanup on every outcome
                     return services.applyPrepared(

@@ -39,6 +39,7 @@ import org.megamek.launcher.channel.FollowChannel;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.KeyStroke;
+import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import java.awt.Color;
 import java.awt.Component;
@@ -89,6 +90,23 @@ class StyledComboBoxTest {
         assertNotNull(selectNext);
         assertNotNull(combo.getActionMap().get(selectNext),
                 "BasicComboBoxUI keyboard selection behavior remains installed");
+    }
+
+    @Test
+    void arrowBindingsSurviveUiRefresh() throws Exception {
+        StyledComboBox<FollowChannel> combo =
+                new StyledComboBox<>(FollowChannel.values(), GuiScale.DEFAULT);
+        SwingUtilities.invokeAndWait(() -> {
+            combo.updateUI();
+            for (int keyCode : new int[]{KeyEvent.VK_DOWN, KeyEvent.VK_UP}) {
+                Object binding = combo.getInputMap(
+                        JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT).get(
+                        KeyStroke.getKeyStroke(keyCode, 0));
+                assertNotNull(binding);
+                assertNotNull(combo.getActionMap().get(binding),
+                        "arrow key must resolve to an action after UI refresh");
+            }
+        });
     }
 
     @Test
