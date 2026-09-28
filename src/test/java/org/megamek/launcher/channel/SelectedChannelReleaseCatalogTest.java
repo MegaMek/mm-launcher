@@ -122,8 +122,8 @@ class SelectedChannelReleaseCatalogTest {
 
         assertEquals(List.of("v0.48.0"),
                 result.entries().stream().map(entry -> entry.release().tag()).toList());
-        assertFalse(result.entries().getFirst().assessment().eligible());
-        assertTrue(result.entries().getFirst().assessment().reason().contains("SHA-256"));
+        assertTrue(result.entries().getFirst().assessment().eligible());
+        assertTrue(result.entries().getFirst().assessment().asset().publishedDigest().isEmpty());
         assertThrows(IOException.class, () -> new SelectedChannelReleaseCatalog(
                 new QueueTransport()).page(repository, FollowChannel.MILESTONE, 0, 10));
     }

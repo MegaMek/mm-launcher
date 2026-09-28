@@ -2,6 +2,14 @@
 
 ## CI distributions
 
+The official source repository is [MegaMek/mm-launcher](https://github.com/MegaMek/mm-launcher).
+The `Launcher distributions` workflow builds on source pushes, pull requests, and manual
+dispatch. It uploads unsigned archives, the Windows MSI, checksums, and test reports
+as temporary Actions artifacts; it does not create a GitHub release, install an MSI,
+or sign binaries. Run `./gradlew test buildArchive verifyArchive` locally (use
+`.\gradlew.bat` on Windows). The Windows MSI build additionally requires WiX 3.14;
+the workflow downloads and verifies those binaries before running `buildWindowsInstaller`.
+
 CI produces six versioned distribution/checksum pairs: one Windows x64 MSI,
 the existing all-platform tar.gz (requires external Java 21), and four
 Java-bundled host-native portable tar.gz archives for Windows x64, Linux x64,

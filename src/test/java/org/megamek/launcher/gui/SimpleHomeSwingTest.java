@@ -1314,6 +1314,7 @@ class SimpleHomeSwingTest {
             JButton headline = waitButton(frame, "newsArticleButton0");
             assertEquals("Aug 14, 2026 - MegaMek update and improvements for players and campaign testers",
                     headline.getText());
+            assertNotNull(waitFor(() -> find(frame, "defaultJavaPath")));
             onEdt(() -> {
                 frame.setSize(2000, 760);
                 frame.validate();

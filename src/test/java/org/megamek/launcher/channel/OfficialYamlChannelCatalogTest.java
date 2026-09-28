@@ -161,11 +161,18 @@ class OfficialYamlChannelCatalogTest {
     }
 
     @Test
-    void releaseMetadataMustContainAnEligibleDigestBoundAsset() {
+    void releaseMetadataAllowsMissingDigestButRejectsMalformedPublishedDigest() throws Exception {
         QueueTransport transport = new QueueTransport(text(200, FIXTURE),
                 text(200, release(OfficialRepository.MEKHQ, "v0.51.0", false)));
+        ChannelCatalog.Target target = new OfficialYamlChannelCatalog(transport)
+                .target(FollowChannel.MILESTONE, OfficialRepository.MEKHQ);
+        assertTrue(target.asset().publishedDigest().isEmpty());
+
+        String malformed = release(OfficialRepository.MEKHQ, "v0.51.0", true)
+                .replace("sha256:" + "a".repeat(64), "sha256:invalid");
         IOException error = assertThrows(IOException.class,
-                () -> new OfficialYamlChannelCatalog(transport)
+                () -> new OfficialYamlChannelCatalog(new QueueTransport(
+                        text(200, FIXTURE), text(200, malformed)))
                         .target(FollowChannel.MILESTONE, OfficialRepository.MEKHQ));
         assertTrue(error.getMessage().contains("SHA-256"));
     }
