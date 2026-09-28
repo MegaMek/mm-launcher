@@ -512,8 +512,13 @@ class UpdateApplySwingTest {
                     .filter(Window::isShowing).filter(JDialog.class::isInstance)
                     .map(JDialog.class::cast).map(JDialog::getTitle)
                     .toList().toString());
+            String workers = Thread.getAllStackTraces().entrySet().stream()
+                    .filter(entry -> entry.getKey().getName().contains("SwingWorker"))
+                    .map(entry -> entry.getKey().getName() + ": "
+                            + java.util.Arrays.toString(entry.getValue()))
+                    .collect(java.util.stream.Collectors.joining("\n"));
             throw new AssertionError("timed out waiting for dialog " + title
-                    + "; showing dialogs: " + visible, timeout);
+                    + "; showing dialogs: " + visible + "; workers: " + workers, timeout);
         }
     }
 
