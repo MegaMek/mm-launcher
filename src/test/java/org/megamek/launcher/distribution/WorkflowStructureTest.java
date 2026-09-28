@@ -61,6 +61,10 @@ class WorkflowStructureTest {
         assertTrue(root.path("on").has("workflow_dispatch"));
         assertTrue(root.path("on").has("push"));
         assertTrue(root.path("on").has("pull_request"));
+        JsonNode pushBranches = root.path("on").path("push").path("branches");
+        assertEquals(1, pushBranches.size(),
+                "PR branches must not launch duplicate push matrix builds");
+        assertEquals("main", pushBranches.path(0).asText());
         assertEquals("read", root.path("permissions").path("contents").asText());
 
         JsonNode jobs = root.path("jobs");

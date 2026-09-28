@@ -3,8 +3,9 @@
 ## CI distributions
 
 The official source repository is [MegaMek/mm-launcher](https://github.com/MegaMek/mm-launcher).
-The `Launcher native installers` workflow builds on source pushes, pull requests,
-and manual dispatch. CI produces **only** five unsigned native installer/checksum
+The `Launcher native installers` workflow builds on pushes to `main`, pull requests,
+and manual dispatch. PR branch pushes run once through the pull-request event rather
+than also starting a duplicate push matrix. CI produces **only** five unsigned native installer/checksum
 pairs: Windows x64 `.msi`, Linux x64 `.deb` and `.rpm`, and macOS `.pkg` on both
 Intel and Apple Silicon. It does not build, verify, or upload portable archives,
 install packages on CI runners, create a release, sign, or notarize. Each

@@ -370,7 +370,27 @@ class UpdateApplySwingTest {
             click(waitForDialog("Update application"), "Update");
             waitUntil(() -> fixture.services.applyCalls == 1);
 
-            JDialog failed = waitForDialog("Update failed — recovery may be required");
+            JDialog failed;
+            try {
+                failed = waitForDialog("Update failed — recovery may be required");
+            } catch (AssertionError timeout) {
+                String progressState = onEdt(() -> {
+                    for (Window window : Window.getWindows()) {
+                        if (window instanceof OperationProgressDialog dialog
+                                && dialog.isShowing()) {
+                            JButton cancel = find(dialog, "operationCancelButton");
+                            JLabel phase = find(dialog, "operationPhaseLabel");
+                            return "phase=" + (phase == null ? null : phase.getText())
+                                    + ", cancel=" + (cancel == null ? null : cancel.getText())
+                                    + ", details=" + componentText(dialog);
+                        }
+                    }
+                    return "no visible progress";
+                });
+                throw new AssertionError("Apply calls=" + fixture.services.applyCalls
+                        + ", home loads=" + fixture.services.loadHomeCalls
+                        + ", progress=" + progressState, timeout);
+            }
             assertTrue(failed.getTitle().contains("recovery"));
             assertNotNull(find(failed, "operationViewDetailsButton"));
             waitUntil(() -> fixture.services.loadHomeCalls >= 2);

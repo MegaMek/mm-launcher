@@ -5,6 +5,8 @@ name: Launcher native installers
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     paths:
       - ".github/workflows/launcher-archives.yml"
       - "build.gradle.kts"
