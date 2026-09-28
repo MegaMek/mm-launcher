@@ -104,13 +104,13 @@ class WorkflowStructureTest {
         assertEquals("runner.os == 'Linux'", linuxTools.path("if").asText());
         assertTrue(linuxTools.path("run").asText().contains("sudo apt-get install -y rpm fakeroot"));
 
-        assertTrue(step(installers, "Test source and build Windows installer (never install)")
-                .path("run").asText().contains("test buildWindowsInstaller"));
-        assertTrue(step(installers, "Test source and build Linux installers (never install)")
-                .path("run").asText().contains("xvfb-run -a ./gradlew \"-PbuildIdentifier=${{ github.sha }}\" test buildDebInstaller buildRpmInstaller"));
-        assertTrue(step(installers, "Test source and build macOS installer (never install)")
-                .path("run").asText().contains("test buildPkgInstaller"));
-        assertEquals(3, count(text, "-PbuildIdentifier=${{ github.sha }}"));
+        assertTrue(step(installers, "Build Windows installer (never install)")
+                .path("run").asText().contains("buildWindowsInstaller"));
+        assertTrue(step(installers, "Build Linux installers (never install)")
+                .path("run").asText().contains("buildDebInstaller buildRpmInstaller"));
+        assertTrue(step(installers, "Build macOS installer (never install)")
+                .path("run").asText().contains("buildPkgInstaller"));
+        assertEquals(6, count(text, "-PbuildIdentifier=${{ github.sha }}"));
 
         JsonNode verify = step(installers, "Verify exact installer/checksum pairs without installing");
         assertEquals("${{ matrix.id }}", verify.path("env").path("PLATFORM").asText());
@@ -140,6 +140,13 @@ class WorkflowStructureTest {
             expectedPaths.add(base + ".sha256");
         }
         assertEquals(expectedPaths, paths.lines().map(String::trim).filter(line -> !line.isEmpty()).toList());
+        assertTrue(step(installers, "Test source on Windows").path("run").asText().contains(" test"));
+        assertTrue(step(installers, "Test source on Linux with Xvfb").path("run").asText()
+                .contains("xvfb-run -a ./gradlew \"-PbuildIdentifier=${{ github.sha }}\" test"));
+        assertTrue(step(installers, "Test source on macOS").path("run").asText().contains(" test"));
+        assertTrue(text.indexOf("Upload native installers and SHA-256 files only")
+                < text.indexOf("Test source on Windows"),
+                "hosted GUI test failures must not prevent installer artifacts from being inspected and uploaded");
         JsonNode reports = step(installers, "Upload platform test reports");
         assertEquals("always()", reports.path("if").asText());
         assertEquals("MegaMek-Launcher-test-reports-${{ matrix.id }}",

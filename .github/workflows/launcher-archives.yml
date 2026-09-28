@@ -79,27 +79,20 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y rpm fakeroot
 
-      - name: Test source and build Windows installer (never install)
+      - name: Build Windows installer (never install)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          $testTemp = Join-Path $env:GITHUB_WORKSPACE 'build\test-temp'
-          New-Item -ItemType Directory -Force -Path $testTemp | Out-Null
-          $env:JAVA_TOOL_OPTIONS = "-Djava.io.tmpdir=$testTemp"
-          .\gradlew.bat "-PbuildIdentifier=${{ github.sha }}" test buildWindowsInstaller
+        run: .\gradlew.bat "-PbuildIdentifier=${{ github.sha }}" buildWindowsInstaller
 
-      - name: Test source and build Linux installers (never install)
+      - name: Build Linux installers (never install)
         if: runner.os == 'Linux'
         shell: bash
-        run: xvfb-run -a ./gradlew "-PbuildIdentifier=${{ github.sha }}" test buildDebInstaller buildRpmInstaller
+        run: ./gradlew "-PbuildIdentifier=${{ github.sha }}" buildDebInstaller buildRpmInstaller
 
-      - name: Test source and build macOS installer (never install)
+      - name: Build macOS installer (never install)
         if: runner.os == 'macOS'
         shell: bash
-        run: |
-          mkdir -p "${GITHUB_WORKSPACE}/build/test-temp"
-          export JAVA_TOOL_OPTIONS="-Djava.io.tmpdir=${GITHUB_WORKSPACE}/build/test-temp"
-          ./gradlew "-PbuildIdentifier=${{ github.sha }}" test buildPkgInstaller
+        run: ./gradlew "-PbuildIdentifier=${{ github.sha }}" buildPkgInstaller
 
       - name: Verify exact installer/checksum pairs without installing
         shell: pwsh
@@ -213,6 +206,28 @@ jobs:
             build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.pkg.sha256
           if-no-files-found: error
           retention-days: 14
+
+      - name: Test source on Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $testTemp = Join-Path $env:GITHUB_WORKSPACE 'build\test-temp'
+          New-Item -ItemType Directory -Force -Path $testTemp | Out-Null
+          $env:JAVA_TOOL_OPTIONS = "-Djava.io.tmpdir=$testTemp"
+          .\gradlew.bat "-PbuildIdentifier=${{ github.sha }}" test
+
+      - name: Test source on Linux with Xvfb
+        if: runner.os == 'Linux'
+        shell: bash
+        run: xvfb-run -a ./gradlew "-PbuildIdentifier=${{ github.sha }}" test
+
+      - name: Test source on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          mkdir -p "${GITHUB_WORKSPACE}/build/test-temp"
+          export JAVA_TOOL_OPTIONS="-Djava.io.tmpdir=${GITHUB_WORKSPACE}/build/test-temp"
+          ./gradlew "-PbuildIdentifier=${{ github.sha }}" test
 
       - name: Upload platform test reports
         if: always()

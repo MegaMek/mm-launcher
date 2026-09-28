@@ -1027,7 +1027,10 @@ val stageNativeInstallerInput = tasks.register<Sync>("stageNativeInstallerInput"
     dependsOn(stageCommonPayload)
     into(nativeInstallerInputDirectory)
     duplicatesStrategy = DuplicatesStrategy.FAIL
-    from(commonPayloadDirectory)
+    from(commonPayloadDirectory) {
+        exclude("lib/**")
+    }
+    from(commonPayloadDirectory.map { it.dir("lib") })
 }
 
 if (OperatingSystem.current().isLinux || OperatingSystem.current().isMacOsX) {
