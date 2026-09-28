@@ -801,8 +801,11 @@ class SimpleHomeSwingTest {
             SwingUtilities.invokeAndWait(frame::showWindow);
             SwingUtilities.invokeAndWait(
                     waitButton(frame, "manageInstallationsButton")::doClick);
+            JButton firstMenu = waitButton(frame,
+                    "installationMenuButton-" + services.first.id());
+            waitUntil(firstMenu::isShowing);
             SwingUtilities.invokeAndWait(
-                    waitButton(frame, "installationMenuButton-" + services.first.id())::doClick);
+                    firstMenu::doClick);
             JPopupMenu menu = waitFor(() -> java.util.Arrays.stream(
                             javax.swing.MenuSelectionManager.defaultManager().getSelectedPath())
                     .filter(JPopupMenu.class::isInstance).map(JPopupMenu.class::cast)
@@ -818,9 +821,11 @@ class SimpleHomeSwingTest {
                 SwingUtilities.invokeAndWait(pendingFrame::showWindow);
                 SwingUtilities.invokeAndWait(
                         waitButton(pendingFrame, "manageInstallationsButton")::doClick);
+                JButton pendingMenuButton = waitButton(pendingFrame,
+                        "installationMenuButton-" + services.first.id());
+                waitUntil(pendingMenuButton::isShowing);
                 SwingUtilities.invokeAndWait(
-                        waitButton(pendingFrame,
-                                "installationMenuButton-" + services.first.id())::doClick);
+                        pendingMenuButton::doClick);
                 JPopupMenu pendingMenu = waitFor(() -> java.util.Arrays.stream(
                                 javax.swing.MenuSelectionManager.defaultManager().getSelectedPath())
                         .filter(JPopupMenu.class::isInstance).map(JPopupMenu.class::cast)

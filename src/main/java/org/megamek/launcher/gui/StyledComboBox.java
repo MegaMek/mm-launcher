@@ -34,9 +34,12 @@
 package org.megamek.launcher.gui;
 
 import javax.swing.BorderFactory;
+import javax.swing.AbstractAction;
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.JButton;
 import javax.swing.JComboBox;
+import javax.swing.JComponent;
+import javax.swing.KeyStroke;
 import javax.swing.JList;
 import javax.swing.UIManager;
 import javax.swing.plaf.basic.BasicButtonUI;
@@ -53,6 +56,7 @@ import java.awt.RenderingHints;
 import java.awt.Toolkit;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.util.function.Function;
@@ -103,6 +107,7 @@ final class StyledComboBox<E> extends JComboBox<E> {
                         scale.scaleForGUI(2), scale.scaleForGUI(1), 0)));
         setRenderer(new StyledRenderer());
         setFocusable(true);
+        installMissingArrowBindings();
         if (!focusListenerInstalled) {
             addFocusListener(new FocusAdapter() {
                 @Override
@@ -116,6 +121,28 @@ final class StyledComboBox<E> extends JComboBox<E> {
                 }
             });
             focusListenerInstalled = true;
+        }
+    }
+
+    private void installMissingArrowBindings() {
+        for (int direction : new int[]{1, -1}) {
+            KeyStroke key = KeyStroke.getKeyStroke(
+                    direction == 1 ? KeyEvent.VK_DOWN : KeyEvent.VK_UP, 0);
+            var inputMap = getInputMap(JComponent.WHEN_ANCESTOR_OF_FOCUSED_COMPONENT);
+            Object actionKey = inputMap.get(key);
+            if (actionKey != null && getActionMap().get(actionKey) != null) continue;
+            String fallbackKey = direction == 1 ? "launcherSelectNext" : "launcherSelectPrevious";
+            inputMap.put(key, fallbackKey);
+            getActionMap().put(fallbackKey, new AbstractAction() {
+                @Override
+                public void actionPerformed(java.awt.event.ActionEvent event) {
+                    if (isEnabled() && getItemCount() > 0) {
+                        int selected = getSelectedIndex();
+                        setSelectedIndex(Math.max(0, Math.min(getItemCount() - 1,
+                                selected + direction)));
+                    }
+                }
+            });
         }
     }
 
