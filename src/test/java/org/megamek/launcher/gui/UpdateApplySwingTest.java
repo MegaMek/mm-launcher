@@ -497,15 +497,24 @@ class UpdateApplySwingTest {
     }
 
     private static JDialog waitForDialog(String title) throws Exception {
-        return waitFor(() -> {
-            for (Window window : Window.getWindows()) {
-                if (window instanceof JDialog dialog && dialog.isShowing()
-                        && title.equals(dialog.getTitle())) {
-                    return dialog;
+        try {
+            return waitFor(() -> {
+                for (Window window : Window.getWindows()) {
+                    if (window instanceof JDialog dialog && dialog.isShowing()
+                            && title.equals(dialog.getTitle())) {
+                        return dialog;
+                    }
                 }
-            }
-            return null;
-        });
+                return null;
+            });
+        } catch (AssertionError timeout) {
+            String visible = onEdt(() -> java.util.Arrays.stream(Window.getWindows())
+                    .filter(Window::isShowing).filter(JDialog.class::isInstance)
+                    .map(JDialog.class::cast).map(JDialog::getTitle)
+                    .toList().toString());
+            throw new AssertionError("timed out waiting for dialog " + title
+                    + "; showing dialogs: " + visible, timeout);
+        }
     }
 
     private static JDialog showingDialog(String title) throws Exception {
@@ -532,7 +541,7 @@ class UpdateApplySwingTest {
     }
 
     private static <T> T waitFor(java.util.function.Supplier<T> probe) throws Exception {
-        long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+        long deadline = System.nanoTime() + Duration.ofSeconds(8).toNanos();
         while (System.nanoTime() < deadline) {
             AtomicReference<T> value = new AtomicReference<>();
             SwingUtilities.invokeAndWait(() -> value.set(probe.get()));
