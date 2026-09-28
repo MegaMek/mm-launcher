@@ -357,6 +357,32 @@ class UpdateApplySwingTest {
     }
 
     @Test
+    void queuedApplyTitleCannotOverwriteFailureTitle() throws Exception {
+        Fixture fixture = fixture(true);
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(fixture.services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            onEdt(() -> {
+                OperationProgressDialog dialog = new OperationProgressDialog(frame,
+                        "Preparing update", "applyUpdateProgressLog", () -> {});
+                dialog.setVisible(true);
+                dialog.setTitleIfCurrent("Preparing update", "Applying verified update");
+                assertEquals("Applying verified update", dialog.getTitle());
+                dialog.setTitle("Update failed — recovery may be required");
+                dialog.setTitleIfCurrent("Preparing update", "Applying verified update");
+                assertEquals("Update failed — recovery may be required", dialog.getTitle());
+                dialog.showFailure(new IOException("simulated apply failure"));
+                dialog.setTitleIfCurrent("Preparing update", "Applying verified update");
+                assertEquals("Update failed — recovery may be required", dialog.getTitle());
+                dialog.dispose();
+                return null;
+            });
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
     void applyFailureBeforeMutationDoesNotInventRecovery()
             throws Exception {
         Fixture fixture = fixture(true);

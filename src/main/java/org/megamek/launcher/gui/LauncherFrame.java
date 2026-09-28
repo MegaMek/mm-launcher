@@ -3648,7 +3648,8 @@ public final class LauncherFrame extends JFrame {
                         discardPrepared(discarded, context);
                     }
                     SwingUtilities.invokeLater(() ->
-                            progress.setTitle("Applying verified update"));
+                            progress.setTitleIfCurrent("Preparing update",
+                                    "Applying verified update"));
                     PreparedUpdate applying = prepared;
                     prepared = null; // applyPrepared now owns cleanup on every outcome
                     return services.applyPrepared(

@@ -266,6 +266,12 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         failureSummary = message;
     }
 
+    void setTitleIfCurrent(String current, String next) {
+        if (isDisplayable() && !finished && current.equals(getTitle())) {
+            setTitle(next);
+        }
+    }
+
     void showFailure(Throwable problem) {
         showFailure(problem, null);
     }
