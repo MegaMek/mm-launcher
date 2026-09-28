@@ -101,7 +101,11 @@ class LauncherServicesTest {
                 new RecordingRunner());
 
         IOException error = assertThrows(IOException.class, services::readRegistry);
-        assertTrue(error.getMessage().contains("non-directory"));
+        assertTrue(error instanceof java.nio.file.NotDirectoryException
+                        || error.getMessage().contains("non-directory")
+                        || error.getMessage().toLowerCase(java.util.Locale.ROOT)
+                                .contains("not a directory"),
+                () -> "Expected a non-directory error, got " + error);
     }
 
     @Test

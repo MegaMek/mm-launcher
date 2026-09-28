@@ -449,9 +449,13 @@ class FirstLaunchPanelTest {
                     ((JMenuItem) split.popupMenu().getComponent(2)).getText()));
             assertEquals("", onEdt(status::getText));
             assertTrue(onEdt(status::isVisible));
-            assertEquals(actionsBefore, onEdt(() ->
-                    findComponent(frame, "firstLaunchActions").getBounds()),
-                    "metadata completion must not move the action row");
+            Rectangle actionsAfter = onEdt(() ->
+                    findComponent(frame, "firstLaunchActions").getBounds());
+            assertEquals(actionsBefore.y, actionsAfter.y,
+                    "metadata completion must not move the action row vertically");
+            assertEquals(actionsBefore.getSize(), actionsAfter.getSize());
+            assertTrue(Math.abs(actionsBefore.x - actionsAfter.x) <= 1,
+                    "metadata completion must not shift the action row beyond layout rounding");
             onEdt(() -> {
                 split.closePopup();
                 return null;

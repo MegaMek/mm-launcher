@@ -281,12 +281,14 @@ jobs:
       - name: Test source and verify provided archive on macOS
         if: runner.os == 'macOS'
         shell: bash
-        run: >-
-          ./gradlew "-PbuildIdentifier=${{ github.sha }}"
-          "-PverificationPlatform=${{ matrix.platform }}"
-          "-PprovidedArchive=${PROVIDED_ARCHIVE}"
-          "-PprovidedChecksum=${PROVIDED_CHECKSUM}"
-          test verifyProvidedArchive verifyPortableArchive
+        run: |
+          mkdir -p "${GITHUB_WORKSPACE}/build/test-temp"
+          export JAVA_TOOL_OPTIONS="-Djava.io.tmpdir=${GITHUB_WORKSPACE}/build/test-temp"
+          ./gradlew "-PbuildIdentifier=${{ github.sha }}" \
+            "-PverificationPlatform=${{ matrix.platform }}" \
+            "-PprovidedArchive=${PROVIDED_ARCHIVE}" \
+            "-PprovidedChecksum=${PROVIDED_CHECKSUM}" \
+            test verifyProvidedArchive verifyPortableArchive
 
       - name: Verify host-native portable checksum
         shell: pwsh
