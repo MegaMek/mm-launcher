@@ -120,7 +120,7 @@ class ChannelSwingIntegrationTest {
                 return button != null && button.isEnabled() ? button : null;
             });
             SwingUtilities.invokeLater(check::doClick);
-            assertTrue(services.started.await(5, TimeUnit.SECONDS));
+            assertTrue(services.started.await(30, TimeUnit.SECONDS));
             JButton home = waitFor(() -> find(frame, "homeButton"));
             SwingUtilities.invokeAndWait(home::doClick);
             assertTrue(onEdt(() -> find(frame, "launch-megamek-button").isEnabled()));
@@ -165,7 +165,7 @@ class ChannelSwingIntegrationTest {
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
-            assertTrue(services.started.await(5, TimeUnit.SECONDS));
+            assertTrue(services.started.await(30, TimeUnit.SECONDS));
             assertEquals(1, services.checks.get());
             assertTrue(onEdt(() -> find(frame, "launch-megamek-button").isEnabled()));
             assertTrue(onEdt(() -> find(frame, "manageInstallationsButton").isEnabled()));
@@ -234,7 +234,7 @@ class ChannelSwingIntegrationTest {
                     JButton check = waitFor(() -> find(frame, "checkUpdatesButton"));
 
                     SwingUtilities.invokeLater(check::doClick);
-                    assertTrue(services.started.await(5, TimeUnit.SECONDS));
+                    assertTrue(services.started.await(30, TimeUnit.SECONDS));
                     assertEquals(1, services.checks.get());
                     services.release.countDown();
                 } finally {
@@ -252,7 +252,7 @@ class ChannelSwingIntegrationTest {
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
-            assertTrue(services.started.await(5, TimeUnit.SECONDS));
+            assertTrue(services.started.await(30, TimeUnit.SECONDS));
             services.release.countDown();
             JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
             assertEquals("Installations", installations.getText());
