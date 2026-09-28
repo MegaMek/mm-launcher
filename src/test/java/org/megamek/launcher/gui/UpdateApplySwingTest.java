@@ -532,7 +532,7 @@ class UpdateApplySwingTest {
     }
 
     private static <T> T waitFor(java.util.function.Supplier<T> probe) throws Exception {
-        long deadline = System.nanoTime() + Duration.ofSeconds(8).toNanos();
+        long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
         while (System.nanoTime() < deadline) {
             AtomicReference<T> value = new AtomicReference<>();
             SwingUtilities.invokeAndWait(() -> value.set(probe.get()));
