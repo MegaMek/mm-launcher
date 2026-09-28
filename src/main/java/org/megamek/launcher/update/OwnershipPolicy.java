@@ -182,6 +182,23 @@ public final class OwnershipPolicy {
         return key.substring(0, slash).equals("lib");
     }
 
+    /** Unowned ordinary lib JARs are preserved, but can still influence class loading. */
+    public static List<String> extraLibJars(Path root, Manifest baseline, Manifest target)
+            throws IOException {
+        Path lib = root.resolve("lib");
+        if (!Files.isDirectory(lib, LinkOption.NOFOLLOW_LINKS)) return List.of();
+        Set<String> official = new java.util.HashSet<>();
+        baseline.files().forEach(entry -> official.add(entry.path().toLowerCase(Locale.ROOT)));
+        target.files().forEach(entry -> official.add(entry.path().toLowerCase(Locale.ROOT)));
+        try (var walk = Files.walk(lib)) {
+            return walk.filter(path -> Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS))
+                    .map(path -> root.relativize(path).toString().replace('\\', '/'))
+                    .filter(path -> path.toLowerCase(Locale.ROOT).endsWith(".jar")
+                            && !official.contains(path.toLowerCase(Locale.ROOT)))
+                    .sorted().toList();
+        }
+    }
+
     private static boolean protectedPath(String key) {
         return PROTECTED_PATHS.stream().anyMatch(protectedPath ->
                 key.equals(protectedPath) || key.startsWith(protectedPath + "/"));

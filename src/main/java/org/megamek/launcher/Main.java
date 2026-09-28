@@ -258,6 +258,12 @@ public final class Main {
                 preview.counts().get(org.megamek.launcher.plan.Action.KEEP),
                 preview.counts().get(org.megamek.launcher.plan.Action.SKIP));
         preview.decisions().forEach(decision -> printDecision(out, decision));
+        for (String jar : OwnershipPolicy.extraLibJars(
+                Path.of(preview.record().canonicalRoot()), preview.currentState().officialManifest(),
+                preview.targetManifest())) {
+            out.println("WARNING preserved unowned lib JAR " + jar
+                    + " may affect the game; update will not remove it.");
+        }
         out.println("READ-ONLY PREVIEW: no installed application, registry, or receipt files changed.");
         out.println("POINT-IN-TIME ONLY: this plan is not authority to apply later.");
         return 0;
@@ -276,6 +282,17 @@ public final class Main {
                 result.record().id(), result.record().observedBuild(), result.state().tag(),
                 result.skippedDecisions(), result.retainedOverrides());
         result.decisions().forEach(decision -> printDecision(out, decision));
+        try {
+            for (String jar : OwnershipPolicy.extraLibJars(
+                    Path.of(result.record().canonicalRoot()), result.state().officialManifest(),
+                    result.state().officialManifest())) {
+                out.println("WARNING preserved unowned lib JAR " + jar
+                        + " may affect the game; update did not remove it.");
+            }
+        } catch (IOException e) {
+            out.println("WARNING update committed; could not inspect extra lib JARs: "
+                    + e.getMessage());
+        }
         out.println(result.skippedDecisions() == 0
                 ? "UPDATE COMPLETE: verified managed program files now match the target."
                 : "UPDATE COMPLETE WITH PRESERVATION: skipped user data/custom collisions remain.");

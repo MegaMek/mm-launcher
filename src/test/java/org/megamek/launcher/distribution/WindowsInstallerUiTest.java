@@ -49,6 +49,37 @@ class WindowsInstallerUiTest {
     private static final String WIX = "http://schemas.microsoft.com/wix/2006/wi";
 
     @Test
+    void progressLabelDoesNotRenderUnresolvedInstallerActionTokens() throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxf").toFile());
+
+        Element progress = find(doc, "Dialog", "LauncherProgress");
+        Element status = find(doc, "Control", "StatusText");
+        assertSame(progress, status.getParentNode());
+        assertEquals("Text", status.getAttribute("Type"));
+        assertEquals("Setting up MegaMek Launcher...", status.getAttribute("Text"),
+                "Use literal text, not an MSI property or an unverified action template");
+        assertEquals(0, status.getElementsByTagNameNS(WIX, "Subscribe").getLength(),
+                "ActionText fallback may show raw bracketed placeholders on localized Windows");
+
+        Element bar = find(doc, "Control", "ProgressBar");
+        assertSame(progress, bar.getParentNode());
+        assertEquals("ProgressBar", bar.getAttribute("Type"));
+        var subscriptions = bar.getElementsByTagNameNS(WIX, "Subscribe");
+        assertEquals(1, subscriptions.getLength());
+        Element subscription = (Element) subscriptions.item(0);
+        assertEquals("SetProgress", subscription.getAttribute("Event"));
+        assertEquals("Progress", subscription.getAttribute("Attribute"));
+        var allSubscriptions = doc.getElementsByTagNameNS(WIX, "Subscribe");
+        for (int i = 0; i < allSubscriptions.getLength(); i++) {
+            assertNotEquals("ActionText", ((Element) allSubscriptions.item(i)).getAttribute("Event"),
+                    "No control should render unverified default action messages");
+        }
+    }
+
+    @Test
     void progressDoesNotBlockExecuteActionAndOnlyFinishCanLaunch() throws Exception {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         factory.setNamespaceAware(true);

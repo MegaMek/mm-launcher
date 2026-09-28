@@ -56,6 +56,102 @@ class RootCoordinatorTest {
     @TempDir Path temp;
 
     @Test
+    void multipleChildrenAreIndependentAndEveryLiveChildBlocksMutations() throws Exception {
+        Path root = Files.createDirectory(temp.resolve("multi-app"));
+        Path coordination = temp.resolve("multi-coordination");
+        Process first = startFixture("wait", temp.resolve("first-ready").toString(),
+                temp.resolve("first-stop").toString());
+        Process second = startFixture("wait", temp.resolve("second-ready").toString(),
+                temp.resolve("second-stop").toString());
+        try {
+            awaitFile(temp.resolve("first-ready"));
+            awaitFile(temp.resolve("second-ready"));
+            String firstId;
+            String secondId;
+            try (RootCoordinator.Lease lease = new RootCoordinator(coordination)
+                    .acquireForLaunch(root)) {
+                lease.markLaunchStarting();
+                firstId = lease.launchId();
+                lease.markChild(ProcessIdentity.of(first.toHandle()));
+            }
+            try (RootCoordinator.Lease lease = new RootCoordinator(coordination)
+                    .acquireForLaunch(root)) {
+                lease.markLaunchStarting();
+                secondId = lease.launchId();
+                lease.markChild(ProcessIdentity.of(second.toHandle()));
+            }
+            assertThrows(IOException.class, () -> new RootCoordinator(coordination)
+                    .acquire(root, true));
+            stopFixture(first, temp.resolve("first-stop"));
+            try (RootCoordinator.Lease lease = new RootCoordinator(coordination)
+                    .acquireForLaunch(root)) {
+                lease.clearLaunchMarker(firstId);
+            }
+            assertThrows(IOException.class, () -> new RootCoordinator(coordination)
+                    .acquire(root, false));
+            stopFixture(second, temp.resolve("second-stop"));
+            try (RootCoordinator.Lease lease = new RootCoordinator(coordination)
+                    .acquireForLaunch(root)) {
+                lease.clearLaunchMarker(secondId);
+            }
+            try (RootCoordinator.Lease ignored = new RootCoordinator(coordination)
+                    .acquire(root, false)) {
+                // All children have exited (simulated by the completed-wait cleanup).
+            }
+        } finally {
+            stopFixture(first, temp.resolve("first-stop"));
+            stopFixture(second, temp.resolve("second-stop"));
+        }
+    }
+
+    @Test
+    void interruptedSecondStartCannotHideEarlierRunningChild() throws Exception {
+        Path root = Files.createDirectory(temp.resolve("mixed-app"));
+        Path coordination = temp.resolve("mixed-coordination");
+        try (RootCoordinator.Lease lease = new RootCoordinator(coordination)
+                .acquireForLaunch(root)) {
+            lease.markLaunchStarting();
+            lease.markChild(ProcessIdentity.of(ProcessHandle.current()));
+        }
+        try (RootCoordinator.Lease lease = new RootCoordinator(coordination)
+                .acquireForLaunch(root)) {
+            lease.markLaunchStarting();
+        }
+        assertThrows(IOException.class, () -> new RootCoordinator(coordination)
+                .acquireForLaunch(root));
+        assertThrows(IOException.class, () -> new RootCoordinator(coordination)
+                .acquire(root, true));
+    }
+
+    @Test
+    void legacyLiveMarkerIsMigratedWithoutLosingItsBlocker() throws Exception {
+        Path root = Files.createDirectory(temp.resolve("legacy-app"));
+        Path coordination = temp.resolve("legacy-coordination");
+        try (RootCoordinator.Lease ignored = new RootCoordinator(coordination)
+                .acquire(root, false)) {
+        }
+        Path marker;
+        try (var files = Files.list(coordination)) {
+            marker = files.filter(path -> path.toString().endsWith(".lock"))
+                    .findFirst().orElseThrow();
+        }
+        marker = marker.resolveSibling(marker.getFileName().toString()
+                .replace(".lock", ".launch.json"));
+        ProcessIdentity live = ProcessIdentity.of(ProcessHandle.current());
+        Files.writeString(marker, new com.fasterxml.jackson.databind.ObjectMapper()
+                .writeValueAsString(java.util.Map.of("schemaVersion", 1,
+                        "canonicalRoot", root.toString(), "process", live,
+                        "phase", "RUNNING")));
+        try (RootCoordinator.Lease lease = new RootCoordinator(coordination)
+                .acquireForLaunch(root)) {
+            lease.markLaunchStarting();
+            lease.markChild(live);
+        }
+        assertThrows(IOException.class, () -> new RootCoordinator(coordination)
+                .acquire(root, true));
+    }
+
+    @Test
     void independentInstancesSerializeRootAndPendingNamespaceBlocksLaunch() throws Exception {
         Path root = Files.createDirectory(temp.resolve("app"));
         Path coordination = temp.resolve("coordination");

@@ -55,6 +55,9 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
 import java.util.HexFormat;
 
 /**
@@ -100,9 +103,19 @@ public final class RootCoordinator {
                 RootCoordinator::readAttributesNoFollow);
     }
 
+    boolean persistent() {
+        return persistent;
+    }
+
     public Lease acquire(Path root, boolean closeAllAcknowledged) throws IOException {
         Path canonical = StrictPathSafety.requireDirectory(root, "coordinated application root");
-        return acquireCanonical(canonical, closeAllAcknowledged);
+        return acquireCanonical(canonical, closeAllAcknowledged, false);
+    }
+
+    /** Launches may coexist with tracked children, but never with an unverified start. */
+    public Lease acquireForLaunch(Path root) throws IOException {
+        return acquireCanonical(StrictPathSafety.requireDirectory(root,
+                "coordinated application root"), false, true);
     }
 
     /**
@@ -113,7 +126,7 @@ public final class RootCoordinator {
         Path absolute = root.toAbsolutePath().normalize();
         if (Files.exists(absolute, LinkOption.NOFOLLOW_LINKS)) {
             return acquireCanonical(StrictPathSafety.requireDirectory(
-                    absolute, "coordinated recovery root"), closeAllAcknowledged);
+                    absolute, "coordinated recovery root"), closeAllAcknowledged, false);
         }
         Path parent = StrictPathSafety.requireDirectory(absolute.getParent(),
                 "coordinated application parent");
@@ -121,10 +134,10 @@ public final class RootCoordinator {
         if (!canonical.equals(absolute)) {
             throw new IOException("recovery root is not canonical");
         }
-        return acquireCanonical(canonical, closeAllAcknowledged);
+        return acquireCanonical(canonical, closeAllAcknowledged, false);
     }
 
-    private Lease acquireCanonical(Path canonical, boolean closeAllAcknowledged)
+    private Lease acquireCanonical(Path canonical, boolean closeAllAcknowledged, boolean launch)
             throws IOException {
         if (!persistent) return new Lease(canonical, null, null, null, false);
         ensureDirectory();
@@ -147,7 +160,7 @@ public final class RootCoordinator {
         Lease lease = new Lease(canonical, channel, lock, directory.resolve(key + ".launch.json"),
                 true);
         try {
-            lease.resolvePriorMarker(closeAllAcknowledged);
+            lease.resolvePriorMarker(closeAllAcknowledged, launch);
             return lease;
         } catch (IOException e) {
             lease.close();
@@ -224,6 +237,8 @@ public final class RootCoordinator {
         private final Path marker;
         private final boolean writesMarkers;
         private boolean markerOwned;
+        private String launchId;
+        private List<LaunchEntry> entries = new ArrayList<>();
 
         private Lease(Path root, FileChannel channel, FileLock lock, Path marker,
                       boolean writesMarkers) {
@@ -244,24 +259,44 @@ public final class RootCoordinator {
 
         public void markLaunchStarting() throws IOException {
             if (!writesMarkers) return;
-            writeMarker(new LaunchMarker(SCHEMA, root.toString(),
-                    ProcessIdentity.of(ProcessHandle.current()), "STARTING"));
+            launchId = UUID.randomUUID().toString();
+            List<LaunchEntry> next = new ArrayList<>(entries);
+            next.add(new LaunchEntry(launchId, ProcessIdentity.of(ProcessHandle.current()),
+                    "STARTING"));
+            writeEntries(next);
             markerOwned = true;
         }
 
         public void markChild(ProcessIdentity child) throws IOException {
             if (!writesMarkers || child == null) return;
-            writeMarker(new LaunchMarker(SCHEMA, root.toString(), child, "RUNNING"));
+            if (!markerOwned) throw new IOException("no launch start owns this marker");
+            List<LaunchEntry> next = new ArrayList<>(entries);
+            next.replaceAll(entry -> entry.id().equals(launchId)
+                    ? new LaunchEntry(launchId, child, "RUNNING") : entry);
+            writeEntries(next);
         }
 
         public void clearLaunchMarker() throws IOException {
-            if (writesMarkers && markerOwned) {
-                Files.deleteIfExists(marker);
-                markerOwned = false;
-            }
+            if (markerOwned) clearLaunchMarker(launchId);
         }
 
-        private void resolvePriorMarker(boolean closeAllAcknowledged) throws IOException {
+        public String launchId() {
+            return launchId;
+        }
+
+        /** Remove only the completed child, under a newly acquired root gate if necessary. */
+        public void clearLaunchMarker(String id) throws IOException {
+            if (!writesMarkers) return;
+            if (id == null) throw new IOException("launch entry is missing");
+            // A concurrent lease may already have reclaimed the verified dead child.
+            if (entries.stream().noneMatch(entry -> entry.id().equals(id))) return;
+            List<LaunchEntry> next = new ArrayList<>(entries);
+            next.removeIf(entry -> entry.id().equals(id));
+            writeEntries(next);
+            if (id.equals(launchId)) markerOwned = false;
+        }
+
+        private void resolvePriorMarker(boolean closeAllAcknowledged, boolean launch) throws IOException {
             if (!writesMarkers) return;
             Path staging = marker.resolveSibling(marker.getFileName() + ".new");
             if (existsNoFollow(staging)) {
@@ -274,9 +309,24 @@ public final class RootCoordinator {
             }
             if (!existsNoFollow(marker)) return;
             rejectUnexpected(marker, false);
-            final LaunchMarker prior;
+            final List<LaunchEntry> prior;
             try {
-                prior = mapper.readValue(Files.readAllBytes(marker), LaunchMarker.class);
+                var tree = mapper.readTree(Files.readAllBytes(marker));
+                if (tree.path("schemaVersion").asInt(-1) == SCHEMA) {
+                    LaunchMarker legacy = mapper.treeToValue(tree, LaunchMarker.class);
+                    if (!root.toString().equals(legacy.canonicalRoot())) {
+                        throw new IOException("marker root mismatch");
+                    }
+                    prior = List.of(new LaunchEntry("legacy", legacy.process(), legacy.phase()));
+                } else {
+                    LaunchLedger ledger = mapper.treeToValue(tree, LaunchLedger.class);
+                    if (ledger.schemaVersion() != 2
+                            || !root.toString().equals(ledger.canonicalRoot())
+                            || ledger.entries() == null || ledger.entries().isEmpty()) {
+                        throw new IOException("invalid launch ledger");
+                    }
+                    prior = ledger.entries();
+                }
             } catch (IOException | RuntimeException e) {
                 if (!closeAllAcknowledged) {
                     throw new IOException("unreadable launch marker blocks this root; close all "
@@ -285,10 +335,11 @@ public final class RootCoordinator {
                 Files.delete(marker);
                 return;
             }
-            if (prior.schemaVersion() != SCHEMA || !root.toString().equals(prior.canonicalRoot())
-                    || prior.process() == null || prior.process().pid() <= 0
-                    || prior.phase() == null
-                    || !java.util.Set.of("STARTING", "RUNNING").contains(prior.phase())) {
+            if (prior.stream().anyMatch(entry -> entry == null || entry.id() == null
+                    || entry.id().isBlank() || entry.process() == null
+                    || entry.process().pid() <= 0 || entry.phase() == null
+                    || !java.util.Set.of("STARTING", "RUNNING").contains(entry.phase()))
+                    || prior.stream().map(LaunchEntry::id).distinct().count() != prior.size()) {
                 if (!closeAllAcknowledged) {
                     throw new IOException("unknown launch marker blocks this root; close all suite "
                             + "applications and use explicit recovery/unblock confirmation");
@@ -296,42 +347,53 @@ public final class RootCoordinator {
                 Files.delete(marker);
                 return;
             }
-            // STARTING records this launcher, not a child identity. Once publication can have
-            // raced a launcher crash, neither a dead/reused parent PID nor the absence of a
-            // visible child proves that no suite process was started.
-            if ("STARTING".equals(prior.phase())) {
+            // Validate all entries before pruning anything: acknowledgement cannot mask a
+            // verified live child elsewhere in the same ledger.
+            List<LaunchEntry> retained = new ArrayList<>();
+            for (LaunchEntry entry : prior) {
+            if ("STARTING".equals(entry.phase())) {
                 if (!closeAllAcknowledged) {
                     throw new IOException("an interrupted launch start has unknown child state; "
                             + "close all suite applications and use explicit recovery/unblock "
                             + "confirmation");
                 }
-                Files.delete(marker);
-                return;
+                continue;
             }
-            ProcessHandle process = ProcessHandle.of(prior.process().pid()).orElse(null);
+            ProcessHandle process = ProcessHandle.of(entry.process().pid()).orElse(null);
             if (process == null || !process.isAlive()) {
-                Files.delete(marker);
-                return;
+                continue;
             }
             String actualStart = process.info().startInstant().map(Instant::toString).orElse(null);
-            if (prior.process().startedAt() != null && actualStart != null
-                    && !prior.process().startedAt().equals(actualStart)) {
-                Files.delete(marker); // PID was reused; this is demonstrably not the tracked child.
-                return;
+            if (entry.process().startedAt() != null && actualStart != null
+                    && !entry.process().startedAt().equals(actualStart)) {
+                continue; // verified PID reuse
             }
-            if (prior.process().startedAt() == null || actualStart == null) {
+            if (entry.process().startedAt() == null || actualStart == null) {
                 if (closeAllAcknowledged) {
-                    Files.delete(marker);
-                    return;
+                    continue;
                 }
                 throw new IOException("tracked process identity cannot be verified; close all suite "
                         + "applications, then use explicit recovery/unblock confirmation");
             }
-            throw new IOException("a launcher-started suite application is still running (PID "
-                    + prior.process().pid() + "); close it before launch, update, or recovery");
+            if (!launch) throw new IOException("a launcher-started suite application is still running (PID "
+                    + entry.process().pid() + "); close it before update or recovery");
+            retained.add(entry);
+            }
+            if (!retained.equals(prior)) writeEntries(retained);
+            else entries = retained;
         }
 
-        private void writeMarker(LaunchMarker value) throws IOException {
+        private void writeEntries(List<LaunchEntry> next) throws IOException {
+            if (next.isEmpty()) {
+                Files.deleteIfExists(marker);
+                entries = next;
+                return;
+            }
+            writeMarker(new LaunchLedger(2, root.toString(), next));
+            entries = next;
+        }
+
+        private void writeMarker(Object value) throws IOException {
             Path staging = marker.resolveSibling(marker.getFileName() + ".new");
             if (existsNoFollow(staging)) {
                 rejectUnexpected(staging, false);
@@ -374,6 +436,9 @@ public final class RootCoordinator {
     private record LaunchMarker(int schemaVersion, String canonicalRoot,
                                 ProcessIdentity process, String phase) {
     }
+    private record LaunchEntry(String id, ProcessIdentity process, String phase) {}
+    private record LaunchLedger(int schemaVersion, String canonicalRoot,
+                                List<LaunchEntry> entries) {}
 
     @FunctionalInterface
     interface PathProbe {

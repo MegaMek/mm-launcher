@@ -218,6 +218,10 @@ public final class UpdatePlanner {
             if (localHash.equals(oldEntry.sha256())) {
                 return new Decision(Action.REPLACE, path, "local file matches baseline; target differs");
             }
+            if (org.megamek.launcher.update.OwnershipPolicy.runtimePath(path)) {
+                return new Decision(Action.REPLACE, path,
+                        "modified official runtime file will be replaced (rollback backup retained until commit)");
+            }
             return new Decision(Action.SKIP, path, "local file differs from both baseline and target");
         }
 
@@ -234,6 +238,10 @@ public final class UpdatePlanner {
         if (trustedPreviousOfficialHashes.contains(localHash)) {
             return new Decision(Action.REMOVE, path,
                     "obsolete local file matches a previously official override ancestor");
+        }
+        if (org.megamek.launcher.update.OwnershipPolicy.runtimePath(path)) {
+            return new Decision(Action.REMOVE, path,
+                    "obsolete modified official runtime file will be removed (rollback backup retained until commit)");
         }
         return new Decision(Action.SKIP, path, "obsolete local file was modified");
     }

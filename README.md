@@ -23,13 +23,13 @@ the installed application and installer is derived from MegaMek.png. The macOS
 app bundle uses an ICNS derivative of that same source. The
 interactive WiX wizard uses composed crops of the launcher first-launch artwork,
 shows the costed per-user binary path on Welcome, advances through a modeless
-installation progress dialog, and has a
-checked **Launch MegaMek Launcher** option on its completion screen. This
+installation progress dialog with a steady status label and live progress bar,
+and offers a checked **Launch MegaMek Launcher** option on its completion screen. This
 launch is an interactive finish-button action only: `msiexec /qn` self-upgrades
 never launch the app. It does not change the `.msi` file association or prompt
 for an install directory. `mm-launcher` remains the compatible internal CLI
 and Linux script name.
-Version 0.14.0 is a newer MSI for upgrading existing 0.1.3 installations;
+Version 0.14.5 is a newer MSI for upgrading existing 0.14.4 (or earlier) installations;
 rebuilding the same version does not allow a same-version MSI reinstall. The upgrade
 keeps the fixed upgrade UUID and install location and leaves user data intact.
 
@@ -360,6 +360,16 @@ does not share packages with an unrelated preview or arbitrary path.
 Every installation offers **Open location** and **Remove from launcher…**. Open location
 revalidates the exact root and asks the platform file manager to open it off the UI thread.
 Removal deletes only the exact registration and launcher-owned sidecars; application files stay.
+The installation **More… → Reset preferences…** action asks you to close all suite apps
+(including those started outside the launcher) and confirms the exact files and backup location.
+For a MekHQ package it moves the existing `mmconf/clientsettings.xml`, `mm.preferences`,
+`mhq.preferences`, `mml.preferences`, `megameklab.properties` and
+`megameklab.properties.bak`; MegaMek-only and MegaMekLab-only packages move only their
+respective files. The `.bak` is included because MML can restore settings from it.
+The files are moved, not deleted, into a unique backup under
+`<installation>/.mm-launcher-preferences-backups/`. Unrecognized or ambiguous imported
+packages are refused; campaigns, saves, custom files, and all other `mmconf` contents remain.
+OS-global Java Preferences cannot be reset per installation and are not touched.
 Managed/adopted copies with complete current provenance and a fixed channel additionally offer
 **Uninstall…**. Uninstall moves only byte-exact current official files into an external,
 same-filesystem recovery area, preserves modified/custom/protected files, removes only empty known
@@ -465,7 +475,10 @@ titles and GitHub prerelease flags do not establish identity or channel history.
 
 All official application executables, application JARs, dependency JARs, and launch metadata must
 match byte-for-byte. Missing managed files, case/Unicode aliases, links, structural conflicts, a
-mixed product/version, or a changed runtime file fail closed. Modified non-runtime official files
+mixed product/version, or a linked/special runtime path fail closed. Ordinary Update replaces
+damaged or missing official runtime files and removes obsolete official runtime, retaining a
+verified rollback backup until commit. Extra unowned JARs under lib are preserved (they may affect
+the game). Modified non-runtime official files
 are recorded as pre-existing overrides; unknown custom files and protected saves, campaigns,
 userdata, configuration, and logs remain outside launcher ownership. The current architecture
 cannot durably represent intentional missing managed files, so adoption rejects them rather than

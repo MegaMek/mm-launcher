@@ -110,24 +110,33 @@ public final class ApplicationLauncher {
                       JavaRuntime.CurrentJava gameJava)
             throws IOException, InterruptedException {
         Path root = Path.of(record.canonicalRoot());
-        try (RootCoordinator.Lease lease = coordinator.acquire(root, false)) {
+        try (RootCoordinator.Lease lease = coordinator.acquireForLaunch(root)) {
             lease.requireNoPendingUpdate();
             List<String> command = command(record, product, gameJava);
             lease.markLaunchStarting();
             boolean childCompleted = false;
+            java.util.concurrent.atomic.AtomicReference<IOException> markerFailure =
+                    new java.util.concurrent.atomic.AtomicReference<>();
+            java.util.concurrent.atomic.AtomicBoolean childPublished =
+                    new java.util.concurrent.atomic.AtomicBoolean();
             try {
-                java.util.concurrent.atomic.AtomicReference<IOException> markerFailure =
-                        new java.util.concurrent.atomic.AtomicReference<>();
                 ProcessRunner.Result result = runner.runTracked(command, root,
                         Duration.ofMillis(Long.MAX_VALUE), true, identity -> {
                             try {
                                 lease.markChild(identity);
+                                childPublished.set(true);
+                                // Publication is durable before the OS gate is released. The
+                                // child wait must not serialize subsequent launches.
+                                lease.close();
                             } catch (IOException e) {
                                 markerFailure.compareAndSet(null, e);
                             }
                         });
                 childCompleted = true;
                 if (markerFailure.get() != null) throw markerFailure.get();
+                if (!childPublished.get() && coordinator.persistent()) {
+                    throw new IOException("child identity was not published; launch state is unknown");
+                }
                 if (result.timedOut()) {
                     throw new IOException("application exceeded launcher wait limit");
                 }
@@ -136,7 +145,12 @@ public final class ApplicationLauncher {
                 // Any runner failure after STARTING is ambiguous: ProcessBuilder.start may have
                 // returned just before callback publication failed or the launcher was
                 // interrupted. Keep STARTING/RUNNING unless the child wait completed.
-                if (childCompleted) lease.clearLaunchMarker();
+                if (childCompleted && markerFailure.get() == null
+                        && (childPublished.get() || !coordinator.persistent())) {
+                    try (RootCoordinator.Lease cleanup = coordinator.acquireForLaunch(root)) {
+                        cleanup.clearLaunchMarker(lease.launchId());
+                    }
+                }
             }
         }
     }

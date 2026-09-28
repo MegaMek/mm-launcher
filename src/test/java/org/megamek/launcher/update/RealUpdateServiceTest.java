@@ -106,6 +106,211 @@ class RealUpdateServiceTest {
     @TempDir Path temp;
 
     @Test
+    void exactRepairRestoresAllOfficialPathsWithoutRetainingBackups() throws Exception {
+        Map<String, byte[]> files = packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime"),
+                "docs/manual.txt", bytes("manual"),
+                "data/units.txt", bytes("units")));
+        Fixture fixture = install("repair-success", "v1", files);
+        Files.writeString(fixture.root.resolve("lib/runtime.txt"), "custom runtime");
+        Files.delete(fixture.root.resolve("MegaMek.jar"));
+        Files.writeString(fixture.root.resolve("docs/manual.txt"), "custom manual");
+        Files.delete(fixture.root.resolve("data/units.txt"));
+        Files.writeString(fixture.root.resolve("mmconf/clientsettings.xml"), "user config");
+        Files.writeString(fixture.root.resolve("data/extra.txt"), "unowned");
+        Files.writeString(fixture.root.resolve("lib/mod.jar"), "mod");
+        byte[] archive = archive("MegaMek-v1", files);
+        RealUpdateService repair = service(transport("v1", archive), point -> {});
+        assertThrows(IOException.class, () -> repair.repair(fixture.registry, fixture.id,
+                RealUpdateService.CONFIRM, quiet()));
+        RealUpdateService.RepairResult result = repair.repair(fixture.registry, fixture.id,
+                RealUpdateService.REPAIR_CONFIRM, quiet());
+        assertEquals(2, result.missingRestored());
+        assertEquals(2, result.modifiedRestored());
+        assertEquals(List.of("lib/mod.jar"), result.extraLibJars());
+        assertTrue(result.warning().contains("temporary"));
+        for (String path : List.of("lib/runtime.txt", "MegaMek.jar",
+                "docs/manual.txt", "data/units.txt")) {
+            assertArrayEquals(files.get(path), Files.readAllBytes(fixture.root.resolve(path)));
+        }
+
+        assertEquals("user config",
+                Files.readString(fixture.root.resolve("mmconf/clientsettings.xml")));
+        assertEquals("unowned", Files.readString(fixture.root.resolve("data/extra.txt")));
+        assertEquals("mod", Files.readString(fixture.root.resolve("lib/mod.jar")));
+        assertFalse(Files.exists(fixture.root.resolve(RootCoordinator.UPDATE_NAMESPACE)));
+        assertEquals("v1", repair.snapshot(fixture.registry, fixture.id).current().tag());
+    }
+
+    @Test
+    void repairReportsRealDownloadBytesAndNonCancellableOrderedStages() throws Exception {
+        Map<String, byte[]> files = packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("official")));
+        Fixture fixture = install("repair-progress", "v1", files);
+        Files.writeString(fixture.root.resolve("lib/runtime.txt"), "edited");
+        byte[] archive = archive("MegaMek-v1", files);
+        List<org.megamek.launcher.operation.OperationProgress> events =
+                new java.util.ArrayList<>();
+        AtomicReference<OperationContext> active = new AtomicReference<>();
+        OperationContext context = new OperationContext(OperationType.UPDATE_APPLY, event -> {
+            events.add(event);
+            assertFalse(event.cancellationAllowed(), "repair must be non-cancellable from start");
+            if (event.phase() == OperationPhase.DOWNLOAD
+                    && event.unit() == org.megamek.launcher.operation.ProgressUnit.BYTES) {
+                assertFalse(active.get().requestCancellation().accepted(),
+                        "a download-stage request must not interrupt repair");
+            }
+        });
+        active.set(context);
+        RealUpdateService.RepairResult result = service(transport("v1", archive),
+                point -> {}).repair(fixture.registry, fixture.id,
+                        RealUpdateService.REPAIR_CONFIRM, quiet(), context);
+        assertEquals(1, result.modifiedRestored());
+        assertFalse(context.requestCancellation().accepted());
+        List<OperationPhase> phases = events.stream()
+                .map(org.megamek.launcher.operation.OperationProgress::phase).distinct().toList();
+        assertEquals(List.of(OperationPhase.METADATA, OperationPhase.DOWNLOAD,
+                OperationPhase.VERIFY, OperationPhase.EXTRACT, OperationPhase.PLAN,
+                OperationPhase.PREPARE_INSTALL, OperationPhase.APPLY, OperationPhase.CLEANUP),
+                phases);
+        assertTrue(events.stream().anyMatch(event -> event.phase() == OperationPhase.DOWNLOAD
+                && event.unit() == org.megamek.launcher.operation.ProgressUnit.BYTES
+                && event.completed() == archive.length && event.total() == archive.length));
+    }
+
+    @Test
+    void repairFacadeExecutesConsentedSourceAndRejectsStaleRecoveryAndAdoption()
+            throws Exception {
+        Map<String, byte[]> files = packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("official runtime")));
+        Fixture fixture = install("facade-repair", "v1", files);
+        byte[] archive = archive("MegaMek-v1", files);
+        PackageTransport network = transport("v1", archive);
+        LauncherServices services = new LauncherServices(fixture.registry, new RegistryStore(),
+                new InstallationInspector(), network, new JavaRuntime(),
+                new ApplicationLauncher(), new RootCoordinator(temp.resolve("facade-repair-locks")));
+        RegistryStore store = new RegistryStore();
+        InstallationRecord record = store.resolve(store.read(fixture.registry), fixture.id);
+        assertFalse(services.loadHome().installationStatuses().get(record.id()).adopted());
+        RealUpdateService.Snapshot consented = services.repairSource(record);
+        assertEquals(0, network.requests.size(), "consent source must be local");
+        Files.writeString(fixture.root.resolve("lib/runtime.txt"), "modified");
+        RealUpdateService.RepairResult result = services.repair(consented, quiet());
+        assertEquals(1, result.modifiedRestored());
+        assertEquals("official runtime",
+                Files.readString(fixture.root.resolve("lib/runtime.txt")));
+        int requests = network.requests.size();
+        assertTrue(requests > 0, "facade must reach the verified archive download");
+
+        InstallationRecord renamed = store.rename(fixture.registry, record, "Renamed");
+        assertTrue(assertThrows(IOException.class,
+                () -> services.repair(consented, quiet())).getMessage()
+                .contains("selected installation changed"));
+        RealUpdateService.Snapshot newConsent = services.repairSource(renamed);
+        Path pending = Files.createDirectory(fixture.root.resolve(
+                RootCoordinator.UPDATE_NAMESPACE));
+        try {
+            assertTrue(assertThrows(IOException.class,
+                    () -> services.repair(newConsent, quiet())).getMessage()
+                    .contains("recovery required"));
+        } finally {
+            Files.delete(pending);
+        }
+        Path adoption = new ReceiptStore().metadataDirectory(fixture.registry)
+                .resolve(fixture.id + ".adoption.json");
+        Files.writeString(adoption, "adopted marker");
+        assertTrue(services.loadHome().installationStatuses().get(fixture.id).adopted(),
+                "adoption marker is retained even if its content is invalid");
+        assertTrue(assertThrows(IOException.class,
+                () -> services.repair(newConsent, quiet())).getMessage()
+                .contains("adopted/imported"));
+        assertEquals(requests, network.requests.size(),
+                "stale consent, recovery and adopted copies must not download");
+    }
+
+    @Test
+    void exactRepairRejectsWrongCompressedDigestBeforeMutation() throws Exception {
+        Map<String, byte[]> files = packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime"), "docs/manual.txt", bytes("manual")));
+        Fixture fixture = install("repair-digest", "v1", files);
+        Files.writeString(fixture.root.resolve("docs/manual.txt"), "my edits");
+        // Change only the gzip header hint: exact size and extracted files stay identical.
+        byte[] different = archive("MegaMek-v1", files);
+        different[8] ^= 1;
+        String metadataWithoutDigest = releaseJson("v1", different)
+                .replace(",\"digest\":\"sha256:" + sha(different) + "\"", "");
+        RealUpdateService repair = service(new PackageTransport(
+                response(metadataWithoutDigest), packageResponse(different)), point -> {});
+        IOException mismatch = assertThrows(IOException.class, () -> repair.repair(
+                fixture.registry, fixture.id, RealUpdateService.REPAIR_CONFIRM, quiet()));
+        assertTrue(mismatch.getMessage().contains("persisted provenance"));
+        assertEquals("my edits", Files.readString(fixture.root.resolve("docs/manual.txt")));
+        assertFalse(Files.exists(fixture.root.resolve(RootCoordinator.UPDATE_NAMESPACE)));
+    }
+
+    @Test
+    void exactRepairCrashRecoveryAndTamperedJournalFailClosed() throws Exception {
+        Map<String, byte[]> files = packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("official"), "docs/manual.txt", bytes("manual")));
+        Fixture fixture = install("repair-recovery", "v1", files);
+        Files.writeString(fixture.root.resolve("lib/runtime.txt"), "my runtime");
+        Files.writeString(fixture.root.resolve("docs/manual.txt"), "my manual");
+        byte[] archive = archive("MegaMek-v1", files);
+        AtomicBoolean interrupted = new AtomicBoolean();
+        RealUpdateService repair = service(transport("v1", archive), point -> {
+            if (point.startsWith("APP_MUTATION:") && interrupted.compareAndSet(false, true)) {
+                throw new IOException("simulated interruption");
+            }
+        });
+        assertThrows(IOException.class, () -> repair.repair(fixture.registry, fixture.id,
+                RealUpdateService.REPAIR_CONFIRM, quiet()));
+        Path journal = journal(fixture.root);
+        byte[] original = Files.readAllBytes(journal);
+        ObjectMapper mapper = new ObjectMapper();
+        com.fasterxml.jackson.databind.node.ObjectNode node =
+                (com.fasterxml.jackson.databind.node.ObjectNode) mapper.readTree(original);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) node.get("operations").get(0))
+                .put("path", "data/not-official.txt");
+        Files.write(journal, mapper.writeValueAsBytes(node));
+        RealUpdateService recovery = service(new PackageTransport(), point -> {});
+        assertThrows(Exception.class, () -> recovery.recover(fixture.registry, fixture.id,
+                RealUpdateService.CONFIRM));
+        assertTrue(Files.exists(journal));
+        Files.write(journal, original);
+        assertTrue(recovery.recover(fixture.registry, fixture.id, RealUpdateService.CONFIRM)
+                .outcome().contains("rolled back"));
+        assertEquals("my runtime", Files.readString(fixture.root.resolve("lib/runtime.txt")));
+        assertEquals("my manual", Files.readString(fixture.root.resolve("docs/manual.txt")));
+        assertFalse(Files.exists(fixture.root.resolve(RootCoordinator.UPDATE_NAMESPACE)));
+    }
+
+    @Test
+    void exactRepairClearsRestoredOverridesWithoutChangingReleaseIdentity() throws Exception {
+        Fixture fixture = install("repair-after-update", "v1", packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime1"),
+                "data/units.txt", bytes("official1"))));
+        Files.writeString(fixture.root.resolve("data/units.txt"), "custom");
+        Map<String, byte[]> v2 = packageFiles(2, Map.of(
+                "lib/runtime.txt", bytes("runtime2"),
+                "data/units.txt", bytes("official2")));
+        byte[] v2Archive = archive("MegaMek-v2", v2);
+        RealUpdateService updater = service(transport("v2", v2Archive), point -> {});
+        RealUpdateService.ApplyResult updated = updater.apply(
+                updater.snapshot(fixture.registry, fixture.id), "v2", v2Archive.length,
+                "sha256:" + sha(v2Archive), RealUpdateService.CONFIRM, quiet());
+        assertTrue(updated.state().overrides().stream().anyMatch(
+                item -> item.path().equals("data/units.txt")));
+        RealUpdateService repair = service(transport("v2", v2Archive), point -> {});
+        RealUpdateService.RepairResult result = repair.repair(fixture.registry, fixture.id,
+                RealUpdateService.REPAIR_CONFIRM, quiet());
+        assertEquals(1, result.modifiedRestored());
+        assertEquals("official2", Files.readString(fixture.root.resolve("data/units.txt")));
+        assertEquals("v2", repair.snapshot(fixture.registry, fixture.id).current().tag());
+        assertFalse(repair.snapshot(fixture.registry, fixture.id).current().overrides().stream()
+                .anyMatch(item -> item.path().equals("data/units.txt")));
+    }
+
+    @Test
     void updatedMilestoneCopyRetainsCurrentChannelProvenanceWhenReimported()
             throws Exception {
         Fixture managed = install("adoption-provenance", "v1.0.0",
@@ -705,13 +910,117 @@ class RealUpdateServiceTest {
                 runtimeReceipt, CurrentUpdateState.initial(runtimeReceipt), "v2",
                 "MegaMek-v2.tar.gz", targetArchive.length, digest, quiet());
         Files.writeString(runtime.root.resolve("lib/runtime.txt"), "local-runtime-change");
-        Exception runtimeFailure = assertThrows(Exception.class, () -> runtimeService.apply(
-                runtimePrepared, RealUpdateService.CONFIRM, quiet()));
-        assertTrue(runtimeFailure.getMessage().toLowerCase(Locale.ROOT).contains("runtime"));
+        RealUpdateService.ApplyResult repaired = runtimeService.apply(
+                runtimePrepared, RealUpdateService.CONFIRM, quiet());
+        assertEquals("v2", repaired.state().tag());
         assertEquals(1, runtimeNetwork.binaryRequests);
         assertEquals(targetArchive.length, runtimeNetwork.binaryBytes);
-        assertEquals("old", Files.readString(runtime.root.resolve("docs/change.txt")));
+        assertEquals("runtime-2", Files.readString(runtime.root.resolve("lib/runtime.txt")));
+        assertEquals("new", Files.readString(runtime.root.resolve("docs/change.txt")));
         assertFalse(Files.exists(runtime.root.resolve(RootCoordinator.UPDATE_NAMESPACE)));
+    }
+
+    @Test
+    void ordinaryUpdateReplacesDamagedAndMissingOfficialRuntimeButPreservesUserDataAndExtraJar()
+            throws Exception {
+        Fixture fixture = install("owned-runtime-overwrite", "v1", packageFiles(1, Map.of(
+                "lib/core.jar", bytes("old-core"), "lib/missing.txt", bytes("missing"),
+                "lib/obsolete.jar", bytes("obsolete"), "data/keep.txt", bytes("old-data"),
+                "MegaMek.exe", bytes("old-exe"), "MegaMek.sh", bytes("old-shell"))));
+        Files.writeString(fixture.root.resolve("MegaMek.jar"), "damaged-root");
+        Files.writeString(fixture.root.resolve("MegaMek.exe"), "damaged-exe");
+        Files.delete(fixture.root.resolve("MegaMek.sh"));
+        Files.writeString(fixture.root.resolve("lib/core.jar"), "damaged-core");
+        Files.delete(fixture.root.resolve("lib/missing.txt"));
+        Files.writeString(fixture.root.resolve("lib/obsolete.jar"), "modified-obsolete");
+        Files.writeString(fixture.root.resolve("lib/extra.jar"), "unowned-addon");
+        Files.writeString(fixture.root.resolve("data/keep.txt"), "my-data");
+        Files.createDirectories(fixture.root.resolve("saves"));
+        Files.writeString(fixture.root.resolve("saves/game.sav"), "save");
+        Map<String, byte[]> target = packageFiles(2, Map.of(
+                "lib/core.jar", bytes("new-core"), "lib/missing.txt", bytes("restored"),
+                "data/keep.txt", bytes("new-data"), "MegaMek.exe", bytes("new-exe"),
+                "MegaMek.sh", bytes("new-shell")));
+        RealUpdateService.ApplyResult updated = apply(fixture, "v2", target, point -> {});
+        assertArrayEquals(target.get("MegaMek.jar"),
+                Files.readAllBytes(fixture.root.resolve("MegaMek.jar")));
+        assertEquals("new-exe", Files.readString(fixture.root.resolve("MegaMek.exe")));
+        assertEquals("new-shell", Files.readString(fixture.root.resolve("MegaMek.sh")));
+        assertEquals("new-core", Files.readString(fixture.root.resolve("lib/core.jar")));
+        assertEquals("restored", Files.readString(fixture.root.resolve("lib/missing.txt")));
+        assertFalse(Files.exists(fixture.root.resolve("lib/obsolete.jar")));
+        assertEquals("unowned-addon", Files.readString(fixture.root.resolve("lib/extra.jar")));
+        assertEquals(List.of("lib/extra.jar"), OwnershipPolicy.extraLibJars(fixture.root,
+                updated.state().officialManifest(), updated.state().officialManifest()));
+        assertEquals("my-data", Files.readString(fixture.root.resolve("data/keep.txt")));
+        assertEquals("save", Files.readString(fixture.root.resolve("saves/game.sav")));
+        assertFalse(Files.exists(fixture.root.resolve(RootCoordinator.UPDATE_NAMESPACE)));
+    }
+
+    @Test
+    void modifiedRuntimeRollbackRestoresExactLocalBytesAndRejectsTamperedJournalPath()
+            throws Exception {
+        Fixture fixture = install("damaged-runtime-rollback", "v1", packageFiles(1, Map.of(
+                "lib/core.jar", bytes("old-core"), "lib/obsolete.jar", bytes("obsolete"))));
+        Files.writeString(fixture.root.resolve("MegaMek.jar"), "custom-damage");
+        Files.writeString(fixture.root.resolve("lib/core.jar"), "custom-core");
+        Files.writeString(fixture.root.resolve("lib/obsolete.jar"), "custom-obsolete");
+        Map<String, byte[]> target = packageFiles(2, Map.of("lib/core.jar", bytes("new-core")));
+        byte[] archive = archive("MegaMek-v2", target);
+        RealUpdateService failing = service(transport("v2", archive), point -> {
+            if (point.equals("APP_MUTATION:lib/core.jar")) throw new IOException("stop");
+        });
+        assertThrows(IOException.class, () -> failing.apply(
+                failing.snapshot(fixture.registry, fixture.id), "v2", archive.length,
+                "sha256:" + sha(archive), RealUpdateService.CONFIRM, quiet()));
+        assertEquals("custom-damage", Files.readString(transaction(fixture.root)
+                .resolve("backups/MegaMek.jar")));
+        Path journal = journal(fixture.root);
+        byte[] originalJournal = Files.readAllBytes(journal);
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode tree = mapper.readTree(originalJournal);
+        ((com.fasterxml.jackson.databind.node.ObjectNode) tree.path("operations").get(0))
+                .put("path", "../saves/game.sav");
+        Files.write(journal, mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(tree));
+        assertThrows(org.megamek.launcher.manifest.ManifestException.class,
+                () -> service(new PackageTransport(), point -> {})
+                .recover(fixture.registry, fixture.id, RealUpdateService.CONFIRM));
+        assertTrue(Files.exists(journal));
+        // Restore the journal only; the backup still carries the original arbitrary bytes.
+        Files.write(journal, originalJournal);
+        service(new PackageTransport(), point -> {}).recover(
+                fixture.registry, fixture.id, RealUpdateService.CONFIRM);
+        assertEquals("custom-damage", Files.readString(fixture.root.resolve("MegaMek.jar")));
+        assertEquals("custom-core", Files.readString(fixture.root.resolve("lib/core.jar")));
+        assertEquals("custom-obsolete", Files.readString(fixture.root.resolve("lib/obsolete.jar")));
+        assertFalse(Files.exists(fixture.root.resolve(RootCoordinator.UPDATE_NAMESPACE)));
+    }
+
+    @Test
+    void cliPreviewAndApplyWarnAboutPreservedExtraLibJar() throws Exception {
+        Fixture fixture = install("cli-extra-lib-jar", "v1",
+                packageFiles(1, Map.of("lib/core.jar", bytes("old"))));
+        Files.writeString(fixture.root.resolve("lib/addon.jar"), "addon");
+        byte[] archive = archive("MegaMek-v2",
+                packageFiles(2, Map.of("lib/core.jar", bytes("new"))));
+        String[] preview = {"preview-update", "--registry", fixture.registry.toString(),
+                "--id", fixture.id, "--tag", "v2"};
+        ByteArrayOutputStream previewOutput = new ByteArrayOutputStream();
+        assertEquals(0, org.megamek.launcher.Main.run(preview,
+                new PrintStream(previewOutput), quiet(), transport("v2", archive)));
+        assertTrue(previewOutput.toString().contains(
+                "WARNING preserved unowned lib JAR lib/addon.jar may affect the game"));
+
+        String[] apply = {"apply-update", "--registry", fixture.registry.toString(),
+                "--id", fixture.id, "--from-tag", "v1", "--tag", "v2",
+                "--size", Long.toString(archive.length), "--digest", "sha256:" + sha(archive),
+                "--confirm", RealUpdateService.CONFIRM};
+        ByteArrayOutputStream applyOutput = new ByteArrayOutputStream();
+        assertEquals(0, org.megamek.launcher.Main.run(apply,
+                new PrintStream(applyOutput), quiet(), transport("v2", archive)));
+        assertTrue(applyOutput.toString().contains(
+                "WARNING preserved unowned lib JAR lib/addon.jar may affect the game"));
+        assertEquals("addon", Files.readString(fixture.root.resolve("lib/addon.jar")));
     }
 
     @Test
@@ -1024,7 +1333,7 @@ class RealUpdateServiceTest {
     }
 
     @Test
-    void customizedRuntimeAndStaleConsentFailBeforeApplicationMutation() throws Exception {
+    void customizedRuntimeIsReplacedButStaleConsentFailsBeforeApplicationMutation() throws Exception {
         Fixture fixture = install("runtime", "v1", packageFiles(1, Map.of(
                 "lib/runtime.txt", bytes("runtime-1"),
                 "data/a.txt", bytes("a"))));
@@ -1034,11 +1343,6 @@ class RealUpdateServiceTest {
                 "data/a.txt", bytes("b")));
         byte[] archive = archive("MegaMek-v2", v2);
         PackageTransport transport = transport("v2", archive);
-        RealUpdateService service = service(transport, point -> {});
-        RealUpdateService.Snapshot snapshot = service.snapshot(fixture.registry, fixture.id);
-        IOException failure = assertThrows(IOException.class, () -> service.apply(snapshot, "v2",
-                archive.length, "sha256:" + sha(archive), RealUpdateService.CONFIRM, quiet()));
-        assertTrue(failure.getMessage().contains("runtime"));
         assertEquals("custom runtime", Files.readString(fixture.root.resolve("lib/runtime.txt")));
         assertEquals("a", Files.readString(fixture.root.resolve("data/a.txt")));
         assertFalse(Files.exists(fixture.root.resolve(RootCoordinator.UPDATE_NAMESPACE)));
@@ -1059,6 +1363,14 @@ class RealUpdateServiceTest {
         assertTrue(stale.getMessage().contains("changed since explicit consent"));
         assertEquals(1, changedDigest.requests.size(), "metadata only; package was not downloaded");
         assertFalse(Files.exists(fixture.root.resolve(RootCoordinator.UPDATE_NAMESPACE)));
+
+        RealUpdateService service = service(transport, point -> {});
+        RealUpdateService.Snapshot snapshot = service.snapshot(fixture.registry, fixture.id);
+        RealUpdateService.ApplyResult result = service.apply(snapshot, "v2", archive.length,
+                "sha256:" + sha(archive), RealUpdateService.CONFIRM, quiet());
+        assertEquals("v2", result.state().tag());
+        assertEquals("runtime-2", Files.readString(fixture.root.resolve("lib/runtime.txt")));
+        assertEquals("b", Files.readString(fixture.root.resolve("data/a.txt")));
     }
 
     @Test
@@ -1257,6 +1569,33 @@ class RealUpdateServiceTest {
                              .acquire(fixture.root, false)) {
             lease.requireNoPendingUpdate();
         }
+    }
+
+    @Test
+    void unexpectedArtifactDuringCommittedCleanupCannotReportSuccess() throws Exception {
+        Fixture fixture = install("cleanup-race", "v1", packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime-1"),
+                "docs/change.txt", bytes("old"))));
+        byte[] archive = archive("MegaMek-v2", packageFiles(2, Map.of(
+                "lib/runtime.txt", bytes("runtime-2"),
+                "docs/change.txt", bytes("new"))));
+        Path namespace = fixture.root.resolve(RootCoordinator.UPDATE_NAMESPACE);
+        RealUpdateService update = service(transport("v2", archive), point -> {
+            if (point.equals("AFTER_PENDING_DELETE")) {
+                Files.writeString(namespace.resolve("unexpected"), "do not delete");
+            }
+        });
+        RealUpdateService.Snapshot before = update.snapshot(fixture.registry, fixture.id);
+        IOException failure = assertThrows(IOException.class, () -> update.apply(
+                before, "v2", archive.length, "sha256:" + sha(archive),
+                RealUpdateService.CONFIRM, quiet()));
+        assertTrue(failure.getMessage().contains("unknown update namespace artifacts"));
+        assertFalse(Files.exists(namespace.resolve("pending.json")));
+        assertTrue(Files.exists(namespace.resolve("unexpected")));
+        assertEquals("v2", update.snapshot(fixture.registry, fixture.id).current().tag());
+        assertThrows(IOException.class, () ->
+                service(new PackageTransport(), point -> {}).recover(
+                        fixture.registry, fixture.id, RealUpdateService.CONFIRM));
     }
 
     @Test
@@ -1510,11 +1849,14 @@ class RealUpdateServiceTest {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         try (GzipCompressorOutputStream gzip = new GzipCompressorOutputStream(output);
              TarArchiveOutputStream tar = new TarArchiveOutputStream(gzip)) {
-            tar.putArchiveEntry(new TarArchiveEntry(root + "/"));
+            TarArchiveEntry directory = new TarArchiveEntry(root + "/");
+            directory.setModTime(0);
+            tar.putArchiveEntry(directory);
             tar.closeArchiveEntry();
             for (Map.Entry<String, byte[]> item : files.entrySet().stream()
                     .sorted(Map.Entry.comparingByKey()).toList()) {
                 TarArchiveEntry entry = new TarArchiveEntry(root + "/" + item.getKey());
+                entry.setModTime(0);
                 entry.setSize(item.getValue().length);
                 tar.putArchiveEntry(entry);
                 tar.write(item.getValue());

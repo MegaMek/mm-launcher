@@ -47,6 +47,7 @@ import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -98,6 +99,30 @@ class UpdatePlannerTest {
         assertEquals("old-remove", Files.readString(installation.resolve("remove.txt")));
         assertEquals("personal", Files.readString(installation.resolve("saves/campaign.sav")));
         assertTrue(Files.notExists(installation.resolve("missing.txt")));
+    }
+
+    @Test
+    void modifiedOfficialRuntimeIsReplacedOrRemovedWhileModifiedDataIsSkipped()
+            throws Exception {
+        write("MegaMek.jar", "damaged");
+        write("lib/core.jar", "damaged");
+        write("lib/obsolete.jar", "modified");
+        write("data/personal.txt", "personal");
+        Manifest baseline = manifest("1", List.of(
+                file("MegaMek.jar", "old"), file("lib/core.jar", "old"),
+                file("lib/obsolete.jar", "old"), file("lib/missing.txt", "old"),
+                file("data/personal.txt", "old")));
+        Manifest target = manifest("2", List.of(
+                file("MegaMek.jar", "new"), file("lib/core.jar", "new"),
+                file("lib/missing.txt", "new"), file("data/personal.txt", "new")));
+
+        List<Decision> decisions = new UpdatePlanner().plan(baseline, target, installation);
+        assertEquals(Map.of("MegaMek.jar", Action.REPLACE, "lib/core.jar", Action.REPLACE,
+                        "lib/missing.txt", Action.ADD, "lib/obsolete.jar", Action.REMOVE,
+                        "data/personal.txt", Action.SKIP),
+                decisions.stream().collect(java.util.stream.Collectors.toMap(
+                        Decision::path, Decision::action)));
+        assertEquals("damaged", Files.readString(installation.resolve("MegaMek.jar")));
     }
 
     @Test

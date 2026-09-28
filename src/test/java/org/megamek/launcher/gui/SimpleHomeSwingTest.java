@@ -46,6 +46,7 @@ import org.megamek.launcher.onboarding.NormalInstallService;
 import org.megamek.launcher.onboarding.Product;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationPhase;
+import org.megamek.launcher.operation.ProgressUnit;
 import org.megamek.launcher.registry.InstallationRecord;
 import org.megamek.launcher.registry.RegistryData;
 import org.megamek.launcher.registry.RegistryStore;
@@ -53,6 +54,9 @@ import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
 import org.megamek.launcher.release.ReleaseTransport;
 import org.megamek.launcher.update.UpdatePreviewService;
+import org.megamek.launcher.update.ImportedCopyAdoptionService;
+import org.megamek.launcher.update.CurrentUpdateState;
+import org.megamek.launcher.update.RealUpdateService;
 
 import javax.imageio.ImageIO;
 import javax.swing.JButton;
@@ -62,6 +66,7 @@ import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JProgressBar;
 import javax.swing.JPopupMenu;
 import javax.swing.JComponent;
 import javax.swing.KeyStroke;
@@ -227,6 +232,13 @@ class SimpleHomeSwingTest {
                 return button != null
                         && button.getText().endsWith("(1.2.3)");
             });
+            assertEquals("Install latest MekHQ Milestone (1.2.3)", primary.getText());
+            assertEquals(QuickInstallSnapshot.DEFAULT_KEY,
+                    new QuickInstallOption.Key(OfficialRepository.MEKHQ, FollowChannel.MILESTONE));
+            assertEquals(List.of(
+                            new QuickInstallOption.Key(OfficialRepository.MEGAMEK, FollowChannel.MILESTONE),
+                            new QuickInstallOption.Key(OfficialRepository.LAB, FollowChannel.MILESTONE)),
+                    QuickInstallSnapshot.MENU_KEYS.subList(0, 2));
             int catalogRequests = services.catalogRequests.get();
 
             invokeKeyBinding(primary, KeyStroke.getKeyStroke(
@@ -415,7 +427,9 @@ class SimpleHomeSwingTest {
             assertTrue((onEdt(frame::getExtendedState) & javax.swing.JFrame.ICONIFIED) != 0);
             assertNoShowingDialog(frame, "Confirm launch");
             assertNoShowingDialog(frame, "Game finished");
+            JButton launchedButton = megamekSplit.primaryButton();
             waitUntil(() -> services.launchAttempts.get() == 1
+                    && find(frame, "launch-megamek-button") != launchedButton
                     && find(frame, "launch-megamek-button") != null
                     && ((JButton) find(frame, "launch-megamek-button")).isEnabled());
             SwingUtilities.invokeAndWait(() ->
@@ -716,6 +730,300 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    void moreMenuPreferencesResetHonorsCancelAndReportsBackupOnConfirmation()
+            throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        FakeServices services = new FakeServices(temp.resolve("reset-menu.json"));
+        services.installed = true;
+        services.main = services.first;
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            JButton manage = waitButton(frame, "manageInstallationsButton");
+            SwingUtilities.invokeAndWait(manage::doClick);
+            JButton more = waitButton(frame, "installationMenuButton-" + services.first.id());
+            for (boolean confirm : List.of(false, true)) {
+                SwingUtilities.invokeAndWait(more::doClick);
+                JMenuItem reset = waitFor(() -> {
+                    for (var element : javax.swing.MenuSelectionManager.defaultManager()
+                            .getSelectedPath()) {
+                        if (element instanceof JPopupMenu popup) {
+                            for (Component child : popup.getComponents()) {
+                                if (child instanceof JMenuItem item
+                                        && ("resetPreferences-" + services.first.id())
+                                        .equals(item.getName())) return item;
+                            }
+                        }
+                    }
+                    return null;
+                });
+                invokeMenuSelection(reset);
+                JDialog dialog = waitDialog(frame, "Reset preferences");
+                JLabel consent = find(dialog, "launcherAlertMessage");
+                String text = consent.getAccessibleContext().getAccessibleName();
+                assertTrue(text.contains("Close MegaMek, MekHQ, and MegaMekLab"));
+                assertTrue(text.contains("preferences for the programs in this installation"));
+                assertTrue(text.contains("Your saves, campaigns, and custom files will stay"));
+                assertTrue(text.contains("A backup of your current preferences will be kept"));
+                assertTrue(text.contains("Its location will be shown after the reset"));
+                assertFalse(text.contains(services.resetBackup.toString()));
+                assertFalse(text.contains("mmconf/"));
+                assertFalse(text.contains(services.first.name()));
+                click(dialog, confirm ? "Reset preferences" : "Cancel");
+                if (confirm) {
+                    waitUntil(() -> services.resetCalls.get() == 1);
+                    JDialog result = waitDialog(frame, "Preferences reset");
+                    JLabel body = find(result, "launcherAlertMessage");
+                    assertEquals("Your previous preferences were backed up here:\n"
+                            + services.resetBackup,
+                            body.getAccessibleContext().getAccessibleName());
+                    click(result, "OK");
+                } else {
+                    assertEquals(0, services.resetCalls.get());
+                }
+            }
+            assertEquals(2, services.resetPlans.get());
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void repairMenuRequiresHealthyManagedCopyAndNoPendingRecovery() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
+        FakeServices services = new FakeServices(temp.resolve("repair-menu.json"));
+        services.installed = true;
+        services.main = services.first;
+        services.repairManaged = true;
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            SwingUtilities.invokeAndWait(
+                    waitButton(frame, "manageInstallationsButton")::doClick);
+            SwingUtilities.invokeAndWait(
+                    waitButton(frame, "installationMenuButton-" + services.first.id())::doClick);
+            JPopupMenu menu = waitFor(() -> java.util.Arrays.stream(
+                            javax.swing.MenuSelectionManager.defaultManager().getSelectedPath())
+                    .filter(JPopupMenu.class::isInstance).map(JPopupMenu.class::cast)
+                    .findFirst().orElse(null));
+            assertNotNull(find(menu, "repairInstallation-" + services.first.id()));
+            assertNull(find(menu, "repairInstallation-" + services.second.id()));
+            SwingUtilities.invokeAndWait(() ->
+                    javax.swing.MenuSelectionManager.defaultManager().clearSelectedPath());
+            dispose(frame);
+            services.pending = true;
+            LauncherFrame pendingFrame = onEdt(() -> new LauncherFrame(services));
+            try {
+                SwingUtilities.invokeAndWait(pendingFrame::showWindow);
+                SwingUtilities.invokeAndWait(
+                        waitButton(pendingFrame, "manageInstallationsButton")::doClick);
+                SwingUtilities.invokeAndWait(
+                        waitButton(pendingFrame,
+                                "installationMenuButton-" + services.first.id())::doClick);
+                JPopupMenu pendingMenu = waitFor(() -> java.util.Arrays.stream(
+                                javax.swing.MenuSelectionManager.defaultManager().getSelectedPath())
+                        .filter(JPopupMenu.class::isInstance).map(JPopupMenu.class::cast)
+                        .findFirst().orElse(null));
+                assertNull(find(pendingMenu, "repairInstallation-" + services.first.id()));
+            } finally {
+                dispose(pendingFrame);
+            }
+
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void adoptedManagedCopyHasNoRepairMenuAction() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
+        FakeServices services = new FakeServices(temp.resolve("adopted-repair-menu.json"));
+        services.installed = true;
+        services.main = services.first;
+        services.repairManaged = true;
+        services.repairAdopted = true;
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            SwingUtilities.invokeAndWait(
+                    waitButton(frame, "manageInstallationsButton")::doClick);
+            SwingUtilities.invokeAndWait(
+                    waitButton(frame, "installationMenuButton-" + services.first.id())::doClick);
+            JPopupMenu menu = waitFor(() -> java.util.Arrays.stream(
+                            javax.swing.MenuSelectionManager.defaultManager().getSelectedPath())
+                    .filter(JPopupMenu.class::isInstance).map(JPopupMenu.class::cast)
+                    .findFirst().orElse(null));
+            assertNull(find(menu, "repairInstallation-" + services.first.id()));
+            assertNotNull(find(menu, "installationMenuSeparator"));
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void repairRequiresConsentBeforeCallingFacade() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
+        FakeServices services = new FakeServices(temp.resolve("repair-consent.json"));
+        services.installed = true;
+        services.main = services.first;
+        services.repairManaged = true;
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            SwingUtilities.invokeAndWait(
+                    waitButton(frame, "manageInstallationsButton")::doClick);
+            SwingUtilities.invokeAndWait(
+                    waitButton(frame, "installationMenuButton-" + services.first.id())::doClick);
+            JMenuItem repair = waitFor(() -> {
+                for (var element : javax.swing.MenuSelectionManager.defaultManager()
+                        .getSelectedPath()) {
+                    if (element instanceof JPopupMenu popup) {
+                        return find(popup, "repairInstallation-" + services.first.id());
+                    }
+                }
+                return null;
+            });
+            invokeMenuSelection(repair);
+            JDialog consent = waitDialog(frame, "Repair installation");
+            JLabel message = find(consent, "launcherAlertMessage");
+            String text = message.getAccessibleContext().getAccessibleName();
+            assertTrue(text.contains("Download size: "));
+            assertTrue(text.contains("Close all MegaMek, MekHQ, and MegaMekLab windows"));
+            assertTrue(text.contains("Your saves and settings will stay"));
+            assertTrue(text.contains("back them up first"));
+            assertFalse(text.contains("won't keep a backup"));
+            assertFalse(text.contains("Installation:"));
+            assertFalse(text.contains("Folder:"));
+            assertFalse(text.contains("v1.2.3"));
+            assertFalse(text.contains("official managed"));
+            assertFalse(text.contains("rollback"));
+            assertFalse(text.contains("unowned"));
+            assertEquals(0, services.repairs.get());
+            click(consent, "Cancel");
+            assertEquals(0, services.repairs.get());
+            SwingUtilities.invokeAndWait(
+                    waitButton(frame, "installationMenuButton-" + services.first.id())::doClick);
+            JMenuItem retry = waitFor(() -> {
+                for (var element : javax.swing.MenuSelectionManager.defaultManager()
+                        .getSelectedPath()) {
+                    if (element instanceof JPopupMenu popup) {
+                        return find(popup, "repairInstallation-" + services.first.id());
+                    }
+                }
+                return null;
+            });
+            invokeMenuSelection(retry);
+            JDialog approved = waitDialog(frame, "Repair installation");
+            click(approved, "Repair");
+            waitUntil(() -> services.repairs.get() == 1);
+            JDialog completed = waitDialog(frame, "Repair complete");
+            JLabel summary = find(completed, "operationProgressDetail");
+            assertEquals("Repair complete. Your installation is ready to use.",
+                    summary.getText());
+            assertEquals("Some added files may still affect the game. View logs for details.",
+                    ((JLabel) find(completed, "operationLoggingWarning")).getText());
+            JTextArea log = ((OperationProgressDialog) completed).logArea();
+            assertTrue(log.getText().contains("lib/mod.jar"));
+            click(completed, "Close");
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void repairFailureKeepsProgressAndRecoveryGuidanceVisible() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
+        FakeServices services = new FakeServices(temp.resolve("repair-failure.json"));
+        services.installed = true;
+        services.main = services.first;
+        services.repairManaged = true;
+        services.repairFailure = new IOException("fixture repair failed");
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            SwingUtilities.invokeAndWait(
+                    waitButton(frame, "manageInstallationsButton")::doClick);
+            SwingUtilities.invokeAndWait(
+                    waitButton(frame, "installationMenuButton-" + services.first.id())::doClick);
+            JMenuItem repair = waitFor(() -> {
+                for (var element : javax.swing.MenuSelectionManager.defaultManager()
+                        .getSelectedPath()) {
+                    if (element instanceof JPopupMenu popup) {
+                        return find(popup, "repairInstallation-" + services.first.id());
+                    }
+
+                }
+                return null;
+            });
+            invokeMenuSelection(repair);
+            click(waitDialog(frame, "Repair installation"), "Repair");
+            JDialog failed = waitDialog(frame, "Repair failed — recovery may be required");
+            JTextArea log = ((OperationProgressDialog) failed).logArea();
+            assertTrue(log.getText().contains("fixture repair failed"));
+            assertTrue(log.getText().contains("Recover interrupted update"));
+            assertEquals(1, services.repairs.get());
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void repairProgressUsesDownloadOnlyPercentageAndPlainLanguageStages() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(
+                new FakeServices(temp.resolve("repair-stages.json"))));
+        OperationProgressDialog dialog = onEdt(() -> new OperationProgressDialog(frame,
+                "Repairing installation", "repairProgressLog", () -> {}));
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                dialog.useRepairProgress();
+                dialog.startNonCancellable(
+                        "Please keep the launcher open until repair finishes.");
+                dialog.setVisible(true);
+            });
+            OperationContext context = new OperationContext(
+                    org.megamek.launcher.operation.OperationType.UPDATE_APPLY, dialog);
+            context.enterFinalization("Repair cannot be cancelled");
+            context.phase(OperationPhase.METADATA, "Technical metadata");
+            assertRepairStage(dialog, "Downloading installation files", true);
+            context.progress(OperationPhase.DOWNLOAD, 250, 1000, ProgressUnit.BYTES,
+                    "Downloaded 250 of 1000 bytes");
+            waitUntil(() -> "25%".equals(((JProgressBar) find(dialog,
+                    "operationProgressBar")).getString()));
+            assertEquals("Downloaded 250 B of 1 KB",
+                    ((JLabel) find(dialog, "operationProgressDetail")).getText());
+            assertRepairStage(dialog, "Downloading installation files", false);
+            context.phase(OperationPhase.EXTRACT, "Technical extraction");
+            assertRepairStage(dialog, "Preparing installation files", true);
+            context.phase(OperationPhase.APPLY, "Technical transaction");
+            assertRepairStage(dialog, "Repairing installation", true);
+            context.cleanupPhase("Technical cleanup");
+            assertRepairStage(dialog, "Finishing up", true);
+            assertFalse(((JButton) find(dialog, "operationCancelButton")).isVisible());
+            SwingUtilities.invokeAndWait(() -> dialog.showRepairComplete(
+                    "Repair complete. No missing or changed installation files were found.",
+                    null));
+            assertEquals("Repair complete. No missing or changed installation files were found.",
+                    ((JLabel) find(dialog, "operationProgressDetail")).getText());
+        } finally {
+            SwingUtilities.invokeAndWait(dialog::dispose);
+            dispose(frame);
+        }
+    }
+
+    private static void assertRepairStage(JDialog dialog, String title, boolean indeterminate)
+            throws Exception {
+        waitUntil(() -> title.equals(((JLabel) find(dialog, "operationPhaseLabel")).getText()));
+        assertEquals(indeterminate,
+                ((JProgressBar) find(dialog, "operationProgressBar")).isIndeterminate());
+        if (indeterminate) {
+            assertEquals("Please keep the launcher open until repair finishes.",
+                    ((JLabel) find(dialog, "operationProgressDetail")).getText());
+        }
+    }
+
+    @Test
     void homeUsesUnionOfProductsEvenWhenOldDefaultContainsOnlyMegaMek() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
@@ -898,6 +1206,32 @@ class SimpleHomeSwingTest {
         }
     }
 
+    @Test
+    void successfulGameExitDuringSettingsLoadDoesNotReloadOrShowBusyDialog()
+            throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
+        FakeServices services = new FakeServices(temp.resolve("exit-during-settings.json"));
+        services.installed = true;
+        services.main = services.first;
+        services.releaseSettings = new CountDownLatch(1);
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
+            assertNotNull(waitFor(() -> find(frame, "settingsLoadingMessage")));
+            SwingUtilities.invokeAndWait(() -> frame.reloadAfterSuccessfulGameExit("megamek"));
+            assertNotNull(onEdt(() -> find(frame, "settingsLoadingMessage")),
+                    "the in-flight Settings page must not be replaced by a home reload");
+            assertNoShowingDialog(frame, "Please wait");
+            services.releaseSettings.countDown();
+            assertNotNull(waitButton(frame, "changeDefaultJavaButton"),
+                    "the Settings worker must still be able to finish");
+        } finally {
+            services.releaseSettings.countDown();
+            dispose(frame);
+        }
+    }
+
     private static void assertSettingsGeometry(LauncherFrame frame, boolean wide, String newsState) {
         JPanel left = find(frame, "settingsLeftColumn");
         JPanel right = find(frame, "settingsRightColumn");
@@ -913,6 +1247,14 @@ class SimpleHomeSwingTest {
                 newsAction.getBounds(), right);
         assertTrue(actionBounds.x + actionBounds.width <= right.getWidth(),
                 "news action must fit inside its column");
+        if (newsState.equals("newsArticleButton0")) {
+            JPanel news = find(frame, "settingsLatestnewsSection");
+            java.awt.Insets insets = news.getInsets();
+            assertEquals(news.getWidth() - insets.left - insets.right,
+                    newsAction.getWidth(), "headline button should use the whole news column");
+            assertEquals(javax.swing.SwingConstants.LEFT, ((JButton) newsAction).getHorizontalAlignment(),
+                    "headline text should align with the other Settings content");
+        }
         assertEquals(0, left.getX());
         if (wide) {
             assertEquals(0, left.getY());
@@ -946,7 +1288,8 @@ class SimpleHomeSwingTest {
         CountDownLatch newsStarted = new CountDownLatch(1);
         AtomicInteger requests = new AtomicInteger();
         byte[] xml = ("<feed xmlns=\"http://www.w3.org/2005/Atom\"><entry>"
-                + "<title>MegaMek update</title><published>2026-08-14T00:00:00Z</published>"
+                + "<title>MegaMek update and improvements for players and campaign testers</title>"
+                + "<published>2026-08-14T00:00:00Z</published>"
                 + "<link rel=\"alternate\" href=\"https://megamek.org/news\"/>"
                 + "</entry></feed>").getBytes(StandardCharsets.UTF_8);
         LauncherNewsFeed feed = new LauncherNewsFeed((uri, accept) -> {
@@ -969,8 +1312,16 @@ class SimpleHomeSwingTest {
                     "the news request does not block Settings navigation");
             releaseNews.countDown();
             JButton headline = waitButton(frame, "newsArticleButton0");
-            assertEquals("Aug 14, 2026 - MegaMek update", headline.getText());
+            assertEquals("Aug 14, 2026 - MegaMek update and improvements for players and campaign testers",
+                    headline.getText());
             onEdt(() -> {
+                frame.setSize(2000, 760);
+                frame.validate();
+                assertSettingsGeometry(frame, true, "newsArticleButton0");
+                assertTrue(headline.getFontMetrics(headline.getFont()).stringWidth(headline.getText())
+                                + headline.getInsets().left + headline.getInsets().right
+                                <= headline.getWidth(),
+                        "the full headline fits when the right column has room");
                 frame.setSize(1080, 760);
                 frame.validate();
                 assertSettingsGeometry(frame, true, "newsArticleButton0");
@@ -1017,7 +1368,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
-    void directLaunchMinimizesSafelyAndOnlyRestoresForFailureOrBusyGate()
+    void directLaunchMinimizesSafelyAndRestoredWindowAllowsAnotherLaunch()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual frame state and dialogs require a display");
@@ -1083,14 +1434,16 @@ class SimpleHomeSwingTest {
             SwingUtilities.invokeAndWait(() ->
                     frame.setExtendedState(javax.swing.JFrame.NORMAL));
             int attempts = services.launchAttempts.get();
+            CountDownLatch firstRelease = services.releaseLaunch;
+            services.launchStarted = new CountDownLatch(1);
+            services.releaseLaunch = new CountDownLatch(1);
             SwingUtilities.invokeLater(
                     () -> frame.launchDirectly(services.second, "megamek"));
-            JDialog busy = waitDialog(frame, "Please wait");
-            assertEquals(javax.swing.JFrame.NORMAL,
-                    onEdt(frame::getExtendedState) & ~javax.swing.JFrame.MAXIMIZED_BOTH);
-            assertEquals(attempts, services.launchAttempts.get(),
-                    "a busy gate neither starts nor minimizes another launch");
-            SwingUtilities.invokeAndWait(busy::dispose);
+            assertTrue(services.launchStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
+            assertEquals(attempts + 1, services.launchAttempts.get(),
+                    "another launch starts before the earlier child exits");
+            assertEquals(services.second, services.launchedRecord);
+            firstRelease.countDown();
             services.releaseLaunch.countDown();
             assertEquals(0, services.selections.get(),
                     "neither primary nor alternate direct launch mutates preferences");
@@ -1115,6 +1468,10 @@ class SimpleHomeSwingTest {
         private final AtomicInteger catalogRequests = new AtomicInteger();
         private final AtomicInteger selections = new AtomicInteger();
         private final AtomicInteger launchAttempts = new AtomicInteger();
+        private final AtomicInteger resetPlans = new AtomicInteger();
+        private final AtomicInteger resetCalls = new AtomicInteger();
+        private final AtomicInteger repairs = new AtomicInteger();
+        private final Path resetBackup;
         private final List<QuickInstallOption.Key> plannedChoices =
                 new java.util.concurrent.CopyOnWriteArrayList<>();
         private final List<Path> plannedDestinations =
@@ -1124,6 +1481,9 @@ class SimpleHomeSwingTest {
         private volatile boolean installed;
         private volatile InstallationRecord installedRecord;
         private volatile boolean pending;
+        private volatile boolean repairManaged;
+        private volatile boolean repairAdopted;
+        private volatile IOException repairFailure;
         private volatile boolean launched;
         private volatile InstallationRecord previewedRecord;
         private volatile String previewedProduct;
@@ -1152,6 +1512,7 @@ class SimpleHomeSwingTest {
         private FakeServices(Path registry) {
             super(registry);
             this.registry = registry.toAbsolutePath().normalize();
+            resetBackup = registry.getParent().resolve("reset-backup");
             destination = registry.getParent().resolve("installations").resolve("Main");
             asset = new ReleaseCatalog.Asset("MekHQ-v1.2.3.tar.gz", 1234,
                     "sha256:" + "a".repeat(64),
@@ -1177,6 +1538,44 @@ class SimpleHomeSwingTest {
                     products, null);
             records = List.of(firstWithoutJava, second);
             main = first;
+        }
+
+        @Override public PreferencesResetService.Plan planPreferencesReset(
+                InstallationRecord record) {
+            resetPlans.incrementAndGet();
+            return new PreferencesResetService.Plan(record, "mekhq",
+                    List.of("mm.preferences"), resetBackup, Map.of());
+        }
+
+        @Override public RealUpdateService.Snapshot repairSource(InstallationRecord record) {
+            CurrentUpdateState current = new CurrentUpdateState(1, 1, record.id(),
+                    record.canonicalRoot(), record.registeredAt(), "mekhq", "v1.2.3",
+                    asset.name(), asset.size(), "a".repeat(64), null, List.of(),
+                    List.of(), List.of(), null);
+            return new RealUpdateService.Snapshot(registry, record, null, current,
+                    Path.of(record.canonicalRoot()));
+        }
+
+        @Override public RealUpdateService.RepairResult repair(
+                RealUpdateService.Snapshot consented, java.io.PrintStream progress)
+                throws IOException {
+            repairs.incrementAndGet();
+            if (repairFailure != null) throw repairFailure;
+            return new RealUpdateService.RepairResult(consented.record(), 1, 1,
+                    List.of("lib/mod.jar"),
+                    "Temporary backups removed.");
+        }
+
+        @Override public RealUpdateService.RepairResult repair(
+                RealUpdateService.Snapshot consented, java.io.PrintStream progress,
+                OperationContext context) throws IOException {
+            return repair(consented, progress);
+        }
+
+        @Override public PreferencesResetService.Result resetPreferences(
+                PreferencesResetService.Plan plan) {
+            resetCalls.incrementAndGet();
+            return new PreferencesResetService.Result(plan.files(), plan.backup());
         }
 
         @Override public SettingsView settingsView() throws IOException, InterruptedException {
@@ -1296,7 +1695,16 @@ class SimpleHomeSwingTest {
                     pending && current.id().equals(first.id()),
                     new ChannelPreferenceStore.ReadResult(
                             ChannelPreferenceStore.Status.CONFIGURED,
-                            preference, "Configured"), Map.of(), Map.of());
+                            preference, "Configured"), Map.of(),
+                    repairManaged ? Map.of(current.id(), new InstallationStatus(
+                            new ChannelPreferenceStore.ReadResult(
+                                    ChannelPreferenceStore.Status.CONFIGURED,
+                                    preference, "Configured"),
+                            new UpdatePreviewService.Eligibility(current, true,
+                                    "fixture managed copy", null, null),
+                            pending, false, null,
+                            ImportedCopyAdoptionService.Availability.MANAGED,
+                            repairAdopted)) : Map.of());
         }
 
         @Override

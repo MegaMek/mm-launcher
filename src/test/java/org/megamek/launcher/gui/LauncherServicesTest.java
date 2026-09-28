@@ -81,6 +81,20 @@ class LauncherServicesTest {
     }
 
     @Test
+    void repairSourceRejectsImportedAndStaleSelectionsWithoutDownloading() throws Exception {
+        Path registry = temp.resolve("repair-registry.json");
+        LauncherServices services = services(registry, new RecordingRunner());
+        InstallationRecord imported = services.register("Imported", suite("repair-import"));
+        assertThrows(IOException.class, () -> services.repairSource(imported));
+        InstallationRecord stale = new InstallationRecord(imported.id(), "Old selection",
+                imported.canonicalRoot(), imported.observedBuild(), imported.products(),
+                imported.pin(), imported.updateEligible(), imported.registeredAt());
+        IOException error = assertThrows(IOException.class,
+                () -> services.repairSource(stale));
+        assertTrue(error.getMessage().contains("selected installation changed"));
+    }
+
+    @Test
     void registryBelowNonDirectoryIsNotMistakenForFirstRun() throws Exception {
         Path parentFile = Files.writeString(temp.resolve("not-a-directory"), "fixture");
         LauncherServices services = services(parentFile.resolve("registry.json"),

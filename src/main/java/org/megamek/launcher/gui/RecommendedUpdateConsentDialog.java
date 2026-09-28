@@ -104,6 +104,10 @@ final class RecommendedUpdateConsentDialog extends JDialog {
                 "Close MegaMek, MekHQ, and MegaMekLab before continuing.",
                 "recommendedUpdateCloseApplications",
                 scale.font(base, Font.PLAIN, 14f), FirstLaunchPanel.TEXT);
+        JLabel extraJars = label(
+                "Extra unowned JARs in lib, if present, are kept and may affect the game.",
+                "recommendedUpdateExtraJars",
+                scale.font(base, Font.PLAIN, 14f), FirstLaunchPanel.TEXT);
         JLabel product = label("Application: " + application,
                 "recommendedUpdateApplication",
                 scale.font(base, Font.BOLD, 14f), FirstLaunchPanel.TEXT);
@@ -122,6 +126,8 @@ final class RecommendedUpdateConsentDialog extends JDialog {
         summary.add(operation);
         summary.add(Box.createVerticalStrut(scale.scaleForGUI(6)));
         summary.add(closeApplications);
+        summary.add(Box.createVerticalStrut(scale.scaleForGUI(6)));
+        summary.add(extraJars);
         summary.add(Box.createVerticalStrut(scale.scaleForGUI(13)));
         summary.add(product);
         summary.add(Box.createVerticalStrut(scale.scaleForGUI(6)));

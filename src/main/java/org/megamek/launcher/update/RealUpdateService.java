@@ -95,7 +95,10 @@ import java.util.regex.Pattern;
  */
 public final class RealUpdateService {
     public static final String CONFIRM = RootCoordinator.CLOSE_ALL_CONFIRMATION;
+    /** Repair is a distinct, explicit authorization, not Update consent. */
+    public static final String REPAIR_CONFIRM = "RESTORE-EXACT-OFFICIAL-RELEASE";
     private static final int JOURNAL_SCHEMA = 1;
+    private static final int REPAIR_JOURNAL_SCHEMA = 2;
     private static final int MAX_METADATA = 64 * 1024 * 1024;
     private static final Pattern TAG = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,99}");
     private static final Pattern DIGEST = Pattern.compile("sha256:[0-9a-fA-F]{64}");
@@ -154,6 +157,137 @@ public final class RealUpdateService {
         new AdoptionStateStore(receipts).validateForUse(
                 registryPath, record, receipt, state, fixed.preference());
         return new Snapshot(registryPath, record, receipt, state, root);
+    }
+
+    /**
+     * Restores only paths owned by the currently recorded exact release. No preview or update
+     * planner is used: local modifications to official docs/data are deliberately restored too.
+     * The returned warning lists unowned lib JARs which may still influence class loading.
+     */
+    public RepairResult repair(Path registry, String id, String confirmation, PrintStream progress)
+            throws IOException, InterruptedException, ManifestException {
+        return repair(registry, id, confirmation, progress,
+                OperationContext.none(OperationType.UPDATE_APPLY));
+    }
+
+    public RepairResult repair(Path registry, String id, String confirmation, PrintStream progress,
+                               OperationContext context)
+            throws IOException, InterruptedException, ManifestException {
+        if (!REPAIR_CONFIRM.equals(confirmation)) {
+            throw new IOException("repair requires explicit " + REPAIR_CONFIRM + " confirmation");
+        }
+        // Repair cannot be abandoned after a journal is started. Unlike Apply, this entire
+        // operation is non-cancellable, including acquisition and preflight.
+        context.enterFinalization("Repair must run through completion or retain recovery state.");
+        context.phase(OperationPhase.METADATA, "Checking exact release provenance");
+        Snapshot expected = snapshot(registry, id);
+        try (RootCoordinator.Lease gate = coordinator.acquire(expected.root(), true)) {
+            gate.requireNoPendingUpdate();
+            RegistryData data = registries.read(expected.registry());
+            if (Files.exists(new AdoptionStateStore(receipts).path(expected.registry(),
+                    expected.record().id()), LinkOption.NOFOLLOW_LINKS)) {
+                throw new IOException("imported copies are not eligible for exact-release repair");
+            }
+            if (Files.exists(UninstallService.pendingJournalPath(expected.registry(),
+                    expected.record().id()), LinkOption.NOFOLLOW_LINKS)) {
+                throw new IOException("uninstall recovery required before repair");
+            }
+            Snapshot current = snapshot(expected.registry(), expected.record().id());
+            if (!current.equals(expected) || !registries.resolve(data, id).equals(current.record())) {
+                throw new IOException("repair provenance changed after authorization");
+            }
+            CurrentUpdateState source = current.current();
+            OfficialRepository repository = OfficialRepository.parse(source.repository());
+            try (VerifiedPackageFetcher.Workspace workspace =
+                         new VerifiedPackageFetcher(transport).fetch(repository, source.tag(),
+                                 receipts.metadataDirectory(current.registry()),
+                                 ".repair-download-", progress,
+                                 new VerifiedPackageFetcher.ExpectedAsset(source.assetName(),
+                                         source.assetSize(), null), context)) {
+                // Published digest metadata may be absent. The persisted computed digest is
+                // always mandatory; it binds the downloaded compressed bytes to this copy.
+                if (!source.assetSha256().equals(workspace.resolvedDigest().hex())) {
+                    throw new IOException("repair archive digest differs from persisted provenance");
+                }
+                context.phase(OperationPhase.PLAN, "Checking official installation files");
+                Inspection targetInspection = new InstallationInspector().inspect(
+                        workspace.extracted());
+                if (targetInspection.products().stream().noneMatch(
+                        product -> product.key().equals(repository.requiredProduct()))) {
+                    throw new IOException("repair archive lacks the receipt application");
+                }
+                OwnershipPolicy.Build target = new OwnershipPolicy().build(workspace.extracted(),
+                        repository, source.tag());
+                if (!source.officialManifest().equals(target.manifest())
+                        || !source.excludedOfficialPaths().equals(target.excludedPaths())) {
+                    throw new IOException("repair archive layout differs from persisted official "
+                            + "inventory");
+                }
+                validateRepairTree(current.root());
+                List<Decision> decisions = new ArrayList<>();
+                int missing = 0;
+                int modified = 0;
+                for (FileEntry entry : source.officialManifest().files()) {
+                    Path destination = RealUpdateFiles.resolve(current.root(), entry.path(), true);
+                    String hash = RealUpdateFiles.hashIfRegular(destination);
+                    Action action = hash == null ? Action.ADD
+                            : hash.equals(entry.sha256()) ? Action.KEEP : Action.REPLACE;
+                    if (action == Action.ADD) missing++;
+                    if (action == Action.REPLACE) modified++;
+                    decisions.add(new Decision(action, entry.path(), "exact-release repair"));
+                }
+                List<String> extraJars = OwnershipPolicy.extraLibJars(current.root(),
+                        source.officialManifest(), target.manifest());
+                context.phase(OperationPhase.PREPARE_INSTALL, "Checking repair destinations");
+                preflight(current.root(), decisions, context);
+                context.phase(OperationPhase.APPLY, "Restoring official installation files");
+                ApplyResult result = transactRepair(current, workspace.extracted(),
+                        targetInspection, decisions);
+                context.cleanupPhase("Finishing repair and removing temporary package files");
+                return new RepairResult(result.record(), missing, modified, extraJars,
+                        "Rollback copies are temporary and are deleted after successful repair; "
+                                + "make a separate backup of local edits before repair.");
+            }
+        }
+    }
+
+    public record RepairResult(InstallationRecord record, int missingRestored,
+                               int modifiedRestored, List<String> extraLibJars,
+                               String warning) {
+        public RepairResult {
+            extraLibJars = List.copyOf(extraLibJars);
+        }
+    }
+
+    private static void validateRepairTree(Path root) throws IOException {
+        Set<String> spellings = new HashSet<>();
+        try (var walk = Files.walk(root)) {
+            for (Path path : walk.skip(1).toList()) {
+                String relative = root.relativize(path).toString().replace('\\', '/');
+                String folded = key(relative);
+                if (OwnershipPolicy.PROTECTED_PATHS.stream().anyMatch(
+                        protectedPath -> folded.equals(protectedPath)
+                                || folded.startsWith(protectedPath + "/"))) {
+                    continue;
+                }
+                if (!OwnershipPolicy.managed(relative)
+                        && !folded.equals("lib") && !folded.equals("docs")
+                        && !folded.equals("data") && !folded.equals("licenses")) {
+                    continue;
+                }
+                var attrs = Files.readAttributes(path,
+                        java.nio.file.attribute.BasicFileAttributes.class,
+                        LinkOption.NOFOLLOW_LINKS);
+                if (attrs.isSymbolicLink() || attrs.isOther()
+                        || !attrs.isDirectory() && !attrs.isRegularFile()) {
+                    throw new IOException("repair refuses linked/special managed-tree entry: "
+                            + relative);
+                }
+                if (!spellings.add(folded)) {
+                    throw new IOException("repair refuses case/Unicode alias: " + relative);
+                }
+            }
+        }
     }
 
     public ApplyResult apply(Path registry, String id, String expectedFromTag, String targetTag,
@@ -507,9 +641,31 @@ public final class RealUpdateService {
                                  ManifestReader.PreviewPairValidation pair,
                                  List<Decision> decisions)
             throws IOException, ManifestException {
+        return transactInternal(snapshot, extracted, target, targetInspection, decisions,
+                false, release, asset, resolvedDigest, pair);
+    }
+
+    private ApplyResult transactRepair(Snapshot snapshot, Path extracted,
+                                       Inspection targetInspection, List<Decision> decisions)
+            throws IOException, ManifestException {
+        return transactInternal(snapshot, extracted,
+                new OwnershipPolicy.Build(snapshot.current().officialManifest(),
+                        snapshot.current().excludedOfficialPaths()),
+                targetInspection, decisions, true, null, null, null, null);
+    }
+
+    private ApplyResult transactInternal(Snapshot snapshot, Path extracted,
+                                         OwnershipPolicy.Build target,
+                                         Inspection targetInspection, List<Decision> decisions,
+                                         boolean repair, ReleaseCatalog.Release release,
+                                         ReleaseCatalog.Asset asset, String resolvedDigest,
+                                         ManifestReader.PreviewPairValidation pair)
+            throws IOException, ManifestException {
         String transactionId = UUID.randomUUID().toString();
-        CurrentUpdateState next = nextState(snapshot.current(), target, release, asset,
-                resolvedDigest, pair, decisions, transactionId);
+        CurrentUpdateState next = repair
+                ? repairState(snapshot.current(), transactionId)
+                : nextState(snapshot.current(), target, release, asset,
+                        resolvedDigest, pair, decisions, transactionId);
         Path namespace = createNamespace(snapshot, transactionId);
         Path transaction = transaction(namespace, transactionId);
         Path pendingFile = namespace.resolve("pending.json");
@@ -517,7 +673,8 @@ public final class RealUpdateService {
         List<String> createdDirectories = missingParents(snapshot.root(), decisions);
         List<RealUpdateJournal.Operation> operations = operations(snapshot.root(), decisions,
                 target.manifest(), transactionId);
-        RealUpdateJournal journal = new RealUpdateJournal(JOURNAL_SCHEMA, transactionId,
+        RealUpdateJournal journal = new RealUpdateJournal(repair ? REPAIR_JOURNAL_SCHEMA
+                : JOURNAL_SCHEMA, transactionId,
                 snapshot.root().toString(), snapshot.registry().toString(),
                 snapshot.record().id(), snapshot.record().registeredAt(), "PREPARED",
                 previousPublished, snapshot.current(), next, snapshot.record(),
@@ -535,6 +692,17 @@ public final class RealUpdateService {
         failureHook.hit("AFTER_STAGING");
         verifyArtifacts(snapshot.root(), transaction, operations);
         verifyAtomicStorage(transaction);
+        if (repair) {
+            // No application mutation until every captured destination still matches the
+            // journal. Per-operation rechecks below protect against subsequent external edits.
+            for (RealUpdateJournal.Operation operation : operations) {
+                if (!Objects.equals(operation.beforeHash(), RealUpdateFiles.hashIfRegular(
+                        RealUpdateFiles.resolve(snapshot.root(), operation.path(), true)))) {
+                    throw new ManifestException("repair destination changed after backup: "
+                            + operation.path());
+                }
+            }
+        }
         failureHook.hit("BEFORE_APP_MUTATION");
         applyOperations(snapshot.root(), transaction, operations);
         failureHook.hit("AFTER_APP_MUTATION");
@@ -554,6 +722,17 @@ public final class RealUpdateService {
         long skipped = decisions.stream().filter(item -> item.action() == Action.SKIP).count();
         return new ApplyResult(refreshed, next, decisions, skipped,
                 next.overrides().size() + next.caseOverrides().size());
+    }
+
+    private static CurrentUpdateState repairState(CurrentUpdateState state, String id) {
+        Set<String> restored = index(state.officialManifest()).keySet();
+        return new CurrentUpdateState(state.schemaVersion(), state.ownershipPolicyVersion(),
+                state.installationId(), state.canonicalRoot(), state.registeredAt(),
+                state.repository(), state.tag(), state.assetName(), state.assetSize(),
+                state.assetSha256(), state.officialManifest(), state.excludedOfficialPaths(),
+                state.overrides().stream().filter(override ->
+                        !restored.contains(key(override.path()))).toList(),
+                state.caseOverrides(), id);
     }
 
     private Path createNamespace(Snapshot snapshot, String transactionId) throws IOException {
@@ -660,6 +839,19 @@ public final class RealUpdateService {
         Path transaction = transaction(root.resolve(NAMESPACE), journal.transactionId());
         List<RealUpdateJournal.Operation> reverse = new ArrayList<>(journal.operations());
         Collections.reverse(reverse);
+        // Check every required backup before touching any application file. In particular,
+        // modified official runtime bytes have no manifest hash to reconstruct them from.
+        for (RealUpdateJournal.Operation operation : reverse) {
+            if (operation.beforeHash() == null) continue;
+            String current = RealUpdateFiles.hashIfRegular(
+                    RealUpdateFiles.resolve(root, operation.path(), true));
+            if (Objects.equals(current, operation.beforeHash())) continue;
+            Path backup = internal(transaction, "backups", operation.path());
+            if (!Files.exists(backup, LinkOption.NOFOLLOW_LINKS)
+                    || !operation.beforeHash().equals(RealUpdateFiles.hash(backup))) {
+                throw new ManifestException("valid backup unavailable for " + operation.path());
+            }
+        }
         for (RealUpdateJournal.Operation operation : reverse) {
             Path destination = RealUpdateFiles.resolve(root, operation.path(), true);
             String current = RealUpdateFiles.hashIfRegular(destination);
@@ -729,6 +921,7 @@ public final class RealUpdateService {
                                  InstallationRecord record, OwnershipReceipt receipt, Path root)
             throws IOException, ManifestException {
         if (journal == null || journal.schemaVersion() != JOURNAL_SCHEMA
+                && journal.schemaVersion() != REPAIR_JOURNAL_SCHEMA
                 || journal.transactionId() == null || journal.canonicalRoot() == null
                 || journal.canonicalRegistry() == null || journal.installationId() == null
                 || journal.registeredAt() == null || journal.phase() == null
@@ -750,6 +943,11 @@ public final class RealUpdateService {
         }
         states.validate(journal.previousState(), journal.expectedRecord(), receipt);
         states.validate(journal.nextState(), journal.expectedRecord(), receipt);
+        boolean repair = journal.schemaVersion() == REPAIR_JOURNAL_SCHEMA;
+        if (repair && (!journal.nextState().equals(repairState(journal.previousState(),
+                journal.transactionId())))) {
+            throw new IOException("repair journal changed exact-release provenance");
+        }
         new ManifestReader().validatePreviewPair(journal.previousState().officialManifest(),
                 journal.nextState().officialManifest());
         Map<String, FileEntry> before = index(journal.previousState().officialManifest());
@@ -770,16 +968,27 @@ public final class RealUpdateService {
             }
             FileEntry oldEntry = before.get(operationKey);
             FileEntry newEntry = after.get(operationKey);
-            if (newEntry == null && !"REMOVE".equals(operation.action())
+            if (repair && (oldEntry == null || newEntry == null
+                    || !oldEntry.path().equals(operation.path())
+                    || !newEntry.path().equals(operation.path())
+                    || !Set.of("ADD", "REPLACE").contains(operation.action()))) {
+                throw new IOException("repair journal operation is not an exact official path");
+            }
+            if (oldEntry == null && !"ADD".equals(operation.action())
+                    || newEntry == null && !"REMOVE".equals(operation.action())
+                    || newEntry != null && "REMOVE".equals(operation.action())
                     || newEntry != null && operation.afterHash() == null
                     || newEntry != null && !newEntry.sha256().equals(operation.afterHash())
                     || operation.beforeHash() == null && !"ADD".equals(operation.action())
                     || operation.beforeHash() != null && "ADD".equals(operation.action())
                     || oldEntry == null && operation.beforeHash() != null
+                    || operation.beforeHash() != null
+                    && !operation.beforeHash().matches("[0-9a-f]{64}")
                     || operation.beforeHash() != null && oldEntry != null
                     && !operation.beforeHash().equals(oldEntry.sha256())
                     && !trusted.getOrDefault(operationKey, Set.of())
-                    .contains(operation.beforeHash())) {
+                    .contains(operation.beforeHash())
+                    && !OwnershipPolicy.runtimePath(operation.path()) && !repair) {
                 throw new IOException("journal operation hashes do not match managed manifests");
             }
             String expectedBackup = operation.beforeHash() == null ? null
@@ -804,6 +1013,12 @@ public final class RealUpdateService {
             if (!decisionPaths.add(decision.path())) {
                 throw new IOException("journal plan contains duplicate paths");
             }
+            if (repair && (decision.path() == null || !before.containsKey(key(decision.path()))
+                    || !before.get(key(decision.path())).path().equals(decision.path())
+                    || !Set.of(Action.ADD, Action.REPLACE, Action.KEEP)
+                    .contains(decision.action()))) {
+                throw new IOException("repair journal plan is not exact-release restoration");
+            }
             if (decision.action() == Action.ADD || decision.action() == Action.REPLACE
                     || decision.action() == Action.REMOVE) {
                 decisionMutations.add(key(decision.path()));
@@ -815,6 +1030,18 @@ public final class RealUpdateService {
         }
         if (!decisionMutations.equals(operations.keySet())) {
             throw new IOException("journal plan and operation allowlists differ");
+        }
+        if (repair) {
+            for (Decision decision : journal.decisions()) {
+                RealUpdateJournal.Operation operation = operations.get(key(decision.path()));
+                if (decision.action() == Action.KEEP && operation != null
+                        || decision.action() == Action.ADD && operation != null
+                        && operation.beforeHash() != null
+                        || decision.action() == Action.REPLACE && operation != null
+                        && operation.beforeHash() == null) {
+                    throw new IOException("repair journal action and backup disagree");
+                }
+            }
         }
         Set<String> expectedPaths = new HashSet<>();
         journal.previousState().officialManifest().files().forEach(
@@ -846,8 +1073,6 @@ public final class RealUpdateService {
         }
         Map<String, FileEntry> old = index(current.officialManifest());
         Map<String, FileEntry> after = index(target);
-        Map<String, Set<String>> trusted = trustedHashes(current);
-        Set<String> actualRuntime = new HashSet<>();
         try (var walk = Files.walk(root)) {
             var iterator = walk.skip(1).iterator();
             while (iterator.hasNext()) {
@@ -868,27 +1093,27 @@ public final class RealUpdateService {
                 }
                 if (!attrs.isRegularFile() || !OwnershipPolicy.runtimePath(portable)) continue;
                 String folded = key(portable);
-                actualRuntime.add(folded);
                 FileEntry oldEntry = old.get(folded);
                 FileEntry newEntry = after.get(folded);
+                if (oldEntry == null && newEntry == null
+                        && portable.toLowerCase(Locale.ROOT).startsWith("lib/")
+                        && portable.toLowerCase(Locale.ROOT).endsWith(".jar")) {
+                    // Unowned mod JARs are not in the transaction allowlist. They may affect
+                    // the game, but must never be removed by an ordinary update.
+                    continue;
+                }
                 String hash = RealUpdateFiles.hash(path, context);
-                boolean official = oldEntry != null && hash.equals(oldEntry.sha256())
-                        || newEntry != null && hash.equals(newEntry.sha256())
-                        || trusted.getOrDefault(folded, Set.of()).contains(hash);
-                if (!official) {
+                if (oldEntry == null && newEntry == null
+                        || oldEntry == null && !hash.equals(newEntry.sha256())
+                        || oldEntry != null && newEntry != null
+                        && !oldEntry.path().equals(portable) && !newEntry.path().equals(portable)) {
                     throw new IOException("entire update refused: unrecognized/customized runtime "
                             + portable);
                 }
             }
         }
-        for (FileEntry entry : old.values()) {
-            context.checkpoint();
-            if (OwnershipPolicy.runtimePath(entry.path())
-                    && !actualRuntime.contains(key(entry.path()))) {
-                throw new IOException("entire update refused: managed runtime is missing "
-                        + entry.path());
-            }
-        }
+        // Missing official runtime files are ordinary ADD operations. The planner and
+        // transaction journal still bind each destination to its manifest path.
     }
 
     private void preflight(Path root, List<Decision> decisions, OperationContext context)
@@ -1090,8 +1315,14 @@ public final class RealUpdateService {
         Files.delete(pending);
         failureHook.hit("AFTER_PENDING_DELETE");
         Path transactions = namespace.resolve("transactions");
-        if (RealUpdateFiles.emptyDirectory(transactions)) Files.delete(transactions);
-        if (RealUpdateFiles.emptyDirectory(namespace)) Files.delete(namespace);
+        if (!RealUpdateFiles.emptyDirectory(transactions)) {
+            throw new IOException("unknown update transactions appeared during cleanup");
+        }
+        Files.delete(transactions);
+        if (!RealUpdateFiles.emptyDirectory(namespace)) {
+            throw new IOException("unknown update namespace artifacts appeared during cleanup");
+        }
+        Files.delete(namespace);
     }
 
     /**

@@ -46,6 +46,36 @@ Top-level actions are **Install another version** and **Import existing installa
 **Uninstall…** at the destructive bottom; imported cards do not. A pending uninstall exposes only
 **Recover uninstall** instead of a new remove/uninstall action. There is no standalone GUI Preview
 action. Update is primary only when known available.
+**Reset preferences…** appears in the More menu for ordinary registered copies, including
+imports. The confirmation explains the program scope, asks users to close the suite, and says
+that saves, campaigns, and custom files stay. It omits the file list and backup path; the
+success dialog identifies the retained backup location. The root coordinator blocks tracked
+running games and pending updates. Users must close externally started suite apps as well.
+Official receipt source determines package scope;
+without a receipt, an unambiguous inspected product inventory is required. MekHQ resets MM,
+MHQ and MML local settings; MegaMek and MegaMekLab reset only their own. MML's
+`megameklab.properties.bak` is moved with the primary settings file. The operation leaves other
+files (including saves and custom files) alone and never touches OS-global Java Preferences.
+No matching files means no reset and no backup created. On a partial move failure, already
+moved files are rolled back where safe; errors identify the backup for manual recovery.
+
+**Repair installation…** appears in More only for a healthy exact-release managed copy without
+pending recovery; imported and adopted copies cannot use it. The pre-download consent identifies
+the download size if known, asks users to close all suite apps, and explains in plain language
+that missing or changed game files will be replaced, saves and settings stay, and users should
+back up changed game files they want to keep. It does not display the installation name, folder,
+release tag, or technical file details in the consent. The facade rechecks consented provenance before execution; the
+backend enforces the root/live-process gate and transaction. Progress shows restoration counts
+and warnings, while a failed repair points to pending update recovery rather than claiming success.
+Repair is non-cancellable from the start in both UI and operation context; its progress displays
+**Downloading installation files** with actual transferred bytes and package-download percentage
+only, then indeterminate **Preparing installation files**, **Repairing installation**, and
+**Finishing up**. The visible reminder is **Please keep the launcher open until repair finishes.**
+There is no overall repair percentage. With no restored files the completion says
+**Repair complete. No missing or changed installation files were found.**; otherwise it says
+**Repair complete. Your installation is ready to use.** Extra unowned lib JARs show a separate
+plain-language caveat, **Some added files may still affect the game. View logs for details.**,
+while their paths and technical warnings remain in logs.
 Selection is never a preference, and there is no bulk update.
 
 Each eligible managed card directly shows **Check for updates when the launcher opens** near its
@@ -54,11 +84,13 @@ record/preference binding, stays selected as requested while disabled for saving
 authoritative value on failure. Imported, incomplete, corrupt, missing-channel, and otherwise
 ineligible records show no checkbox. The action menu has no update-check editor.
 
-The title bar shows the packaged launcher version (0.14.0) or identifies a development build. Settings
+The title bar shows the packaged launcher version (0.14.5) or identifies a development build. Settings
 uses equal-width, top-aligned columns at wide window sizes: Game Java, Diagnostics, and
 Launcher update (Windows MSI) on the left; Community and Latest news on the right.
 At narrow sizes these groups stack in that reading order, with the bottom navigation
-remaining visible and the sections scrolling vertically as needed. Loading and error
+remaining visible and the sections scrolling vertically as needed. News headline buttons
+use the right column's available width with left-aligned text rather than a fixed character limit; at narrow
+widths their full titles remain available through tooltips and accessible names. Loading and error
 states keep the same layout. Settings
 includes Game Java, Diagnostics, Launcher update on Windows MSI, Community, and Latest news;
 there is no global automatic-check control. Latest news loads up to three dated headlines from
@@ -250,8 +282,13 @@ The long-term immutable cross-repository history requirement and current workaro
 in `../ci.md`.
 
 Static inspection, registry writes, package metadata/download work, launch-time Java validation,
-and child-process waiting run on a single-flight `SwingWorker`, never the event-dispatch
-thread. Ordinary actions are disabled during that work and restored after success or failure.
+and child-process waiting run on background `SwingWorker`s, never the event-dispatch
+thread. Ordinary actions are disabled during single-flight operations and restored after success
+or failure. Launch waiting is an exception: after dispatch, manually restoring the minimized
+window exposes launch controls for additional games. The per-root OS gate serializes each start
+and mutation; a durable per-root ledger tracks every started child independently. Updates,
+uninstalls, and recovery remain blocked while any tracked child is live, including children of
+other launcher processes. Ambiguous starts require explicit close-all recovery.
 The active operation dialog is exempt so its authoritative **Cancel** remains reachable. It uses a
 compact dark-teal/gold skin, logical `GuiScale` metrics, a clear typed phase, an honest accent
 progress bar, and one concise nontechnical detail. Backend stream text is retained only in a

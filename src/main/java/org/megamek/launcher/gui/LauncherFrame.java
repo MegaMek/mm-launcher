@@ -1481,7 +1481,8 @@ public final class LauncherFrame extends JFrame {
         if (current != null) {
             statuses.put(record.id(), new LauncherServices.InstallationStatus(
                     preference, current.previewEligibility(), current.pendingUpdate(),
-                    current.pendingUninstall(), current.error(), current.adoption()));
+                    current.pendingUninstall(), current.error(), current.adoption(),
+                    current.adopted()));
         }
         ChannelPreferenceStore.ReadResult preferredPreference =
                 record.equals(state.preferred()) ? preference : state.channelPreference();
@@ -1538,11 +1539,23 @@ public final class LauncherFrame extends JFrame {
         rename.setName("renameInstallation-" + record.id());
         rename.addActionListener(event -> renameInstallation(record));
         menu.add(rename);
+        JMenuItem resetPreferences = installationMenuItem("Reset preferences…");
+        resetPreferences.setName("resetPreferences-" + record.id());
+        resetPreferences.addActionListener(event -> resetPreferences(record));
+        menu.add(resetPreferences);
         JMenuItem remove = installationMenuItem("Remove from launcher…");
         remove.addActionListener(event -> removeFromLauncher(record));
         menu.add(remove);
         if (updateManaged) {
             menu.add(installationMenuSeparator());
+            if (local != null && local.error() == null && !local.pendingUpdate()
+                    && local.adoption() == ImportedCopyAdoptionService.Availability.MANAGED
+                    && !local.adopted()) {
+                JMenuItem repair = installationMenuItem("Repair installation…");
+                repair.setName("repairInstallation-" + record.id());
+                repair.addActionListener(event -> repairInstallation(record));
+                menu.add(repair);
+            }
             JMenuItem uninstall = installationMenuItem("Uninstall…");
             uninstall.addActionListener(event -> uninstall(record));
             menu.add(uninstall);
@@ -2223,6 +2236,28 @@ public final class LauncherFrame extends JFrame {
         });
     }
 
+    private void resetPreferences(InstallationRecord record) {
+        run("Preparing preferences reset", () -> services.planPreferencesReset(record), plan -> {
+            boolean confirmed = LauncherAlertDialog.showConfirm(this, guiScale,
+                    "Reset preferences",
+                    "Close MegaMek, MekHQ, and MegaMekLab before continuing."
+                            + "\n\nThis resets the preferences for the programs in this "
+                            + "installation. Your saves, campaigns, and custom files will stay."
+                            + "\n\nA backup of your current preferences will be kept in case "
+                            + "you want to restore them. Its location will be shown after "
+                            + "the reset.",
+                    "Reset preferences");
+            if (!confirmed) return;
+            run("Resetting preferences", () -> services.resetPreferences(plan), result -> {
+                String message = result.moved().isEmpty()
+                        ? "No known preferences files were found; nothing was reset."
+                        : "Your previous preferences were backed up here:\n" + result.backup();
+                status.setText(message);
+                LauncherAlertDialog.showMessage(this, guiScale, "Preferences reset", message);
+            });
+        });
+    }
+
     private void uninstall(InstallationRecord record) {
         boolean confirmed = LauncherAlertDialog.showConfirm(this, guiScale, "Uninstall",
                 "Uninstall " + record.name() + "?\nOfficial application files will be removed. "
@@ -2418,10 +2453,11 @@ public final class LauncherFrame extends JFrame {
                 LauncherNewsFeed.Article article = newsArticles.get(i);
                 String headline = NEWS_DATE.format(article.published())
                         + " - " + article.title();
-                JButton link = homeButton(headline.length() > 42
-                                ? headline.substring(0, 39) + "..." : headline,
-                        "newsArticleButton" + i);
+                JButton link = homeButton(headline, "newsArticleButton" + i);
                 link.setAlignmentX(Component.LEFT_ALIGNMENT);
+                link.setHorizontalAlignment(javax.swing.SwingConstants.LEFT);
+                link.setMaximumSize(new Dimension(Integer.MAX_VALUE,
+                        link.getPreferredSize().height));
                 link.setToolTipText(headline);
                 link.getAccessibleContext().setAccessibleName(headline);
                 link.addActionListener(event -> openWebsite(article.link(), "MegaMek news"));
@@ -2747,8 +2783,7 @@ public final class LauncherFrame extends JFrame {
 
             @Override
             protected void done() {
-                gate.leave();
-                setActionsEnabled(true);
+                if (!gate.isBusy()) setActionsEnabled(true);
                 Integer exit = null;
                 Throwable problem = null;
                 try {
@@ -2761,9 +2796,7 @@ public final class LauncherFrame extends JFrame {
                 }
                 if (!isDisplayable()) return;
                 if (problem == null && exit != null && exit == 0) {
-                    status.setText(displayProduct(capturedProduct) + " exited.");
-                    // Reload while retaining ICONIFIED. No success dialog or foreground request.
-                    reload();
+                    reloadAfterSuccessfulGameExit(capturedProduct);
                     return;
                 }
                 setExtendedState(restoreState);
@@ -2783,6 +2816,10 @@ public final class LauncherFrame extends JFrame {
         };
         try {
             launchWorker.execute();
+            // The root coordinator, not the GUI gate, protects the installation once the
+            // worker begins. Restoring the window manually exposes launch controls again.
+            gate.leave();
+            setActionsEnabled(true);
         } catch (RuntimeException error) {
             gate.leave();
             setActionsEnabled(true);
@@ -2792,6 +2829,16 @@ public final class LauncherFrame extends JFrame {
             showError("Launching " + displayProduct(capturedProduct) + " failed", error);
             status.setText("Launch failed — details shown");
         }
+    }
+
+    void reloadAfterSuccessfulGameExit(String productKey) {
+        // An unrelated operation may have acquired the gate after launch started.
+        // Its completion owns the UI; attempting reload() here would show a
+        // misleading "Please wait" dialog and clear the current page.
+        if (gate.isBusy()) return;
+        status.setText(displayProduct(productKey) + " exited.");
+        // Reload while retaining ICONIFIED. No success dialog or foreground request.
+        reload();
     }
 
     private void prepareNormalInstall(OfficialRepository repository, FollowChannel channel,
@@ -3651,6 +3698,73 @@ public final class LauncherFrame extends JFrame {
         throw new IllegalStateException("prepared update discard did not retain cancellation");
     }
 
+    private void repairInstallation(InstallationRecord record) {
+        // Capture local provenance off the EDT. No download or mutation precedes consent.
+        run("Checking repair eligibility", () -> services.repairSource(record),
+                source -> {
+                    if (!isDisplayable()) return;
+                    String size = source.current().assetSize() > 0
+                            ? BinarySizeFormat.mebibytes(source.current().assetSize())
+                            : "unknown";
+                    boolean confirmed = LauncherAlertDialog.showConfirm(this, guiScale,
+                            "Repair installation",
+                            "Download size: " + size
+                                    + "\n\nClose all MegaMek, MekHQ, and MegaMekLab windows "
+                                    + "before continuing."
+                                    + "\n\nRepair will replace missing or changed game files. "
+                                    + "Your saves and settings will stay."
+                                    + "\n\nIf you changed game files you want to keep, back "
+                                    + "them up first.",
+                            "Repair");
+                    if (!confirmed) return;
+                    OperationProgressDialog progress = new OperationProgressDialog(this,
+                            "Repairing installation", "repairProgressLog",
+                            this::showOperationLogs);
+                    progress.useRepairProgress();
+                    progress.startNonCancellable(
+                            "Please keep the launcher open until repair finishes.");
+                    progress.setVisible(true);
+                    PrintStream stream = new PrintStream(new LogOutput(progress.logArea()), true,
+                            StandardCharsets.UTF_8);
+                    runOperation("Repairing " + record.name(), OperationType.UPDATE_APPLY,
+                            List.of(source.root()), progress,
+                            context -> {
+                                // The backend owns the root gate, live-child check, transaction
+                                // journal, and recovery. Never call it with a stale consent.
+                                context.checkpoint();
+                                return services.repair(source, stream, context);
+                            }, result -> {
+                                progress.append("\nRestored " + result.missingRestored()
+                                        + " missing and " + result.modifiedRestored()
+                                        + " modified official files.\n");
+                                if (!result.extraLibJars().isEmpty()) {
+                                    progress.append("WARNING: extra unowned lib JARs remain: "
+                                            + String.join(", ", result.extraLibJars())
+                                            + ". They may affect the game.\n");
+                                }
+                                progress.append(result.warning() + "\n");
+                                progress.showRepairComplete(
+                                        result.missingRestored() + result.modifiedRestored() == 0
+                                                ? "Repair complete. No missing or changed "
+                                                        + "installation files were found."
+                                                : "Repair complete. Your installation is ready "
+                                                        + "to use.",
+                                        result.extraLibJars().isEmpty() ? null
+                                                : "Some added files may still affect the game. "
+                                                        + "View logs for details.");
+                                page = Page.INSTALLATIONS;
+                                reload();
+                            }, error -> {
+                                progress.append("\nREPAIR FAILED: " + errorDetail(error)
+                                        + "\nIf recovery is pending, close all suite games and "
+                                        + "use Recover interrupted update. Do not retry repair "
+                                        + "until recovery completes.\n");
+                                progress.setTitle("Repair failed — recovery may be required");
+                                reload();
+                            }, stream::close);
+                }, error -> showError("Repair unavailable", error));
+    }
+
     private void recoverUpdate(InstallationRecord record) {
         boolean confirmed = LauncherAlertDialog.showConfirm(this, guiScale,
                 "Confirm update recovery",
@@ -3698,6 +3812,17 @@ public final class LauncherFrame extends JFrame {
                 .append("\n\nDecisions:\n");
         result.decisions().forEach(decision -> text.append(decision.action()).append('\t')
                 .append(decision.path()).append("\t— ").append(decision.reason()).append('\n'));
+        try {
+            for (String jar : OwnershipPolicy.extraLibJars(
+                    Path.of(result.record().canonicalRoot()),
+                    result.currentState().officialManifest(), result.targetManifest())) {
+                text.append("WARNING: Preserved unowned lib JAR ").append(jar)
+                        .append(" may affect the game; Update will not remove it.\n");
+            }
+        } catch (IOException e) {
+            text.append("WARNING: Could not inspect extra lib JARs: ")
+                    .append(e.getMessage()).append('\n');
+        }
         JTextArea details = textArea(text.toString());
         details.setName("updatePreviewResults");
         JDialog dialog = dialog("Read-only update preview", new JScrollPane(details), null,
@@ -3795,6 +3920,15 @@ public final class LauncherFrame extends JFrame {
         OperationContext context = logged == null
                 ? new OperationContext(type, progress) : logged.context();
         progress.bind(context);
+        if (progress.isRepairProgress()) {
+            // Disable cancellation in the context as well as the dialog, before the worker
+            // starts. A repair must not be interruptible even during its download.
+            try {
+                context.enterFinalization("This operation must finish or retain recovery state.");
+            } catch (OperationCancelledException impossible) {
+                throw new IllegalStateException(impossible);
+            }
+        }
         if (!activeOperation.compareAndSet(null, context)) {
             gate.leave();
             progress.dispose();

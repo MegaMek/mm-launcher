@@ -290,6 +290,18 @@ public class LauncherServices {
         return store.rename(registry, record, name);
     }
 
+    public PreferencesResetService.Plan planPreferencesReset(InstallationRecord record)
+            throws IOException {
+        return new PreferencesResetService(registry, store, inspector, updateCoordinator)
+                .plan(record);
+    }
+
+    public PreferencesResetService.Result resetPreferences(PreferencesResetService.Plan plan)
+            throws IOException {
+        return new PreferencesResetService(registry, store, inspector, updateCoordinator)
+                .reset(plan);
+    }
+
     public HomeState loadHome() throws IOException {
         if (Files.exists(registry, LinkOption.NOFOLLOW_LINKS)) {
             uninstalls.recoverCommitted();
@@ -314,6 +326,11 @@ public class LauncherServices {
             boolean pendingUninstall = uninstalls.hasPending(record.id());
             ImportedCopyAdoptionService.Availability adoption =
                     adoptions.availability(data, record, pending || pendingUninstall);
+            // MANAGED covers both freshly installed and adopted copies. Preserve the
+            // adoption marker separately even when the other sidecars are incomplete.
+            boolean adopted = Files.exists(new org.megamek.launcher.update.ReceiptStore()
+                    .metadataDirectory(registry).resolve(record.id() + ".adoption.json"),
+                    LinkOption.NOFOLLOW_LINKS);
             try {
                 channel = new ChannelPreferenceStore().read(registry, data, record);
                 eligibility = new UpdatePreviewService(transport)
@@ -325,10 +342,11 @@ public class LauncherServices {
                     throw new IOException("registered build or application layout changed");
                 }
                 statuses.put(record.id(), new InstallationStatus(
-                        channel, eligibility, pending, pendingUninstall, null, adoption));
+                        channel, eligibility, pending, pendingUninstall, null, adoption, adopted));
             } catch (IOException | RuntimeException error) {
                 statuses.put(record.id(), new InstallationStatus(
-                        channel, eligibility, pending, pendingUninstall, detail(error), adoption));
+                        channel, eligibility, pending, pendingUninstall, detail(error), adoption,
+                        adopted));
             }
         }
         return new HomeState(data, legacy.preferred(), legacy.currentInspection(),
@@ -815,6 +833,49 @@ public class LauncherServices {
                 .recover(registry, record.id(), confirmation);
     }
 
+    /** Capture the exact local release to be shown before repair consent (no network request). */
+    public RealUpdateService.Snapshot repairSource(InstallationRecord selected)
+            throws IOException {
+        RegistryData data = readRegistry();
+        InstallationRecord current = store.resolve(data, selected.id());
+        if (!current.equals(selected)) {
+            throw new IOException("selected installation changed; reopen Installations");
+        }
+        requireNoPendingUninstall(current);
+        RealUpdateService service = new RealUpdateService(transport, updateCoordinator);
+        if (service.hasPending(Path.of(current.canonicalRoot()))) {
+            throw new IOException("update recovery required before repair");
+        }
+        Path adoption = new org.megamek.launcher.update.ReceiptStore()
+                .metadataDirectory(registry).resolve(current.id() + ".adoption.json");
+        if (Files.exists(adoption, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("adopted/imported copies cannot be repaired");
+        }
+        return service.snapshot(registry, current.id());
+    }
+
+    /** Recheck the consented local identity before calling the transaction backend. */
+    public RealUpdateService.RepairResult repair(RealUpdateService.Snapshot consented,
+                                                  PrintStream progress)
+            throws IOException, InterruptedException,
+            org.megamek.launcher.manifest.ManifestException {
+        return repair(consented, progress, OperationContext.none(OperationType.UPDATE_APPLY));
+    }
+
+    public RealUpdateService.RepairResult repair(RealUpdateService.Snapshot consented,
+                                                  PrintStream progress, OperationContext context)
+            throws IOException, InterruptedException,
+            org.megamek.launcher.manifest.ManifestException {
+        context.enterFinalization("Repair must run through completion or retain recovery state.");
+        RealUpdateService.Snapshot fresh = repairSource(consented.record());
+        if (!fresh.equals(consented)) {
+            throw new IOException("repair source changed after consent; review and confirm again");
+        }
+        return new RealUpdateService(transport, updateCoordinator).repair(
+                registry, consented.record().id(), RealUpdateService.REPAIR_CONFIRM, progress,
+                context);
+    }
+
     public RealUpdateService.RecoveryResult recoverUpdate(InstallationRecord record,
                                                            String confirmation,
                                                            OperationContext context)
@@ -915,19 +976,28 @@ public class LauncherServices {
     public record InstallationStatus(ChannelPreferenceStore.ReadResult channelPreference,
                                      UpdatePreviewService.Eligibility previewEligibility,
                                      boolean pendingUpdate, boolean pendingUninstall, String error,
-                                     ImportedCopyAdoptionService.Availability adoption) {
+                                     ImportedCopyAdoptionService.Availability adoption,
+                                     boolean adopted) {
+        public InstallationStatus(ChannelPreferenceStore.ReadResult channelPreference,
+                                  UpdatePreviewService.Eligibility previewEligibility,
+                                  boolean pendingUpdate, boolean pendingUninstall, String error,
+                                  ImportedCopyAdoptionService.Availability adoption) {
+            this(channelPreference, previewEligibility, pendingUpdate, pendingUninstall,
+                    error, adoption, false);
+        }
         public InstallationStatus(ChannelPreferenceStore.ReadResult channelPreference,
                                   UpdatePreviewService.Eligibility previewEligibility,
                                   boolean pendingUpdate, String error) {
             this(channelPreference, previewEligibility, pendingUpdate, false, error,
-                    ImportedCopyAdoptionService.Availability.INCOMPLETE);
+                    ImportedCopyAdoptionService.Availability.INCOMPLETE, false);
         }
 
         public InstallationStatus(ChannelPreferenceStore.ReadResult channelPreference,
                                   UpdatePreviewService.Eligibility previewEligibility,
                                   boolean pendingUpdate, String error,
                                   ImportedCopyAdoptionService.Availability adoption) {
-            this(channelPreference, previewEligibility, pendingUpdate, false, error, adoption);
+            this(channelPreference, previewEligibility, pendingUpdate, false, error, adoption,
+                    false);
         }
     }
 

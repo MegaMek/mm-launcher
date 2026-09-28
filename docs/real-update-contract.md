@@ -1,5 +1,31 @@
 # Explicit real-package update and recovery contract
 
+## Exact-current-release repair
+
+The Installations **More → Repair installation…** action is separate from Update and never
+chooses a newer release. The GUI captures valid local managed provenance, displays the selected
+package size (or unknown size) in a plain-language confirmation, and requires consent before
+any package download or mutation. It rechecks the captured registry record, receipt and current
+state before invoking `RealUpdateService.repair` with `REPAIR_CONFIRM`. Imported/adopted copies,
+pending update or uninstall recovery, and running launcher-started suite games are ineligible.
+Users must close **all** suite games, including externally started ones.
+
+Repair downloads and verifies the exact persisted package and restores **all** missing or modified
+official managed files, including locally edited documentation and data. Protected and unowned
+paths are preserved; extra unowned `lib` JARs remain and are reported as a gameplay risk. Rollback
+copies are temporary and not retained after successful repair: users must make their own backups.
+Failures after mutation may require the existing update recovery flow. A completed repair records
+restoration counts and extra-JAR paths in logs, with a visible caveat when extra JARs remain.
+The GUI passes its typed operation context through the facade to the verified package fetcher.
+Repair enters non-cancellable finalization before any acquisition or provenance check, so an
+operation cancellation request cannot interrupt download, preflight, or transaction. Typed events
+report actual compressed download bytes/total, followed by verification, extraction, planning,
+preparation, Apply, and cleanup; the repair-only GUI groups these into download (percentage of
+package transfer only), indeterminate preparation, repair, and finishing stages. It never
+estimates overall completion. The zero-change result says no missing or changed files were
+found; a changed result says the installation is ready to use. Unowned lib JARs retain an
+independent visible caveat with file paths in the logs, not a claim that all additions were fixed.
+
 ## Authorization, eligibility, and source trust
 
 Real Apply is never unconsented and does not update MegaMek Launcher itself. The GUI **Update…** flow
@@ -40,7 +66,7 @@ SHA-256 (published when available, otherwise computed during the one bounded tra
 extracts it into another owned area, and requires that extraction's static inspection and complete
 ownership inventory to equal the pristine captured target. A changed observational extraction is
 therefore reconstructed from verified bytes, never blessed. Apply then replans against fresh
-installed bytes and retains the original runtime/pristine checks and per-operation transaction
+installed bytes and retains the runtime collision checks and per-operation transaction
 verification.
 
 The initial GUI consent shows the application, current and target versions, rounded download size,
@@ -95,12 +121,17 @@ written. Modified data, obsolete-modified data, and data collisions are retained
 overrides instead of unnecessarily aborting Apply. Unknown artifacts are never broadly scanned for
 deletion.
 
-Runtime is stricter because a partially updated runtime is unsafe. Every suite-root `.jar`, `.exe`,
-or `.sh` and every ordinary file below `lib/` must match the current verified manifest, the exact
-target manifest, or a recorded official ancestor. A missing, modified, linked, special, or
-unrecognized runtime path, or any runtime `SKIP`/case conflict, refuses the **whole Apply before
-application mutation**. After mutations, `InstallationInspector` must report exactly the verified
-target build/product layout before metadata can commit.
+Runtime is stricter because a partially updated runtime is unsafe. Missing, damaged or modified
+official runtime files (suite-root `.jar`, `.exe`, `.sh`, and ordinary files below `lib/`) are
+added/replaced from the verified target; obsolete modified official runtime is removed. Their
+actual pre-update bytes are copied into a durable, SHA-256-verified transaction backup before
+any application mutation and are available for rollback until commit. Backups need not remain
+after a successful commit. Unowned extra ordinary JARs below `lib/` are never removed, and
+preview/CLI warn they may affect the game. Other unknown runtime files, linked/special runtime
+paths, runtime `SKIP`/case conflicts and unowned target collisions refuse the **whole Apply before
+application mutation**. User saves, preferences, campaigns and modified non-runtime data retain
+their existing preservation policy. After mutations, `InstallationInspector` must report exactly
+the verified target build/product layout before metadata can commit.
 
 Cross-release case-only execution remains deferred. Affected files/prefixes are `SKIP`, including
 runtime prefixes (which therefore stop Apply). Data case-prefix overrides are persisted separately
@@ -183,12 +214,15 @@ unexpected post-crash/user edit and never kills a process.
 ## Launch/update coordination and limitation
 
 A per-OS-user coordination directory outside installations is keyed by canonical root. An OS file
-lock serializes launches, Apply, recovery, and unblock across GUI/CLI processes and across multiple
-registries naming the same root. A launch holds the lock for the full game lifetime. Imported-copy
+lock serializes launch publication, Apply, recovery, and unblock across GUI/CLI processes and across multiple
+registries naming the same root. It is released after durable child publication rather than held
+for the game lifetime, allowing additional launches from the same root. Imported-copy
 launches remain usable and do not create coordination metadata inside the installation.
 
-Direct launches first persist `STARTING` with the launcher identity, then replace it with `RUNNING`
-and the child PID plus process creation time before waiting. `STARTING` means child publication may
+Direct launches append a uniquely identified `STARTING` entry with the launcher identity, then
+replace that entry with `RUNNING` and the child PID plus process creation time before waiting.
+Earlier single-entry markers are read and migrated under the same gate. All live `RUNNING` entries
+block mutation until their respective children exit. `STARTING` means child publication may
 have been interrupted: even a dead or reused launcher PID does not prove that no child was started,
 so only explicit close-all acknowledgement clears it. A `RUNNING` identity is cleared
 automatically only when its child is dead or its PID is demonstrably reused. A verified live
@@ -198,7 +232,7 @@ state and never terminates anything.
 
 Users must close **all** MegaMek, MekHQ, and MegaMekLab applications before Apply/recovery,
 including manually started instances. Coordination prevents cooperating current launcher
-processes from starting or updating the same root concurrently and pending transactions block
+processes from publishing launches while updating the same root and pending transactions block
 cooperating launches. It cannot prevent old launchers or external commands from starting an
 application, cannot universally detect those processes, and does not rely on or claim that Windows
 file locks guarantee application closure.

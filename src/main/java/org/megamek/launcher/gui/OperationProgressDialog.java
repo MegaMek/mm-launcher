@@ -111,6 +111,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
     private boolean finished;
     private boolean failureShown;
     private boolean nonCancellableFromStart;
+    private boolean repairProgress;
 
     OperationProgressDialog(LauncherFrame owner, String title, String logName,
                             Runnable showLogs) {
@@ -235,6 +236,22 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         cancel.setEnabled(false);
         cancel.setVisible(false);
         detail.setText(concise(message));
+    }
+
+    void useRepairProgress() {
+        repairProgress = true;
+    }
+
+    boolean isRepairProgress() {
+        return repairProgress;
+    }
+
+    void showRepairComplete(String message, String caveat) {
+        showWarning("Repair complete", message);
+        if (caveat != null) {
+            loggingWarning.setText(caveat);
+            loggingWarning.setVisible(true);
+        }
     }
 
     void setExpectedFailureSummary(String message) {
@@ -403,8 +420,9 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         }
         OperationProgress event = pending.getAndSet(null);
         if (event == null || !isDisplayable() || finished) return;
-        phase.setText(phaseName(event));
-        boolean extraction = event.phase() == OperationPhase.EXTRACT;
+        phase.setText(repairProgress ? repairPhaseName(event) : phaseName(event));
+        boolean extraction = event.phase() == OperationPhase.EXTRACT
+                || repairProgress && event.phase() != OperationPhase.DOWNLOAD;
         if (extraction) {
             progress.setIndeterminate(true);
             progress.setStringPainted(false);
@@ -429,16 +447,30 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
             progress.setIndeterminate(true);
             progress.setString("Working…");
         }
-        progress.getAccessibleContext().setAccessibleDescription(accessibleProgress(event));
+        progress.getAccessibleContext().setAccessibleDescription(repairProgress
+                && event.phase() != OperationPhase.DOWNLOAD
+                ? repairPhaseName(event) : accessibleProgress(event));
         boolean cancellationAllowed = event.cancellationAllowed()
                 && !nonCancellableFromStart;
         cancel.setEnabled(cancellationAllowed);
         cancel.setVisible(cancellationAllowed);
         cancel.setToolTipText(cancellationAllowed
                 ? "Cancel at the next safe checkpoint" : null);
-        detail.setText(cancellationAllowed
-                ? progressDetail(event)
-                : nonCancellableDetail(event));
+        detail.setText(repairProgress
+                ? event.phase() == OperationPhase.DOWNLOAD
+                        && event.unit() == ProgressUnit.BYTES && event.total() > 0
+                        ? progressDetail(event)
+                        : "Please keep the launcher open until repair finishes."
+                : cancellationAllowed ? progressDetail(event) : nonCancellableDetail(event));
+    }
+
+    private static String repairPhaseName(OperationProgress event) {
+        return switch (event.phase()) {
+            case METADATA, DOWNLOAD -> "Downloading installation files";
+            case VERIFY, EXTRACT, PLAN, PREPARE_INSTALL -> "Preparing installation files";
+            case APPLY -> "Repairing installation";
+            default -> "Finishing up";
+        };
     }
 
     private static String phaseName(OperationProgress event) {

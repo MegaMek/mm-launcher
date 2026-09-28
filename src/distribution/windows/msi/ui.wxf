@@ -170,9 +170,12 @@
                  Text="LauncherWizardBanner"/>
         <Control Id="Title" Type="Text" X="15" Y="56" Width="335" Height="24" TabSkip="no"
                  Text="Installing MegaMek Launcher"/>
-        <Control Id="ActionText" Type="Text" X="15" Y="97" Width="335" Height="22">
-          <Subscribe Event="ActionText" Attribute="Text"/>
-        </Control>
+        <!-- The generated MSI has no ActionText table. Subscribing to the
+             Windows Installer fallback messages can display raw tokens such
+             as "Files [9]" on localized systems. Keep the label static; the
+             independent progress-bar subscription still reports progress. -->
+        <Control Id="StatusText" Type="Text" X="15" Y="97" Width="335" Height="22"
+                 Text="Setting up MegaMek Launcher..."/>
         <Control Id="ProgressBar" Type="ProgressBar" X="15" Y="126" Width="335" Height="15"
                  ProgressBlocks="yes" Text="Progress">
           <Subscribe Event="SetProgress" Attribute="Progress"/>
