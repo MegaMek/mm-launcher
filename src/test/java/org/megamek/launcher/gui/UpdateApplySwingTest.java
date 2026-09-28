@@ -369,33 +369,22 @@ class UpdateApplySwingTest {
             SwingUtilities.invokeLater(update::doClick);
             click(waitForDialog("Update application"), "Update");
             waitUntil(() -> fixture.services.applyCalls == 1);
-            // Apply is counted before the prepared workspace is closed and the
-            // failure callback reloads home; macOS cleanup can outlast a UI poll.
-            waitUntil(() -> fixture.services.loadHomeCalls >= 2, Duration.ofSeconds(60));
 
-            JDialog failed;
-            try {
-                failed = waitForDialog("Update failed — recovery may be required");
-            } catch (AssertionError timeout) {
-                String progressState = onEdt(() -> {
-                    for (Window window : Window.getWindows()) {
-                        if (window instanceof OperationProgressDialog dialog
-                                && dialog.isShowing()) {
-                            JButton cancel = find(dialog, "operationCancelButton");
-                            JLabel phase = find(dialog, "operationPhaseLabel");
-                            return "phase=" + (phase == null ? null : phase.getText())
-                                    + ", cancel=" + (cancel == null ? null : cancel.getText())
-                                    + ", details=" + componentText(dialog);
-                        }
+            // The Apply count precedes package cleanup. Wait for the failure
+            // surface itself, not an unrelated home reload or a worker milestone.
+            JDialog failed = waitFor(() -> {
+                for (Window window : Window.getWindows()) {
+                    if (window instanceof OperationProgressDialog dialog
+                            && dialog.isShowing()) {
+                        JButton close = find(dialog, "operationCancelButton");
+                        if (close != null && "Close".equals(close.getText())) return dialog;
                     }
-                    return "no visible progress";
-                });
-                throw new AssertionError("Apply calls=" + fixture.services.applyCalls
-                        + ", home loads=" + fixture.services.loadHomeCalls
-                        + ", progress=" + progressState, timeout);
-            }
-            assertTrue(failed.getTitle().contains("recovery"));
+                }
+                return null;
+            }, Duration.ofSeconds(60));
+            assertEquals("Update failed — recovery may be required", failed.getTitle());
             assertNotNull(find(failed, "operationViewDetailsButton"));
+            waitUntil(() -> fixture.services.loadHomeCalls >= 2);
             assertNull(find(frame, "recoverUpdateButton"),
                     "a failure before mutation must not invent a pending recovery");
         } finally {
@@ -568,7 +557,12 @@ class UpdateApplySwingTest {
     }
 
     private static <T> T waitFor(java.util.function.Supplier<T> probe) throws Exception {
-        long deadline = System.nanoTime() + Duration.ofSeconds(8).toNanos();
+        return waitFor(probe, Duration.ofSeconds(8));
+    }
+
+    private static <T> T waitFor(java.util.function.Supplier<T> probe, Duration timeout)
+            throws Exception {
+        long deadline = System.nanoTime() + timeout.toNanos();
         while (System.nanoTime() < deadline) {
             AtomicReference<T> value = new AtomicReference<>();
             SwingUtilities.invokeAndWait(() -> value.set(probe.get()));
@@ -579,11 +573,7 @@ class UpdateApplySwingTest {
     }
 
     private static void waitUntil(BooleanSupplier condition) throws Exception {
-        waitUntil(condition, Duration.ofSeconds(8));
-    }
-
-    private static void waitUntil(BooleanSupplier condition, Duration timeout) throws Exception {
-        long deadline = System.nanoTime() + timeout.toNanos();
+        long deadline = System.nanoTime() + Duration.ofSeconds(8).toNanos();
         while (System.nanoTime() < deadline) {
             boolean[] result = new boolean[1];
             SwingUtilities.invokeAndWait(() -> result[0] = condition.getAsBoolean());
