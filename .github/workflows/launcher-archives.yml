@@ -157,11 +157,11 @@ jobs:
           if (@($executables | Where-Object { $_ -like '*|MegaMek Launcher.exe' }).Count -ne 1) {
             throw 'MSI installed executable identity is incorrect.'
           }
-          $finish = @(MsiValues "SELECT ``Dialog`` FROM ``Dialog`` WHERE ``Dialog``='LauncherFinished'")
-          if ($finish.Count -ne 1 -or $finish[0] -cne 'LauncherFinished') {
+          $finish = @(MsiValues "SELECT ``Dialog`` FROM ``Dialog`` WHERE ``Dialog``='Exit'")
+          if ($finish.Count -ne 1 -or $finish[0] -cne 'Exit') {
             throw 'MSI interactive finish dialog is missing.'
           }
-          $view = $database.OpenView("SELECT ``Event``, ``Argument``, ``Condition`` FROM ``ControlEvent`` WHERE ``Dialog_``='LauncherFinished'")
+          $view = $database.OpenView("SELECT ``Event``, ``Argument``, ``Condition`` FROM ``ControlEvent`` WHERE ``Dialog_``='Exit'")
           $view.Execute()
           $launch = $false
           while ($record = $view.Fetch()) {
