@@ -1,26 +1,30 @@
 # Portable archive distribution contract
 
-## Additional CI artifacts
+## Native installer CI
 
-The generic archive documented below remains Java-free. CI additionally
-builds `MegaMek-Launcher-<version>-windows-x64.msi` and four
-`MegaMek-Launcher-<version>-<platform>-portable.tar.gz` archives (`windows-x64`,
-`linux-x64`, `macos-intel`, `macos-apple-silicon`), each with an exact-name
-`.sha256` file. Native archives are built on their respective runner, not
-cross-compiled. Each includes a host-native Java 21 jlink image using
-`ALL-MODULE-PATH` (including `bin/java`, `lib/modules`, and `legal/`).
-Windows uses the Launch4j bundled `runtime` path; Linux uses root `runtime`;
-macOS uses `MegaMek Launcher.app/Contents/runtime`. Scripts prefer the local
-runtime and retain the external-Java fallback for the generic archive.
-Each native portable archive carries only its host's entry point. The Windows
-archive retains `MegaMek Launcher.app/Contents/app/lib` for WindowsBootstrap's
-relative payload lookup, but does not include the macOS script or Info.plist
-or the Linux script. The generic archive still contains all three entry points.
-`verifyPortableArchive` extracts, checks the checksum and runtime structure,
-and runs a diagnostic with an invalid `JAVA_HOME` and unusable `PATH`.
-The MSI uses jpackage's own full-module runtime and WiX 3.14; CI never
-installs it. Neither CI job publishes a release. The Java image carries
-its own upstream `legal/` notices. Signing and notarization remain pending.
+The generic archive described below remains a developer-only prototype;
+CI does not build, verify or upload any archives. CI builds five native
+installer/checksum pairs, each on its target host:
+`MegaMek-Launcher-<version>-windows-x64.msi`,
+`MegaMek-Launcher-<version>-linux-x64.deb`,
+`MegaMek-Launcher-<version>-linux-x64.rpm`, and
+`MegaMek-Launcher-<version>-macos-{intel,apple-silicon}.pkg`.
+Each has an exact-name `.sha256` counterpart. MSI uses jpackage's
+full-module runtime and WiX 3.14; Linux and macOS use a host-native
+`ALL-MODULE-PATH` jlink image passed to jpackage via `--runtime-image`.
+These images retain `bin/java` for games, `lib/modules`, and upstream
+`legal/` notices. CI only inspects installer contents and checksums;
+it never installs them or publishes a release. Signing and notarization
+remain pending.
+
+Linux's stable package name is `megamek-launcher` under `/opt`; the macOS
+bundle identifier is `org.megamek.launcher` under `/Applications`.
+Both own only application files. Registry, settings, logs and installed
+games live in independent user paths and must not be overwritten by package
+upgrades. The Windows MSI retains its stable per-user installation path and
+upgrade UUID described below. The archive tasks are still available for
+development (including `verifyPortableArchive` and `verifyProvidedArchive`),
+but are not part of the CI installer contract.
 The MSI keeps the permanent upgrade UUID and per-user fixed binary directory
 `%LOCALAPPDATA%\Programs\MegaMek Launcher` (no folder chooser). This is
 separate from mutable registry state under `%LOCALAPPDATA%\MegaMek Launcher`,
@@ -171,10 +175,9 @@ structure, and integrity of those exact files. Its task graph includes test comp
 configuration guard but no staging, Launch4j, archive, or checksum producer, so a missing or wrong
 checksum fails instead of being regenerated.
 
-The prepared read-only GitHub Actions workflow builds the archive once on Windows, uploads one
-named CI artifact containing the archive and checksum, and makes every verifier download those
-same bytes. The workflow reports the archive SHA on each job and uses unique platform report
-artifact names:
+Archive verification is developer-only; the GitHub Actions workflow no longer
+builds or verifies archives. It builds native installers on the following runners
+and inspects checksums, metadata and runtime payload without installing anything:
 
 | Runner | Tested architecture intent |
 | --- | --- |
@@ -183,8 +186,7 @@ artifact names:
 | `macos-15-intel` | macOS Intel |
 | `macos-15` | macOS Apple Silicon |
 
-The macOS and Linux verifiers do not run Launch4j or any packaging task. Runner labels describe
-test coverage, not a minimum supported OS promise. The workflow does not create a Release, write
+Runner labels describe build coverage, not a minimum supported OS promise. The workflow does not create a Release, write
 repository contents, use secrets, sign, notarize, or publish anything. Native Windows has been
 exercised locally; native macOS/Linux and both Mac architectures remain pending the user's CI run.
 Windows ARM and Linux ARM are not qualified by this matrix.

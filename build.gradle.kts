@@ -210,6 +210,9 @@ abstract class WindowsInstallerMsi : DefaultTask() {
 
     @TaskAction
     fun packageInstaller() {
+        check(OperatingSystem.current().isWindows) {
+            "The Windows MSI can only be built on Windows."
+        }
         val wix = wixBinaryDirectory.get().asFile
         check(wix.isDirectory && File(wix, "candle.exe").isFile && File(wix, "light.exe").isFile) {
             "WiX Toolset 3.x binaries (candle.exe/light.exe) are required at " +
@@ -273,6 +276,92 @@ abstract class WindowsInstallerMsi : DefaultTask() {
         check(generated.isFile) { "jpackage did not produce ${generated.absolutePath}." }
         installer.parentFile.mkdirs()
         Files.move(generated.toPath(), installer.toPath())
+    }
+}
+
+abstract class NativeInstaller : DefaultTask() {
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val inputDirectory: DirectoryProperty
+
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val runtimeDirectory: DirectoryProperty
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val macIconFile: RegularFileProperty
+
+    @get:Internal
+    abstract val jpackageExecutable: RegularFileProperty
+
+    @get:Input
+    abstract val packageType: Property<String>
+
+    @get:Input
+    abstract val mainJarFileName: Property<String>
+
+    @get:Input
+    abstract val appVersion: Property<String>
+
+    @get:OutputFile
+    abstract val installerFile: RegularFileProperty
+
+    @get:Inject
+    abstract val execOperations: ExecOperations
+
+    @TaskAction
+    fun packageInstaller() {
+        val type = packageType.get()
+        check((type == "pkg" && OperatingSystem.current().isMacOsX) ||
+            ((type == "deb" || type == "rpm") && OperatingSystem.current().isLinux)) {
+            "$type installers can only be built on their native host."
+        }
+        val runtime = runtimeDirectory.get().asFile
+        check(File(runtime, "bin/java").isFile &&
+            File(runtime, "lib/modules").isFile && File(runtime, "legal").isDirectory) {
+            "Native installer runtime must include bin/java, JDK modules and legal notices."
+        }
+        val jpackage = jpackageExecutable.get().asFile
+        check(jpackage.isFile) { "jpackage is missing at ${jpackage.absolutePath}." }
+        val installer = installerFile.get().asFile
+        val destination = File(inputDirectory.get().asFile.parentFile, "output")
+        destination.mkdirs()
+        // Only remove old jpackage outputs of this type, not input or user data.
+        destination.listFiles().orEmpty().filter { it.extension == type }.forEach {
+            check(it.delete()) { "Could not remove previous jpackage output at $it." }
+        }
+        check(!installer.exists() || installer.delete()) {
+            "Could not remove previous installer at ${installer.absolutePath}."
+        }
+        execOperations.exec {
+            executable = jpackage.absolutePath
+            args("--verbose", "--type", type,
+                "--input", inputDirectory.get().asFile.absolutePath,
+                "--dest", destination.absolutePath,
+                "--name", "MegaMek Launcher",
+                "--app-version", appVersion.get(),
+                "--vendor", "MegaMek",
+                "--copyright", "MegaMek",
+                "--description", "MegaMek Launcher graphical desktop launcher",
+                "--main-jar", mainJarFileName.get(),
+                "--main-class", "org.megamek.launcher.DesktopLauncher",
+                "--runtime-image", runtime.absolutePath)
+            if (type == "pkg") {
+                args("--mac-package-identifier", "org.megamek.launcher",
+                    "--icon", macIconFile.get().asFile.absolutePath,
+                    "--install-dir", "/Applications")
+            } else {
+                args("--linux-package-name", "megamek-launcher",
+                    "--install-dir", "/opt")
+            }
+        }
+        val generated = destination.listFiles().orEmpty().filter { it.extension == type }
+        check(generated.size == 1) {
+            "Expected exactly one $type output from jpackage, found ${generated.size}."
+        }
+        installer.parentFile.mkdirs()
+        Files.move(generated.single().toPath(), installer.toPath())
     }
 }
 
@@ -723,10 +812,15 @@ val buildArchive = tasks.register("buildArchive") {
 // Include all JDK modules: games started by the launcher use the same bin/java
 // and require modules that the launcher itself does not reference.
 val nativePlatform = when {
-    OperatingSystem.current().isWindows -> "windows-x64"
-    OperatingSystem.current().isLinux -> "linux-x64"
-    OperatingSystem.current().isMacOsX ->
-        if (System.getProperty("os.arch") == "aarch64") "macos-apple-silicon" else "macos-intel"
+    OperatingSystem.current().isWindows &&
+        System.getProperty("os.arch") in setOf("amd64", "x86_64") -> "windows-x64"
+    OperatingSystem.current().isLinux &&
+        System.getProperty("os.arch") in setOf("amd64", "x86_64") -> "linux-x64"
+    OperatingSystem.current().isMacOsX && System.getProperty("os.arch") == "aarch64" ->
+        "macos-apple-silicon"
+    OperatingSystem.current().isMacOsX &&
+        System.getProperty("os.arch") in setOf("amd64", "x86_64") ->
+        "macos-intel"
     else -> error("Unsupported portable runtime host")
 }
 val javaHome = extensions.getByType(JavaToolchainService::class.java)
@@ -853,9 +947,8 @@ tasks.register<Test>("verifyPortableArchive") {
 }
 
 // ---------------------------------------------------------------------------
-// Windows MSI installer (jpackage). This is an additional, independently
-// verified artifact alongside the portable tar.gz above; it does not replace
-// it and does not participate in buildArchive/verifyDistributionConfiguration.
+// Windows MSI installer (jpackage). Preserve the existing per-user upgrade
+// identity and unattended self-update behavior independently of other packages.
 //
 // It bundles a jlink-trimmed Java runtime (via jpackage's automatic runtime
 // detection) so installed users never need a system Java. It always installs
@@ -906,7 +999,6 @@ val windowsInstallerMsi = tasks.register<WindowsInstallerMsi>("windowsInstallerM
     // Borrowed from the MegaMek project icon until a dedicated launcher icon exists.
     iconFile.set(layout.projectDirectory.file("src/distribution/windows/icon.ico"))
     wixResources.set(layout.projectDirectory.dir("src/distribution/windows/msi"))
-    onlyIf { OperatingSystem.current().isWindows }
     outputs.cacheIf { false }
 }
 
@@ -924,6 +1016,51 @@ val buildWindowsInstaller = tasks.register("buildWindowsInstaller") {
     group = "distribution"
     description = "Builds the Windows MSI installer and its exact SHA-256 file."
     dependsOn(windowsInstallerChecksum)
+}
+
+// macOS and Linux installers contain only installer-owned application binaries.
+// The jlink image includes every JDK module (including bin/java for launched
+// games); registry, logs and game installations remain in separate user paths.
+val nativeInstallerInputDirectory = layout.buildDirectory.dir("packaging/native-installer/input")
+val stageNativeInstallerInput = tasks.register<Sync>("stageNativeInstallerInput") {
+    group = "distribution"
+    dependsOn(stageCommonPayload)
+    into(nativeInstallerInputDirectory)
+    duplicatesStrategy = DuplicatesStrategy.FAIL
+    from(commonPayloadDirectory)
+}
+
+if (OperatingSystem.current().isLinux || OperatingSystem.current().isMacOsX) {
+    val types = if (OperatingSystem.current().isLinux) listOf("deb", "rpm") else listOf("pkg")
+    types.forEach { type ->
+        val name = type.replaceFirstChar { it.uppercase() }
+        val fileName = "MegaMek-Launcher-${project.version}-$nativePlatform.$type"
+        val installer = tasks.register<NativeInstaller>("native${name}Installer") {
+            group = "distribution"
+            description = "Builds the host-native $type installer with bundled Java."
+            dependsOn(stageNativeInstallerInput, linkPortableRuntime)
+            inputDirectory.set(nativeInstallerInputDirectory)
+            runtimeDirectory.set(nativeRuntimeDirectory)
+            macIconFile.set(layout.projectDirectory.file(
+                "src/distribution/macos/MegaMekLauncher.icns"))
+            jpackageExecutable.set(layout.file(javaHome.map { File(it, "bin/jpackage") }))
+            packageType.set(type)
+            mainJarFileName.set(tasks.named<Jar>("jar").flatMap { it.archiveFileName })
+            appVersion.set(windowsInstallerAppVersion)
+            installerFile.set(distributionsDirectory.map { it.file(fileName) })
+            outputs.cacheIf { false }
+        }
+        val checksum = tasks.register<Sha256File>("native${name}InstallerChecksum") {
+            group = "distribution"
+            dependsOn(installer)
+            archiveFile.set(installer.flatMap { it.installerFile })
+            checksumFile.set(distributionsDirectory.map { it.file("$fileName.sha256") })
+        }
+        tasks.register("build${name}Installer") {
+            group = "distribution"
+            dependsOn(checksum)
+        }
+    }
 }
 
 val verifyDistributionConfiguration = tasks.register<VerifyDistributionConfiguration>(
