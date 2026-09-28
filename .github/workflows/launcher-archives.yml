@@ -33,19 +33,15 @@ jobs:
         include:
           - id: windows-x64
             os: windows-2025
-            tasks: buildWindowsInstaller
             extensions: msi
           - id: linux-x64
             os: ubuntu-24.04
-            tasks: buildDebInstaller buildRpmInstaller
             extensions: deb,rpm
           - id: macos-intel
             os: macos-15-intel
-            tasks: buildPkgInstaller
             extensions: pkg
           - id: macos-apple-silicon
             os: macos-15
-            tasks: buildPkgInstaller
             extensions: pkg
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45

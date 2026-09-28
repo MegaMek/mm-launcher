@@ -187,8 +187,10 @@ and inspects checksums, metadata and runtime payload without installing anything
 | `macos-15` | macOS Apple Silicon |
 
 Runner labels describe build coverage, not a minimum supported OS promise. The workflow does not create a Release, write
-repository contents, use secrets, sign, notarize, or publish anything. Native Windows has been
-exercised locally; native macOS/Linux and both Mac architectures remain pending the user's CI run.
+repository contents, use secrets, sign, notarize, or publish anything. The hosted CI run has
+built, inspected, and uploaded all five installers on Windows, Linux, macOS Intel, and macOS
+Apple Silicon; source tests also pass on all four runners. This does not certify installation,
+upgrades, signing, or notarization on those hosts.
 Windows ARM and Linux ARM are not qualified by this matrix.
 
 ## Licensing and signing limitations

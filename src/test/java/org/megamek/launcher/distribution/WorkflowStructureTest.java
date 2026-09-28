@@ -69,18 +69,15 @@ class WorkflowStructureTest {
         assertEquals("${{ matrix.os }}", installers.path("runs-on").asText());
         List<String> ids = new ArrayList<>();
         List<String> runners = new ArrayList<>();
-        List<String> tasks = new ArrayList<>();
         List<String> extensions = new ArrayList<>();
         for (JsonNode row : installers.path("strategy").path("matrix").path("include")) {
             ids.add(row.path("id").asText());
             runners.add(row.path("os").asText());
-            tasks.add(row.path("tasks").asText());
+            assertFalse(row.has("tasks"), "matrix tasks must not imply they drive build commands");
             extensions.add(row.path("extensions").asText());
         }
         assertEquals(List.of("windows-x64", "linux-x64", "macos-intel", "macos-apple-silicon"), ids);
         assertEquals(List.of("windows-2025", "ubuntu-24.04", "macos-15-intel", "macos-15"), runners);
-        assertEquals(List.of("buildWindowsInstaller", "buildDebInstaller buildRpmInstaller",
-                "buildPkgInstaller", "buildPkgInstaller"), tasks);
         assertEquals(List.of("msi", "deb,rpm", "pkg", "pkg"), extensions);
         assertEquals(List.of(
                 "actions/checkout@v4",
