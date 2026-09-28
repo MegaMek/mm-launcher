@@ -369,6 +369,9 @@ class UpdateApplySwingTest {
             SwingUtilities.invokeLater(update::doClick);
             click(waitForDialog("Update application"), "Update");
             waitUntil(() -> fixture.services.applyCalls == 1);
+            // Apply is counted before the prepared workspace is closed and the
+            // failure callback reloads home; macOS cleanup can outlast a UI poll.
+            waitUntil(() -> fixture.services.loadHomeCalls >= 2, Duration.ofSeconds(60));
 
             JDialog failed;
             try {
@@ -393,7 +396,6 @@ class UpdateApplySwingTest {
             }
             assertTrue(failed.getTitle().contains("recovery"));
             assertNotNull(find(failed, "operationViewDetailsButton"));
-            waitUntil(() -> fixture.services.loadHomeCalls >= 2);
             assertNull(find(frame, "recoverUpdateButton"),
                     "a failure before mutation must not invent a pending recovery");
         } finally {
@@ -577,7 +579,11 @@ class UpdateApplySwingTest {
     }
 
     private static void waitUntil(BooleanSupplier condition) throws Exception {
-        long deadline = System.nanoTime() + Duration.ofSeconds(8).toNanos();
+        waitUntil(condition, Duration.ofSeconds(8));
+    }
+
+    private static void waitUntil(BooleanSupplier condition, Duration timeout) throws Exception {
+        long deadline = System.nanoTime() + timeout.toNanos();
         while (System.nanoTime() < deadline) {
             boolean[] result = new boolean[1];
             SwingUtilities.invokeAndWait(() -> result[0] = condition.getAsBoolean());
