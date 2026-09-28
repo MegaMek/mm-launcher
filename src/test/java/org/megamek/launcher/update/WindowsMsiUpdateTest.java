@@ -186,7 +186,10 @@ class WindowsMsiUpdateTest {
         String encoded = Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
         Process process = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive",
                 "-EncodedCommand", encoded).start();
-        assertTrue(process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS));
+        if (!process.waitFor(30, java.util.concurrent.TimeUnit.SECONDS)) {
+            process.destroyForcibly();
+            org.junit.jupiter.api.Assertions.fail("PowerShell did not return the installer arguments");
+        }
         assertEquals(0, process.exitValue());
         assertEquals("\"" + path + "\"",
                 new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8));
