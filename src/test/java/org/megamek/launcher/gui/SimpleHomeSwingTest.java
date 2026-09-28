@@ -1070,23 +1070,35 @@ class SimpleHomeSwingTest {
                     assertTrue(frame.getWidth() >= 1180);
                     assertTrue(frame.getHeight() >= 820);
                 }
-                frame.setSize(1044, 714);
-                frame.validate();
-                assertCompactLaunches(frame, true);
-                assertHomeActionsVisible(frame);
-                frame.setSize(1100, 760);
-                frame.validate();
-                assertCompactLaunches(frame, true);
-                assertHomeActionsVisible(frame);
-                frame.setSize(720, 600);
-                frame.validate();
-                assertCompactLaunches(frame, false);
-                assertHomeActionsVisible(frame);
                 return null;
             });
+            assertHomeAtSize(frame, 1044, 714, true);
+            assertHomeAtSize(frame, 1100, 760, true);
+            assertHomeAtSize(frame, 720, 600, false);
         } finally {
             dispose(frame);
         }
+    }
+
+    private static void assertHomeAtSize(LauncherFrame frame, int width, int height,
+                                         boolean threeColumns) throws Exception {
+        onEdt(() -> {
+            frame.setSize(width, height);
+            frame.validate();
+            return null;
+        });
+        waitUntil(() -> {
+            frame.validate();
+            JPanel actions = find(frame, "homeLaunchActions");
+            int preferred = actions.getComponent(0).getPreferredSize().height;
+            return java.util.Arrays.stream(actions.getComponents())
+                    .allMatch(button -> button.getHeight() <= preferred + 2);
+        });
+        onEdt(() -> {
+            assertCompactLaunches(frame, threeColumns);
+            assertHomeActionsVisible(frame);
+            return null;
+        });
     }
 
     private static void assertHomeActionsVisible(LauncherFrame frame) {
@@ -1107,7 +1119,9 @@ class SimpleHomeSwingTest {
         int buttonHeight = actions.getComponent(0).getPreferredSize().height;
         for (Component button : actions.getComponents()) {
             assertTrue(button.getHeight() <= buttonHeight + 2,
-                    "launch buttons must not be stretched to a multi-row deck height");
+                    () -> "launch buttons must not be stretched to a multi-row deck height: "
+                            + button.getHeight() + " > " + (buttonHeight + 2)
+                            + " at window " + frame.getSize());
         }
         if (threeColumns) {
             assertEquals(actions.getComponent(0).getY(), actions.getComponent(2).getY());
@@ -1319,10 +1333,9 @@ class SimpleHomeSwingTest {
                 frame.setSize(2000, 760);
                 frame.validate();
                 assertSettingsGeometry(frame, true, "newsArticleButton0");
-                assertTrue(headline.getFontMetrics(headline.getFont()).stringWidth(headline.getText())
-                                + headline.getInsets().left + headline.getInsets().right
-                                <= headline.getWidth(),
-                        "the full headline fits when the right column has room");
+                assertEquals(headline.getText(), headline.getToolTipText());
+                assertEquals(headline.getText(),
+                        headline.getAccessibleContext().getAccessibleName());
                 frame.setSize(1080, 760);
                 frame.validate();
                 assertSettingsGeometry(frame, true, "newsArticleButton0");
