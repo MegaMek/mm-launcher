@@ -1107,7 +1107,9 @@ class SimpleHomeSwingTest {
         int buttonHeight = actions.getComponent(0).getPreferredSize().height;
         for (Component button : actions.getComponents()) {
             assertTrue(button.getHeight() <= buttonHeight + 2,
-                    "launch buttons must not be stretched to a multi-row deck height");
+                    () -> "launch buttons must not be stretched to a multi-row deck height: "
+                            + button.getHeight() + " > " + (buttonHeight + 2)
+                            + " at window " + frame.getSize());
         }
         if (threeColumns) {
             assertEquals(actions.getComponent(0).getY(), actions.getComponent(2).getY());
@@ -1319,10 +1321,13 @@ class SimpleHomeSwingTest {
                 frame.setSize(2000, 760);
                 frame.validate();
                 assertSettingsGeometry(frame, true, "newsArticleButton0");
-                assertTrue(headline.getFontMetrics(headline.getFont()).stringWidth(headline.getText())
-                                + headline.getInsets().left + headline.getInsets().right
-                                <= headline.getWidth(),
-                        "the full headline fits when the right column has room");
+                int textWidth = headline.getFontMetrics(headline.getFont())
+                        .stringWidth(headline.getText())
+                        + headline.getInsets().left + headline.getInsets().right;
+                assertTrue(textWidth <= headline.getWidth(),
+                        () -> "the full headline fits when the right column has room: "
+                                + textWidth + " > " + headline.getWidth()
+                                + " at window " + frame.getSize());
                 frame.setSize(1080, 760);
                 frame.validate();
                 assertSettingsGeometry(frame, true, "newsArticleButton0");

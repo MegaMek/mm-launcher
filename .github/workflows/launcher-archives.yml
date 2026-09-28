@@ -258,12 +258,15 @@ jobs:
       - name: Test source and verify provided archive on Windows
         if: runner.os == 'Windows'
         shell: pwsh
-        run: >-
-          .\gradlew.bat "-PbuildIdentifier=${{ github.sha }}"
-          "-PverificationPlatform=${{ matrix.platform }}"
-          "-PprovidedArchive=$env:PROVIDED_ARCHIVE"
-          "-PprovidedChecksum=$env:PROVIDED_CHECKSUM"
-          test verifyProvidedArchive verifyPortableArchive
+        run: |
+          $testTemp = Join-Path $env:GITHUB_WORKSPACE 'build\test-temp'
+          New-Item -ItemType Directory -Force -Path $testTemp | Out-Null
+          $env:JAVA_TOOL_OPTIONS = "-Djava.io.tmpdir=$testTemp"
+          .\gradlew.bat "-PbuildIdentifier=${{ github.sha }}" `
+            "-PverificationPlatform=${{ matrix.platform }}" `
+            "-PprovidedArchive=$env:PROVIDED_ARCHIVE" `
+            "-PprovidedChecksum=$env:PROVIDED_CHECKSUM" `
+            test verifyProvidedArchive verifyPortableArchive
 
       - name: Test source and verify provided archive on Linux with Xvfb
         if: runner.os == 'Linux'
