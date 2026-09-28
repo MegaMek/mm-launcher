@@ -2101,6 +2101,12 @@ public final class LauncherFrame extends JFrame {
         });
         installEscapeAction(dialog, "closeAdoptionChannelMismatch", dialog::dispose);
         dialog.getRootPane().setDefaultButton(retry);
+        dialog.addWindowListener(new WindowAdapter() {
+            @Override public void windowOpened(WindowEvent event) {
+                retry.requestFocusInWindow();
+                dialog.getRootPane().setDefaultButton(retry);
+            }
+        });
         dialog.setVisible(true);
     }
 
