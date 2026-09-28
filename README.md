@@ -331,7 +331,8 @@ and that computed SHA-256 becomes the installed copy's local package identity. U
 classification is accepted only
 because successful installation creates a new fixed local track. Every successfully published graphical managed installation
 starts with its per-install check-on-open value enabled. See
-[`ci.md`](ci.md) for the canonical release index needed to classify old releases safely.
+[`ci_update.md`](ci_update.md) for the proposed complete-suite records needed to
+classify releases by channel.
 Preview asks to fetch official releases and shows the exact package and full size before download.
 Preview itself remains read-only and has no Apply control. **Update…** is a separate workflow:
 it previews first, requires a second confirmation that names the destructive intent and exact

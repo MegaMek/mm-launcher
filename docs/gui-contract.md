@@ -278,8 +278,8 @@ product set, source, release, asset URL/name/size/optional published digest, and
 then repeats its exact metadata check before transfer. A quoted digest cannot disappear or change;
 quoted absence may become a valid digest at that refresh, or remain absent and use the SHA-256
 computed from the one exact retained body. Unknown historical membership is not channel evidence.
-The long-term immutable cross-repository history requirement and current workaround are documented
-in `../ci.md`.
+The proposed complete-suite records and the current workaround are documented
+in [the CI update proposal](../ci_update.md).
 
 Static inspection, registry writes, package metadata/download work, launch-time Java validation,
 and child-process waiting run on background `SwingWorker`s, never the event-dispatch

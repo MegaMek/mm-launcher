@@ -102,8 +102,8 @@ history is intentionally unknown and appears under both channel selections. The 
 becomes only the created installation's fixed update channel; it is not evidence that an unknown
 release belonged to that channel. Every chosen row re-enters the normal planner through its exact
 repository/tag for metadata, destination, registry, asset URL/name/size/digest validation before
-consent and again before package transfer. See `../ci.md` for the immutable channel history target
-state.
+consent and again before package transfer. See [the CI update proposal](../ci_update.md)
+for the complete-suite release metadata target state.
 
 Channel metadata checks remain outside the package-operation gate and retain their existing
 startup/manual behavior. A package download started from a recommendation uses the shared typed

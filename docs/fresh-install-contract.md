@@ -140,7 +140,7 @@ destination and registry checks, and records the chosen channel solely as that
 new installation's immutable track. Install repeats the matching current-pointer or exact-tag lookup before any
 binary transfer. Product/channel/source-mode changes invalidate stale picker objects rather than
 retargeting them. The canonical historical-channel metadata needed to replace the unclassified
-workaround is specified in `../ci.md`.
+workaround is discussed in [the CI update proposal](../ci_update.md).
 
 Normal installation and existing-copy import do not read, resolve, execute, or validate Java.
 Missing or corrupt launcher settings therefore cannot invalidate an installation quote or prevent
