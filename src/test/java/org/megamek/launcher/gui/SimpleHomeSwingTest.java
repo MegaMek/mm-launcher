@@ -799,8 +799,9 @@ class SimpleHomeSwingTest {
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
-            SwingUtilities.invokeAndWait(
-                    waitButton(frame, "manageInstallationsButton")::doClick);
+            JButton manage = waitButton(frame, "manageInstallationsButton");
+            waitUntil(() -> manage.isEnabled() && manage.isShowing());
+            SwingUtilities.invokeAndWait(manage::doClick);
             JButton firstMenu = waitButton(frame,
                     "installationMenuButton-" + services.first.id());
             waitUntil(firstMenu::isShowing);
@@ -819,8 +820,9 @@ class SimpleHomeSwingTest {
             LauncherFrame pendingFrame = onEdt(() -> new LauncherFrame(services));
             try {
                 SwingUtilities.invokeAndWait(pendingFrame::showWindow);
-                SwingUtilities.invokeAndWait(
-                        waitButton(pendingFrame, "manageInstallationsButton")::doClick);
+                JButton pendingManage = waitButton(pendingFrame, "manageInstallationsButton");
+                waitUntil(() -> pendingManage.isEnabled() && pendingManage.isShowing());
+                SwingUtilities.invokeAndWait(pendingManage::doClick);
                 JButton pendingMenuButton = waitButton(pendingFrame,
                         "installationMenuButton-" + services.first.id());
                 waitUntil(pendingMenuButton::isShowing);
