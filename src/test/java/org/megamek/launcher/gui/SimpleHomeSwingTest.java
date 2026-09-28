@@ -802,9 +802,8 @@ class SimpleHomeSwingTest {
             JButton manage = waitButton(frame, "manageInstallationsButton");
             waitUntil(() -> manage.isEnabled() && manage.isShowing());
             SwingUtilities.invokeAndWait(manage::doClick);
-            JButton firstMenu = waitButton(frame,
+            JButton firstMenu = waitShowingButton(frame,
                     "installationMenuButton-" + services.first.id());
-            waitUntil(firstMenu::isShowing);
             SwingUtilities.invokeAndWait(
                     firstMenu::doClick);
             JPopupMenu menu = waitFor(() -> java.util.Arrays.stream(
@@ -823,9 +822,8 @@ class SimpleHomeSwingTest {
                 JButton pendingManage = waitButton(pendingFrame, "manageInstallationsButton");
                 waitUntil(() -> pendingManage.isEnabled() && pendingManage.isShowing());
                 SwingUtilities.invokeAndWait(pendingManage::doClick);
-                JButton pendingMenuButton = waitButton(pendingFrame,
+                JButton pendingMenuButton = waitShowingButton(pendingFrame,
                         "installationMenuButton-" + services.first.id());
-                waitUntil(pendingMenuButton::isShowing);
                 SwingUtilities.invokeAndWait(
                         pendingMenuButton::doClick);
                 JPopupMenu pendingMenu = waitFor(() -> java.util.Arrays.stream(
@@ -1940,6 +1938,13 @@ class SimpleHomeSwingTest {
 
     private static JButton waitButton(Container root, String name) throws Exception {
         return waitFor(() -> find(root, name));
+    }
+
+    private static JButton waitShowingButton(Container root, String name) throws Exception {
+        return waitFor(() -> {
+            JButton button = find(root, name);
+            return button != null && button.isShowing() ? button : null;
+        });
     }
 
     private static <T> T waitFor(java.util.function.Supplier<T> probe) throws Exception {
