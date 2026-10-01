@@ -98,6 +98,14 @@ upload implementation detail: no human draft-review gate is added. After all che
 job publishes a normal stable release and verifies the latest-stable endpoint consumed by the
 Windows updater.
 
+While the release is a draft, GitHub can return an `untagged-...` download URL.
+Staging accepts either the final versioned URL or the temporary URL derived from
+that same draft's official `html_url`, with the exact asset filename. A different
+host, repository, temporary release, version, filename, query or fragment is rejected.
+After publication, only the final `v<version>` URL is accepted, both in the
+publication response and the latest-stable response. The asset IDs, uploaded
+state, sizes and SHA-256 digests are still checked at every stage.
+
 No write is retried automatically, no existing asset/tag is replaced, and no automatic rollback
 deletes release evidence or reverts the version commit. A failed build leaves the bumped
 version on `main`; a fresh dispatch increments again, so unpublished patch numbers can be skipped.

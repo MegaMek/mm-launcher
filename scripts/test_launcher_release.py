@@ -30,7 +30,10 @@ class FakeGitHub:
         self.inventory = []
         self.existing_tag = None
         self.fail_upload = False
+        self.draft_tag = "untagged-abe406fdea29a73d5316"
+        self.mutate_upload = None
         self.mutate_staged = None
+        self.mutate_published = None
         self.mutate_latest = None
 
     def request(self, method, endpoint, data=None, file=None, missing_ok=False):
@@ -43,7 +46,9 @@ class FakeGitHub:
             self.reference = {"ref": data["ref"], "object": {"type": "commit", "sha": data["sha"]}}
             return copy.deepcopy(self.reference)
         if method == "POST" and endpoint.endswith("/releases"):
-            self.release = {"id": 37, **data, "assets": []}
+            self.release = {"id": 37, **data, "assets": [],
+                            "html_url": f"https://github.com/{release.REPOSITORY}"
+                                        f"/releases/tag/{self.draft_tag}"}
             return copy.deepcopy(self.release)
         if method == "POST" and "/assets?name=" in endpoint:
             if self.fail_upload:
@@ -53,8 +58,10 @@ class FakeGitHub:
                 "size": file.stat().st_size, "state": "uploaded",
                 "digest": "sha256:" + hashlib.sha256(file.read_bytes()).hexdigest(),
                 "browser_download_url": f"https://github.com/{release.REPOSITORY}"
-                                        f"/releases/download/v{self.version}/{file.name}",
+                                        f"/releases/download/{self.draft_tag}/{file.name}",
             }
+            if self.mutate_upload:
+                self.mutate_upload(metadata)
             self.release["assets"].append(metadata)
             return copy.deepcopy(metadata)
         if method == "GET" and endpoint.endswith("/releases/37"):
@@ -64,6 +71,14 @@ class FakeGitHub:
             return result
         if method == "PATCH" and endpoint.endswith("/releases/37"):
             self.release.update(data)
+            self.release["html_url"] = (f"https://github.com/{release.REPOSITORY}"
+                                        f"/releases/tag/v{self.version}")
+            for asset in self.release["assets"]:
+                asset["browser_download_url"] = (
+                    f"https://github.com/{release.REPOSITORY}/releases/download/"
+                    f"v{self.version}/{asset['name']}")
+            if self.mutate_published:
+                self.mutate_published(self.release)
             return copy.deepcopy(self.release)
         if method == "GET" and endpoint.endswith("/releases/latest"):
             result = copy.deepcopy(self.release)
@@ -431,10 +446,66 @@ class LauncherReleaseTest(unittest.TestCase):
         self.assertEqual(1, sum("/assets?name=" in endpoint for _, endpoint, _ in github.calls))
         self.assertFalse(any(method == "DELETE" for method, _, _ in github.calls))
 
+    @patch("builtins.print")
+    def test_draft_uploads_also_accept_final_versioned_urls(self, output):
+        github = FakeGitHub()
+        github.draft_tag = "v" + VERSION
+        release.publish(github, VERSION, COMMIT, self.assets())
+        self.assertFalse(github.release["draft"])
+        self.assertEqual(10, len(github.release["assets"]))
+        self.assertEqual(1, sum(method == "PATCH" for method, _, _ in github.calls))
+
+    def test_draft_upload_urls_must_match_the_same_release_and_asset(self):
+        name = f"MegaMek-Launcher-{VERSION}-windows-x64.msi"
+        prefix = f"https://github.com/{release.REPOSITORY}/releases/download/"
+        urls = (
+            f"https://example.org/{name}",
+            f"https://github.com/Someone/mm-launcher/releases/download/untagged-abc/{name}",
+            prefix + f"untagged-abc/{name}",
+            prefix + f"v0.14.6/{name}",
+            prefix + f"untagged-abe406fdea29a73d5316/wrong.msi",
+            prefix + f"untagged-abe406fdea29a73d5316/{name}?download=1",
+            prefix + f"untagged-abe406fdea29a73d5316/{name}#fragment",
+            prefix + f"untagged-abe406fdea29a73d5316/../{name}",
+        )
+        for url in urls:
+            with self.subTest(url=url):
+                github = FakeGitHub()
+                github.mutate_upload = lambda item: item.update(browser_download_url=url)
+                with self.assertRaisesRegex(release.ReleaseError, "Uploaded asset"):
+                    release.publish(github, VERSION, COMMIT, self.assets())
+                self.assert_no_publication(github)
+                self.assertTrue(github.release["draft"])
+                self.assertEqual(1, sum("/assets?name=" in endpoint for _, endpoint, _ in github.calls))
+
+    def test_staged_draft_url_must_stay_bound_to_its_release(self):
+        github = FakeGitHub()
+        github.mutate_staged = lambda item: item.update(
+            html_url=f"https://github.com/{release.REPOSITORY}/releases/tag/untagged-abc")
+        with self.assertRaisesRegex(release.ReleaseError, "Uploaded asset"):
+            release.publish(github, VERSION, COMMIT, self.assets())
+        self.assert_no_publication(github)
+
+    def test_published_and_latest_assets_require_final_versioned_urls(self):
+        name = f"MegaMek-Launcher-{VERSION}-windows-x64.msi"
+        temporary_url = (f"https://github.com/{release.REPOSITORY}/releases/download/"
+                         f"untagged-abe406fdea29a73d5316/{name}")
+        for phase in ("mutate_published", "mutate_latest"):
+            with self.subTest(phase=phase):
+                github = FakeGitHub()
+                setattr(github, phase, lambda item: item["assets"][0].update(
+                    browser_download_url=temporary_url))
+                with self.assertRaisesRegex(release.ReleaseError, "Uploaded asset"):
+                    release.publish(github, VERSION, COMMIT, self.assets())
+                self.assertFalse(github.release["draft"])
+                self.assertEqual(1, sum(method == "PATCH" for method, _, _ in github.calls))
+                self.assertFalse(any(method == "DELETE" for method, _, _ in github.calls))
+
     def test_staged_metadata_drift_and_missing_digest_prevent_publication(self):
         for field, value in (("digest", None), ("digest", "sha256:" + "b" * 64),
                              ("state", "new"), ("size", 1), ("id", 999),
-                             ("browser_download_url", "https://example.org/installer.msi")):
+                             ("browser_download_url", "https://example.org/installer.msi"),
+                             ("browser_download_url", [])):
             with self.subTest(field=field):
                 github = FakeGitHub()
                 github.mutate_staged = lambda item: item["assets"][0].update({field: value})

@@ -261,14 +261,22 @@ def positive_id(value):
     return type(value) is int and value > 0
 
 
-def verify_asset(metadata, asset, version):
+def verify_asset(metadata, asset, version, draft_release_url=None):
     if not isinstance(metadata, dict) or not positive_id(metadata.get("id")):
         raise ReleaseError("Uploaded asset has no immutable positive ID")
     url = f"https://github.com/{REPOSITORY}/releases/download/v{version}/{asset.path.name}"
+    urls = [url]
+    if isinstance(draft_release_url, str):
+        match = re.fullmatch(
+            re.escape(f"https://github.com/{REPOSITORY}/releases/tag/") +
+            r"(untagged-[0-9a-f]+)", draft_release_url)
+        if match:
+            urls.append(f"https://github.com/{REPOSITORY}/releases/download/"
+                        f"{match.group(1)}/{asset.path.name}")
     if (metadata.get("name") != asset.path.name or type(metadata.get("size")) is not int
             or metadata["size"] != asset.size or metadata.get("state") != "uploaded"
             or metadata.get("digest") != "sha256:" + asset.sha256
-            or metadata.get("browser_download_url") != url):
+            or metadata.get("browser_download_url") not in urls):
         raise ReleaseError(f"Uploaded asset identity/size/state/SHA-256 mismatch: {asset.path.name}")
     return metadata["id"]
 
@@ -288,7 +296,8 @@ def verify_release(release, assets, version, draft, identities=None):
             raise ReleaseError("Duplicate or malformed release assets")
         by_name[item["name"]] = item
     for asset in assets:
-        identifier = verify_asset(by_name.get(asset.path.name), asset, version)
+        identifier = verify_asset(by_name.get(asset.path.name), asset, version,
+                                  release.get("html_url") if draft else None)
         if identifier in ids or identities is not None and identities.get(asset.path.name) != identifier:
             raise ReleaseError("Release asset IDs were duplicated or changed")
         ids.add(identifier)
@@ -322,7 +331,7 @@ def publish(github, version, commit, assets):
     for asset in assets:
         metadata = github.request("POST", f"https://uploads.github.com/{API}/releases/{identifier}"
                                   f"/assets?name={quote(asset.path.name, safe='')}", file=asset.path)
-        identities[asset.path.name] = verify_asset(metadata, asset, version)
+        identities[asset.path.name] = verify_asset(metadata, asset, version, release.get("html_url"))
     staged = github.request("GET", f"{API}/releases/{identifier}")
     if verify_release(staged, assets, version, True, identities) != identifier:
         raise ReleaseError("Staged release ID changed")
