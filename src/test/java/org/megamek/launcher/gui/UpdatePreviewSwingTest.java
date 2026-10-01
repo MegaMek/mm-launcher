@@ -206,13 +206,7 @@ class UpdatePreviewSwingTest {
     }
 
     private static JButton waitForButton(Container root, String name) throws Exception {
-        for (int attempt = 0; attempt < 100; attempt++) {
-            JButton[] result = new JButton[1];
-            SwingUtilities.invokeAndWait(() -> result[0] = findButton(root, name));
-            if (result[0] != null) return result[0];
-            Thread.sleep(25);
-        }
-        return null;
+        return SwingTestSupport.await("button " + name, () -> findButton(root, name));
     }
 
     private static JButton findButton(Container root, String name) {
@@ -239,23 +233,7 @@ class UpdatePreviewSwingTest {
 
     private static JPopupMenu openInstallationMenu(Container root, String recordId)
             throws Exception {
-        JButton button = waitForButton(root, "installationMenuButton-" + recordId);
-        assertNotNull(button);
-        SwingUtilities.invokeAndWait(button::doClick);
-        for (int attempt = 0; attempt < 100; attempt++) {
-            JPopupMenu[] result = new JPopupMenu[1];
-            SwingUtilities.invokeAndWait(() -> {
-                for (var element : MenuSelectionManager.defaultManager().getSelectedPath()) {
-                    if (element instanceof JPopupMenu menu) {
-                        result[0] = menu;
-                        break;
-                    }
-                }
-            });
-            if (result[0] != null) return result[0];
-            Thread.sleep(25);
-        }
-        throw new AssertionError("timed out waiting for installation menu");
+        return SwingTestSupport.installationMenu(root, recordId);
     }
 
     private static JMenuItem findMenuItem(JPopupMenu menu, String text) {
@@ -266,10 +244,7 @@ class UpdatePreviewSwingTest {
     }
 
     private static void dispose(LauncherFrame frame) throws Exception {
-        SwingUtilities.invokeAndWait(() -> {
-            for (java.awt.Window window : frame.getOwnedWindows()) window.dispose();
-            frame.dispose();
-        });
+        SwingTestSupport.dispose(frame);
     }
 
     private record Fixture(Path root, org.megamek.launcher.registry.InstallationRecord record,

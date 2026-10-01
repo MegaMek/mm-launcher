@@ -541,6 +541,10 @@ public final class LauncherFrame extends JFrame {
         }
     }
 
+    boolean firstLaunchMetadataPending() {
+        return firstLaunchOptionsWorker != null;
+    }
+
     private void startFirstLaunchOptionsCheck() {
         if (firstLaunchOptionsWorker != null
                 || firstLaunchMetadataState == FirstLaunchMetadataState.READY) {

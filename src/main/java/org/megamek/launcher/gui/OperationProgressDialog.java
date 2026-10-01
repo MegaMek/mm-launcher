@@ -419,7 +419,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
                 : finishingMessage(context.type(), request.reason()));
     }
 
-    private void flush() {
+    void flush() {
         if (!SwingUtilities.isEventDispatchThread()) {
             SwingUtilities.invokeLater(this::flush);
             return;

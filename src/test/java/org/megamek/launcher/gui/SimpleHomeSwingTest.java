@@ -488,14 +488,7 @@ class SimpleHomeSwingTest {
                     "installationMenuButton-" + services.second.id()));
             assertNull(find(frame, "checkOnOpenCheckbox-" + services.second.id()),
                     "managed-incomplete cards must not expose automatic checks");
-            SwingUtilities.invokeAndWait(firstMenu::doClick);
-            waitUntil(() -> java.util.Arrays.stream(
-                            javax.swing.MenuSelectionManager.defaultManager().getSelectedPath())
-                    .anyMatch(element -> element instanceof JPopupMenu));
-            JPopupMenu cardMenu = (JPopupMenu) java.util.Arrays.stream(
-                            javax.swing.MenuSelectionManager.defaultManager().getSelectedPath())
-                    .filter(element -> element instanceof JPopupMenu)
-                    .findFirst().orElseThrow();
+            JPopupMenu cardMenu = SwingTestSupport.installationMenu(frame, services.first.id());
             List<String> preferenceActions = java.util.Arrays.stream(cardMenu.getComponents())
                     .filter(JMenuItem.class::isInstance).map(JMenuItem.class::cast)
                     .map(JMenuItem::getText)
@@ -778,20 +771,9 @@ class SimpleHomeSwingTest {
             SwingUtilities.invokeAndWait(frame::showWindow);
             clickShowingButton(frame, "manageInstallationsButton");
             for (boolean confirm : List.of(false, true)) {
-                clickShowingButton(frame, "installationMenuButton-" + services.first.id());
-                JMenuItem reset = waitFor(() -> {
-                    for (var element : javax.swing.MenuSelectionManager.defaultManager()
-                            .getSelectedPath()) {
-                        if (element instanceof JPopupMenu popup) {
-                            for (Component child : popup.getComponents()) {
-                                if (child instanceof JMenuItem item
-                                        && ("resetPreferences-" + services.first.id())
-                                        .equals(item.getName())) return item;
-                            }
-                        }
-                    }
-                    return null;
-                });
+                JPopupMenu popup = SwingTestSupport.installationMenu(frame, services.first.id());
+                JMenuItem reset = onEdt(() -> find(
+                        popup, "resetPreferences-" + services.first.id()));
                 invokeMenuSelection(reset);
                 JDialog dialog = waitDialog(frame, "Reset preferences");
                 JLabel consent = find(dialog, "launcherAlertMessage");
@@ -835,17 +817,8 @@ class SimpleHomeSwingTest {
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
-            JButton manage = waitButton(frame, "manageInstallationsButton");
-            waitUntil(() -> manage.isEnabled() && manage.isShowing());
-            SwingUtilities.invokeAndWait(manage::doClick);
-            JButton firstMenu = waitShowingButton(frame,
-                    "installationMenuButton-" + services.first.id());
-            SwingUtilities.invokeAndWait(
-                    firstMenu::doClick);
-            JPopupMenu menu = waitFor(() -> java.util.Arrays.stream(
-                            javax.swing.MenuSelectionManager.defaultManager().getSelectedPath())
-                    .filter(JPopupMenu.class::isInstance).map(JPopupMenu.class::cast)
-                    .findFirst().orElse(null));
+            clickShowingButton(frame, "manageInstallationsButton");
+            JPopupMenu menu = SwingTestSupport.installationMenu(frame, services.first.id());
             assertNotNull(find(menu, "repairInstallation-" + services.first.id()));
             assertNull(find(menu, "repairInstallation-" + services.second.id()));
             SwingUtilities.invokeAndWait(() ->
@@ -855,17 +828,8 @@ class SimpleHomeSwingTest {
             LauncherFrame pendingFrame = onEdt(() -> new LauncherFrame(services));
             try {
                 SwingUtilities.invokeAndWait(pendingFrame::showWindow);
-                JButton pendingManage = waitButton(pendingFrame, "manageInstallationsButton");
-                waitUntil(() -> pendingManage.isEnabled() && pendingManage.isShowing());
-                SwingUtilities.invokeAndWait(pendingManage::doClick);
-                JButton pendingMenuButton = waitShowingButton(pendingFrame,
-                        "installationMenuButton-" + services.first.id());
-                SwingUtilities.invokeAndWait(
-                        pendingMenuButton::doClick);
-                JPopupMenu pendingMenu = waitFor(() -> java.util.Arrays.stream(
-                                javax.swing.MenuSelectionManager.defaultManager().getSelectedPath())
-                        .filter(JPopupMenu.class::isInstance).map(JPopupMenu.class::cast)
-                        .findFirst().orElse(null));
+                clickShowingButton(pendingFrame, "manageInstallationsButton");
+                JPopupMenu pendingMenu = SwingTestSupport.installationMenu(pendingFrame, services.first.id());
                 assertNull(find(pendingMenu, "repairInstallation-" + services.first.id()));
             } finally {
                 dispose(pendingFrame);
@@ -887,14 +851,8 @@ class SimpleHomeSwingTest {
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
-            SwingUtilities.invokeAndWait(
-                    waitButton(frame, "manageInstallationsButton")::doClick);
-            SwingUtilities.invokeAndWait(
-                    waitButton(frame, "installationMenuButton-" + services.first.id())::doClick);
-            JPopupMenu menu = waitFor(() -> java.util.Arrays.stream(
-                            javax.swing.MenuSelectionManager.defaultManager().getSelectedPath())
-                    .filter(JPopupMenu.class::isInstance).map(JPopupMenu.class::cast)
-                    .findFirst().orElse(null));
+            clickShowingButton(frame, "manageInstallationsButton");
+            JPopupMenu menu = SwingTestSupport.installationMenu(frame, services.first.id());
             assertNull(find(menu, "repairInstallation-" + services.first.id()));
             assertNotNull(find(menu, "installationMenuSeparator"));
         } finally {
@@ -912,19 +870,9 @@ class SimpleHomeSwingTest {
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
-            SwingUtilities.invokeAndWait(
-                    waitButton(frame, "manageInstallationsButton")::doClick);
-            SwingUtilities.invokeAndWait(
-                    waitButton(frame, "installationMenuButton-" + services.first.id())::doClick);
-            JMenuItem repair = waitFor(() -> {
-                for (var element : javax.swing.MenuSelectionManager.defaultManager()
-                        .getSelectedPath()) {
-                    if (element instanceof JPopupMenu popup) {
-                        return find(popup, "repairInstallation-" + services.first.id());
-                    }
-                }
-                return null;
-            });
+            clickShowingButton(frame, "manageInstallationsButton");
+            JPopupMenu repairMenu = SwingTestSupport.installationMenu(frame, services.first.id());
+            JMenuItem repair = onEdt(() -> find(repairMenu, "repairInstallation-" + services.first.id()));
             invokeMenuSelection(repair);
             JDialog consent = waitDialog(frame, "Repair installation");
             JLabel message = find(consent, "launcherAlertMessage");
@@ -943,17 +891,8 @@ class SimpleHomeSwingTest {
             assertEquals(0, services.repairs.get());
             click(consent, "Cancel");
             assertEquals(0, services.repairs.get());
-            SwingUtilities.invokeAndWait(
-                    waitButton(frame, "installationMenuButton-" + services.first.id())::doClick);
-            JMenuItem retry = waitFor(() -> {
-                for (var element : javax.swing.MenuSelectionManager.defaultManager()
-                        .getSelectedPath()) {
-                    if (element instanceof JPopupMenu popup) {
-                        return find(popup, "repairInstallation-" + services.first.id());
-                    }
-                }
-                return null;
-            });
+            JPopupMenu retryMenu = SwingTestSupport.installationMenu(frame, services.first.id());
+            JMenuItem retry = onEdt(() -> find(retryMenu, "repairInstallation-" + services.first.id()));
             invokeMenuSelection(retry);
             JDialog approved = waitDialog(frame, "Repair installation");
             click(approved, "Repair");
@@ -983,20 +922,9 @@ class SimpleHomeSwingTest {
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
-            SwingUtilities.invokeAndWait(
-                    waitButton(frame, "manageInstallationsButton")::doClick);
-            SwingUtilities.invokeAndWait(
-                    waitButton(frame, "installationMenuButton-" + services.first.id())::doClick);
-            JMenuItem repair = waitFor(() -> {
-                for (var element : javax.swing.MenuSelectionManager.defaultManager()
-                        .getSelectedPath()) {
-                    if (element instanceof JPopupMenu popup) {
-                        return find(popup, "repairInstallation-" + services.first.id());
-                    }
-
-                }
-                return null;
-            });
+            clickShowingButton(frame, "manageInstallationsButton");
+            JPopupMenu repairMenu = SwingTestSupport.installationMenu(frame, services.first.id());
+            JMenuItem repair = onEdt(() -> find(repairMenu, "repairInstallation-" + services.first.id()));
             invokeMenuSelection(repair);
             click(waitDialog(frame, "Repair installation"), "Repair");
             JDialog failed = waitDialog(frame, "Repair failed — recovery may be required");
@@ -1840,9 +1768,7 @@ class SimpleHomeSwingTest {
     }
 
     private static void click(JDialog dialog, String text) throws Exception {
-        JButton button = findByText(dialog, text);
-        assertNotNull(button);
-        SwingUtilities.invokeLater(button::doClick);
+        SwingTestSupport.startClickText(dialog, text);
         waitUntil(() -> !dialog.isDisplayable());
     }
 
@@ -1979,24 +1905,7 @@ class SimpleHomeSwingTest {
     }
 
     private static JDialog waitDialog(LauncherFrame frame, String title) throws Exception {
-        long deadline = System.nanoTime() + Duration.ofSeconds(8).toNanos();
-        while (System.nanoTime() < deadline) {
-            JDialog[] found = new JDialog[1];
-            SwingUtilities.invokeAndWait(() -> {
-                for (java.awt.Window window : java.awt.Window.getWindows()) {
-                    if (window instanceof JDialog dialog && dialog.isShowing()
-                            && title.equals(dialog.getTitle())) {
-                        found[0] = dialog;
-                    }
-                }
-            });
-            if (found[0] != null) return found[0];
-            Thread.sleep(20);
-        }
-        List<String> titles = java.util.Arrays.stream(java.awt.Window.getWindows())
-                .filter(JDialog.class::isInstance).map(JDialog.class::cast)
-                .filter(JDialog::isShowing).map(JDialog::getTitle).toList();
-        throw new AssertionError("timed out waiting for " + title + "; showing=" + titles);
+        return SwingTestSupport.dialog(frame, title);
     }
 
     private static JButton waitButton(Container root, String name) throws Exception {
@@ -2011,37 +1920,15 @@ class SimpleHomeSwingTest {
     }
 
     private static void clickShowingButton(Container root, String name) throws Exception {
-        waitFor(() -> {
-            JButton button = find(root, name);
-            if (button == null || !button.isShowing() || !button.isEnabled()) return null;
-            button.doClick();
-            return Boolean.TRUE;
-        });
+        SwingTestSupport.click(root, name);
     }
 
     private static <T> T waitFor(java.util.function.Supplier<T> probe) throws Exception {
-        long deadline = System.nanoTime() + Duration.ofSeconds(8).toNanos();
-        while (System.nanoTime() < deadline) {
-            Object[] value = new Object[1];
-            SwingUtilities.invokeAndWait(() -> value[0] = probe.get());
-            if (value[0] != null) {
-                @SuppressWarnings("unchecked") T cast = (T) value[0];
-                return cast;
-            }
-            Thread.sleep(20);
-        }
-        throw new AssertionError("timed out waiting for Swing component");
+        return SwingTestSupport.await("home presentation", probe::get);
     }
 
     private static void waitUntil(BooleanSupplier condition) throws Exception {
-        long deadline = System.nanoTime() + Duration.ofSeconds(8).toNanos();
-        while (System.nanoTime() < deadline) {
-            boolean[] result = new boolean[1];
-            SwingUtilities.invokeAndWait(() -> result[0] = condition.getAsBoolean());
-            if (result[0]) return;
-            Thread.sleep(20);
-        }
-        throw new AssertionError("timed out waiting for Swing state");
+        SwingTestSupport.awaitCondition("home state", condition::getAsBoolean);
     }
 
     private static void invokeKeyBinding(JButton button, KeyStroke stroke) throws Exception {
@@ -2131,22 +2018,10 @@ class SimpleHomeSwingTest {
     }
 
     private static <T> T onEdt(java.util.concurrent.Callable<T> work) throws Exception {
-        Object[] value = new Object[1];
-        SwingUtilities.invokeAndWait(() -> {
-            try {
-                value[0] = work.call();
-            } catch (Exception error) {
-                throw new RuntimeException(error);
-            }
-        });
-        @SuppressWarnings("unchecked") T cast = (T) value[0];
-        return cast;
+        return SwingTestSupport.onEdt(work);
     }
 
     private static void dispose(LauncherFrame frame) throws Exception {
-        SwingUtilities.invokeAndWait(() -> {
-            for (java.awt.Window window : frame.getOwnedWindows()) window.dispose();
-            frame.dispose();
-        });
+        SwingTestSupport.dispose(frame);
     }
 }

@@ -305,6 +305,23 @@ if ($LASTEXITCODE -ne 0) { throw "Build failed with exit code $LASTEXITCODE." }
 .\build\install\mm-launcher\bin\mm-launcher.bat gui
 ```
 
+GUI tests use the package-local `SwingTestSupport` harness. Probe Swing state on the EDT,
+wait for the actual rendered result rather than service-entry counters or fixed sleeps,
+and reacquire controls after a render. `click` looks up a showing, enabled control and
+clicks it in the same EDT turn. Use `startClick` or `startClickText` for actions that can
+open a synchronous modal dialog, then await the owned dialog and dismiss it; a synchronous
+click cannot finish while its modal dialog is open. Asynchronous listener failures are
+reported to the test, and waits have bounded, named timeout failures. Installation menus
+must belong to the exact clicked invoker; dialog lookup and recursive teardown must stay
+within the tested window's ownership tree.
+
+`SwingTestSupportTest` exercises hidden/disabled and replaced controls, modal interaction,
+exception propagation, timeout diagnostics, and unrelated-window isolation. The existing
+GUI classes use the same harness. They require a display (Xvfb on Linux); a headless skip
+is not GUI qualification. Two package-local testability hooks expose metadata-worker
+completion and let progress tests explicitly flush pending rendering, without changing
+the production worker or timer behavior.
+
 Review Home, Installations, Settings, the split **Install latest MekHQ Milestone** control,
 **Use existing installation**, **Install another version**, Update, recovery, Game Java
 selection, and direct launch behavior. The primary normal first install uses the greatest complete

@@ -450,7 +450,7 @@ class LauncherSwingSmokeTest {
             JDialog dialog = owned(frame, "Download an official release");
             JButton fetch = find(dialog, "fetchReleasesButton");
             JComboBox<?> product = findCombo(dialog, "downloadProductCombo");
-            SwingUtilities.invokeLater(fetch::doClick);
+            SwingTestSupport.startClick(dialog, "fetchReleasesButton");
             assertTrue(services.started.await(5, TimeUnit.SECONDS));
 
             SwingUtilities.invokeAndWait(
@@ -804,10 +804,10 @@ class LauncherSwingSmokeTest {
 
             context.finish(org.megamek.launcher.operation.OperationOutcome.SUCCEEDED,
                     "Operation completed");
-            Thread.sleep(200);
-            assertEquals("Enabling managed updates", phase.getText(),
+            onEdt(() -> { holder.get().flush(); return null; });
+            assertEquals("Enabling managed updates", onEdt(phase::getText),
                     "terminal FINAL stays hidden until the authoritative callback closes UI");
-            assertFalse("Finished".equals(phase.getText()));
+            assertFalse("Finished".equals(onEdt(phase::getText)));
         } finally {
             dispose(frame);
         }
@@ -829,13 +829,7 @@ class LauncherSwingSmokeTest {
     }
 
     private static JButton waitForButton(Container root, String name) throws Exception {
-        for (int attempt = 0; attempt < 50; attempt++) {
-            JButton[] found = new JButton[1];
-            SwingUtilities.invokeAndWait(() -> found[0] = find(root, name));
-            if (found[0] != null) return found[0];
-            Thread.sleep(50);
-        }
-        return null;
+        return SwingTestSupport.await("button " + name, () -> find(root, name));
     }
 
     private static JButton find(Container root, String name) {
@@ -896,17 +890,7 @@ class LauncherSwingSmokeTest {
     }
 
     private static JDialog owned(LauncherFrame frame, String title) throws Exception {
-        final JDialog[] result = new JDialog[1];
-        waitFor(() -> {
-            for (java.awt.Window window : frame.getOwnedWindows()) {
-                if (window instanceof JDialog dialog && title.equals(dialog.getTitle())) {
-                    result[0] = dialog;
-                    return true;
-                }
-            }
-            return false;
-        });
-        return result[0];
+        return SwingTestSupport.dialog(frame, title);
     }
 
     private static boolean hasShowingDialog(LauncherFrame frame, String title) throws Exception {
@@ -947,34 +931,15 @@ class LauncherSwingSmokeTest {
     }
 
     private static void dispose(LauncherFrame frame) throws Exception {
-        SwingUtilities.invokeAndWait(() -> {
-            for (java.awt.Window window : frame.getOwnedWindows()) window.dispose();
-            frame.dispose();
-        });
+        SwingTestSupport.dispose(frame);
     }
 
     private static void waitFor(java.util.function.BooleanSupplier condition) throws Exception {
-        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(8).toNanos();
-        while (System.nanoTime() < deadline) {
-            boolean[] matched = new boolean[1];
-            SwingUtilities.invokeAndWait(() -> matched[0] = condition.getAsBoolean());
-            if (matched[0]) return;
-            Thread.sleep(25);
-        }
-        throw new AssertionError("timed out waiting for Swing state");
+        SwingTestSupport.awaitCondition("launcher presentation", condition::getAsBoolean);
     }
 
     private static <T> T onEdt(java.util.concurrent.Callable<T> operation) throws Exception {
-        Object[] result = new Object[1];
-        SwingUtilities.invokeAndWait(() -> {
-            try {
-                result[0] = operation.call();
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        });
-        @SuppressWarnings("unchecked") T cast = (T) result[0];
-        return cast;
+        return SwingTestSupport.onEdt(operation);
     }
 
     private static void saveReviewImage(String name, Container component) throws Exception {

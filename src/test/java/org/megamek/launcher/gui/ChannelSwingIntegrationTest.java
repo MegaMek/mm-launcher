@@ -103,7 +103,7 @@ class ChannelSwingIntegrationTest {
             JCheckBox checks = waitFor(() -> (JCheckBox) findNamed(
                     frame, "checkOnOpenCheckbox-" + services.record.id()));
             assertFalse(checks.isSelected());
-            SwingUtilities.invokeLater(checks::doClick);
+            SwingTestSupport.startClick(frame, "checkOnOpenCheckbox-" + services.record.id());
             waitUntil(() -> services.saved.get() == 1);
             assertTrue(onEdt(checks::isSelected));
             assertEquals(0, services.checks.get(),
@@ -119,7 +119,7 @@ class ChannelSwingIntegrationTest {
                 JButton button = find(frame, "checkUpdatesButton");
                 return button != null && button.isEnabled() ? button : null;
             });
-            SwingUtilities.invokeLater(check::doClick);
+            SwingTestSupport.startClick(frame, "checkUpdatesButton");
             assertTrue(services.started.await(30, TimeUnit.SECONDS));
             JButton home = waitFor(() -> find(frame, "homeButton"));
             SwingUtilities.invokeAndWait(home::doClick);
@@ -141,7 +141,7 @@ class ChannelSwingIntegrationTest {
                     () -> find(frame, "manageInstallationsButton").doClick());
             JButton addRelease = waitFor(() -> find(frame, "installAnotherVersionButton"));
             SwingUtilities.invokeAndWait(addRelease::doClick);
-            JDialog download = waitForDialog("Download an official release");
+            JDialog download = waitForDialog(frame, "Download an official release");
             JComboBox<?> freshChannel = findCombo(download, "downloadChannelCombo");
             assertNotNull(freshChannel);
             assertEquals(FollowChannel.MILESTONE, onEdt(freshChannel::getSelectedItem),
@@ -202,8 +202,8 @@ class ChannelSwingIntegrationTest {
                         frame, "checkOnOpenCheckbox-" + services.record.id()));
                 assertFalse(checkbox.isSelected());
 
-                SwingUtilities.invokeLater(checkbox::doClick);
-                JDialog error = waitForDialog("Update check setting was not saved");
+                SwingTestSupport.startClick(frame, "checkOnOpenCheckbox-" + services.record.id());
+                JDialog error = waitForDialog(frame, "Update check setting was not saved");
                 JCheckBox restored = waitFor(() -> (JCheckBox) findNamed(
                         frame, "checkOnOpenCheckbox-" + services.record.id()));
                 assertFalse(restored.isSelected());
@@ -224,7 +224,7 @@ class ChannelSwingIntegrationTest {
                 LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
                 try {
                     SwingUtilities.invokeAndWait(frame::showWindow);
-                    Thread.sleep(100);
+                    waitFor(() -> find(frame, "launch-megamek-button"));
                     assertEquals(0, services.checks.get());
                     JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
                     SwingUtilities.invokeAndWait(installations::doClick);
@@ -233,7 +233,7 @@ class ChannelSwingIntegrationTest {
                     assertFalse(checkbox.isSelected());
                     JButton check = waitFor(() -> find(frame, "checkUpdatesButton"));
 
-                    SwingUtilities.invokeLater(check::doClick);
+                    SwingTestSupport.startClick(frame, "checkUpdatesButton");
                     assertTrue(services.started.await(30, TimeUnit.SECONDS));
                     assertEquals(1, services.checks.get());
                     services.release.countDown();
@@ -288,50 +288,22 @@ class ChannelSwingIntegrationTest {
         }
     }
 
-    private static JDialog waitForDialog(String title) throws Exception {
-        final JDialog[] found = new JDialog[1];
-        waitUntil(() -> {
-            for (Window window : Window.getWindows()) {
-                if (window instanceof JDialog dialog && dialog.isShowing()
-                        && title.equals(dialog.getTitle())) {
-                    found[0] = dialog;
-                    return true;
-                }
-            }
-            return false;
-        });
-        return found[0];
+    private static JDialog waitForDialog(LauncherFrame frame, String title) throws Exception {
+        return SwingTestSupport.dialog(frame, title);
     }
 
     private static void click(JDialog dialog, String text) throws Exception {
-        JButton button = onEdt(() -> findByText(dialog, text));
-        assertNotNull(button);
-        SwingUtilities.invokeLater(button::doClick);
+        SwingTestSupport.startClickText(dialog, text);
         waitUntil(() -> !dialog.isDisplayable());
     }
 
     private static <T extends Component> T waitFor(java.util.concurrent.Callable<T> lookup)
             throws Exception {
-        final Component[] found = new Component[1];
-        waitUntil(() -> {
-            try {
-                found[0] = onEdt(lookup);
-                return found[0] != null;
-            } catch (Exception error) {
-                throw new RuntimeException(error);
-            }
-        });
-        @SuppressWarnings("unchecked") T cast = (T) found[0];
-        return cast;
+        return SwingTestSupport.await("channel presentation", lookup);
     }
 
     private static void waitUntil(BooleanSupplier condition) throws Exception {
-        long end = System.nanoTime() + Duration.ofSeconds(8).toNanos();
-        while (System.nanoTime() < end) {
-            if (condition.getAsBoolean()) return;
-            Thread.sleep(25);
-        }
-        throw new AssertionError("timed out waiting for Swing condition");
+        SwingTestSupport.awaitCondition("channel state", condition::getAsBoolean);
     }
 
     private static JButton find(Container root, String name) {
@@ -379,19 +351,7 @@ class ChannelSwingIntegrationTest {
     }
 
     private static <T> T onEdt(java.util.concurrent.Callable<T> action) throws Exception {
-        if (SwingUtilities.isEventDispatchThread()) return action.call();
-        Object[] value = new Object[1];
-        Throwable[] failure = new Throwable[1];
-        SwingUtilities.invokeAndWait(() -> {
-            try {
-                value[0] = action.call();
-            } catch (Throwable error) {
-                failure[0] = error;
-            }
-        });
-        if (failure[0] != null) throw new RuntimeException(failure[0]);
-        @SuppressWarnings("unchecked") T cast = (T) value[0];
-        return cast;
+        return SwingTestSupport.onEdt(action);
     }
 
     private static final class FakeServices extends LauncherServices {

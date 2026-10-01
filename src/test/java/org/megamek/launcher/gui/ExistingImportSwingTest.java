@@ -137,7 +137,7 @@ class ExistingImportSwingTest {
 
             assertNotNull(waitFor(() -> findButton(frame, "launch-megamek-button")));
             releaseSnapshot.countDown();
-            Thread.sleep(100);
+            waitUntil(() -> !frame.firstLaunchMetadataPending());
             assertNotNull(onEdt(() -> findButton(frame, "launch-megamek-button")));
             assertNull(onEdt(() -> find(frame, "firstLaunchSplitButton")));
             assertEquals(1, snapshots.get());
@@ -975,48 +975,19 @@ class ExistingImportSwingTest {
     }
 
     private static <T> T waitFor(java.util.function.Supplier<T> probe) throws Exception {
-        long deadline = System.nanoTime() + Duration.ofSeconds(8).toNanos();
-        while (System.nanoTime() < deadline) {
-            T value = onEdt(probe::get);
-            if (value != null) return value;
-            Thread.sleep(20);
-        }
-        throw new AssertionError("timed out waiting for Swing state");
+        return SwingTestSupport.await("import presentation", probe::get);
     }
 
     private static void waitUntil(BooleanSupplier condition) throws Exception {
-        long deadline = System.nanoTime() + Duration.ofSeconds(8).toNanos();
-        while (System.nanoTime() < deadline) {
-            if (onEdt(condition::getAsBoolean)) return;
-            Thread.sleep(20);
-        }
-        throw new AssertionError("timed out waiting for Swing state");
+        SwingTestSupport.awaitCondition("import state", condition::getAsBoolean);
     }
 
     private static <T> T onEdt(java.util.concurrent.Callable<T> action) throws Exception {
-        Object[] result = new Object[1];
-        Throwable[] failure = new Throwable[1];
-        SwingUtilities.invokeAndWait(() -> {
-            try {
-                result[0] = action.call();
-            } catch (Throwable error) {
-                failure[0] = error;
-            }
-        });
-        if (failure[0] != null) {
-            if (failure[0] instanceof Exception exception) throw exception;
-            throw (Error) failure[0];
-        }
-        @SuppressWarnings("unchecked") T cast = (T) result[0];
-        return cast;
+        return SwingTestSupport.onEdt(action);
     }
 
     private static void dispose(LauncherFrame frame) throws Exception {
-        onEdt(() -> {
-            for (java.awt.Window window : frame.getOwnedWindows()) window.dispose();
-            frame.dispose();
-            return null;
-        });
+        SwingTestSupport.dispose(frame);
     }
 
     private static final class RecordingRunner implements ProcessRunner {
