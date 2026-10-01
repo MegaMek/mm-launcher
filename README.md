@@ -46,16 +46,31 @@ upgrades must leave those separate locations untouched. macOS and Linux
 installers do not self-update.
 
 Only the Windows MSI installation checks the official MegaMek/mm-launcher
-GitHub latest stable release for a newer numeric MSI version. The GUI prompts
-before downloading and again before installing; it requires an exact release
+GitHub latest stable release for a newer numeric MSI version. One themed
+**Update now** confirmation authorizes download, verification, closing the launcher,
+and installation. A cancellable progress dialog shows download and verification;
+cancellation stops being available when installer handoff begins. It requires an exact release
 MSI asset with a published SHA-256, checks the staged MSI's upgrade code,
 product name and product version using Windows Installer, then exits before
-the silent per-user upgrade begins. Settings offers a manual check and the
-next launch reports a failed Windows Installer exit code and acknowledges the
-completed result so a later manual check can retry. A successful installation
+the per-user upgrade begins with visible Windows Installer progress (`/passive`,
+no extra wizard and no forced computer restart). After successful completion,
+the helper records its result before reopening the launcher; the next launch confirms
+the installed version and reports the update result. Settings offers a manual check.
+Active updates are shown as still finishing, not as failed release lookups. Completed
+failures are acknowledged so a later manual check can retry. Incomplete reports are
+retained as diagnostic evidence: identified targets are confirmed as updated only
+with a matching installed version and an exited helper. If the old version is still
+confirmed installed, the failed attempt is acknowledged so a later check can retry.
+Old reports without a target are explicitly reported
+as an unknown previous result, not a successful update, after checking that the old
+helper is absent and Windows confirms the current installation. A successful installation
 with staged MSI cleanup failure is reported as a cleanup warning, not as an
 installation failure. Pending or unrecognized results remain for review; a
 completed result is acknowledged before the release lookup, even when offline.
+Helper output and Windows Installer diagnostics are retained beside the registry
+as `msi-update-helper.log` and `msi-update-installer.log`; update operation logs include
+both locations. Windows PowerShell's atomic completion write uses `[NullString]::Value`,
+not `$null`, which is converted to an invalid empty backup path by its .NET method binding.
 If no compatible
 official release exists, no upgrade is attempted. Portable archives, macOS
 and Linux do not self-update. MSI upgrades replace installer-owned binaries,

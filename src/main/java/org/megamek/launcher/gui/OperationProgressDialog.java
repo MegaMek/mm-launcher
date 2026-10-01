@@ -612,6 +612,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
             case ADOPT_EXISTING -> "verification";
             case UPDATE_PREVIEW -> "preview";
             case UPDATE_APPLY -> "update";
+            case LAUNCHER_UPDATE -> "launcher update";
             case RECOVERY -> "recovery";
             case UNINSTALL -> "uninstall";
             case UNINSTALL_RECOVERY -> "uninstall recovery";

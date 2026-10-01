@@ -39,6 +39,7 @@ public enum OperationType {
     ADOPT_EXISTING("Enable managed updates"),
     UPDATE_PREVIEW("Update preview"),
     UPDATE_APPLY("Update"),
+    LAUNCHER_UPDATE("Launcher update"),
     RECOVERY("Update recovery"),
     UNINSTALL("Uninstall"),
     UNINSTALL_RECOVERY("Uninstall recovery"),
