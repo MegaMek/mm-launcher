@@ -38,7 +38,9 @@ or non-Home components. Home re-render/reload, page transitions, confirmation ca
 Change location, and repeated quote opens reuse it and preserve every version label without
 loading flicker or another current-target request. Opening the ready menu performs no
 request. After failure or partial availability, only explicit Retry starts another snapshot attempt; failed attempts are
-not successful cache entries. Per-installation
+not successful cache entries. A failed refresh preserves the previous usable snapshot and exposes
+the refresh failure with Retry still available; only a successful refresh replaces that snapshot.
+Per-installation
 channels and check status appear on Installations rather than recreating a global default block on
 managed Home. Installer explanations remain in the actual confirmation, not repeated on Home.
 
@@ -147,7 +149,8 @@ Reused tags are deduplicated by their newest referencing record. All three produ
 must validate for each displayed target; titles and prerelease flags never infer membership.
 Channel becomes the created installation's fixed update track. Product or channel changes clear results and
 invalidate in-flight work; Previous/Next retain their exact selection snapshot. Every row returns
-through captured-record normal-planner revalidation before consent. Product/channel and Java
+through captured-record normal-planner revalidation before consent. Change location preserves
+the chosen record source, even if a newer record reuses the same product tag. Product/channel and Java
 selectors share the dark vector-arrow combo treatment rather than an operating-system white arrow
 segment.
 

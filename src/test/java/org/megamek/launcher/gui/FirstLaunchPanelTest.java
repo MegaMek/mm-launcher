@@ -530,6 +530,75 @@ class FirstLaunchPanelTest {
     }
 
     @Test
+    void failedPartialRefreshRetainsWeeklyChoicesAndAllowsASuccessfulRetry() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
+        for (String failure : List.of("exception", "null", "interrupted")) {
+            AtomicInteger requests = new AtomicInteger();
+            LauncherServices services = new LauncherServices(temp.resolve(failure + ".json")) {
+                @Override public org.megamek.launcher.channel.QuickInstallSnapshot
+                        quickInstallSnapshot() throws java.io.IOException, InterruptedException {
+                    int attempt = requests.incrementAndGet();
+                    if (attempt == 1) return QuickInstallTestData.weeklyOnly("0.51.01");
+                    if (attempt == 2) {
+                        return switch (failure) {
+                            case "null" -> null;
+                            case "interrupted" -> throw new InterruptedException("fixture interrupted");
+                            default -> throw new java.io.IOException("fixture refresh offline");
+                        };
+                    }
+                    return QuickInstallTestData.snapshot("0.51.02", "0.51.03");
+                }
+            };
+            LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+            try {
+                onEdt(() -> { frame.showWindow(); return null; });
+                waitFor(() -> {
+                    JMenuItem weekly = menuItem(frame, "latestMekHQWeeklyMenuItem");
+                    return weekly != null && weekly.isEnabled();
+                });
+                String capturedLabel = onEdt(() ->
+                        menuItem(frame, "latestMekHQWeeklyMenuItem").getText());
+                onEdt(() -> {
+                    menuItem(frame, "retryQuickInstallMetadataMenuItem").doClick();
+                    return null;
+                });
+                waitFor(() -> ((JLabel) findComponent(frame, "homeStatusLabel"))
+                        .getText().startsWith("Version refresh failed"));
+                assertEquals(2, requests.get());
+                assertFalse(onEdt(() -> find(frame, "downloadAndInstallButton").isEnabled()));
+                assertEquals(capturedLabel, onEdt(() ->
+                        menuItem(frame, "latestMekHQWeeklyMenuItem").getText()));
+                for (OfficialRepository repository : OfficialRepository.values()) {
+                    assertTrue(onEdt(() -> menuItem(frame,
+                            "latest" + repository.productName() + "WeeklyMenuItem").isEnabled()));
+                }
+                assertNotNull(onEdt(() -> ((JLabel) findComponent(frame, "homeStatusLabel"))
+                        .getToolTipText()));
+                assertTrue(onEdt(() -> menuItem(frame, "retryQuickInstallMetadataMenuItem").isEnabled()));
+                onEdt(() -> {
+                    menuItem(frame, "retryQuickInstallMetadataMenuItem").doClick();
+                    return null;
+                });
+                waitFor(() -> find(frame, "downloadAndInstallButton").isEnabled());
+                assertEquals(3, requests.get());
+                assertEquals("Install latest MekHQ Milestone (0.51.02)", onEdt(() ->
+                        find(frame, "downloadAndInstallButton").getText()));
+                assertEquals("Install latest MekHQ Weekly (0.51.03)", onEdt(() ->
+                        menuItem(frame, "latestMekHQWeeklyMenuItem").getText()));
+                assertEquals("", onEdt(() -> ((JLabel) findComponent(frame, "homeStatusLabel")).getText()));
+                assertNull(onEdt(() -> ((JLabel) findComponent(frame, "homeStatusLabel")).getToolTipText()));
+                assertFalse(Files.exists(temp.resolve(failure + ".json")));
+            } finally {
+                onEdt(() -> {
+                    for (var window : frame.getOwnedWindows()) window.dispose();
+                    frame.dispose();
+                    return null;
+                });
+            }
+        }
+    }
+
+    @Test
     void reloadedFirstLaunchReusesTheInFlightSessionSnapshot() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         CountDownLatch firstStarted = new CountDownLatch(1);

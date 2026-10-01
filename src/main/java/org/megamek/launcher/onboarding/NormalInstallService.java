@@ -156,7 +156,7 @@ public final class NormalInstallService {
                 requestedDestination);
     }
 
-    /** Compatibility overload for one of the two explicit official MekHQ channels. */
+    /** Compatibility overload for a supported official MekHQ channel. */
     public Plan prepare(FollowChannel requestedChannel, Path requestedDestination)
             throws IOException, InterruptedException {
         return prepare(OfficialRepository.MEKHQ, requestedChannel,

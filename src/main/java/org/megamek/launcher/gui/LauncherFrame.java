@@ -251,10 +251,10 @@ public final class LauncherFrame extends JFrame {
 
     private void prepareExactNormalInstall(OfficialRepository repository,
                                            FollowChannel futureChannel, String tag,
-                                           Path destination) {
+                                           String source, Path destination) {
         run("Checking exact " + displayProduct(repository.key()) + " " + tag,
                 () -> services.prepareExactNormalInstall(repository, futureChannel, tag,
-                        destination),
+                        source, destination),
                 this::showNormalInstallConfirmation);
     }
 
@@ -567,10 +567,8 @@ public final class LauncherFrame extends JFrame {
                 try {
                     QuickInstallSnapshot loaded = get();
                     if (loaded == null) {
-                        firstLaunchSnapshot = null;
-                        firstLaunchMetadataState = FirstLaunchMetadataState.FAILED;
-                        firstLaunchMetadataFailure =
-                                "Install versions unavailable: no catalog returned. Choose Retry version check.";
+                        firstLaunchOptionsFailed(
+                                "Install versions unavailable: no catalog returned. Choose Retry version check.");
                     } else {
                         firstLaunchSnapshot = loaded;
                         firstLaunchMetadataFailure = null;
@@ -579,18 +577,14 @@ public final class LauncherFrame extends JFrame {
                 } catch (java.util.concurrent.CancellationException ignored) {
                     return;
                 } catch (java.util.concurrent.ExecutionException error) {
-                    firstLaunchSnapshot = null;
-                    firstLaunchMetadataState = FirstLaunchMetadataState.FAILED;
-                    firstLaunchMetadataFailure =
+                    firstLaunchOptionsFailed(
                             "Install versions unavailable: "
                                     + SanitizedErrors.display(error.getCause())
-                                    + ". Choose Retry version check.";
+                                    + ". Choose Retry version check.");
                 } catch (InterruptedException error) {
                     Thread.currentThread().interrupt();
-                    firstLaunchSnapshot = null;
-                    firstLaunchMetadataState = FirstLaunchMetadataState.FAILED;
-                    firstLaunchMetadataFailure =
-                            "Version check interrupted. Choose Retry version check.";
+                    firstLaunchOptionsFailed(
+                            "Version check interrupted. Choose Retry version check.");
                 }
                 applyFirstLaunchMetadata(false);
             }
@@ -599,11 +593,17 @@ public final class LauncherFrame extends JFrame {
             firstLaunchOptionsWorker.execute();
         } catch (RuntimeException error) {
             firstLaunchOptionsWorker = null;
-            firstLaunchMetadataState = FirstLaunchMetadataState.FAILED;
-            firstLaunchMetadataFailure =
-                    "Version check could not start. Choose Retry version check.";
+            firstLaunchOptionsFailed(
+                    "Version check could not start: " + SanitizedErrors.display(error)
+                            + ". Choose Retry version check.");
             applyFirstLaunchMetadata(false);
         }
+    }
+
+    private void firstLaunchOptionsFailed(String message) {
+        firstLaunchMetadataFailure = message;
+        firstLaunchMetadataState = firstLaunchSnapshot == null
+                ? FirstLaunchMetadataState.FAILED : FirstLaunchMetadataState.READY;
     }
 
     private void retryFirstLaunchOptions() {
@@ -620,6 +620,7 @@ public final class LauncherFrame extends JFrame {
 
     private void applyFirstLaunchMetadata(boolean startInitial) {
         if (!isCurrentEmptyFirstLaunch()) return;
+        status.setToolTipText(null);
         switch (firstLaunchMetadataState) {
             case NOT_STARTED -> {
                 firstLaunchSplitButton.setOptionsLoading();
@@ -653,6 +654,13 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void setStableFirstLaunchStatus() {
+        if (isCurrentEmptyFirstLaunch() && firstLaunchMetadataFailure != null
+                && firstLaunchSnapshot != null) {
+            status.setText("Version refresh failed — using previous versions. Choose Retry.");
+            status.setToolTipText(firstLaunchMetadataFailure);
+            return;
+        }
+        status.setToolTipText(null);
         status.setText(isCurrentEmptyFirstLaunch() && firstLaunchArtworkError != null
                 ? "Artwork unavailable; diagnostics are available in Settings."
                 : "");
@@ -2982,7 +2990,7 @@ public final class LauncherFrame extends JFrame {
                         prepareNormalInstall(plan.repository(), plan.channel(), changed);
                     } else {
                         prepareExactNormalInstall(plan.repository(), plan.channel(),
-                                plan.release().tag(), changed);
+                                plan.release().tag(), plan.source(), changed);
                     }
                     return true;
                 }, source -> {

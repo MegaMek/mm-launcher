@@ -375,6 +375,29 @@ class NormalInstallServiceTest {
     }
 
     @Test
+    void browsedLocationReplanKeepsCapturedRecordWhenANewerRecordReusesTheProductTag()
+            throws Exception {
+        Fixture fixture = fixture("1.02.03");
+        NormalInstallService.Plan initial = fixture.service.prepareExact(
+                OfficialRepository.MEKHQ, FollowChannel.MILESTONE, "v0.01.00", fixture.destination);
+        fixture.transport.addSuite("2.00.00", FollowChannel.MILESTONE, "0.01.00");
+        Path changed = fixture.state.resolve("different-location");
+        NormalInstallService.Plan replanned = fixture.service.prepareExact(
+                initial.repository(), initial.channel(), initial.release().tag(),
+                initial.source(), changed);
+        assertEquals(initial.source(), replanned.source());
+        assertEquals(initial.release(), replanned.release());
+        assertEquals(initial.asset(), replanned.asset());
+        assertEquals(changed, replanned.destination());
+        assertEquals(SuiteTestData.recordUri("2.00.00").toString(),
+                fixture.service.prepareExact(initial.repository(), initial.channel(),
+                        initial.release().tag(), fixture.state.resolve("tag-only-location")).source());
+        assertEquals(0, fixture.transport.binaryRequests);
+        assertFalse(Files.exists(changed));
+        assertFalse(Files.exists(fixture.registry));
+    }
+
+    @Test
     void historicalExactMetadataDriftFailsBeforePackageTransfer() throws Exception {
         Fixture fixture = fixture("1.02.03");
         NormalInstallService.Plan plan = fixture.service.prepareExact(
