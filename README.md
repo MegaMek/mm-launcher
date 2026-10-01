@@ -8,7 +8,8 @@ and manual dispatch. PR branch pushes run once through the pull-request event ra
 than also starting a duplicate push matrix. CI produces **only** five unsigned native installer/checksum
 pairs: Windows x64 `.msi`, Linux x64 `.deb` and `.rpm`, and macOS `.pkg` on both
 Intel and Apple Silicon. It does not build, verify, or upload portable archives,
-install packages on CI runners, create a release, sign, or notarize. Each
+install packages on CI runners, create a release, sign, or notarize. The separate
+manual `Publish launcher release` workflow reuses these same builds and tests before publication. Each
 installer contains a host-native Java 21 image with all JDK modules and `bin/java`
 for games launched by the application; no external Java is required.
 Run `./gradlew test buildDebInstaller buildRpmInstaller` on Linux,
@@ -59,6 +60,34 @@ If no compatible
 official release exists, no upgrade is attempted. Portable archives, macOS
 and Linux do not self-update. MSI upgrades replace installer-owned binaries,
 not the `%LOCALAPPDATA%` launcher registry, logs or installed games.
+
+### Publishing a launcher release
+
+The manually dispatched `Publish launcher release` workflow is independent of the game-suite
+coordinator. Select **main** and enter the numeric launcher version already committed in
+`build.gradle.kts`, for example `0.14.5`. It refuses forks, other branches, existing tags/releases
+(including drafts), version mismatches, and a version not newer than every published stable
+launcher release. It never runs automatically on pushes or pull requests.
+
+The workflow calls the ordinary native-installer CI and waits for all four platforms' builds,
+package inspections, source tests, and release tooling tests to pass. Only then does one write-enabled
+job download this run's five installers and five checksum files, check the exact filenames and
+hashes, create `v<version>` at the tested commit, and upload the complete asset set. GitHub must
+report the expected uploaded asset IDs, sizes, URLs, and SHA-256 digests, including the digest used
+by Windows self-update.
+
+Publication goes straight to a stable release in that same run, with no draft-review approval
+stage. The upload operation briefly uses GitHub's draft flag so an incomplete asset set cannot
+become the update target; it is cleared automatically only after verification. The workflow then
+verifies the official latest-stable endpoint. Installers remain unsigned and macOS packages are
+not notarized.
+
+Writes are not automatically retried, existing assets/tags are never overwritten, and failure
+does not automatically delete a tag, draft, or published release. Inspect any partial state before
+another attempt; a published release cannot be made unpublished by a failed post-publication
+check. Full Windows self-update still requires an older installed MSI and a newer published
+version. Publishing the same version as the installed launcher does not trigger an upgrade.
+See [the distribution contract](docs/archive-distribution-contract.md) for validation commands.
 
 The desktop default registry is `%LOCALAPPDATA%\MegaMek Launcher\launcher-registry.json`
 on Windows, `~/Library/Application Support/MegaMek Launcher/launcher-registry.json`

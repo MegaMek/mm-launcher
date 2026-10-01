@@ -1,0 +1,67 @@
+# Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: Publish launcher release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Launcher version already committed on main (for example 0.14.5)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: launcher-stable-release
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.prepare.outputs.version }}
+      commit: ${{ steps.prepare.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate official main source and unused release version
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: python3 -B scripts/launcher_release.py prepare --version "$RELEASE_VERSION"
+
+  installers:
+    needs: prepare
+    permissions:
+      contents: read
+    uses: ./.github/workflows/launcher-archives.yml
+
+  publish:
+    needs: [prepare, installers]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: MegaMek-Launcher-*-installers
+          path: build/release
+          merge-multiple: true
+      - name: Validate and publish the complete stable launcher release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: |
+          python3 -B scripts/launcher_release.py publish \
+            --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
+            --assets build/release
