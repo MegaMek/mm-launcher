@@ -63,20 +63,33 @@ The macOS app bundle includes a MegaMek.png-derived ICNS in `Contents/Resources`
 
 `Publish launcher release` is a separate, manual-only entry point in
 [launcher-release.yml](../.github/workflows/launcher-release.yml). Dispatch it from official
-`MegaMek/mm-launcher` **main** with a version already committed in `build.gradle.kts`.
-The version is canonical `major.minor.patch` within Windows Installer's numeric limits.
+`MegaMek/mm-launcher` **main** with no version input. The workflow reads the version committed
+at dispatch, increments only its patch number, and creates a version-only commit on `main`.
+For example, committed `0.14.5` becomes `0.14.6` before any installer is built.
+Versions are canonical `major.minor.patch` within Windows Installer's numeric limits; a patch
+at 65535 fails rather than silently rolling into a different minor version.
 It must be unused (with or without a `v` tag prefix) and newer than every published stable
 launcher version. Existing tags and releases, including drafts left by failed runs, are not reused.
 The workflow serializes publication attempts without cancelling an in-flight attempt.
 
-Preparation is read-only and captures the exact workflow source commit. The workflow then calls
-the existing native-installer workflow, including all four platforms' source tests and offline
-release tooling tests. Publication requires that entire called workflow to succeed. Only the
-publication job receives `contents: write`; ordinary CI and preparation keep read-only access.
+Preparation first validates the candidate using read-only access. A dedicated GitHub App then
+creates a Git tree differing only in the version literal in `build.gradle.kts`, verifies the
+tree and single parent, and updates `main` without force. `main` must still match the dispatched
+commit; an intervening change or stale queued dispatch fails instead of overwriting newer work.
+The version file's formatting and other content are preserved.
+
+The workflow then calls the existing native-installer workflow, including all four platforms'
+source tests and offline
+release tooling tests. Every checkout and build identifier uses the exact new version-bump
+commit, not the older workflow-triggering SHA. Publication requires that entire called workflow
+to succeed. Only the publication job receives workflow-token `contents: write`; ordinary CI
+and preparation keep that token read-only. The App's short-lived Contents-write token is
+restricted to this repository, used only for the bump, revoked at the end of preparation,
+and never passed to installer/test jobs or publication.
 Artifacts come from the current workflow run, not a previous build or independently selected
 latest artifact.
 
-Before any remote write, [launcher_release.py](../scripts/launcher_release.py) requires exactly
+Before any release/tag write, [launcher_release.py](../scripts/launcher_release.py) requires exactly
 the five expected installer/checksum pairs, nonempty regular files, matching SHA-256 values, and
 an MSI no larger than the updater's 300 MiB limit. It creates a new lightweight `v<version>` tag
 at the tested commit, uploads all ten files, and requires GitHub's uploaded state, immutable IDs,
@@ -86,11 +99,44 @@ job publishes a normal stable release and verifies the latest-stable endpoint co
 Windows updater.
 
 No write is retried automatically, no existing asset/tag is replaced, and no automatic rollback
-deletes release evidence. A failed run can leave a tag or upload draft; a post-publication check
-failure can leave a public release. Inspect remote state before taking any recovery action.
+deletes release evidence or reverts the version commit. A failed build leaves the bumped
+version on `main`; a fresh dispatch increments again, so unpublished patch numbers can be skipped.
+Rerunning only failed installer/publisher jobs retains the successful preparation outputs.
+Rerunning all jobs after a successful bump fails the stale-source guard rather than bumping
+twice from the original dispatch. A failed run can leave a tag or upload draft; a
+post-publication check failure can leave a public release. Inspect remote state before taking
+any recovery action.
 The workflow never installs packages, signs/notarizes, assembles a game suite, or updates an
 installed launcher on a runner. A real self-update test requires separate explicit authorization
 to publish and to upgrade an older Windows MSI installation.
+
+### Release bot setup
+
+An authorized administrator must complete this one-time setup before the automatic workflow
+can commit a version:
+
+1. Create a dedicated GitHub App for launcher releases. Grant **Repository permissions:
+   Contents: Read and write**; Metadata read access is implicit. Webhooks and user OAuth
+   authorization are not needed. Install it on the MegaMek organization with **Only select
+   repositories: mm-launcher**. Organization approval may be required.
+2. In the repository's **Settings > Rules > Rulesets > Protect Main Branch**, add that App
+   to the bypass list with **Always allow**. A pull-request-only bypass cannot perform this
+   direct version commit. Keep code-owner review and the other protections for everyone else.
+   If additional active rulesets restrict main writes, the App must be explicitly authorized
+   there too; the workflow must not weaken or disable protections.
+3. In **Settings > Secrets and variables > Actions > Variables**, add
+   `LAUNCHER_RELEASE_APP_ID` with the App's numeric **App ID**, not its client ID.
+4. Generate an App private key and store the entire PEM content as the repository Actions
+   secret `LAUNCHER_RELEASE_APP_PRIVATE_KEY`. Never commit it or paste it into issues,
+   pull requests, logs, or chat.
+
+The bypass grants the App real repository write authority, not a server-enforced restriction
+to one file. The workflow narrows its installation token to this repository and verifies that
+the generated commit changes only the version file. Protect the App key and workflow changes.
+GitHub App-authored main pushes may also trigger ordinary read-only CI; that separate run
+cannot publish and is not substituted for this release run's installer/test matrix.
+Missing configuration, denied bypass, or GitHub write failures fail explicitly; there is
+no personal-token fallback.
 
 Focused local checks (no native installer builds or network publication):
 

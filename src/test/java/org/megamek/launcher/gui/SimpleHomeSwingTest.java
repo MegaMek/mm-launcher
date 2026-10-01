@@ -776,11 +776,9 @@ class SimpleHomeSwingTest {
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
-            JButton manage = waitButton(frame, "manageInstallationsButton");
-            SwingUtilities.invokeAndWait(manage::doClick);
-            JButton more = waitButton(frame, "installationMenuButton-" + services.first.id());
+            clickShowingButton(frame, "manageInstallationsButton");
             for (boolean confirm : List.of(false, true)) {
-                SwingUtilities.invokeAndWait(more::doClick);
+                clickShowingButton(frame, "installationMenuButton-" + services.first.id());
                 JMenuItem reset = waitFor(() -> {
                     for (var element : javax.swing.MenuSelectionManager.defaultManager()
                             .getSelectedPath()) {
@@ -817,6 +815,8 @@ class SimpleHomeSwingTest {
                     click(result, "OK");
                 } else {
                     assertEquals(0, services.resetCalls.get());
+                    clickShowingButton(frame, "homeButton");
+                    clickShowingButton(frame, "manageInstallationsButton");
                 }
             }
             assertEquals(2, services.resetPlans.get());
@@ -2007,6 +2007,15 @@ class SimpleHomeSwingTest {
         return waitFor(() -> {
             JButton button = find(root, name);
             return button != null && button.isShowing() ? button : null;
+        });
+    }
+
+    private static void clickShowingButton(Container root, String name) throws Exception {
+        waitFor(() -> {
+            JButton button = find(root, name);
+            if (button == null || !button.isShowing() || !button.isEnabled()) return null;
+            button.doClick();
+            return Boolean.TRUE;
         });
     }
 

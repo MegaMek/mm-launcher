@@ -64,13 +64,16 @@ not the `%LOCALAPPDATA%` launcher registry, logs or installed games.
 ### Publishing a launcher release
 
 The manually dispatched `Publish launcher release` workflow is independent of the game-suite
-coordinator. Select **main** and enter the numeric launcher version already committed in
-`build.gradle.kts`, for example `0.14.5`. It refuses forks, other branches, existing tags/releases
-(including drafts), version mismatches, and a version not newer than every published stable
-launcher release. It never runs automatically on pushes or pull requests.
+coordinator. Select **main** and click **Run workflow**, with no version field. It increments the
+committed patch version (for example `0.14.5` to `0.14.6`), commits only that version change to
+`main` using a dedicated release bot, and captures the new commit. It refuses forks, other
+branches, stale dispatches, existing candidate tags/releases (including drafts), and a version
+not newer than every published stable launcher release. It never runs automatically on pushes
+or pull requests. Major/minor version changes remain explicit source changes.
 
-The workflow calls the ordinary native-installer CI and waits for all four platforms' builds,
-package inspections, source tests, and release tooling tests to pass. Only then does one write-enabled
+The workflow calls the ordinary native-installer CI at the captured version-bump commit and
+waits for all four platforms' builds, package inspections, source tests, and release tooling
+tests to pass. Only then does one write-enabled
 job download this run's five installers and five checksum files, check the exact filenames and
 hashes, create `v<version>` at the tested commit, and upload the complete asset set. GitHub must
 report the expected uploaded asset IDs, sizes, URLs, and SHA-256 digests, including the digest used
@@ -82,9 +85,15 @@ become the update target; it is cleared automatically only after verification. T
 verifies the official latest-stable endpoint. Installers remain unsigned and macOS packages are
 not notarized.
 
+The release bot needs one-time installation, repository-scoped Contents write permission, an
+explicit protected-main ruleset bypass, the `LAUNCHER_RELEASE_APP_ID` Actions variable, and
+the `LAUNCHER_RELEASE_APP_PRIVATE_KEY` Actions secret. Its token is revoked when preparation
+ends and is not passed to builds or publication. See
+[release bot setup](docs/archive-distribution-contract.md#release-bot-setup).
+
 Writes are not automatically retried, existing assets/tags are never overwritten, and failure
-does not automatically delete a tag, draft, or published release. Inspect any partial state before
-another attempt; a published release cannot be made unpublished by a failed post-publication
+does not automatically undo a version-bump commit or delete a tag, draft, or published release.
+Inspect any partial state before another attempt; a published release cannot be made unpublished by a failed post-publication
 check. Full Windows self-update still requires an older installed MSI and a newer published
 version. Publishing the same version as the installed launcher does not trigger an upgrade.
 See [the distribution contract](docs/archive-distribution-contract.md) for validation commands.

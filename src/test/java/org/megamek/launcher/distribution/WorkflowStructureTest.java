@@ -60,6 +60,10 @@ class WorkflowStructureTest {
 
         assertTrue(root.path("on").has("workflow_dispatch"));
         assertTrue(root.path("on").has("workflow_call"));
+        JsonNode sourceInput = root.path("on").path("workflow_call").path("inputs").path("source_commit");
+        assertEquals("string", sourceInput.path("type").asText());
+        assertFalse(sourceInput.path("required").asBoolean());
+        assertEquals("", sourceInput.path("default").asText());
         assertTrue(root.path("on").has("push"));
         assertTrue(root.path("on").has("pull_request"));
         JsonNode pushBranches = root.path("on").path("push").path("branches");
@@ -73,6 +77,8 @@ class WorkflowStructureTest {
         JsonNode tooling = jobs.path("release-tooling");
         assertEquals("ubuntu-24.04", tooling.path("runs-on").asText());
         assertEquals(List.of("actions/checkout@v4"), actions(tooling));
+        assertEquals("${{ inputs.source_commit || github.sha }}",
+                tooling.path("steps").get(0).path("with").path("ref").asText());
         assertTrue(step(tooling, "Test launcher release tooling without network or publication")
                 .path("run").asText().contains("unittest discover -s scripts -p test_launcher_release.py"));
         for (String event : List.of("push", "pull_request")) {
@@ -81,6 +87,10 @@ class WorkflowStructureTest {
             assertTrue(paths.contains(".github/workflows/launcher-release.yml"));
         }
         JsonNode installers = jobs.path("installers");
+        assertEquals("${{ inputs.source_commit || github.sha }}",
+                installers.path("steps").get(0).path("with").path("ref").asText());
+        assertEquals("${{ inputs.source_commit || github.sha }}",
+                installers.path("env").path("SOURCE_COMMIT").asText());
         assertEquals("${{ matrix.os }}", installers.path("runs-on").asText());
         List<String> ids = new ArrayList<>();
         List<String> runners = new ArrayList<>();
@@ -122,7 +132,8 @@ class WorkflowStructureTest {
                 .path("run").asText().contains("buildDebInstaller buildRpmInstaller"));
         assertTrue(step(installers, "Build macOS installer (never install)")
                 .path("run").asText().contains("buildPkgInstaller"));
-        assertEquals(6, count(text, "-PbuildIdentifier=${{ github.sha }}"));
+        assertEquals(2, count(text, "-PbuildIdentifier=$env:SOURCE_COMMIT"));
+        assertEquals(4, count(text, "-PbuildIdentifier=${SOURCE_COMMIT}"));
 
         JsonNode verify = step(installers, "Verify exact installer/checksum pairs without installing");
         assertEquals("${{ matrix.id }}", verify.path("env").path("PLATFORM").asText());
@@ -154,7 +165,7 @@ class WorkflowStructureTest {
         assertEquals(expectedPaths, paths.lines().map(String::trim).filter(line -> !line.isEmpty()).toList());
         assertTrue(step(installers, "Test source on Windows").path("run").asText().contains(" test"));
         assertTrue(step(installers, "Test source on Linux with Xvfb").path("run").asText()
-                .contains("xvfb-run -a ./gradlew \"-PbuildIdentifier=${{ github.sha }}\" test"));
+                .contains("xvfb-run -a ./gradlew \"-PbuildIdentifier=${SOURCE_COMMIT}\" test"));
         assertTrue(step(installers, "Test source on macOS").path("run").asText().contains(" test"));
         assertTrue(text.indexOf("Upload native installers and SHA-256 files only")
                 < text.indexOf("Test source on Windows"),
@@ -191,23 +202,40 @@ class WorkflowStructureTest {
         JsonNode root = new ObjectMapper(new YAMLFactory()).readTree(text);
         assertEquals(1, root.path("on").size(), "publication must never run on push or PR");
         JsonNode dispatch = root.path("on").path("workflow_dispatch");
-        assertEquals("string", dispatch.path("inputs").path("version").path("type").asText());
-        assertTrue(dispatch.path("inputs").path("version").path("required").asBoolean());
+        assertFalse(dispatch.has("inputs"), "patch release must require no version input");
         assertEquals("read", root.path("permissions").path("contents").asText());
         assertEquals("launcher-stable-release", root.path("concurrency").path("group").asText());
         assertFalse(root.path("concurrency").path("cancel-in-progress").asBoolean());
         JsonNode jobs = root.path("jobs");
         assertEquals(3, jobs.size());
         JsonNode prepare = jobs.path("prepare");
-        assertEquals("${{ steps.prepare.outputs.version }}", prepare.path("outputs").path("version").asText());
-        assertEquals("${{ steps.prepare.outputs.commit }}", prepare.path("outputs").path("commit").asText());
-        JsonNode validation = step(prepare, "Validate official main source and unused release version");
-        assertEquals("${{ inputs.version }}", validation.path("env").path("RELEASE_VERSION").asText());
+        assertEquals("${{ steps.bump.outputs.version }}", prepare.path("outputs").path("version").asText());
+        assertEquals("${{ steps.bump.outputs.commit }}", prepare.path("outputs").path("commit").asText());
+        assertEquals("${{ github.sha }}", prepare.path("steps").get(0).path("with").path("ref").asText());
+        JsonNode validation = step(prepare, "Validate official main source and next unused patch version");
+        assertEquals("${{ github.token }}", validation.path("env").path("GH_TOKEN").asText());
         assertTrue(validation.path("run").asText().contains("launcher_release.py prepare"));
+        JsonNode bot = step(prepare, "Create repository-scoped release bot token");
+        assertEquals("actions/create-github-app-token@v2", bot.path("uses").asText());
+        assertEquals("${{ vars.LAUNCHER_RELEASE_APP_ID }}", bot.path("with").path("app-id").asText());
+        assertEquals("${{ secrets.LAUNCHER_RELEASE_APP_PRIVATE_KEY }}",
+                bot.path("with").path("private-key").asText());
+        assertEquals("${{ github.repository_owner }}", bot.path("with").path("owner").asText());
+        assertEquals("mm-launcher", bot.path("with").path("repositories").asText());
+        assertEquals("write", bot.path("with").path("permission-contents").asText());
+        assertFalse(bot.path("with").path("skip-token-revoke").asBoolean());
+        JsonNode bump = step(prepare, "Commit next patch version to protected main");
+        assertEquals("${{ steps.release-bot.outputs.token }}", bump.path("env").path("GH_TOKEN").asText());
+        assertTrue(bump.path("run").asText().contains("launcher_release.py bump"));
+        assertFalse(prepare.has("permissions"), "default workflow token stays read-only during preparation");
+        assertTrue(text.indexOf("Validate official main source and next unused patch version")
+                < text.indexOf("Create repository-scoped release bot token"));
         JsonNode installers = jobs.path("installers");
         assertEquals("prepare", installers.path("needs").asText());
         assertEquals("./.github/workflows/launcher-archives.yml", installers.path("uses").asText());
         assertEquals("read", installers.path("permissions").path("contents").asText());
+        assertEquals("${{ needs.prepare.outputs.commit }}",
+                installers.path("with").path("source_commit").asText());
         assertFalse(installers.has("secrets"), "installer jobs must not receive publisher secrets");
         JsonNode publish = jobs.path("publish");
         List<String> prerequisites = new ArrayList<>();
@@ -216,6 +244,9 @@ class WorkflowStructureTest {
         assertFalse(publish.has("if"), "default success dependency guard must not be bypassed");
         assertEquals("write", publish.path("permissions").path("contents").asText());
         assertEquals(List.of("actions/checkout@v4", "actions/download-artifact@v4"), actions(publish));
+        assertEquals("${{ needs.prepare.outputs.commit }}",
+                publish.path("steps").get(0).path("with").path("ref").asText());
+        assertFalse(publish.path("steps").get(0).path("with").path("persist-credentials").asBoolean());
         JsonNode download = publish.path("steps").get(1);
         assertEquals("MegaMek-Launcher-*-installers", download.path("with").path("pattern").asText());
         assertEquals("build/release", download.path("with").path("path").asText());

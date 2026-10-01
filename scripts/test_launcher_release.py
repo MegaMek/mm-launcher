@@ -22,7 +22,8 @@ ENVIRONMENT = {
 
 
 class FakeGitHub:
-    def __init__(self):
+    def __init__(self, version=VERSION):
+        self.version = version
         self.calls = []
         self.reference = None
         self.release = None
@@ -52,7 +53,7 @@ class FakeGitHub:
                 "size": file.stat().st_size, "state": "uploaded",
                 "digest": "sha256:" + hashlib.sha256(file.read_bytes()).hexdigest(),
                 "browser_download_url": f"https://github.com/{release.REPOSITORY}"
-                                        f"/releases/download/v{VERSION}/{file.name}",
+                                        f"/releases/download/v{self.version}/{file.name}",
             }
             self.release["assets"].append(metadata)
             return copy.deepcopy(metadata)
@@ -72,12 +73,70 @@ class FakeGitHub:
         raise AssertionError(f"Unexpected request: {method} {endpoint}")
 
 
+class FakeBumpGitHub(FakeGitHub):
+    def __init__(self, original):
+        super().__init__("0.14.6")
+        self.main = {"ref": "refs/heads/main", "object": {"type": "commit", "sha": COMMIT}}
+        self.tree = {
+            "sha": "b" * 40, "truncated": False,
+            "tree": [
+                {"path": "build.gradle.kts", "mode": "100644", "type": "blob",
+                 "sha": release.blob_sha(original)},
+                {"path": "README.md", "mode": "100644", "type": "blob", "sha": "f" * 40},
+            ],
+        }
+        self.mutate_tree = None
+        self.changed_tree = None
+        self.mutate_commit = None
+        self.fail_push = False
+        self.concurrent_push = False
+
+    def request(self, method, endpoint, data=None, file=None, missing_ok=False):
+        if (method, endpoint) not in (
+                ("GET", f"{release.API}/git/ref/heads/main"),
+                ("GET", f"{release.API}/git/commits/{COMMIT}"),
+                ("GET", f"{release.API}/git/trees/" + "b" * 40),
+                ("GET", f"{release.API}/git/trees/" + "c" * 40),
+                ("POST", f"{release.API}/git/trees"),
+                ("POST", f"{release.API}/git/commits"),
+                ("PATCH", f"{release.API}/git/refs/heads/main")):
+            return super().request(method, endpoint, data, file, missing_ok)
+        self.calls.append((method, endpoint, copy.deepcopy(data)))
+        if method == "GET" and endpoint.endswith("/git/ref/heads/main"):
+            return copy.deepcopy(self.main)
+        if method == "GET" and "/git/commits/" in endpoint:
+            return {"sha": COMMIT, "tree": {"sha": "b" * 40}}
+        if method == "GET" and "/git/trees/" in endpoint:
+            return copy.deepcopy(self.changed_tree if endpoint.endswith("c" * 40) else self.tree)
+        if method == "POST" and endpoint.endswith("/git/trees"):
+            result = copy.deepcopy(self.tree)
+            result["sha"] = "c" * 40
+            result["tree"][0]["sha"] = release.blob_sha(data["tree"][0]["content"])
+            if self.mutate_tree:
+                self.mutate_tree(result)
+            self.changed_tree = result
+            return {"sha": result["sha"]}
+        if method == "POST" and endpoint.endswith("/git/commits"):
+            result = {"sha": "d" * 40, "tree": {"sha": data["tree"]},
+                      "parents": [{"sha": parent} for parent in data["parents"]]}
+            if self.mutate_commit:
+                self.mutate_commit(result)
+            return result
+        if self.concurrent_push:
+            self.main["object"]["sha"] = "e" * 40
+            raise release.ReleaseError("Simulated concurrent non-fast-forward push")
+        if self.fail_push:
+            raise release.ReleaseError("Simulated protected-branch permission denial")
+        self.main["object"]["sha"] = data["sha"]
+        return copy.deepcopy(self.main)
+
+
 class LauncherReleaseTest(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        (self.root / "build.gradle.kts").write_text(f'version = "{VERSION}"\n', encoding="utf-8")
+        (self.root / "build.gradle.kts").write_text(f'version = "{VERSION}"\n', encoding="utf-8", newline="\n")
         self.directory = self.root / "assets"
         self.directory.mkdir()
         for suffix in release.INSTALLERS:
@@ -106,6 +165,154 @@ class LauncherReleaseTest(unittest.TestCase):
         (self.root / "build.gradle.kts").write_text('version = "0.14.5"\nversion = "0.14.5"\n')
         with self.assertRaises(release.ReleaseError):
             release.validate_source(VERSION, self.root, ENVIRONMENT)
+
+    def test_patch_preparation_is_read_only_and_preserves_source_formatting(self):
+        original = '// fixture\r\nversion \t= "0.14.5"  \r\nother = "0.14.5"\r\n'
+        (self.root / "build.gradle.kts").write_bytes(original.encode("utf-8"))
+        github = FakeBumpGitHub(original)
+        version, commit, content, updated = release.prepare_patch(github, self.root, ENVIRONMENT)
+        self.assertEqual("0.14.6", version)
+        self.assertEqual(COMMIT, commit)
+        self.assertEqual(original, content)
+        self.assertEqual(original.replace('version \t= "0.14.5"', 'version \t= "0.14.6"'), updated)
+        self.assertTrue(all(method == "GET" for method, _, _ in github.calls))
+        self.assertEqual(original.encode("utf-8"), (self.root / "build.gradle.kts").read_bytes())
+
+    def test_patch_increment_preserves_major_minor_and_enforces_msi_ceiling(self):
+        for current, expected in (("0.14.5", "0.14.6"), ("1.2.9", "1.2.10"),
+                                  ("255.255.65534", "255.255.65535")):
+            with self.subTest(current=current):
+                self.assertEqual(expected, release.next_patch_version(current))
+        for current in ("0.14.65535", "00.14.5", "0.14.5-SNAPSHOT", "v0.14.5"):
+            with self.subTest(current=current), self.assertRaises(release.ReleaseError):
+                release.next_patch_version(current)
+
+    def test_blob_identity_matches_the_standard_git_object_hash(self):
+        self.assertEqual("d670460b4b4aece5915caf5c68d12f560a9fe3e4",
+                         release.blob_sha("test content\n"))
+
+    def test_patch_bump_changes_only_version_file_and_fast_forwards_main_once(self):
+        github = FakeBumpGitHub((self.root / "build.gradle.kts").read_text())
+        version, commit = release.bump_patch(github, self.root, ENVIRONMENT)
+        self.assertEqual(("0.14.6", "d" * 40), (version, commit))
+        writes = [(method, endpoint, data) for method, endpoint, data in github.calls if method != "GET"]
+        self.assertEqual(3, len(writes))
+        self.assertEqual({"base_tree": "b" * 40, "tree": [
+            {"path": "build.gradle.kts", "mode": "100644", "type": "blob",
+             "content": 'version = "0.14.6"\n'}]}, writes[0][2])
+        self.assertEqual([COMMIT], writes[1][2]["parents"])
+        self.assertEqual("c" * 40, writes[1][2]["tree"])
+        self.assertEqual(("PATCH", f"{release.API}/git/refs/heads/main",
+                          {"sha": commit, "force": False}), writes[2])
+        self.assertEqual(commit, github.main["object"]["sha"])
+        self.assertIsNone(github.reference)
+        self.assertIsNone(github.release)
+
+    def test_bump_rejects_stale_main_existing_candidate_and_wrong_source_before_writes(self):
+        for failure in ("stale-main", "used-version", "wrong-file", "truncated-tree", "wrong-mode"):
+            with self.subTest(failure=failure):
+                github = FakeBumpGitHub((self.root / "build.gradle.kts").read_text())
+                if failure == "stale-main":
+                    github.main["object"]["sha"] = "e" * 40
+                elif failure == "used-version":
+                    github.inventory = [{"tag_name": "v0.14.6", "draft": True, "prerelease": False}]
+                elif failure == "wrong-file":
+                    github.tree["tree"][0]["sha"] = "e" * 40
+                elif failure == "truncated-tree":
+                    github.tree["truncated"] = True
+                else:
+                    github.tree["tree"][0]["mode"] = "100755"
+                with self.assertRaises(release.ReleaseError):
+                    release.bump_patch(github, self.root, ENVIRONMENT)
+                self.assertTrue(all(method == "GET" for method, _, _ in github.calls))
+
+    def test_bump_rejects_tree_drift_or_wrong_parent_without_updating_main(self):
+        for failure in ("extra-change", "wrong-parent", "missing-parent"):
+            with self.subTest(failure=failure):
+                github = FakeBumpGitHub((self.root / "build.gradle.kts").read_text())
+                if failure == "extra-change":
+                    github.mutate_tree = lambda tree: tree["tree"][1].update(sha="e" * 40)
+                elif failure == "wrong-parent":
+                    github.mutate_commit = lambda commit: commit.update(parents=[{"sha": "e" * 40}])
+                else:
+                    github.mutate_commit = lambda commit: commit.update(parents=[])
+                with self.assertRaises(release.ReleaseError):
+                    release.bump_patch(github, self.root, ENVIRONMENT)
+                self.assertFalse(any(method == "PATCH" for method, _, _ in github.calls))
+                self.assertEqual(COMMIT, github.main["object"]["sha"])
+
+    def test_denied_or_concurrent_push_is_not_forced_retried_or_rolled_back(self):
+        for failure in ("permission", "concurrent"):
+            with self.subTest(failure=failure):
+                github = FakeBumpGitHub((self.root / "build.gradle.kts").read_text())
+                github.fail_push = failure == "permission"
+                github.concurrent_push = failure == "concurrent"
+                with self.assertRaises(release.ReleaseError):
+                    release.bump_patch(github, self.root, ENVIRONMENT)
+                self.assertEqual(1, sum(method == "PATCH" for method, _, _ in github.calls))
+                self.assertFalse(any(method == "DELETE" for method, _, _ in github.calls))
+                expected = "e" * 40 if failure == "concurrent" else COMMIT
+                self.assertEqual(expected, github.main["object"]["sha"])
+                self.assertIsNone(github.reference)
+
+    @patch("builtins.print")
+    def test_bump_cli_exports_new_version_and_commit_not_the_dispatch_commit(self, output):
+        github = FakeBumpGitHub((self.root / "build.gradle.kts").read_text())
+        outputs = self.root / "outputs"
+        with patch("launcher_release.GitHub", return_value=github), \
+                patch("launcher_release.Path.cwd", return_value=self.root), \
+                patch("launcher_release.verify_checkout") as checkout, \
+                patch.dict(release.os.environ, {**ENVIRONMENT, "GITHUB_OUTPUT": str(outputs)}, clear=True), \
+                patch("launcher_release.sys.argv", ["launcher_release.py", "bump"]):
+            release.main()
+        checkout.assert_called_once_with(self.root, COMMIT)
+        self.assertEqual("version=0.14.6\ncommit=" + "d" * 40 + "\n", outputs.read_text())
+        output.assert_called_once_with(
+            "Committed launcher 0.14.6 to main at " + "d" * 40 + "; no release published yet")
+
+    def test_checkout_guard_requires_the_bumped_commit_even_with_original_dispatch_context(self):
+        (self.root / "build.gradle.kts").write_text('version = "0.14.6"\n')
+        self.assertEqual("d" * 40,
+                         release.validate_source("0.14.6", self.root, ENVIRONMENT, "d" * 40))
+        with patch("launcher_release.subprocess.run") as run:
+            run.return_value = subprocess.CompletedProcess([], 0, COMMIT + "\n", "")
+            with self.assertRaisesRegex(release.ReleaseError, "exact prepared commit"):
+                release.verify_checkout(self.root, "d" * 40)
+            run.return_value = subprocess.CompletedProcess([], 0, "d" * 40 + "\n", "")
+            release.verify_checkout(self.root, "d" * 40)
+
+    @patch("builtins.print")
+    def test_publish_cli_builds_new_version_assets_and_tags_bumped_not_dispatched_commit(self, output):
+        github = FakeBumpGitHub((self.root / "build.gradle.kts").read_text())
+        version, commit = release.bump_patch(github, self.root, ENVIRONMENT)
+        (self.root / "build.gradle.kts").write_bytes(f'version = "{version}"\n'.encode("utf-8"))
+        directory = self.root / "new-assets"
+        directory.mkdir()
+        for suffix in release.INSTALLERS:
+            name = f"MegaMek-Launcher-{version}-{suffix}"
+            content = name.encode("ascii")
+            (directory / name).write_bytes(content)
+            sha = hashlib.sha256(content).hexdigest()
+            (directory / (name + ".sha256")).write_text(f"{sha}  {name}\n", encoding="ascii")
+        with patch("launcher_release.GitHub", return_value=github), \
+                patch("launcher_release.Path.cwd", return_value=self.root), \
+                patch("launcher_release.subprocess.run") as git, \
+                patch.dict(release.os.environ, ENVIRONMENT, clear=True), \
+                patch("launcher_release.sys.argv", ["launcher_release.py", "publish",
+                                                   "--version", version, "--commit", commit,
+                                                   "--assets", str(directory)]):
+            git.return_value = subprocess.CompletedProcess([], 0, commit + "\n", "")
+            release.main()
+        self.assertEqual("0.14.6", version)
+        self.assertEqual("d" * 40, github.reference["object"]["sha"])
+        self.assertNotEqual(COMMIT, github.reference["object"]["sha"])
+        self.assertEqual("v0.14.6", github.release["tag_name"])
+        self.assertFalse(github.release["draft"])
+        self.assertEqual(10, len(github.release["assets"]))
+        self.assertTrue(all(asset["name"].startswith("MegaMek-Launcher-0.14.6-")
+                            for asset in github.release["assets"]))
+        output.assert_called_once_with(
+            f"Published https://github.com/{release.REPOSITORY}/releases/tag/v0.14.6")
 
     def test_numeric_msi_version_contract_and_exact_limits(self):
         self.assertEqual((255, 255, 65535), release.numeric_version("255.255.65535"))
