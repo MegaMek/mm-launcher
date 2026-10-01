@@ -136,14 +136,14 @@ class UpdateApplySwingTest {
                     "Close MegaMek, MekHQ, and MegaMekLab before continuing."));
             assertTrue(firstText.contains("Application: MegaMek"));
             assertTrue(firstText.contains("Current version: 1.0.0"));
-            assertTrue(firstText.contains("New version: 2.0.0"));
+            assertTrue(firstText.contains("New version: 2.00.00"));
             assertTrue(firstText.contains("Download size: "
                     + BinarySizeFormat.mebibytes(fixture.services.asset.size())));
             assertFalse(firstText.contains(fixture.services.asset.name()));
             assertFalse(firstText.contains(fixture.services.asset.digest()));
             assertFalse(firstText.contains(fixture.services.asset.url().toString()));
             assertFalse(firstText.contains(" bytes"));
-            assertFalse(firstText.contains("v2.0.0"));
+            assertFalse(firstText.contains("v2.00.00"));
             assertFalse(firstText.contains("tag"));
             assertFalse(firstText.contains("digest"));
             assertFalse(firstText.contains("read-only"));
@@ -183,7 +183,7 @@ class UpdateApplySwingTest {
             assertEquals(1, fixture.services.applyCalls);
             assertEquals(fixture.first, fixture.services.appliedRecord);
             assertEquals(fixture.firstCurrent, fixture.services.appliedState);
-            assertEquals("v2.0.0", fixture.services.appliedTag);
+            assertEquals("v2.00.00", fixture.services.appliedTag);
             assertEquals(fixture.services.asset.size(), fixture.services.appliedSize);
             assertEquals(fixture.services.asset.digest(), fixture.services.appliedDigest);
             assertEquals(RealUpdateService.CONFIRM, fixture.services.appliedConfirmation);
@@ -192,7 +192,7 @@ class UpdateApplySwingTest {
                     "the accepted attempt downloads exactly one package");
             assertEquals(fixture.services.archive.length,
                     fixture.services.network.binaryBytes);
-            assertEquals("v2.0.0", new RealUpdateService(fixture.services.network)
+            assertEquals("v2.00.00", new RealUpdateService(fixture.services.network)
                     .snapshot(fixture.services.registry(), fixture.first.id()).current().tag());
             assertEquals("runtime-2", Files.readString(
                     Path.of(fixture.first.canonicalRoot()).resolve("lib/runtime.txt")));
@@ -247,11 +247,11 @@ class UpdateApplySwingTest {
                     fixture.services.network.binaryBytes);
             assertEquals(1, fixture.services.applyCalls);
             assertFalse(fixture.services.applyOnEdt);
-            assertEquals("v2.0.0", fixture.services.appliedTag);
+            assertEquals("v2.00.00", fixture.services.appliedTag);
             RealUpdateService.Snapshot installed =
                     new RealUpdateService(fixture.services.network)
                             .snapshot(fixture.services.registry(), fixture.first.id());
-            assertEquals("v2.0.0", installed.current().tag());
+            assertEquals("v2.00.00", installed.current().tag());
             assertEquals(fixture.first.canonicalRoot(), installed.current().canonicalRoot());
             assertEquals("runtime-2", Files.readString(
                     Path.of(fixture.first.canonicalRoot()).resolve("lib/runtime.txt")));
@@ -781,16 +781,16 @@ class UpdateApplySwingTest {
             this.archive = archive;
             this.registryStore = store;
             try {
-                this.asset = new ReleaseCatalog.Asset("MegaMek-v2.0.0.tar.gz", archive.length,
+                this.asset = new ReleaseCatalog.Asset("MegaMek-2.00.00.tar.gz", archive.length,
                         "sha256:" + sha(archive),
                         URI.create("https://github.com/MegaMek/megamek/releases/download/"
-                                + "v2.0.0/MegaMek-v2.0.0.tar.gz"));
+                                + "v2.00.00/MegaMek-2.00.00.tar.gz"));
             } catch (Exception error) {
                 throw new IllegalStateException(error);
             }
             this.release = new ReleaseCatalog.Release(
-                    "v2.0.0", "Target", false, false,
-                    URI.create("https://github.com/MegaMek/megamek/releases/tag/v2.0.0"),
+                    "v2.00.00", "Target", false, false,
+                    URI.create("https://github.com/MegaMek/megamek/releases/tag/v2.00.00"),
                     List.of(asset));
             this.first = first;
             this.second = second;
@@ -978,17 +978,27 @@ class UpdateApplySwingTest {
         private volatile int binaryRequests;
         private volatile long binaryBytes;
         private volatile boolean blockBinary;
+        private final org.megamek.launcher.channel.SuiteTestData complete =
+                new org.megamek.launcher.channel.SuiteTestData();
         private final CountDownLatch binaryStarted = new CountDownLatch(1);
         private final CountDownLatch releaseBinary = new CountDownLatch(1);
 
         private PreparedTransport(byte[] archive) throws Exception {
             this.archive = archive;
             this.digest = sha(archive);
+            for (String version : List.of("2.00.00", "2.01.00")) {
+                complete.suite(version, version.equals("2.00.00")
+                                ? FollowChannel.MILESTONE : FollowChannel.DEVELOPMENT,
+                        Map.of(OfficialRepository.MEGAMEK, version, OfficialRepository.LAB, version,
+                                OfficialRepository.MEKHQ, version),
+                        Map.of(OfficialRepository.MEGAMEK, (long) archive.length),
+                        Map.of(OfficialRepository.MEGAMEK, digest));
+            }
         }
 
         @Override
         public Response get(URI uri, String accept) throws IOException, InterruptedException {
-            if ("application/octet-stream".equals(accept)) {
+            if (uri.getPath().endsWith(".tar.gz")) {
                 assertFalse(SwingUtilities.isEventDispatchThread(),
                         "package transfer must not run on EDT");
                 binaryRequests++;
@@ -1013,20 +1023,20 @@ class UpdateApplySwingTest {
                         });
             }
             metadataRequests++;
-            if (accept.contains("yaml")) {
-                byte[] yaml = "stable: 2.0.0\ndev: 2.1.0\n"
-                        .getBytes(StandardCharsets.UTF_8);
-                return new Response(200,
-                        Map.of("content-length", List.of(Integer.toString(yaml.length))),
-                        new ByteArrayInputStream(yaml));
+            if (uri.getQuery() != null || uri.getPath().endsWith(".json")
+                    || uri.getPath().matches(".*/releases/[0-9]+")) {
+                return complete.get(uri, accept);
             }
             String json = """
-                    {"tag_name":"v2.0.0","name":"Target","draft":false,"prerelease":false,
-                    "html_url":"https://github.com/MegaMek/megamek/releases/tag/v2.0.0",
-                    "assets":[{"name":"MegaMek-v2.0.0.tar.gz","size":%d,
+                    {"id":%d,"tag_name":"v2.00.00","name":"Target","draft":false,"prerelease":false,
+                    "html_url":"https://github.com/MegaMek/megamek/releases/tag/v2.00.00",
+                    "assets":[{"id":%d,"state":"uploaded","name":"MegaMek-2.00.00.tar.gz","size":%d,
                     "digest":"sha256:%s",
-                    "browser_download_url":"https://github.com/MegaMek/megamek/releases/download/v2.0.0/MegaMek-v2.0.0.tar.gz"}]}
-                    """.formatted(archive.length, digest);
+                    "browser_download_url":"https://github.com/MegaMek/megamek/releases/download/v2.00.00/MegaMek-2.00.00.tar.gz"}]}
+                    """.formatted(org.megamek.launcher.channel.SuiteTestData.releaseId(
+                            OfficialRepository.MEGAMEK, "2.00.00"),
+                    org.megamek.launcher.channel.SuiteTestData.assetId(
+                            OfficialRepository.MEGAMEK, "2.00.00"), archive.length, digest);
             return new Response(200, Map.of(),
                     new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8)));
         }

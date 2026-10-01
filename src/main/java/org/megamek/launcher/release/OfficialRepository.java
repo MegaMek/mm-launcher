@@ -57,6 +57,14 @@ public enum OfficialRepository {
     public String assetPrefix() { return assetPrefix; }
     public String requiredProduct() { return requiredProduct; }
 
+    public String productName() {
+        return switch (this) {
+            case MEGAMEK -> "MegaMek";
+            case LAB -> "MegaMekLab";
+            case MEKHQ -> "MekHQ";
+        };
+    }
+
     public static OfficialRepository parse(String value) throws IOException {
         for (OfficialRepository repository : values()) {
             if (repository.key.equals(value)) return repository;

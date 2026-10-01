@@ -111,7 +111,7 @@ class FirstLaunchPanelTest {
                 }
                 FirstLaunchSplitButton split = (FirstLaunchSplitButton)
                         findComponent(panel, "firstLaunchSplitButton");
-                assertEquals(5, split.popupMenu().getComponentCount());
+                assertEquals(8, split.popupMenu().getComponentCount());
                 assertFalse(find(panel, "downloadAndInstallButton").isEnabled());
                 assertFalse(find(panel, "downloadAndInstallButton").isFocusable());
                 assertFalse(find(panel, "downloadOptionsButton").isEnabled());
@@ -134,13 +134,19 @@ class FirstLaunchPanelTest {
                         "latestMekHQDevelopmentMenuItem",
                         "latestMegaMekDevelopmentMenuItem",
                         "latestMegaMekLabDevelopmentMenuItem",
+                        "latestMekHQWeeklyMenuItem",
+                        "latestMegaMekWeeklyMenuItem",
+                        "latestMegaMekLabWeeklyMenuItem",
                         "useExistingCopyButton"), actions);
                 assertEquals(List.of(
                                 "Install latest MegaMek Milestone (0.51.0)",
                                 "Install latest MegaMekLab Milestone (0.51.0)",
                                 "Install latest MekHQ Development (0.52.0)",
                                 "Install latest MegaMek Development (0.52.0)",
-                                "Install latest MegaMekLab Development (0.52.0)"),
+                                "Install latest MegaMekLab Development (0.52.0)",
+                                "Install latest MekHQ Weekly (0.52.0)",
+                                "Install latest MegaMek Weekly (0.52.0)",
+                                "Install latest MegaMekLab Weekly (0.52.0)"),
                         java.util.Arrays.stream(split.popupMenu().getComponents())
                                 .map(JMenuItem.class::cast).map(JMenuItem::getText).toList());
                 assertEquals(FirstLaunchSplitButton.POPUP_BACKGROUND,
@@ -271,14 +277,14 @@ class FirstLaunchPanelTest {
                     assertTrue(component.isEnabled());
                 }
                 split.setOptionsUnavailable("Offline fixture");
-                assertEquals(6, split.popupMenu().getComponentCount());
-                for (int index = 0; index < 5; index++) {
+                assertEquals(9, split.popupMenu().getComponentCount());
+                for (int index = 0; index < 8; index++) {
                     Component component = split.popupMenu().getComponent(index);
                     assertFalse(component.isEnabled());
                     assertTrue(((JMenuItem) component).getAccessibleContext()
                             .getAccessibleDescription().contains("Offline fixture"));
                 }
-                JMenuItem retry = (JMenuItem) split.popupMenu().getComponent(5);
+                JMenuItem retry = (JMenuItem) split.popupMenu().getComponent(8);
                 assertTrue(retry.isEnabled());
                 assertTrue(retry.getAccessibleContext().getAccessibleDescription()
                         .contains("Offline fixture"));
@@ -493,13 +499,13 @@ class FirstLaunchPanelTest {
             assertFalse(onEdt(() -> find(frame, "downloadAndInstallButton").isEnabled()));
             FirstLaunchSplitButton split = (FirstLaunchSplitButton) onEdt(
                     () -> findComponent(frame, "firstLaunchSplitButton"));
-            assertEquals(6, split.popupMenu().getComponentCount());
-            for (int index = 0; index < 5; index++) {
+            assertEquals(9, split.popupMenu().getComponentCount());
+            for (int index = 0; index < 8; index++) {
                 Component component = split.popupMenu().getComponent(index);
                 assertFalse(component.isEnabled());
                 assertTrue(((JMenuItem) component).getText().endsWith("(Unavailable)"));
             }
-            JMenuItem retry = (JMenuItem) split.popupMenu().getComponent(5);
+            JMenuItem retry = (JMenuItem) split.popupMenu().getComponent(8);
             assertEquals("Retry version check", retry.getText());
             assertTrue(retry.isEnabled());
             onEdt(() -> {
@@ -572,22 +578,36 @@ class FirstLaunchPanelTest {
         return new FirstLaunchPanel(image, scale, download, existing, new JLabel(""));
     }
 
+    @Test
+    void weeklyOnlyBootstrapEnablesWeeklyChoicesWithoutChangingMilestoneDefault() throws Exception {
+        onEdt(() -> {
+            List<QuickInstallOption.Key> selected = new ArrayList<>();
+            AtomicInteger retries = new AtomicInteger();
+            FirstLaunchSplitButton split = new FirstLaunchSplitButton(GuiScale.DEFAULT,
+                    () -> { throw new AssertionError("unavailable Milestone must not install"); },
+                    selected::add, retries::incrementAndGet);
+            split.setOptions(QuickInstallTestData.weeklyOnly("0.51.01"));
+            assertFalse(split.primaryButton().isEnabled());
+            assertTrue(split.optionsButton().isEnabled());
+            assertTrue(split.primaryButton().getToolTipText().contains("Milestone"));
+            for (Component component : split.popupMenu().getComponents()) {
+                JMenuItem item = (JMenuItem) component;
+                if (item.getName().contains("Weekly")) {
+                    assertTrue(item.isEnabled());
+                    item.doClick();
+                } else if (item.getName().equals("retryQuickInstallMetadataMenuItem")) {
+                    item.doClick();
+                } else assertFalse(item.isEnabled());
+            }
+            assertEquals(3, selected.size());
+            assertTrue(selected.stream().allMatch(key -> key.channel() == FollowChannel.WEEKLY));
+            assertEquals(1, retries.get());
+            return null;
+        });
+    }
+
     private static String actionName(QuickInstallOption.Key key) {
-        if (key.repository() == OfficialRepository.MEGAMEK
-                && key.channel() == FollowChannel.MILESTONE) {
-            return "latestMegaMekMilestoneMenuItem";
-        }
-        if (key.repository() == OfficialRepository.LAB
-                && key.channel() == FollowChannel.MILESTONE) {
-            return "latestMegaMekLabMilestoneMenuItem";
-        }
-        if (key.repository() == OfficialRepository.MEKHQ) {
-            return "latestMekHQDevelopmentMenuItem";
-        }
-        if (key.repository() == OfficialRepository.MEGAMEK) {
-            return "latestMegaMekDevelopmentMenuItem";
-        }
-        return "latestMegaMekLabDevelopmentMenuItem";
+        return "latest" + key.repository().productName() + key.channel() + "MenuItem";
     }
 
     private static void collectLabels(Container root, List<String> labels) {

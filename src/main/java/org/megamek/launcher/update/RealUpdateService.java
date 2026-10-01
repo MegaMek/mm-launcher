@@ -456,7 +456,8 @@ public final class RealUpdateService {
             OfficialRepository repository =
                     OfficialRepository.parse(current.current().repository());
             VerifiedPackageFetcher.ExpectedAsset expectedAsset =
-                    new VerifiedPackageFetcher.ExpectedAsset(preview.targetAsset().name(),
+                    recommendation != null ? recommendation.expectedAsset()
+                            : new VerifiedPackageFetcher.ExpectedAsset(preview.targetAsset().name(),
                             preview.targetAsset().size(), preview.targetAsset().digest());
             Path extracted = new VerifiedPackageFetcher(transport).revalidateAndExtract(
                     repository, preview.targetRelease().tag(), prepared.workspace(),
@@ -1550,6 +1551,8 @@ public final class RealUpdateService {
                 && first.registeredAt().equals(second.registeredAt())
                 && first.preference().equals(second.preference())
                 && first.repository() == second.repository()
+                && first.releaseId().equals(second.releaseId())
+                && first.assetId().equals(second.assetId())
                 && first.source().equals(second.source())
                 && first.targetTag().equals(second.targetTag())
                 && first.assetName().equals(second.assetName())

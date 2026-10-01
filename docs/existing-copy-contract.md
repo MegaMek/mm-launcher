@@ -40,8 +40,12 @@ ignores an unresolved manifest classpath URL; inspection reports this with
 `confidence=recognized-packaging-optional-transitive-missing`. Unsafe entries, indeterminate access,
 non-files, and existing corrupt transitive jars still fail, and every reachable jar is checked.
 The expected root directories are `data`, `mmconf`, and `lib`; directory names alone and nested
-source trees are not detection evidence. Conflicting version evidence fails rather than inventing
-a release identity.
+source trees are not detection evidence. Each root product prefers its own manifest
+`Implementation-Version`, retaining legacy MegaMek version-properties lookup when that attribute
+is absent. Independent program versions are recognized and preserved; the bundle display uses
+MekHQ's version, otherwise Lab's, otherwise MegaMek's. A blank own version or conflicting versions
+between duplicate MegaMek jars fail rather than inventing identity. Recognition proves neither
+official ownership nor compatibility and does not authorize managed updates.
 
 The Game Java candidate list contains only the launcher's `java.home` and `JAVA_HOME`.
 Existing-copy import does not read settings or resolve, execute, or validate Java. Its immutable
@@ -75,9 +79,9 @@ enabled, after which the direct per-card checkbox is the sole automatic-check se
 An official package folder copied without its launcher registry, ownership receipt, and
 fixed-channel sidecar may still identify its build during static inspection, but that identity
 does not recreate installation provenance or update eligibility. Version, title, and prerelease
-state never infer a channel. During explicit adoption only, the two canonical current pointers
-classify a matching current identity: a distinct opposite-current-only identity is rejected, a
-shared current identity is valid for either selection, and an identity matching neither pointer
+state never infer a channel. During explicit adoption only, the available channels' complete-record
+current targets classify a matching identity: an identity current only in another channel is rejected,
+a shared current identity is valid for its matching channels, and an identity matching no current target
 remains historical/unknown and may use the selected fixed channel.
 
 The existing-copy commands themselves perform no network, download, or archive extraction. The
@@ -128,16 +132,17 @@ Network work is refused on the Swing event thread.
 The observed product set maps deterministically: any supported bundle containing MekHQ uses the
 MekHQ repository, lab-only uses MegaMekLab, and MegaMek-only uses MegaMek. Other mixed or unknown
 sets are rejected. After the user chooses the future update policy (Milestone by default or
-Development), the launcher searches bounded release-list metadata rather than guessing
+Development or Weekly), the launcher searches bounded release-list metadata rather than guessing
 `/tags/v<observed>`. It accepts exactly one eligible immutable tag whose normalized dotted version
 matches the observed build; leading zeroes are insignificant, but prerelease/build suffixes and
 component count are not discarded. Draft and ineligible releases do not qualify. A full final
 bounded page is inconclusive rather than permission to guess. Before that scan, the same canonical
-current-pointer classification used by selected-channel release browsing is applied to the
-normalized observed identity. A selected-current match is allowed. If both pointers identify that
-version, either channel is allowed. A distinct identity known only as the opposite current channel
-is a typed mismatch and stops before package download. A version matching neither pointer is
-historical/unknown, so the user's selected fixed channel remains valid.
+complete-record current targets are compared with the normalized primary-product identity.
+A selected-current match is allowed; a shared identity is valid for its matching channels.
+A distinct identity current only in another channel is a typed mismatch and stops before package
+download. A version matching no current target remains historical/unknown, so the user's selected
+fixed channel remains valid for this exact-ancestor adoption route. This does not add unknown
+history to the normal record-only install browser.
 
 Zero, multiple, incomplete, or failed searches leave the copy launch-only and expose only a simple
 message plus **Choose a different version…**. That explicit fallback opens the bounded official

@@ -983,8 +983,8 @@ public final class ImportedCopyAdoptionService {
     }
 
     private static void requireChannel(FollowChannel channel) throws IOException {
-        if (channel != FollowChannel.MILESTONE && channel != FollowChannel.DEVELOPMENT) {
-            throw new IOException("adoption channel must be Milestone or Development");
+        if (channel == null) {
+            throw new IOException("adoption channel must be Milestone, Development, or Weekly");
         }
     }
 

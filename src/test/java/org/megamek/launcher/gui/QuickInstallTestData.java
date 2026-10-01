@@ -35,7 +35,7 @@ package org.megamek.launcher.gui;
 
 import org.megamek.launcher.channel.ChannelCatalog;
 import org.megamek.launcher.channel.FollowChannel;
-import org.megamek.launcher.channel.OfficialYamlChannelCatalog;
+import org.megamek.launcher.channel.SuiteTestData;
 import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.channel.QuickInstallSnapshot;
 import org.megamek.launcher.release.OfficialRepository;
@@ -56,7 +56,7 @@ final class QuickInstallTestData {
                     ? milestone : development;
             String tag = "v" + version;
             OfficialRepository repository = key.repository();
-            String assetName = repository.assetPrefix() + tag + ".tar.gz";
+            String assetName = repository.assetPrefix() + version + ".tar.gz";
             ReleaseCatalog.Asset asset = new ReleaseCatalog.Asset(assetName, 123,
                     "sha256:" + "a".repeat(64), URI.create("https://github.com/"
                     + repository.slug() + "/releases/download/" + tag + "/" + assetName));
@@ -66,9 +66,17 @@ final class QuickInstallTestData {
                             + "/releases/tag/" + tag), List.of(asset));
             ChannelCatalog.Target target = new ChannelCatalog.Target(key.channel(), version,
                     repository, release, asset,
-                    OfficialYamlChannelCatalog.SOURCE.toString());
+                    SuiteTestData.recordUri(SuiteTestData.canonical(version)).toString());
             options.add(new QuickInstallOption(key, target));
         }
         return new QuickInstallSnapshot(options);
+    }
+
+    static QuickInstallSnapshot weeklyOnly(String version) {
+        return new QuickInstallSnapshot(snapshot(version, version).options().stream()
+                .map(option -> option.key().channel() == FollowChannel.WEEKLY ? option
+                        : new QuickInstallOption(option.key(), null,
+                        "No complete " + option.key().channel() + " suite record has been published."))
+                .toList());
     }
 }

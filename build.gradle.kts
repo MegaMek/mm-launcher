@@ -55,6 +55,7 @@ import org.gradle.api.tasks.OutputFile
 import org.gradle.api.tasks.PathSensitive
 import org.gradle.api.tasks.PathSensitivity
 import org.gradle.api.tasks.Sync
+import org.gradle.api.tasks.WriteProperties
 import org.gradle.api.tasks.TaskAction
 import org.gradle.api.tasks.bundling.AbstractArchiveTask
 import org.gradle.api.tasks.bundling.Compression
@@ -534,11 +535,11 @@ java {
 
 dependencies {
     implementation("com.fasterxml.jackson.core:jackson-databind:2.18.3")
-    implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.18.3")
     implementation("org.apache.commons:commons-compress:1.28.0")
 
     testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.18.3")
 }
 
 application {
@@ -561,6 +562,18 @@ require(buildIdentifier.matches(Regex("[A-Za-z0-9._-]{1,64}"))) {
 }
 
 val runtimeClasspath = configurations.runtimeClasspath
+
+val launcherVersionDirectory = layout.buildDirectory.dir("generated/launcher-version")
+val generateLauncherVersion = tasks.register<WriteProperties>("generateLauncherVersion") {
+    destinationFile.set(launcherVersionDirectory.map {
+        it.file("org/megamek/launcher/version.properties")
+    })
+    property("version", project.version.toString())
+}
+sourceSets["main"].resources.srcDir(launcherVersionDirectory)
+tasks.named("processResources") {
+    dependsOn(generateLauncherVersion)
+}
 
 tasks.named<Jar>("jar") {
     manifest {

@@ -570,7 +570,7 @@ public final class LauncherFrame extends JFrame {
                         firstLaunchSnapshot = null;
                         firstLaunchMetadataState = FirstLaunchMetadataState.FAILED;
                         firstLaunchMetadataFailure =
-                                "Install versions unavailable. Choose Retry version check.";
+                                "Install versions unavailable: no catalog returned. Choose Retry version check.";
                     } else {
                         firstLaunchSnapshot = loaded;
                         firstLaunchMetadataFailure = null;
@@ -582,7 +582,9 @@ public final class LauncherFrame extends JFrame {
                     firstLaunchSnapshot = null;
                     firstLaunchMetadataState = FirstLaunchMetadataState.FAILED;
                     firstLaunchMetadataFailure =
-                            "Install versions unavailable. Choose Retry version check.";
+                            "Install versions unavailable: "
+                                    + SanitizedErrors.display(error.getCause())
+                                    + ". Choose Retry version check.";
                 } catch (InterruptedException error) {
                     Thread.currentThread().interrupt();
                     firstLaunchSnapshot = null;
@@ -607,9 +609,12 @@ public final class LauncherFrame extends JFrame {
     private void retryFirstLaunchOptions() {
         if (!isCurrentEmptyFirstLaunch()
                 || firstLaunchMetadataState != FirstLaunchMetadataState.FAILED
+                && !(firstLaunchMetadataState == FirstLaunchMetadataState.READY
+                && firstLaunchSnapshot.options().stream().anyMatch(option -> !option.available()))
                 || firstLaunchOptionsWorker != null) {
             return;
         }
+        firstLaunchMetadataState = FirstLaunchMetadataState.NOT_STARTED;
         startFirstLaunchOptionsCheck();
     }
 
@@ -1728,7 +1733,7 @@ public final class LauncherFrame extends JFrame {
         JLabel channelLabel = new JLabel("Update channel:");
         channelLabel.setForeground(FirstLaunchPanel.TEXT);
         StyledComboBox<FollowChannel> channel = new StyledComboBox<>(
-                new FollowChannel[]{FollowChannel.MILESTONE, FollowChannel.DEVELOPMENT},
+                FollowChannel.values(),
                 guiScale);
         channel.setName("adoptionChannelCombo");
         channel.setPreferredSize(new Dimension(
@@ -1736,7 +1741,7 @@ public final class LauncherFrame extends JFrame {
         channel.setSelectedItem(FollowChannel.MILESTONE);
         channel.getAccessibleContext().setAccessibleName("Future update channel");
         channel.getAccessibleContext().setAccessibleDescription(
-                "Choose Milestone or Development once. This choice is fixed after enabling.");
+                "Choose Milestone, Development, or Weekly once. This choice is fixed after enabling.");
         channelLabel.setLabelFor(channel);
         channelRow.add(channelLabel);
         channelRow.add(Box.createHorizontalStrut(detailGap));
@@ -3396,7 +3401,7 @@ public final class LauncherFrame extends JFrame {
             String tag = choice.release().tag();
             startTask("Revalidating exact install plan",
                     () -> services.prepareExactNormalInstall(
-                            repository, selectedChannel, tag, destination),
+                            repository, selectedChannel, tag, choice.source(), destination),
                     plan -> {
                         if (!dialog.isDisplayable() || choice != releases.getSelectedValue()
                                 || product.getSelectedItem() != repository
@@ -4448,6 +4453,7 @@ public final class LauncherFrame extends JFrame {
                                        SelectedChannelReleaseCatalog.Classification classification,
                                        ReleaseCatalog.Release release,
                                        ReleaseCatalog.Assessment assessment,
+                                       String source,
                                        String label) {
         private static PickerReleaseChoice from(
                 SelectedChannelReleaseCatalog.Entry entry, FollowChannel channel) {
@@ -4456,7 +4462,7 @@ public final class LauncherFrame extends JFrame {
                     && (tag.charAt(0) == 'v' || tag.charAt(0) == 'V')
                     ? tag.substring(1) : tag;
             return new PickerReleaseChoice(entry.identity().repository(), channel,
-                    entry.classification(), entry.release(), entry.assessment(),
+                    entry.classification(), entry.release(), entry.assessment(), entry.source(),
                     VersionDisplay.programChannelVersion(
                             displayProduct(entry.identity().repository().key()),
                             channel.toString(), version));

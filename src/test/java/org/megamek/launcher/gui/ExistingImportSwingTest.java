@@ -514,7 +514,7 @@ class ExistingImportSwingTest {
             assertTrue(preference.checkOnOpen());
             assertSame(preparationContext.get(), publicationContext.get(),
                     "verification and publication must use one active operation context");
-            assertEquals(7, requests.get(),
+            assertEquals(19, requests.get(),
                     "publication performs no remote metadata request");
             assertEquals(1, packageRequests.get(),
                     "publication reuses the verified download");
@@ -606,7 +606,7 @@ class ExistingImportSwingTest {
             assertFalse(hasShowingDialog(frame, "Details"));
             assertEquals(0, packageRequests.get(),
                     "channel mismatch must be decided before package transfer");
-            assertEquals(1, requests.get(),
+            assertEquals(9, requests.get(),
                     "channel mismatch needs only the canonical current pointers");
 
             onEdt(() -> {
@@ -620,7 +620,7 @@ class ExistingImportSwingTest {
             });
             assertEquals("Up to date", updateStatus.getText());
             assertEquals(1, packageRequests.get());
-            assertEquals(8, requests.get());
+            assertEquals(28, requests.get());
             var preference = new ChannelPreferenceStore()
                     .read(registry, services.readRegistry(), record).preference();
             assertEquals(FollowChannel.MILESTONE, preference.channel());
@@ -836,16 +836,19 @@ class ExistingImportSwingTest {
                 """.formatted(archive.length, digest);
         Deque<java.util.function.Supplier<ReleaseTransport.Response>> responses =
                 new ArrayDeque<>(List.of(
-                        response("stable: 0.50.07\ndev: 0.51.0\n"),
+                        () -> org.megamek.launcher.channel.SuiteTestData.channels("0.50.07", "0.51.0"),
                         response("[" + metadata + "]"),
                         response(metadata),
                         response(metadata),
                         binaryResponse(archive),
-                        response("stable: 0.50.07\ndev: 0.51.0\n"),
+                        () -> org.megamek.launcher.channel.SuiteTestData.channels("0.50.07", "0.51.0"),
                         response(metadata)));
+        var metadataRouter = new org.megamek.launcher.channel.SuiteTestData.MetadataRouter();
         return (uri, accept) -> {
             requests.incrementAndGet();
-            if ("application/octet-stream".equals(accept)) packageRequests.incrementAndGet();
+            var generated = metadataRouter.response(uri, accept, responses.peekFirst());
+            if (generated != null) return generated;
+            if (uri.getPath().endsWith(".tar.gz")) packageRequests.incrementAndGet();
             var response = responses.pollFirst();
             if (response == null) throw new IOException("unexpected request: " + uri);
             return response.get();
@@ -868,17 +871,20 @@ class ExistingImportSwingTest {
                 """.formatted(archive.length, digest);
         Deque<java.util.function.Supplier<ReleaseTransport.Response>> responses =
                 new ArrayDeque<>(List.of(
-                        response("stable: 0.50.07\ndev: 0.51.0\n"),
-                        response("stable: 0.50.07\ndev: 0.51.0\n"),
+                        () -> org.megamek.launcher.channel.SuiteTestData.channels("0.50.07", "0.51.0"),
+                        () -> org.megamek.launcher.channel.SuiteTestData.channels("0.50.07", "0.51.0"),
                         response("[" + metadata + "]"),
                         response(metadata),
                         response(metadata),
                         binaryResponse(archive),
-                        response("stable: 0.50.07\ndev: 0.51.0\n"),
+                        () -> org.megamek.launcher.channel.SuiteTestData.channels("0.50.07", "0.51.0"),
                         response(metadata)));
+        var metadataRouter = new org.megamek.launcher.channel.SuiteTestData.MetadataRouter();
         return (uri, accept) -> {
             requests.incrementAndGet();
-            if ("application/octet-stream".equals(accept)) packageRequests.incrementAndGet();
+            var generated = metadataRouter.response(uri, accept, responses.peekFirst());
+            if (generated != null) return generated;
+            if (uri.getPath().endsWith(".tar.gz")) packageRequests.incrementAndGet();
             var response = responses.pollFirst();
             if (response == null) throw new IOException("unexpected request: " + uri);
             return response.get();

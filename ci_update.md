@@ -22,7 +22,7 @@ and publication path as a scheduled Weekly. Development and Milestone have no
 scheduled publication. Ordinary PR/main builds are validation artifacts, not
 user releases.
 
-The three game programs share **one user-facing version per published suite**,
+Each published suite has **one record version**, while its three programs retain independent versions,
 for example `0.51.01` (Weekly), `0.51.02` (an on-demand Weekly), `0.51.03`
 (Development), and `0.52.00` (Milestone). The existing two-digit padding is
 a minimum width, not a cap: `0.51.99` is followed by `0.51.100`. The channel
@@ -36,23 +36,29 @@ remains reserved for exceptional point releases, not a Weekly counter.
 A source commit, timestamp, or CI run ID is internal provenance, **not
 another user-facing version**.
 
-Each publication consumes a never-before-used version across all three game
+Each publication consumes a never-before-used suite version across all three game
 repositories. Weekly and Development advance the patch component; Milestone
 advances the middle release-line component and resets patch to zero. The
 coordinator reserves the next unused numeric version from release tags and
-injects that exact value into all three builds, without committing a
+assigns that value only to products that require rebuilding, without committing a
 `Version.properties` change for every scheduled release. It must reserve
-without racing another scheduled/manual invocation, validate the same version in game displays,
+without racing another scheduled/manual invocation, validate each product's own version in its displays,
 embedded identity, tags, archive roots and asset names, and never move a tag
 or replace a published asset. A failed attempt must not make its version
 installable; retry policy must distinguish a retry of identical, unexposed
 inputs from a new publication. The base version source currently lives in
 MegaMek's `megamek/resources/Version.properties`; CI must apply the reserved
-version consistently without independent jobs reading or changing that file at
+versions consistently without independent jobs reading or changing that file at
 different times. The existing `-PextraVersion=nightly-...` convention is not
 the proposed public version scheme. Development and Milestone builds also get
-new versions; promoting an old build by editing its channel is not part of
+new record versions, possibly reusing all product artifacts; editing an old record's membership is not part of
 this proposal.
+
+The ordering is `MegaMek <= MegaMekLab <= MekHQ <= suite`. MegaMek or data changes rebuild all
+three products; Lab changes rebuild Lab/HQ; HQ-only changes rebuild HQ. Unaffected products reuse
+their exact previously attested release/asset IDs, names, sizes, SHA-256, and bytes. A new membership
+can publish a record with all three products reused. Reused archives are not relabelled or modified;
+an older MegaMek archive may carry older unrelated Lab/HQ snapshot pins.
 
 The launcher keeps its own independent numeric product version. Publishing
 game version `0.52.00` does not require publishing launcher version `0.52.0` or
@@ -69,14 +75,16 @@ also supports explicitly selected Development and Milestone releases. Freeze
 the exact protected `main` commits for MegaMek, MegaMekLab, MekHQ, and
 `mm-data` before building anything. MekHQ and MegaMekLab currently consume MegaMek, and MekHQ
 also consumes MegaMekLab; the published dependency revisions must agree with
-the snapshot. Record these commits and the shared suite version in the
-resulting metadata. Every new release requires all three game archives. The
+the snapshot. Record these commits, the allocated suite record version, and each product's version in the
+resulting metadata. Every complete record references all three game archives, but only affected
+products are newly built and uploaded. The
 historical MegaMek-only Core Rules release is not a template for exceptions
 in the new pipeline.
 
 Before reserving a Weekly version, compare all four pinned source commits
-with the newest complete Weekly record. If they are unchanged, both scheduled
-and manual Weekly runs report a no-op without building or publishing. If the
+with the newest complete record. If they are unchanged and that record is already Weekly, both scheduled
+and manual Weekly runs report a verified no-op without building or publishing. A change of membership
+can instead publish a new record with all products reused. If the
 comparison is unavailable or ambiguous, fail explicitly; do not silently
 skip or allocate a duplicate version.
 
@@ -84,18 +92,19 @@ For each publication:
 
 1. Reserve a globally unique suite version and freeze the four source commits.
    Serialize competing publication runs, including manual Weekly fixes.
-2. Build and test the pinned products and data; reject mismatched dependency
+2. Build and test affected pinned products and data, and attest exact reusable artifacts;
+   reject mismatched dependency
    revisions, versions, Java requirements, or package layouts. Choose one
    launcher-installable archive per product. The current Nightly matrix emits
    both JDK 21 and JDK 25 artifacts; qualification for additional JDKs may
    remain a test concern, but it must not create ambiguous install assets.
 3. Produce the existing full `.tar.gz` game bundles, with a versioned,
-   machine-readable embedded identity (product, suite version, exact source
+   machine-readable embedded identity (product, its own version, exact source
    commits, data revision, and required launcher/runtime compatibility).
    Preserve the launcher's required archive structure and protected user-data
    rules. Component/delta updates are a later project, not a Weekly prerequisite.
 4. Calculate each finished archive's exact filename, byte size and SHA-256;
-   validate its internal version/layout and upload it to a durable, public
+   validate each new archive's internal version/layout and upload it to a durable, public
    official GitHub Release for that product's exact immutable tag. GitHub
    Actions artifacts alone are not the launcher delivery mechanism. Verify
    the uploaded metadata and bytes before exposing a complete suite.
@@ -136,7 +145,7 @@ explicit policy, not a prerequisite for the ordinary fix workflow.
   coordinated Tuesday 05:00 UTC Weekly entry point. Today's
   Nightly workflows are not synchronized (`03:00 UTC` in MekHQ/Lab,
   `05:00 UTC` in MegaMek). GitHub schedules can start late.
-- Accept the coordinator's pinned snapshot and allocated suite version,
+- Accept the coordinator's pinned snapshot and allocated product version,
   validate the version in the binary and archive, and publish the exact
   full-bundle asset. Preserve historical point-release data without adding
   a MegaMek-only route to the new three-product release pipeline.
@@ -146,8 +155,8 @@ explicit policy, not a prerequisite for the ordinary fix workflow.
 ### MegaMekLab
 
 - Stop independently scheduling/publishing a Nightly. Build the coordinator's
-  pinned MegaMek and `mm-data` revisions under the one allocated suite
-  version; reject mismatched dependencies.
+  pinned MegaMek and `mm-data` revisions under its own allocated version when affected;
+  otherwise attest the reused artifact. Reject mismatched dependencies.
 - Test and publish the existing launcher-compatible MegaMekLab full archive
   and its verified metadata. Keep PR validation independent of release
   publication.

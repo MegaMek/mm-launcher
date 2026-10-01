@@ -589,7 +589,7 @@ public final class Main {
                   mm-launcher launch --registry <json> [--id <uuid>] --product <megamek|mekhq|lab> [--dry-run true]
                   mm-launcher check-updates --registry <json> [--id <uuid>]
                   mm-launcher releases --application <megamek|mekhq|lab> [--page <1-1000>] [--per-page <1-50>]
-                  mm-launcher install-release --application <megamek|mekhq|lab> --tag <exact-tag> --destination <new-dir> --registry <json> --name <name> --channel <milestone|development>
+                  mm-launcher install-release --application <megamek|mekhq|lab> --tag <exact-tag> --destination <new-dir> --registry <json> --name <name> --channel <milestone|development|weekly>
                   mm-launcher preview-update --registry <json> [--id <uuid>] --tag <exact-tag>
                   mm-launcher apply-update --registry <json> [--id <uuid>] --from-tag <current-tag> --tag <exact-tag> --size <bytes> --digest <sha256:hex> --confirm CLOSE-ALL-SUITE-APPS-AND-APPLY
                   mm-launcher recover-update --registry <json> [--id <uuid>] --confirm CLOSE-ALL-SUITE-APPS-AND-APPLY

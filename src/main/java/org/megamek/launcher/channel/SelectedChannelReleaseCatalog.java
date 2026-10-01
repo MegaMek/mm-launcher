@@ -36,19 +36,14 @@ package org.megamek.launcher.channel;
 import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
 import org.megamek.launcher.release.ReleaseTransport;
-import org.megamek.launcher.release.VersionIdentity;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 
 /**
- * Builds one bounded install-browser page from the current official channel pointers and one
- * repository history page. The fixed YAML is the only channel-membership authority: every
- * historical identity other than either current pointer remains explicitly unknown.
+ * Builds a bounded page of product releases authorized by complete records of the selected
+ * channel. Reused product tags appear once, backed by their newest referencing record.
  */
 public final class SelectedChannelReleaseCatalog {
     public static final int MAX_PAGE = 1000;
@@ -71,66 +66,22 @@ public final class SelectedChannelReleaseCatalog {
                     + ReleaseCatalog.MAX_PAGE_SIZE);
         }
 
-        OfficialYamlChannelCatalog.CurrentPointers pointers =
-                new OfficialYamlChannelCatalog(transport).currentPointers();
-        String selectedVersion = pointers.version(channel);
-        String selectedTag = "v" + selectedVersion;
-
-        ReleaseCatalog releases = new ReleaseCatalog(transport);
-        ReleaseCatalog.Page history = releases.list(repository, page, perPage);
-        Map<Identity, Entry> unique = new LinkedHashMap<>();
-        Entry selectedFromHistory = null;
-
-        for (ReleaseCatalog.Release release : history.releases()) {
-            Identity identity = new Identity(repository, release.tag());
-            if (unique.containsKey(identity)) {
-                continue;
-            }
-            OfficialYamlChannelCatalog.CurrentIdentity current =
-                    VersionIdentity.fromExact(release.tag())
-                            .map(releaseIdentity -> pointers.classify(
-                                    channel, releaseIdentity))
-                            .orElse(OfficialYamlChannelCatalog.CurrentIdentity.UNKNOWN);
-            if (current == OfficialYamlChannelCatalog.CurrentIdentity.OPPOSITE_CURRENT) {
-                continue;
-            }
-            boolean selectedCurrent =
-                    current == OfficialYamlChannelCatalog.CurrentIdentity.SELECTED_CURRENT
-                            || current == OfficialYamlChannelCatalog.CurrentIdentity.SHARED_CURRENT;
-            if (selectedCurrent) {
-                if (page == 1 && release.tag().equals(selectedTag)
-                        && selectedFromHistory == null) {
-                    selectedFromHistory = new Entry(identity,
-                            Classification.SELECTED_CHANNEL, release,
-                            releases.assess(repository, release));
-                }
-                continue;
-            }
-            Classification classification = Classification.UNKNOWN;
-            Entry entry = new Entry(identity, classification, release,
-                    releases.assess(repository, release));
-            unique.put(identity, entry);
-        }
-
-        List<Entry> rows = new ArrayList<>();
-        if (page == 1) {
-            Entry selected = selectedFromHistory;
-            if (selected == null || !selected.assessment().eligible()) {
-                ReleaseCatalog.Release exact = releases.exact(repository, selectedTag);
-                selected = new Entry(new Identity(repository, exact.tag()),
-                        Classification.SELECTED_CHANNEL, exact,
-                        releases.assess(repository, exact));
-            }
-            rows.add(selected);
-        }
-        rows.addAll(unique.values());
-
-        return new Result(repository, channel, page, perPage, selectedVersion,
-                selectedTag, List.copyOf(rows), history.mayHaveNextPage());
+        OfficialSuiteChannelCatalog.History history =
+                new OfficialSuiteChannelCatalog(transport).history(repository, channel, page, perPage);
+        String selectedTag = history.current().release().tag();
+        List<Entry> rows = history.entries().stream().map(target -> new Entry(
+                new Identity(repository, target.release().tag()),
+                target.release().tag().equals(selectedTag)
+                        ? Classification.SELECTED_CHANNEL : Classification.CHANNEL_HISTORY,
+                target.release(), new ReleaseCatalog.Assessment(true,
+                target.asset(), "Verified complete suite record"), target.source())).toList();
+        return new Result(repository, channel, page, perPage, history.current().version(),
+                selectedTag, rows, history.mayHaveNextPage());
     }
 
     public enum Classification {
         SELECTED_CHANNEL,
+        CHANNEL_HISTORY,
         UNKNOWN
     }
 
@@ -146,12 +97,27 @@ public final class SelectedChannelReleaseCatalog {
 
     public record Entry(Identity identity, Classification classification,
                         ReleaseCatalog.Release release,
-                        ReleaseCatalog.Assessment assessment) {
+                        ReleaseCatalog.Assessment assessment, String source) {
+        public Entry(Identity identity, Classification classification,
+                     ReleaseCatalog.Release release, ReleaseCatalog.Assessment assessment) {
+            this(identity, classification, release, assessment,
+                    exactSource(identity));
+        }
+
+        private static String exactSource(Identity identity) {
+            try {
+                return ReleaseCatalog.exactMetadataUri(identity.repository(), identity.tag()).toString();
+            } catch (IOException error) {
+                throw new IllegalArgumentException("invalid official release identity", error);
+            }
+        }
+
         public Entry {
             Objects.requireNonNull(identity, "identity");
             Objects.requireNonNull(classification, "classification");
             Objects.requireNonNull(release, "release");
             Objects.requireNonNull(assessment, "assessment");
+            Objects.requireNonNull(source, "source");
             if (!identity.tag().equals(release.tag())) {
                 throw new IllegalArgumentException("entry identity and release tag differ");
             }

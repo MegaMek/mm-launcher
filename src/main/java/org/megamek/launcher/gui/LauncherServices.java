@@ -37,7 +37,7 @@ import org.megamek.launcher.channel.ChannelPreference;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.ChannelUpdateChecker;
 import org.megamek.launcher.channel.FollowChannel;
-import org.megamek.launcher.channel.OfficialYamlChannelCatalog;
+import org.megamek.launcher.channel.OfficialSuiteChannelCatalog;
 import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.channel.QuickInstallSnapshot;
 import org.megamek.launcher.channel.SelectedChannelReleaseCatalog;
@@ -162,7 +162,7 @@ public class LauncherServices {
 
     public QuickInstallSnapshot quickInstallSnapshot()
             throws IOException, InterruptedException {
-        return new OfficialYamlChannelCatalog(transport).quickInstallSnapshot();
+        return new OfficialSuiteChannelCatalog(transport).quickInstallSnapshot();
     }
 
     public LoggedOperation beginOperation(OperationType type,
@@ -220,6 +220,13 @@ public class LauncherServices {
                                                                String tag, Path destination)
             throws IOException, InterruptedException {
         return normalInstalls.prepareExact(repository, futureChannel, tag, destination);
+    }
+
+    public NormalInstallService.Plan prepareExactNormalInstall(OfficialRepository repository,
+                                                               FollowChannel channel, String tag,
+                                                               String source, Path destination)
+            throws IOException, InterruptedException {
+        return normalInstalls.prepareExact(repository, channel, tag, source, destination);
     }
 
     public NormalInstallService.Result installNormal(NormalInstallService.Plan plan,

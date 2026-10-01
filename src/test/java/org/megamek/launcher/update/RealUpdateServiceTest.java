@@ -342,8 +342,8 @@ class RealUpdateServiceTest {
                 importPlan, "Imported updated copy", importContext).record();
         String v2Metadata = releaseJson("v2.0.0", v2Archive);
         PackageTransport adoptionNetwork = new PackageTransport(
-                response("stable: 2.0.0\ndev: 3.0.0\n"),
-                response("stable: 2.0.0\ndev: 3.0.0\n"),
+                () -> org.megamek.launcher.channel.SuiteTestData.channels("2.0.0", "3.0.0"),
+                () -> org.megamek.launcher.channel.SuiteTestData.channels("2.0.0", "3.0.0"),
                 response("[" + v2Metadata + "]"),
                 response(v2Metadata), response(v2Metadata),
                 packageResponse(v2Archive));
@@ -358,7 +358,7 @@ class RealUpdateServiceTest {
                                 FollowChannel.DEVELOPMENT, quiet(),
                                 OperationContext.none(OperationType.ADOPT_EXISTING)));
 
-        assertEquals("2.0.0", mismatch.currentVersion());
+        assertEquals("2.00.00", mismatch.currentVersion());
         assertEquals(FollowChannel.DEVELOPMENT, mismatch.selectedChannel());
         assertEquals(FollowChannel.MILESTONE, mismatch.requiredChannel());
         assertEquals(0, adoptionNetwork.binaryRequests,
@@ -1755,7 +1755,67 @@ class RealUpdateServiceTest {
                 new PackageTransport(), new JavaRuntime(runner), new ApplicationLauncher(runner));
     }
 
+    @Test
+    void weeklyRecordShaSurvivesPreparationAndApplyWithoutGitHubDigestAndRejectsRecordDrift()
+            throws Exception {
+        for (boolean drift : List.of(false, true)) {
+            Fixture fixture = install("weekly-record-" + drift, "v1.00.00",
+                    packageFiles(1, Map.of("lib/runtime.txt", bytes("runtime-1"))), FollowChannel.WEEKLY);
+            Files.writeString(fixture.root.resolve("mmconf/clientsettings.xml"), "personal configuration");
+            byte[] target = archive("MegaMek-2.00.00",
+                    packageFiles(2, Map.of("lib/runtime.txt", bytes("runtime-2"))));
+            var network = new org.megamek.launcher.channel.SuiteTestData();
+            var record = network.suite("2.00.00", FollowChannel.WEEKLY,
+                    Map.of(OfficialRepository.MEGAMEK, "2.00.00",
+                            OfficialRepository.LAB, "2.00.00", OfficialRepository.MEKHQ, "2.00.00"),
+                    Map.of(OfficialRepository.MEGAMEK, (long) target.length),
+                    Map.of(OfficialRepository.MEGAMEK, sha(target)));
+            var metadata = network.product(OfficialRepository.MEGAMEK, "2.00.00");
+            assertFalse(metadata.withArray("assets").get(0).has("digest"));
+            network.put(org.megamek.launcher.release.ReleaseCatalog.exactMetadataUri(
+                    OfficialRepository.MEGAMEK, "v2.00.00"),
+                    org.megamek.launcher.channel.SuiteTestData.bytes(metadata));
+            network.put(org.megamek.launcher.channel.SuiteTestData.packageUri(
+                    OfficialRepository.MEGAMEK, "2.00.00"), target);
+            var coordinator = new RootCoordinator(temp.resolve("weekly-record-coordination-" + drift));
+            var source = new RealUpdateService(network, coordinator).snapshot(fixture.registry, fixture.id);
+            var expected = new org.megamek.launcher.channel.ChannelUpdateChecker(
+                    fixture.registry, network).check(fixture.id);
+            assertTrue(expected.updateAvailable());
+            assertTrue(expected.recommendation().releaseId().isPresent());
+            assertTrue(expected.recommendation().assetId().isPresent());
+            var updates = new PreparedUpdateService(network, coordinator);
+            try (PreparedUpdate prepared = updates.prepareRecommended(fixture.registry,
+                    source.record(), source.receipt(), source.current(), expected, quiet())) {
+                assertTrue(prepared.preview().targetRelease().assets().contains(prepared.preview().targetAsset()));
+                if (drift) {
+                    ((com.fasterxml.jackson.databind.node.ObjectNode) record.at("/products/MegaMek/asset"))
+                            .put("sha256", "d".repeat(64));
+                    assertThrows(IOException.class, () -> updates.apply(prepared,
+                            RealUpdateService.CONFIRM, quiet()));
+                } else {
+                    var result = updates.apply(prepared, RealUpdateService.CONFIRM, quiet());
+                    assertEquals("v2.00.00", result.state().tag());
+                }
+            }
+            assertEquals(1, network.requests.stream()
+                    .filter(uri -> uri.getPath().endsWith(".tar.gz")).count());
+            assertEquals("personal configuration",
+                    Files.readString(fixture.root.resolve("mmconf/clientsettings.xml")));
+            var current = new RealUpdateService(network, coordinator).snapshot(fixture.registry, fixture.id);
+            assertEquals(drift ? "v1.00.00" : "v2.00.00", current.current().tag());
+            assertEquals(FollowChannel.WEEKLY, new ChannelPreferenceStore().read(
+                    fixture.registry, new RegistryStore().read(fixture.registry), current.record())
+                    .preference().channel());
+        }
+    }
+
     private Fixture install(String name, String tag, Map<String, byte[]> files) throws Exception {
+        return install(name, tag, files, FollowChannel.MILESTONE);
+    }
+
+    private Fixture install(String name, String tag, Map<String, byte[]> files, FollowChannel channel)
+            throws Exception {
         Path area = Files.createDirectory(temp.resolve(name));
         Path registry = area.resolve("registry.json");
         Path root = area.resolve("installed");
@@ -1763,7 +1823,7 @@ class RealUpdateServiceTest {
         FreshInstaller.Result result = new FreshInstaller(transport(tag, archive)).install(
                 OfficialRepository.MEGAMEK, tag, root, registry, name, quiet());
         new ChannelPreferenceStore().initializeManaged(registry, result.record(),
-                result.ownershipReceipt(), FollowChannel.MILESTONE, false);
+                result.ownershipReceipt(), channel, false);
         return new Fixture(registry, root, result.record().id());
     }
 
@@ -1942,6 +2002,8 @@ class RealUpdateServiceTest {
         private int metadataRequests;
         private int binaryRequests;
         private long binaryBytes;
+        private final org.megamek.launcher.channel.SuiteTestData.MetadataRouter metadata =
+                new org.megamek.launcher.channel.SuiteTestData.MetadataRouter();
 
         @SafeVarargs
         private PackageTransport(Supplier<Response>... responses) {
@@ -1951,10 +2013,12 @@ class RealUpdateServiceTest {
         @Override
         public Response get(URI uri, String accept) throws IOException {
             requests.add(uri);
+            Response generated = metadata.response(uri, accept, responses.peekFirst());
+            if (generated != null) return generated;
             Supplier<Response> response = responses.poll();
             if (response == null) throw new IOException("unexpected network request");
             Response supplied = response.get();
-            if (!"application/octet-stream".equals(accept)) {
+            if (!uri.getPath().endsWith(".tar.gz")) {
                 metadataRequests++;
                 return supplied;
             }

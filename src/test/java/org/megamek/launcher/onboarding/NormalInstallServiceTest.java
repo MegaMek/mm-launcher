@@ -43,6 +43,7 @@ import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.channel.QuickInstallSnapshot;
+import org.megamek.launcher.channel.SuiteTestData;
 import org.megamek.launcher.gui.LauncherServices;
 import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.launch.ApplicationLauncher;
@@ -54,6 +55,7 @@ import org.megamek.launcher.registry.InstallationRecord;
 import org.megamek.launcher.registry.RegistryData;
 import org.megamek.launcher.registry.RegistryStore;
 import org.megamek.launcher.release.OfficialRepository;
+import org.megamek.launcher.release.ReleaseCatalog;
 import org.megamek.launcher.release.ReleaseTransport;
 
 import java.io.ByteArrayInputStream;
@@ -86,16 +88,74 @@ class NormalInstallServiceTest {
     @TempDir Path temp;
 
     @Test
+    void independentlyVersionedBundlesInstallOwnVersionsAndRemainRecognizable() throws Exception {
+        Map<OfficialRepository, String> versions = Map.of(
+                OfficialRepository.MEGAMEK, "0.51.01", OfficialRepository.LAB, "0.51.02",
+                OfficialRepository.MEKHQ, "0.51.03");
+        Map<String, String> builds = Map.of("megamek", "0.51.01", "lab", "0.51.02", "mekhq", "0.51.03");
+        var network = new SuiteTestData();
+        Map<OfficialRepository, Long> sizes = new java.util.EnumMap<>(OfficialRepository.class);
+        Map<OfficialRepository, String> hashes = new java.util.EnumMap<>(OfficialRepository.class);
+        for (OfficialRepository repository : OfficialRepository.values()) {
+            byte[] bytes = applicationArchive(repository, versions.get(repository), builds);
+            sizes.put(repository, (long) bytes.length);
+            hashes.put(repository, sha(bytes));
+            network.put(SuiteTestData.packageUri(repository, versions.get(repository)), bytes);
+        }
+        network.suite("0.51.04", FollowChannel.WEEKLY, versions, sizes, hashes);
+        Path registry = temp.resolve("independent-registry.json");
+        var installs = new NormalInstallService(registry, network);
+        for (OfficialRepository repository : OfficialRepository.values()) {
+            String version = versions.get(repository);
+            network.put(ReleaseCatalog.exactMetadataUri(repository, "v" + version),
+                    SuiteTestData.bytes(network.product(repository, version)));
+            var plan = installs.prepare(repository, FollowChannel.WEEKLY,
+                    temp.resolve("independent-" + repository.key()));
+            assertEquals(version, plan.version());
+            var result = installs.install(plan, quiet(), OperationContext.none(OperationType.FRESH_INSTALL));
+            var inspection = new InstallationInspector().inspect(Path.of(result.record().canonicalRoot()));
+            assertEquals(version, inspection.observedBuild());
+            for (Product product : inspection.products()) assertEquals(builds.get(product.key()), product.build());
+            assertEquals(FollowChannel.WEEKLY, new ChannelPreferenceStore().read(registry,
+                    new RegistryStore().read(registry), result.record()).preference().channel());
+        }
+        assertEquals(3, network.requests.stream().filter(uri -> uri.getPath().endsWith(".tar.gz")).count());
+    }
+
+    @Test
+    void matchingRecordDigestCannotAuthorizeAnArchiveWithWrongPrimaryProductVersion() throws Exception {
+        var network = new SuiteTestData();
+        byte[] bytes = applicationArchive(OfficialRepository.MEKHQ, "0.51.03",
+                Map.of("megamek", "0.51.01", "lab", "0.51.02", "mekhq", "0.51.02"));
+        network.suite("0.51.04", FollowChannel.WEEKLY,
+                Map.of(OfficialRepository.MEGAMEK, "0.51.01", OfficialRepository.LAB, "0.51.02",
+                        OfficialRepository.MEKHQ, "0.51.03"),
+                Map.of(OfficialRepository.MEKHQ, (long) bytes.length),
+                Map.of(OfficialRepository.MEKHQ, sha(bytes)));
+        network.put(SuiteTestData.packageUri(OfficialRepository.MEKHQ, "0.51.03"), bytes);
+        network.put(ReleaseCatalog.exactMetadataUri(OfficialRepository.MEKHQ, "v0.51.03"),
+                SuiteTestData.bytes(network.product(OfficialRepository.MEKHQ, "0.51.03")));
+        Path registry = temp.resolve("wrong-primary-registry.json");
+        Path destination = temp.resolve("wrong-primary");
+        var installs = new NormalInstallService(registry, network);
+        var plan = installs.prepare(FollowChannel.WEEKLY, destination);
+        assertTrue(assertThrows(IOException.class, () -> installs.install(plan, quiet(),
+                OperationContext.none(OperationType.FRESH_INSTALL))).getMessage().contains("primary product version"));
+        assertFalse(Files.exists(destination));
+        assertFalse(Files.exists(registry));
+    }
+
+    @Test
     void milestonePlanIsMetadataOnlyAndConfirmedInstallReturnsLatestReadyMain()
             throws Exception {
-        Fixture fixture = fixture("1.2.3");
+        Fixture fixture = fixture("1.02.03");
         NormalInstallService.Plan plan =
                 fixture.launcherServices.prepareNormalInstall(fixture.destination);
 
         assertEquals(FollowChannel.MILESTONE, plan.channel());
         assertEquals("MegaMek/mekhq", plan.repository().slug());
         assertEquals(NormalInstallService.SUITE_PRODUCTS, plan.requiredProducts());
-        assertEquals("v1.2.3", plan.release().tag());
+        assertEquals("v1.02.03", plan.release().tag());
         assertEquals(fixture.transport.assetName, plan.asset().name());
         assertEquals(fixture.destination, plan.destination());
         assertEquals(0, fixture.transport.binaryRequests);
@@ -114,7 +174,7 @@ class NormalInstallServiceTest {
         InstallationRecord latest = fixture.registries.resolve(data, null);
         assertEquals(result.record(), latest);
         assertTrue(result.becameMain());
-        assertEquals("MekHQ Milestone (1.2.3)", latest.name());
+        assertEquals("MekHQ Milestone (1.02.03)", latest.name());
         assertEquals(NormalInstallService.SUITE_PRODUCTS,
                 latest.products().stream().map(Product::key)
                         .collect(java.util.stream.Collectors.toSet()));
@@ -133,7 +193,7 @@ class NormalInstallServiceTest {
 
     @Test
     void configuredDefaultGameJavaIsIgnoredByNormalPlanAndImport() throws Exception {
-        Fixture fixture = fixture("6.7.8");
+        Fixture fixture = fixture("6.07.08");
         Path selectedJava = Files.writeString(
                 fixture.state.resolve("java.exe"), "fixture").toRealPath();
         fixture.launcherServices.selectDefaultJava(selectedJava);
@@ -144,7 +204,7 @@ class NormalInstallServiceTest {
         assertEquals(callsAfterSelection, fixture.java.calls,
                 "install planning must not validate configured Java");
 
-        Path existing = createSuite(fixture.state.resolve("existing-copy"), "6.7.8");
+        Path existing = createSuite(fixture.state.resolve("existing-copy"), "6.07.08");
         var imported = fixture.launcherServices.prepareExistingImport(existing,
                 OperationContext.none(OperationType.IMPORT_EXISTING));
         assertEquals(existing.toRealPath().toString(),
@@ -154,15 +214,15 @@ class NormalInstallServiceTest {
     @Test
     void developmentPlanUsesExactDevTargetAndPersistsDevelopmentAfterOneTransfer()
             throws Exception {
-        Fixture fixture = fixture("1.2.3");
+        Fixture fixture = fixture("1.02.03");
 
         NormalInstallService.Plan plan = fixture.launcherServices.prepareNormalInstall(
                 FollowChannel.DEVELOPMENT, fixture.destination);
 
         assertEquals(FollowChannel.DEVELOPMENT, plan.channel());
-        assertEquals("9.9.9", plan.version());
-        assertEquals("v9.9.9", plan.release().tag());
-        assertEquals("MekHQ-9.9.9.tar.gz", plan.asset().name());
+        assertEquals("9.09.09", plan.version());
+        assertEquals("v9.09.09", plan.release().tag());
+        assertEquals("MekHQ-9.09.09.tar.gz", plan.asset().name());
         assertEquals(0, fixture.transport.binaryRequests);
         assertFalse(Files.exists(fixture.destination, LinkOption.NOFOLLOW_LINKS));
         assertFalse(Files.exists(fixture.registry, LinkOption.NOFOLLOW_LINKS));
@@ -175,8 +235,8 @@ class NormalInstallServiceTest {
         InstallationRecord main = fixture.registries.resolve(data, null);
         assertEquals(result.record(), main);
         assertTrue(result.becameMain());
-        assertEquals("MekHQ Development (9.9.9)", main.name());
-        assertEquals("9.9.9", main.observedBuild());
+        assertEquals("MekHQ Development (9.09.09)", main.name());
+        assertEquals("9.09.09", main.observedBuild());
         assertEquals(FollowChannel.DEVELOPMENT,
                 new ChannelPreferenceStore().read(fixture.registry, data, main)
                         .preference().channel());
@@ -187,10 +247,10 @@ class NormalInstallServiceTest {
     @Test
     void capturedCurrentPlanNeverRereadsPointerAndInstallsOnlyCapturedTarget()
             throws Exception {
-        Fixture fixture = fixture("1.2.3");
+        Fixture fixture = fixture("1.02.03");
         QuickInstallSnapshot snapshot = fixture.launcherServices.quickInstallSnapshot();
         QuickInstallOption captured = snapshot.option(QuickInstallSnapshot.DEFAULT_KEY);
-        int yamlAfterSnapshot = fixture.transport.yamlRequests;
+        int websiteAfterSnapshot = fixture.transport.websiteRequests;
         int apiAfterSnapshot = fixture.transport.apiRequests;
 
         NormalInstallService.Plan plan =
@@ -200,19 +260,19 @@ class NormalInstallServiceTest {
         assertTrue(plan.currentChannelTarget());
         assertTrue(plan.capturedCurrentTarget());
         assertEquals(NormalInstallService.TargetKind.CAPTURED_CURRENT, plan.targetKind());
-        assertEquals(yamlAfterSnapshot, fixture.transport.yamlRequests);
+        assertEquals(websiteAfterSnapshot, fixture.transport.websiteRequests);
         assertEquals(apiAfterSnapshot, fixture.transport.apiRequests,
                 "captured planning performs only fresh local validation");
 
-        fixture.transport.version = "8.8.8";
+        fixture.transport.version = "8.08.08";
         NormalInstallService.Result result = fixture.launcherServices.installNormal(
                 plan, quiet(), OperationContext.none(OperationType.FRESH_INSTALL));
 
-        assertEquals("v1.2.3", result.release().tag());
-        assertEquals(yamlAfterSnapshot, fixture.transport.yamlRequests,
+        assertEquals("v1.02.03", result.release().tag());
+        assertEquals(websiteAfterSnapshot, fixture.transport.websiteRequests,
                 "install-time validation must not reread the moving current pointer");
-        assertEquals(apiAfterSnapshot + 2, fixture.transport.apiRequests,
-                "the exact quoted release is checked before transfer and by the fetcher");
+        assertEquals(apiAfterSnapshot + 5, fixture.transport.apiRequests,
+                "the captured record, all three references, and fetched product are revalidated");
         assertEquals(1, fixture.transport.binaryRequests);
         assertEquals(0, fixture.java.calls,
                 "captured-current installation must not execute Java");
@@ -221,16 +281,16 @@ class NormalInstallServiceTest {
     @Test
     void capturedTargetReplanningRefreshesLocalDestinationOnly()
             throws Exception {
-        Fixture fixture = fixture("1.3.0");
+        Fixture fixture = fixture("1.03.00");
         QuickInstallOption captured = fixture.launcherServices.quickInstallSnapshot()
                 .option(QuickInstallSnapshot.DEFAULT_KEY);
-        int yamlAfterSnapshot = fixture.transport.yamlRequests;
+        int websiteAfterSnapshot = fixture.transport.websiteRequests;
         int apiAfterSnapshot = fixture.transport.apiRequests;
         Path occupied = Files.createDirectory(fixture.state.resolve("occupied"));
         assertThrows(IOException.class,
                 () -> fixture.launcherServices.prepareCapturedNormalInstall(
                         captured, occupied));
-        assertEquals(yamlAfterSnapshot, fixture.transport.yamlRequests);
+        assertEquals(websiteAfterSnapshot, fixture.transport.websiteRequests);
         assertEquals(apiAfterSnapshot, fixture.transport.apiRequests,
                 "a local planning failure does not refresh the captured target");
         NormalInstallService.Plan initial =
@@ -246,7 +306,7 @@ class NormalInstallServiceTest {
         assertEquals(changedDestination, changed.destination());
         assertEquals(initial.release(), changed.release());
         assertEquals(initial.asset(), changed.asset());
-        assertEquals(yamlAfterSnapshot, fixture.transport.yamlRequests);
+        assertEquals(websiteAfterSnapshot, fixture.transport.websiteRequests);
         assertEquals(apiAfterSnapshot, fixture.transport.apiRequests);
         assertEquals(0, fixture.transport.binaryRequests);
     }
@@ -264,14 +324,14 @@ class NormalInstallServiceTest {
             NormalInstallService.Plan plan =
                     fixture.launcherServices.prepareCapturedNormalInstall(
                             captured, fixture.destination);
-            int yamlAfterSnapshot = fixture.transport.yamlRequests;
+            int websiteAfterSnapshot = fixture.transport.websiteRequests;
             fixture.transport.metadataDrift = drift;
 
             assertThrows(IOException.class,
                     () -> fixture.launcherServices.installNormal(plan, quiet(),
                             OperationContext.none(OperationType.FRESH_INSTALL)));
 
-            assertEquals(yamlAfterSnapshot, fixture.transport.yamlRequests);
+            assertEquals(websiteAfterSnapshot, fixture.transport.websiteRequests);
             assertEquals(0, fixture.transport.binaryRequests);
             assertFalse(Files.exists(fixture.destination, LinkOption.NOFOLLOW_LINKS));
             assertFalse(Files.exists(fixture.destination.getParent(), LinkOption.NOFOLLOW_LINKS));
@@ -282,28 +342,28 @@ class NormalInstallServiceTest {
     @Test
     void historicalExactPlanSkipsYamlAndFixesChannelOnlyForCreatedInstallation()
             throws Exception {
-        Fixture fixture = fixture("1.2.3");
+        Fixture fixture = fixture("1.02.03");
 
         NormalInstallService.Plan plan = fixture.service.prepareExact(
-                OfficialRepository.MEKHQ, FollowChannel.MILESTONE, "v9.9.9",
+                OfficialRepository.MEKHQ, FollowChannel.MILESTONE, "v0.01.00",
                 fixture.destination);
 
         assertFalse(plan.currentChannelTarget());
-        assertEquals("9.9.9", plan.version());
-        assertEquals("v9.9.9", plan.release().tag());
+        assertEquals("0.01.00", plan.version());
+        assertEquals("v0.01.00", plan.release().tag());
         assertEquals(FollowChannel.MILESTONE, plan.channel());
-        assertTrue(plan.source().endsWith("/releases/tags/v9.9.9"));
-        assertEquals(0, fixture.transport.yamlRequests,
+        assertEquals(SuiteTestData.recordUri("0.01.00").toString(), plan.source());
+        assertEquals(0, fixture.transport.websiteRequests,
                 "history selection must not be mislabeled through a current channel pointer");
-        assertEquals(1, fixture.transport.apiRequests);
+        assertEquals(4, fixture.transport.apiRequests);
         assertEquals(0, fixture.transport.binaryRequests);
 
         NormalInstallService.Result result = fixture.service.install(
                 plan, quiet(), OperationContext.none(OperationType.FRESH_INSTALL));
 
-        assertEquals(0, fixture.transport.yamlRequests);
-        assertEquals(3, fixture.transport.apiRequests,
-                "the planner and package fetch each revalidate the exact tag before transfer");
+        assertEquals(0, fixture.transport.websiteRequests);
+        assertEquals(9, fixture.transport.apiRequests,
+                "the planner and package fetch revalidate the captured record and exact product");
         assertEquals(1, fixture.transport.binaryRequests);
         assertEquals(0, fixture.java.calls,
                 "historical installation must not execute Java");
@@ -316,9 +376,9 @@ class NormalInstallServiceTest {
 
     @Test
     void historicalExactMetadataDriftFailsBeforePackageTransfer() throws Exception {
-        Fixture fixture = fixture("1.2.3");
+        Fixture fixture = fixture("1.02.03");
         NormalInstallService.Plan plan = fixture.service.prepareExact(
-                OfficialRepository.MEKHQ, FollowChannel.DEVELOPMENT, "v9.9.9",
+                OfficialRepository.MEKHQ, FollowChannel.DEVELOPMENT, "v9.09.09",
                 fixture.destination);
         fixture.transport.metadataDrift = MetadataDrift.DIGEST;
 
@@ -326,7 +386,7 @@ class NormalInstallServiceTest {
                 () -> fixture.service.install(plan, quiet(),
                         OperationContext.none(OperationType.FRESH_INSTALL)));
 
-        assertTrue(changed.getMessage().contains("metadata changed"));
+        assertTrue(changed.getMessage().contains("SHA-256"));
         assertEquals(FollowChannel.DEVELOPMENT, plan.channel());
         assertEquals(0, fixture.transport.binaryRequests);
         assertFalse(Files.exists(fixture.destination, LinkOption.NOFOLLOW_LINKS));
@@ -361,7 +421,7 @@ class NormalInstallServiceTest {
 
     @Test
     void defaultFoldersAreDistinctAndNameTheSelectedProductAndChannel() throws Exception {
-        Fixture fixture = fixture("5.0.0");
+        Fixture fixture = fixture("5.00.00");
         assertEquals(fixture.state.resolve("installations").resolve("MekHQ Milestone"),
                 fixture.service.defaultDestination(OfficialRepository.MEKHQ,
                         FollowChannel.MILESTONE));
@@ -376,7 +436,7 @@ class NormalInstallServiceTest {
     @Test
     void managedDefaultQuotesSeparateStateAndApplicationDataParentsWithoutWriting()
             throws Exception {
-        Fixture fixture = fixture("5.0.2");
+        Fixture fixture = fixture("5.00.02");
         Path stateParent = fixture.state.resolve("new-state");
         Path registry = stateParent.resolve("registry.json");
         Path dataHome = fixture.state.resolve("new-data");
@@ -420,7 +480,7 @@ class NormalInstallServiceTest {
     @Test
     void quoteAllowsFourSafeMissingParentsButRejectsADeeperUncreatedChain()
             throws Exception {
-        Fixture fixture = fixture("5.0.1");
+        Fixture fixture = fixture("5.00.01");
         Path first = fixture.state.resolve("one");
         Path second = first.resolve("two");
         Path third = second.resolve("three");
@@ -445,11 +505,11 @@ class NormalInstallServiceTest {
     @Test
     void nullChannelAndDevelopmentFeedDriftFailBeforePackageOrStateWrite()
             throws Exception {
-        Fixture invalid = fixture("1.2.3");
+        Fixture invalid = fixture("1.02.03");
         IOException missing = assertThrows(IOException.class,
                 () -> invalid.service.prepare(null, invalid.destination));
-        assertTrue(missing.getMessage().contains("Milestone or Development"));
-        assertEquals(0, invalid.transport.yamlRequests);
+        assertTrue(missing.getMessage().contains("Milestone, Development, or Weekly"));
+        assertEquals(0, invalid.transport.websiteRequests);
         assertEquals(0, invalid.transport.apiRequests);
         assertEquals(0, invalid.transport.binaryRequests);
         assertFalse(Files.exists(invalid.registry, LinkOption.NOFOLLOW_LINKS));
@@ -458,12 +518,12 @@ class NormalInstallServiceTest {
                         invalid.destination));
         assertTrue(missingRepository.getMessage().contains(
                 "MekHQ, MegaMek, or MegaMekLab"));
-        assertEquals(0, invalid.transport.yamlRequests);
+        assertEquals(0, invalid.transport.websiteRequests);
 
-        Fixture drift = fixture("2.3.4");
+        Fixture drift = fixture("2.03.04");
         NormalInstallService.Plan plan = drift.service.prepare(
                 FollowChannel.DEVELOPMENT, drift.destination);
-        drift.transport.developmentVersion = "9.9.8";
+        drift.transport.developmentVersion = "9.09.08";
         IOException changed = assertThrows(IOException.class,
                 () -> drift.service.install(plan, quiet(),
                         OperationContext.none(OperationType.FRESH_INSTALL)));
@@ -493,7 +553,7 @@ class NormalInstallServiceTest {
 
     @Test
     void cancelBeforeTransferCreatesNoDestinationRegistryOrBinaryRequest() throws Exception {
-        Fixture fixture = fixture("1.2.3");
+        Fixture fixture = fixture("1.02.03");
         NormalInstallService.Plan plan = fixture.service.prepare(fixture.destination);
         OperationContext context = new OperationContext(OperationType.FRESH_INSTALL, progress -> {
         });
@@ -510,16 +570,16 @@ class NormalInstallServiceTest {
     @Test
     void metadataDriftExistingDestinationAndLogOverlapRequireFreshChoiceBeforeBinary()
             throws Exception {
-        Fixture drift = fixture("1.2.3");
+        Fixture drift = fixture("1.02.03");
         NormalInstallService.Plan driftPlan = drift.service.prepare(drift.destination);
-        drift.transport.version = "1.2.4";
+        drift.transport.version = "1.02.04";
         IOException changed = assertThrows(IOException.class,
                 () -> drift.service.install(driftPlan, quiet(),
                         OperationContext.none(OperationType.FRESH_INSTALL)));
         assertTrue(changed.getMessage().contains("metadata changed"));
         assertEquals(0, drift.transport.binaryRequests);
 
-        Fixture collision = fixture("2.0.0");
+        Fixture collision = fixture("2.00.00");
         NormalInstallService.Plan collisionPlan =
                 collision.service.prepare(collision.destination);
         Files.createDirectories(collision.destination);
@@ -529,7 +589,7 @@ class NormalInstallServiceTest {
         assertTrue(appeared.getMessage().contains("wholly nonexistent"));
         assertEquals(0, collision.transport.binaryRequests);
 
-        Fixture overlap = fixture("3.0.0");
+        Fixture overlap = fixture("3.00.00");
         Path logs = overlap.registry.resolveSibling(
                 overlap.registry.getFileName() + ".launcher-logs");
         IOException unsafe = assertThrows(IOException.class,
@@ -539,15 +599,15 @@ class NormalInstallServiceTest {
     }
 
     @Test
-    void malformedFeedAndThirdMetadataReadAssetDriftNeverReachBinary() throws Exception {
-        Fixture malformed = fixture("1.2.3");
-        malformed.transport.malformedFeed = true;
+    void malformedRecordsAndThirdMetadataReadAssetDriftNeverReachBinary() throws Exception {
+        Fixture malformed = fixture("1.02.03");
+        malformed.transport.malformedRecords = true;
         assertThrows(IOException.class,
                 () -> malformed.service.prepare(malformed.destination));
         assertEquals(0, malformed.transport.binaryRequests);
         assertFalse(Files.exists(malformed.registry, LinkOption.NOFOLLOW_LINKS));
 
-        Fixture assetDrift = fixture("2.3.4");
+        Fixture assetDrift = fixture("2.03.04");
         NormalInstallService.Plan plan =
                 assetDrift.service.prepare(assetDrift.destination);
         assetDrift.transport.driftOnThirdApi = true;
@@ -555,16 +615,17 @@ class NormalInstallServiceTest {
                 () -> assetDrift.service.install(plan, quiet(),
                         OperationContext.none(OperationType.FRESH_INSTALL)));
         assertTrue(changed.getMessage().contains("expected")
-                || changed.getMessage().contains("changed"));
+                || changed.getMessage().contains("changed")
+                || changed.getMessage().contains("identity"));
         assertEquals(0, assetDrift.transport.binaryRequests);
         assertFalse(Files.exists(assetDrift.destination, LinkOption.NOFOLLOW_LINKS));
     }
 
     @Test
     void staleRegistryAndSymlinkParentAreRejectedWithoutTransfer() throws Exception {
-        Fixture stale = fixture("1.2.3");
+        Fixture stale = fixture("1.02.03");
         NormalInstallService.Plan plan = stale.service.prepare(stale.destination);
-        Path imported = createSuite(stale.state.resolve("Imported"), "9.9.9");
+        Path imported = createSuite(stale.state.resolve("Imported"), "9.09.09");
         stale.registries.register(stale.registry, "Imported", imported, null);
 
         IOException changed = assertThrows(IOException.class,
@@ -573,7 +634,7 @@ class NormalInstallServiceTest {
         assertTrue(changed.getMessage().contains("changed"));
         assertEquals(0, stale.transport.binaryRequests);
 
-        Fixture linked = fixture("1.2.3");
+        Fixture linked = fixture("1.02.03");
         Path real = Files.createDirectory(linked.state.resolve("real-parent"));
         Path link = linked.state.resolve("linked-parent");
         try {
@@ -602,8 +663,8 @@ class NormalInstallServiceTest {
     @Test
     void managedInstallAlwaysOptsInAndLeavesImportedCopyWithoutChannel()
             throws Exception {
-        Fixture fixture = fixture("1.2.3");
-        Path imported = createSuite(fixture.state.resolve("Imported"), "8.0.0");
+        Fixture fixture = fixture("1.02.03");
+        Path imported = createSuite(fixture.state.resolve("Imported"), "8.00.00");
         InstallationRecord old = fixture.registries.register(
                 fixture.registry, "Existing", imported, "keep-pin");
         InstallationRecord expectedOld = old;
@@ -639,7 +700,7 @@ class NormalInstallServiceTest {
     @Test
     void unrelatedLauncherSettingChangeAfterQuoteDoesNotInvalidateInstall()
             throws Exception {
-        Fixture fixture = fixture("5.6.7");
+        Fixture fixture = fixture("5.06.07");
         NormalInstallService.Plan plan =
                 fixture.launcherServices.prepareNormalInstall(fixture.destination);
         Path selectedJava = Files.writeString(Files.createDirectories(
@@ -656,7 +717,7 @@ class NormalInstallServiceTest {
 
     @Test
     void corruptSettingsAfterQuoteDoesNotAffectInstall() throws Exception {
-        Fixture fixture = fixture("6.7.8");
+        Fixture fixture = fixture("6.07.08");
         NormalInstallService.Plan plan =
                 fixture.launcherServices.prepareNormalInstall(fixture.destination);
         Path settings = Files.writeString(settingsPath(fixture.registry), "{broken");
@@ -671,7 +732,7 @@ class NormalInstallServiceTest {
     @Test
     void cancellationDuringPreparationNeverPublishesAndJavaFailureCannotAffectInstall()
             throws Exception {
-        Fixture cancelled = fixture("1.2.3");
+        Fixture cancelled = fixture("1.02.03");
         NormalInstallService.Plan cancelledPlan =
                 cancelled.service.prepare(cancelled.destination);
         AtomicReference<OperationContext> holder = new AtomicReference<>();
@@ -689,7 +750,7 @@ class NormalInstallServiceTest {
         assertFalse(Files.exists(cancelled.registry, LinkOption.NOFOLLOW_LINKS));
 
         FakeJava failingJava = new FakeJava(4);
-        Fixture retained = fixture("2.0.0", failingJava);
+        Fixture retained = fixture("2.00.00", failingJava);
         NormalInstallService.Plan retainedPlan =
                 retained.service.prepare(retained.destination);
         NormalInstallService.Result installed = retained.service.install(retainedPlan, quiet(),
@@ -704,9 +765,9 @@ class NormalInstallServiceTest {
     @Test
     void registryChangeDuringDownloadRetainsRegisteredCopyWithoutOverwritingNewMain()
             throws Exception {
-        Fixture fixture = fixture("4.5.6");
+        Fixture fixture = fixture("4.05.06");
         NormalInstallService.Plan plan = fixture.service.prepare(fixture.destination);
-        Path concurrentRoot = createSuite(fixture.state.resolve("Concurrent"), "7.8.9");
+        Path concurrentRoot = createSuite(fixture.state.resolve("Concurrent"), "7.08.09");
         AtomicReference<InstallationRecord> concurrent = new AtomicReference<>();
         fixture.transport.onBinary = () -> {
             try {
@@ -738,11 +799,12 @@ class NormalInstallServiceTest {
     }
 
     private Fixture fixture(String version, FakeJava java) throws Exception {
+        version = SuiteTestData.canonical(version);
         Path state = Files.createDirectory(temp.resolve("state-" + version + "-"
                 + Integer.toUnsignedString(System.identityHashCode(java))));
         Path registry = state.resolve("registry.json");
         Map<OfficialRepository, byte[]> archives = archives(version);
-        String developmentVersion = "9.9.9";
+        String developmentVersion = "9.09.09";
         Map<OfficialRepository, byte[]> developmentArchives = archives(developmentVersion);
         FixtureTransport transport = new FixtureTransport(version, archives,
                 developmentVersion, developmentArchives);
@@ -782,6 +844,12 @@ class NormalInstallServiceTest {
 
     private static byte[] applicationArchive(OfficialRepository repository, String version)
             throws Exception {
+        return applicationArchive(repository, version,
+                Map.of("megamek", version, "mekhq", version, "lab", version));
+    }
+
+    private static byte[] applicationArchive(OfficialRepository repository, String version,
+                                             Map<String, String> builds) throws Exception {
         String root = repository.assetPrefix() + version;
         List<Entry> entries = new ArrayList<>();
         for (String directory : List.of(root, root + "/data", root + "/mmconf",
@@ -791,18 +859,18 @@ class NormalInstallServiceTest {
         if (repository == OfficialRepository.MEKHQ
                 || repository == OfficialRepository.MEGAMEK) {
             entries.add(new Entry(root + "/MegaMek.jar",
-                    jar("megamek.MegaMek", version), false));
-            entries.add(new Entry(root + "/lib/MegaMek.jar",
-                    jar("megamek.MegaMek", version), false));
+                    jar("megamek.MegaMek", builds.get("megamek")), false));
         }
+        entries.add(new Entry(root + "/lib/MegaMek.jar",
+                jar("megamek.MegaMek", builds.get("megamek")), false));
         if (repository == OfficialRepository.MEKHQ) {
             entries.add(new Entry(root + "/MekHQ.jar",
-                    jar("mekhq.MekHQ", version), false));
+                    jar("mekhq.MekHQ", builds.get("mekhq")), false));
         }
         if (repository == OfficialRepository.MEKHQ
                 || repository == OfficialRepository.LAB) {
             entries.add(new Entry(root + "/MegaMekLab.jar",
-                    jar("megameklab.MegaMekLab", version), false));
+                    jar("megameklab.MegaMekLab", builds.get("lab")), false));
         }
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (GzipCompressorOutputStream gzip = new GzipCompressorOutputStream(bytes);
@@ -824,6 +892,9 @@ class NormalInstallServiceTest {
         Manifest manifest = new Manifest();
         manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
         manifest.getMainAttributes().put(Attributes.Name.MAIN_CLASS, mainClass);
+        if (!mainClass.equals("megamek.MegaMek")) {
+            manifest.getMainAttributes().put(Attributes.Name.IMPLEMENTATION_VERSION, version);
+        }
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (JarOutputStream jar = new JarOutputStream(bytes, manifest)) {
             jar.putNextEntry(new JarEntry("megamek/Version.properties"));
@@ -863,7 +934,7 @@ class NormalInstallServiceTest {
             calls++;
             return calls == failAt
                     ? new Result(1, "failed", false)
-                    : new Result(0, "openjdk version \"21.0.4\"", false);
+                    : new Result(0, "openjdk version \"21.00.04\"", false);
         }
     }
 
@@ -872,11 +943,16 @@ class NormalInstallServiceTest {
         private final Map<OfficialRepository, byte[]> archives;
         private String developmentVersion;
         private final Map<OfficialRepository, byte[]> developmentArchives;
+        private final Map<OfficialRepository, byte[]> historicalArchives;
+        private final SuiteTestData complete = new SuiteTestData();
+        private final java.util.Set<String> knownVersions = new java.util.LinkedHashSet<>();
+        private String recordedMilestone;
+        private String recordedDevelopment;
         private int binaryRequests;
         private final String assetName;
         private int apiRequests;
-        private int yamlRequests;
-        private boolean malformedFeed;
+        private int websiteRequests;
+        private boolean malformedRecords;
         private boolean driftOnThirdApi;
         private MetadataDrift metadataDrift = MetadataDrift.NONE;
         private Runnable onBinary = () -> {
@@ -884,28 +960,69 @@ class NormalInstallServiceTest {
 
         private FixtureTransport(String version, Map<OfficialRepository, byte[]> archives,
                                  String developmentVersion,
-                                 Map<OfficialRepository, byte[]> developmentArchives) {
+                                 Map<OfficialRepository, byte[]> developmentArchives) throws Exception {
             this.version = version;
             this.archives = archives;
             this.developmentVersion = developmentVersion;
             this.developmentArchives = developmentArchives;
             this.assetName = "MekHQ-" + version + ".tar.gz";
+            historicalArchives = archives("0.01.00");
+            addSuite("0.01.00", FollowChannel.MILESTONE, "0.01.00");
+            addSuite(version, FollowChannel.MILESTONE, version);
+            addSuite(developmentVersion, FollowChannel.DEVELOPMENT, developmentVersion);
+            addSuite("10.00.00", FollowChannel.WEEKLY, developmentVersion);
+            recordedMilestone = version;
+            recordedDevelopment = developmentVersion;
+        }
+
+        private void addSuite(String suiteVersion, FollowChannel channel, String productVersion)
+                throws Exception {
+            Map<OfficialRepository, String> versions = new java.util.EnumMap<>(OfficialRepository.class);
+            Map<OfficialRepository, Long> sizes = new java.util.EnumMap<>(OfficialRepository.class);
+            Map<OfficialRepository, String> hashes = new java.util.EnumMap<>(OfficialRepository.class);
+            for (OfficialRepository repository : OfficialRepository.values()) {
+                byte[] bytes = archiveFor(repository, productVersion);
+                versions.put(repository, productVersion);
+                sizes.put(repository, (long) bytes.length);
+                hashes.put(repository, sha(bytes));
+            }
+            complete.suite(suiteVersion, channel, versions, sizes, hashes);
+            knownVersions.add(productVersion);
         }
 
         @Override
         public Response get(URI uri, String accept) throws IOException {
             try {
                 if (uri.getHost().equals("raw.githubusercontent.com")) {
-                    yamlRequests++;
-                    String yaml = malformedFeed ? "stable: [unsafe]\ndev: 9.9.9\n"
-                            : "stable: " + version + "\ndev: "
-                            + developmentVersion + "\n";
-                    return response(yaml.getBytes(StandardCharsets.UTF_8), "text/yaml");
+                    websiteRequests++;
+                    throw new IOException("legacy website pointers must not be requested");
+                }
+                if (uri.getPath().endsWith(".json") && uri.getPath().contains("suite-record-")) {
+                    return complete.get(uri, accept);
                 }
                 if (uri.getHost().equals("api.github.com")) {
                     apiRequests++;
-                    String requested = requestedVersion(uri);
+                    if (uri.getQuery() != null) {
+                        if (malformedRecords) return response("{}".getBytes(StandardCharsets.UTF_8),
+                                "application/json");
+                        if (!version.equals(recordedMilestone)) {
+                            addSuite(version, FollowChannel.MILESTONE, version);
+                            recordedMilestone = version;
+                        }
+                        if (!developmentVersion.equals(recordedDevelopment)) {
+                            addSuite("10.00.01", FollowChannel.DEVELOPMENT, developmentVersion);
+                            recordedDevelopment = developmentVersion;
+                        }
+                        return complete.get(uri, accept);
+                    }
                     OfficialRepository repository = repository(uri);
+                    String requested;
+                    if (uri.getPath().matches(".*/releases/[0-9]+")) {
+                        long id = Long.parseLong(uri.getPath().substring(uri.getPath().lastIndexOf('/') + 1));
+                        requested = knownVersions.stream()
+                                .filter(value -> SuiteTestData.releaseId(repository, value) == id)
+                                .findFirst().orElseThrow(() -> new IOException("unknown fixture release ID"));
+                    } else requested = requestedVersion(uri);
                     return response(releaseJson(repository, requested,
                                     archiveFor(repository, requested),
                                     metadataDrift,
@@ -928,7 +1045,8 @@ class NormalInstallServiceTest {
 
         private byte[] archiveFor(OfficialRepository repository, String requested) {
             return requested.equals(developmentVersion)
-                    ? developmentArchives.get(repository) : archives.get(repository);
+                    ? developmentArchives.get(repository) : requested.equals("0.01.00")
+                    ? historicalArchives.get(repository) : archives.get(repository);
         }
 
         private static OfficialRepository repository(URI uri) throws IOException {
@@ -964,19 +1082,22 @@ class NormalInstallServiceTest {
                     ? "different-" + currentName : currentName;
             boolean sizeDrift = timedDrift || metadataDrift == MetadataDrift.SIZE;
             boolean digestDrift = timedDrift || metadataDrift == MetadataDrift.DIGEST;
+            String digestField = digestDrift
+                    ? "\"digest\":\"sha256:" + "0".repeat(64) + "\"," : "";
             String assets = metadataDrift == MetadataDrift.REMOVED ? "[]" : """
-                    [{"name":"%s","size":%d,"digest":"sha256:%s",
+                    [{"id":%d,"state":"uploaded","name":"%s","size":%d,%s
                     "browser_download_url":"https://github.com/%s/releases/download/v%s/%s"}]
-                    """.formatted(assetName,
+                    """.formatted(SuiteTestData.assetId(repository, requested), assetName,
                     requestedArchive.length + (sizeDrift ? 1 : 0),
-                    digestDrift ? "0".repeat(64) : sha(requestedArchive),
+                    digestField,
                     repository.slug(), requested, urlName);
             return """
-                    {"tag_name":"%s","name":"Milestone %s","draft":false,
+                    {"id":%d,"tag_name":"%s","name":"Milestone %s","draft":false,
                     "prerelease":false,
                     "html_url":"https://github.com/%s/releases/tag/v%s",
                     "assets":%s}
-                    """.formatted(tag, requested, repository.slug(), requested, assets);
+                    """.formatted(SuiteTestData.releaseId(repository, requested),
+                    tag, requested, repository.slug(), requested, assets);
         }
 
         private static Response response(byte[] bytes, String type) {

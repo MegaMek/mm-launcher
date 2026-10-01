@@ -57,7 +57,7 @@ To install MegaMek or MegaMekLab independently, use `--application megamek` or
 `--application lab` consistently in both commands. A new registration becomes default only if the
 registry was empty.
 
-`--channel milestone|development` is required. It becomes this new installation's immutable
+`--channel milestone|development|weekly` is required. It becomes this new installation's immutable
 update track after the exact ownership receipt is published. The manually selected tag does not
 classify the release; it only supplies the new copy's initial bytes. To follow another channel,
 run `install-release` again with another nonexistent destination. Every successful managed CLI

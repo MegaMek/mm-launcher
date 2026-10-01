@@ -129,15 +129,17 @@ suite-inspired vector buttons. Its joined split control keeps
 large primary action for the fixed current Milestone MekHQ all-three-program suite. A distinct
 arrow opens a dark-teal/gold popup with exactly **Install latest MegaMek Milestone**,
 **Install latest MegaMekLab Milestone**, **Install latest MekHQ Development**,
-**Install latest MegaMek Development**, and **Install latest MegaMekLab Development**, in that order. Each
+**Install latest MegaMek Development**, **Install latest MegaMekLab Development**,
+**Install latest MekHQ Weekly**, **Install latest MegaMek Weekly**, and
+**Install latest MegaMekLab Weekly**, in that order. Each
 available row shows its validated version. The popup contains neither a redundant MekHQ Milestone
 row nor the full exact-release picker. It preserves ordinary menu actions, keyboard opening,
 Escape, accessible names/descriptions, opaque selection contrast, and a system high-contrast
 fallback rather than inheriting plain white OS rows.
 Successful rows need no validation tooltip; unavailable rows retain concise diagnostic details.
-On initial empty Home, one frame-scoped background snapshot loads all six choices. Until it
+On initial empty Home, one frame-scoped background snapshot loads all nine choices. Until it
 succeeds, both install segments are disabled and unfocusable while **Use existing installation**
-stays enabled. Failure keeps install unavailable and exposes one explicit Retry command; retry
+stays enabled. Failure or partial availability exposes one explicit Retry command; retry
 activation is deduplicated. READY labels and exact options survive Home reloads, page transitions,
 confirmation cancellation/close, Change location, and repeated quote opens without another
 current-channel request or loading flicker.
@@ -169,11 +171,11 @@ Settings when recording succeeds.
 
 Ready quick-install actions pass the selected cached `QuickInstallOption` to an off-EDT planner.
 That planner freshly captures destination and registry/default state but does not read Settings or
-perform a YAML/current-target lookup. Confirmation opens with the shared Home
+perform a current-record lookup. Confirmation opens with the shared Home
 status cleared. Cancel, Escape, window close, local retry, and Change location preserve the cached
-labels and readiness. Before transfer or parent creation, the backend re-fetches and validates the
-quoted exact repository/tag and asset name, size, SHA-256, and URL. It never follows an advanced
-channel pointer for that quote; exact-target drift fails for fresh consent.
+labels and readiness. Before transfer or parent creation, the backend revalidates the captured
+record and its references, including release/asset IDs, tag, name, size, SHA-256, and URL.
+It never follows a newer current record for that quote; exact-target drift fails for fresh consent.
 
 Managed Home uses the same top-art/bottom-deck composition, centered cover crop, dark palette, and
 compact vertical scrolling as first launch. It has no duplicate launcher header/footer, left-side
@@ -198,16 +200,18 @@ the frame visible/front, and shows the existing explicit error. BusyGate refusal
 iconify and retains **Please wait**. No path disposes, exits, detaches, or uses a system tray.
 
 The primary label gains the validated MekHQ Milestone version, for example
-**Install latest MekHQ Milestone (0.51.0)**. There is no separate caption. A single background
-metadata-only snapshot reads the bounded official stable/dev YAML once and validates all six
-repository/channel targets. Exact release metadata is deduplicated per repository/tag when stable
-equals development. The main label and five labels update atomically only on the current panel.
+**Install latest MekHQ Milestone (0.51.00)**. There is no separate caption. A single background
+metadata-only snapshot discovers bounded complete records and validates all nine
+repository/channel targets. Repeated product release IDs are cached within the attempt.
+The main label and eight labels update atomically only on the current panel.
 It never requests package bytes or writes state. Loading disables both install segments but not
-other onboarding. Offline results show **Version unavailable** and five disabled
-**(Unavailable)** rows plus the explicit Retry command. Stale components are never rebound.
+other onboarding. Offline results show **Version unavailable** and eight disabled
+**(Unavailable)** rows plus the explicit Retry command. Partially available channels remain usable:
+a Weekly-only bootstrap leaves the Milestone primary disabled and Weekly rows enabled. Each disabled
+choice carries a reason; explicit Retry can refresh partial snapshots. Stale components are never rebound.
 
 The normal planner accepts only one explicit official `MEKHQ`, `MEGAMEK`, or `LAB` repository and
-one explicit Milestone or Development channel. The default overload remains available to the
+one explicit Milestone, Development, or Weekly channel. The default overload remains available to the
 managed picker. First-launch primary/menu actions instead pass their fixed cached option to the
 same backend. Planning is metadata-only and binds the requested repository/product set/channel, source
 version/tag, full release/asset identity, product/channel-specific per-user destination, registry
@@ -219,8 +223,8 @@ selection is followed by a styled folder-name dialog with a friendly preselected
 `Program Channel (Version)` value, inline validation, Cancel/Escape behavior, and no separate
 installation-name prompt. The friendly value is also the automatic registered name. There is no
 passive update-behavior row or technical-details toggle/pane. Captured-current plans skip a second
-channel-pointer lookup; exact release revalidation plus the installer's expected-asset check still
-reject tag/name/URL/size/digest drift before binary transfer without retargeting. Java,
+current-target lookup; captured record/release revalidation plus the installer's expected-asset check still
+reject release/asset ID, tag/name/URL/size/digest drift before binary transfer without retargeting. Java,
 registry/default, receipt,
 and state validation also remain backend requirements, with failures retained in operation logs.
 At most four individually quoted real parents are created only after consent; the target itself
@@ -253,17 +257,17 @@ field and arrow segment locally, with a system high-contrast palette fallback.
 
 One top row contains, in order, styled **Product**, styled **Channel**, and styled
 **Fetch releases** controls. It defaults to MekHQ/Milestone; there is no separate Browse mode.
-One fetch reads both fixed `current_releases.yml` pointers, requests one bounded page from only the
-selected product repository, and performs an exact selected-target lookup only when the history
-page cannot provide its canonical eligible metadata. It never requests package bytes.
+One fetch performs bounded complete-record discovery and resolves the current record plus the
+records needed for one selected-membership product-history page. Every resolved record requires
+all three product references to validate. It never requests package bytes.
 
-Results include the selected channel's known current identity and history whose membership is
-unknown. A distinct identity known only as the other channel's current target is excluded; a
-shared current pointer is included for either channel. No title, `prerelease`, version, or ordering
+Results include the selected channel's current product and only history with explicit record membership.
+Reused product tags retain their newest referencing record as the captured install source.
+No title, `prerelease`, version, or publication-date ordering
 inference is allowed. Page one contains the selected current identity exactly once, with stable
 repository/tag deduplication. **Previous page**, a non-button **Page N**, **Next page**, and
 **Install** share a stable footer. Previous is disabled on page one; Next follows the
-API's bounded may-have-next signal. Product or channel changes clear selection/results/page
+record history's bounded may-have-next signal. Product or channel changes clear selection/results/page
 controls and invalidate in-flight work. Page requests retain their exact product/channel snapshot
 and discard stale or closed-dialog results. The reserved status line is blank after success and
 shows only loading/errors.
@@ -450,16 +454,17 @@ current state, channel, adoption staging, and pending transaction are all absent
 managed-incomplete/corrupt, and recovery-pending cards never show it.
 
 The compact first screen shows one **Program (Version)** line and a styled update-channel selector
-with Milestone selected by default and Development as the only alternative. **Cancel** is fixed at
+with Milestone selected by default and Development and Weekly as alternatives. **Cancel** is fixed at
 the far left and **Continue** at the far right; Escape cancels and Enter continues. No network
 request occurs until Continue. Continue searches bounded GitHub release-list metadata for the
 detected official repository and automatically prepares the copy only when one safe immutable tag
 matches. Numeric dotted versions compare numerically (`0.50.7`, `0.50.07`, and `v0.50.07` are
 equivalent), while component count and prerelease/build suffix remain identity-bearing. It first
-reads both canonical current pointers and applies the install browser's classification: the
-selected current identity is allowed, a shared current identity is valid for either channel, a
-distinct opposite-current-only identity is rejected, and neither-current history remains unknown
-and may use the selected fixed channel.
+compares the primary product's observed version with the available channels' current complete-record
+targets. A selected-current identity is allowed, a shared identity is valid for its matching channels,
+and a distinct identity current only in another channel is rejected before package download.
+An identity matching no current target remains historical/unknown and may use the selected fixed
+channel in this legacy-ancestor adoption route, not in the normal record-only install browser.
 
 Drafts and releases without exactly one eligible supported asset are ignored. Search is capped at
 ten 50-entry pages and refuses a result if more history may exist at that bound. It does not infer
@@ -475,9 +480,9 @@ metadata/package work runs in a worker under `BusyGate`, with exact record, sele
 dialog generation, and cancellation guards.
 
 The typed opposite-current result replaces the progress surface before package download. Its gold
-heading says **Use Milestone for this installation** or **Use Development for this installation**,
+heading names **Use Milestone**, **Use Development**, or **Use Weekly for this installation**,
 plain copy identifies the version's current canonical channel and confirms that no files changed,
-and its only actions are a direct styled **Try Milestone** / **Try Development** retry and
+and its only actions are a direct styled **Try Milestone** / **Try Development** / **Try Weekly** retry and
 **Close**. Retry uses the same record, suggestion, and dialog generation with the canonical
 channel. It neither exposes logs/technical details nor mislabels a file-comparison failure as a
 channel mismatch.

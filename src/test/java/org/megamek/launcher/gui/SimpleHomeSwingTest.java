@@ -246,7 +246,7 @@ class SimpleHomeSwingTest {
             waitUntil(() -> split.popupMenu().isVisible());
             JPopupMenu popup = split.popupMenu();
             waitUntil(() -> popup.getComponent(0).isEnabled());
-            assertEquals(5, popup.getComponentCount());
+            assertEquals(8, popup.getComponentCount());
             List<String> menuLabels = java.util.Arrays.stream(popup.getComponents())
                     .map(JMenuItem.class::cast).map(JMenuItem::getText).toList();
             assertEquals(List.of(
@@ -254,7 +254,10 @@ class SimpleHomeSwingTest {
                             "Install latest MegaMekLab Milestone (1.2.3)",
                             "Install latest MekHQ Development (1.2.4)",
                             "Install latest MegaMek Development (1.2.4)",
-                            "Install latest MegaMekLab Development (1.2.4)"),
+                            "Install latest MegaMekLab Development (1.2.4)",
+                            "Install latest MekHQ Weekly (1.2.4)",
+                            "Install latest MegaMek Weekly (1.2.4)",
+                            "Install latest MegaMekLab Weekly (1.2.4)"),
                     menuLabels);
             assertFalse(menuLabels.contains("Choose another version or application…"));
             assertTrue(menuLabels.stream().noneMatch(label -> label.contains("Advanced")));
@@ -328,7 +331,7 @@ class SimpleHomeSwingTest {
                     waitDialog(frame, "Install latest MekHQ Milestone (1.2.3)");
             assertEquals(FollowChannel.MILESTONE, services.lastPlannedChannel);
             assertEquals(OfficialRepository.MEKHQ, services.lastPlannedRepository);
-            assertEquals(6, services.plans.get());
+            assertEquals(9, services.plans.get());
             assertTrue(onEdt(primary::isEnabled));
             assertTrue(onEdt(options::isEnabled));
             assertNull(find(confirmation, "downloadProductCombo"));
