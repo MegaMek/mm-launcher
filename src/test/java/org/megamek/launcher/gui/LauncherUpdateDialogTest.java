@@ -28,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 @Tag("gui-smoke")
+@Tag("native-gui")
 class LauncherUpdateDialogTest {
     private JFrame owner() throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless(), "actual dialog test requires a display");

@@ -85,6 +85,7 @@ class WorkflowStructureTest {
             String paths = root.path("on").path(event).path("paths").toString();
             assertTrue(paths.contains("scripts/**"));
             assertTrue(paths.contains(".github/workflows/launcher-release.yml"));
+            assertTrue(paths.contains(".github/workflows/launcher-gui-smoke.yml"));
         }
         JsonNode installers = jobs.path("installers");
         assertEquals("${{ inputs.source_commit || github.sha }}",
@@ -155,6 +156,8 @@ class WorkflowStructureTest {
         assertEquals("MegaMek-Launcher-${{ matrix.id }}-installers",
                 upload.path("with").path("name").asText());
         assertEquals("error", upload.path("with").path("if-no-files-found").asText());
+        assertTrue(upload.path("with").path("overwrite").asBoolean(),
+                "failed-job retries may replace same-run CI artifacts, never published release assets");
         String paths = upload.path("with").path("path").asText();
         List<String> expectedPaths = new ArrayList<>();
         for (String extension : List.of("msi", "deb", "rpm", "pkg")) {
@@ -164,12 +167,12 @@ class WorkflowStructureTest {
         }
         assertEquals(expectedPaths, paths.lines().map(String::trim).filter(line -> !line.isEmpty()).toList());
         assertTrue(step(installers, "Test source on Windows").path("run").asText().contains(" test"));
-        assertTrue(step(installers, "Test source on Linux with Xvfb").path("run").asText()
-                .contains("xvfb-run -a ./gradlew \"-PbuildIdentifier=${SOURCE_COMMIT}\" test"));
+        assertTrue(step(installers, "Test source on Linux").path("run").asText()
+                .contains("./gradlew \"-PbuildIdentifier=${SOURCE_COMMIT}\" test"));
         assertTrue(step(installers, "Test source on macOS").path("run").asText().contains(" test"));
         assertTrue(text.indexOf("Upload native installers and SHA-256 files only")
                 < text.indexOf("Test source on Windows"),
-                "hosted GUI test failures must not prevent installer artifacts from being inspected and uploaded");
+                "test failures must not prevent installer artifacts from being inspected and uploaded");
         JsonNode reports = step(installers, "Upload platform test reports");
         assertEquals("always()", reports.path("if").asText());
         assertEquals("MegaMek-Launcher-test-reports-${{ matrix.id }}",
@@ -207,10 +210,11 @@ class WorkflowStructureTest {
         assertEquals("launcher-stable-release", root.path("concurrency").path("group").asText());
         assertFalse(root.path("concurrency").path("cancel-in-progress").asBoolean());
         JsonNode jobs = root.path("jobs");
-        assertEquals(3, jobs.size());
+        assertEquals(4, jobs.size());
         JsonNode prepare = jobs.path("prepare");
-        assertEquals("${{ steps.bump.outputs.version }}", prepare.path("outputs").path("version").asText());
-        assertEquals("${{ steps.bump.outputs.commit }}", prepare.path("outputs").path("commit").asText());
+        assertEquals("${{ steps.candidate.outputs.version }}", prepare.path("outputs").path("version").asText());
+        assertEquals("${{ steps.candidate.outputs.commit }}", prepare.path("outputs").path("commit").asText());
+        assertEquals("${{ steps.candidate.outputs.base }}", prepare.path("outputs").path("base").asText());
         assertEquals("${{ github.sha }}", prepare.path("steps").get(0).path("with").path("ref").asText());
         JsonNode validation = step(prepare, "Validate official main source and next unused patch version");
         assertEquals("${{ github.token }}", validation.path("env").path("GH_TOKEN").asText());
@@ -224,9 +228,9 @@ class WorkflowStructureTest {
         assertEquals("mm-launcher", bot.path("with").path("repositories").asText());
         assertEquals("write", bot.path("with").path("permission-contents").asText());
         assertFalse(bot.path("with").path("skip-token-revoke").asBoolean());
-        JsonNode bump = step(prepare, "Commit next patch version to protected main");
+        JsonNode bump = step(prepare, "Prepare version-only candidate outside main");
         assertEquals("${{ steps.release-bot.outputs.token }}", bump.path("env").path("GH_TOKEN").asText());
-        assertTrue(bump.path("run").asText().contains("launcher_release.py bump"));
+        assertTrue(bump.path("run").asText().contains("launcher_release.py candidate"));
         assertFalse(prepare.has("permissions"), "default workflow token stays read-only during preparation");
         assertTrue(text.indexOf("Validate official main source and next unused patch version")
                 < text.indexOf("Create repository-scoped release bot token"));
@@ -259,10 +263,62 @@ class WorkflowStructureTest {
                 publication.path("env").path("RELEASE_VERSION").asText());
         assertTrue(publication.path("run").asText().contains("launcher_release.py publish"));
         assertTrue(publication.path("run").asText().contains("--assets build/release"));
+        JsonNode finalize = jobs.path("finalize");
+        List<String> finalPrerequisites = new ArrayList<>();
+        finalize.path("needs").forEach(dependency -> finalPrerequisites.add(dependency.asText()));
+        assertEquals(List.of("prepare", "publish"), finalPrerequisites);
+        assertFalse(finalize.has("if"), "main synchronization must require successful publication");
+        assertFalse(finalize.has("permissions"), "use a fresh App token, not a writable default token");
+        assertEquals("${{ needs.prepare.outputs.commit }}",
+                finalize.path("steps").get(0).path("with").path("ref").asText());
+        assertFalse(finalize.path("steps").get(0).path("with").path("persist-credentials").asBoolean());
+        assertEquals(download.path("with"), finalize.path("steps").get(1).path("with"));
+        JsonNode syncToken = step(finalize, "Create repository-scoped version synchronization token");
+        assertEquals(bot.path("with"), syncToken.path("with"));
+        assertEquals("actions/create-github-app-token@v2", syncToken.path("uses").asText());
+        JsonNode sync = step(finalize, "Confirm published release and synchronize main");
+        assertEquals("${{ steps.release-bot.outputs.token }}", sync.path("env").path("GH_TOKEN").asText());
+        assertEquals("${{ needs.prepare.outputs.base }}", sync.path("env").path("RELEASE_BASE").asText());
+        assertEquals("${{ needs.prepare.outputs.commit }}", sync.path("env").path("RELEASE_COMMIT").asText());
+        assertEquals("${{ needs.prepare.outputs.version }}", sync.path("env").path("RELEASE_VERSION").asText());
+        assertTrue(sync.path("run").asText().contains("launcher_release.py finalize"));
+        assertTrue(sync.path("run").asText().contains("--base \"$RELEASE_BASE\""));
+        assertTrue(sync.path("run").asText().contains("--assets build/release"));
+        assertFalse(text.contains("launcher-gui-smoke"),
+                "advisory desktop checks must not gate publication");
         assertFalse(text.contains("${{ inputs.version }}\""), "input must pass through environment, not shell expansion");
         assertFalse(text.contains("buildWindowsInstaller"), "reuse packaging instead of duplicating it");
         assertFalse(text.contains("msiexec"));
         assertFalse(text.contains("secrets: inherit"));
+    }
+
+    @Test
+    void advisoryDesktopWorkflowIsVisibleReadOnlyAndIndependentOfPublication() throws Exception {
+        String text = Files.readString(Path.of(".github", "workflows", "launcher-gui-smoke.yml"));
+        JsonNode root = new ObjectMapper(new YAMLFactory()).readTree(text);
+        assertTrue(root.path("name").asText().contains("advisory"));
+        assertEquals("read", root.path("permissions").path("contents").asText());
+        for (String event : List.of("push", "pull_request", "schedule", "workflow_dispatch")) {
+            assertTrue(root.path("on").has(event));
+        }
+        assertFalse(root.path("on").has("workflow_call"));
+        JsonNode desktop = root.path("jobs").path("desktop");
+        List<String> platforms = new ArrayList<>();
+        desktop.path("strategy").path("matrix").path("include")
+                .forEach(row -> platforms.add(row.path("id").asText()));
+        assertEquals(List.of("windows-x64", "linux-x64", "macos-intel", "macos-apple-silicon"), platforms);
+        assertFalse(desktop.has("needs"));
+        assertFalse(desktop.has("continue-on-error"));
+        assertEquals("21", desktop.path("steps").get(1).path("with").path("java-version").asText());
+        assertEquals(3, count(text, " nativeGuiTest"));
+        assertTrue(step(desktop, "Desktop tests on Linux with Xvfb")
+                .path("run").asText().contains("xvfb-run -a ./gradlew nativeGuiTest"));
+        JsonNode reports = step(desktop, "Upload advisory desktop reports");
+        assertEquals("always()", reports.path("if").asText());
+        assertTrue(reports.path("with").path("path").asText().contains("test-results/nativeGuiTest"));
+        assertFalse(text.contains("secrets."));
+        assertFalse(text.contains("continue-on-error"));
+        assertFalse(text.contains("launcher_release.py"));
     }
 
     private static JsonNode step(JsonNode job, String name) {

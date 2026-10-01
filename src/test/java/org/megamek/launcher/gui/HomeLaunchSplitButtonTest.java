@@ -61,6 +61,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HomeLaunchSplitButtonTest {
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void joinedControlKeepsPerApplicationPreferenceAndRoutesOrderedCapturedAlternates()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());

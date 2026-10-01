@@ -25,6 +25,7 @@ import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.function.Predicate;
+import java.util.function.Consumer;
 
 final class SwingTestSupport {
     private static final Duration TIMEOUT = Duration.ofSeconds(8);
@@ -36,6 +37,21 @@ final class SwingTestSupport {
     static <T> T onEdt(Callable<T> operation) throws Exception {
         checkActions();
         return onEdt(operation, TIMEOUT);
+    }
+
+    static <T extends Window> T createWindow(Callable<T> factory) throws Exception {
+        return ownedOnEdt(factory, SwingTestSupport::disposeTree, TIMEOUT);
+    }
+
+    static <T> T ownedOnEdt(Callable<T> factory, Consumer<T> cleanup, Duration timeout) throws Exception {
+        checkActions();
+        OwnedFixture<T> fixture = new OwnedFixture<>(factory, cleanup);
+        try {
+            return onEdt(fixture::create, timeout);
+        } catch (Exception | Error error) {
+            fixture.abandon();
+            throw error;
+        }
     }
 
     private static <T> T onEdt(Callable<T> operation, Duration timeout) throws Exception {
@@ -58,7 +74,7 @@ final class SwingTestSupport {
             Thread.sleep(20);
         }
         checkActions();
-        throw new AssertionError("Timed out waiting for " + description);
+        throw timeoutFailure(description, null);
     }
 
     static void awaitCondition(String description, Callable<Boolean> condition) throws Exception {
@@ -123,7 +139,7 @@ final class SwingTestSupport {
             }
             Thread.sleep(20);
         }
-        throw new AssertionError("Timed out waiting for showing, enabled click target " + target);
+        throw timeoutFailure("showing, enabled click target " + target, null);
     }
 
     static JPopupMenu installationMenu(Container root, String recordId) throws Exception {
@@ -268,11 +284,55 @@ final class SwingTestSupport {
             throw new AssertionError(description + " failed", cause);
         } catch (TimeoutException error) {
             if (cancelWait) future.cancel(false);
-            throw new AssertionError("Timed out waiting for " + description, error);
+            throw timeoutFailure(description, error);
         } catch (InterruptedException error) {
             if (cancelWait) future.cancel(false);
             Thread.currentThread().interrupt();
             throw error;
+        }
+    }
+
+    private static AssertionError timeoutFailure(String description, Throwable cause) {
+        StringBuilder details = new StringBuilder("Timed out waiting for ").append(description);
+        Thread.getAllStackTraces().forEach((thread, stack) -> {
+            details.append("\n\n").append(thread.getName()).append(" [").append(thread.getState()).append("]");
+            for (StackTraceElement element : stack) details.append("\n    at ").append(element);
+        });
+        return new AssertionError(details.toString(), cause);
+    }
+
+    private static final class OwnedFixture<T> {
+        private final Callable<T> factory;
+        private final Consumer<T> cleanup;
+        private T value;
+        private boolean abandoned;
+
+        private OwnedFixture(Callable<T> factory, Consumer<T> cleanup) {
+            this.factory = factory;
+            this.cleanup = cleanup;
+        }
+
+        private T create() throws Exception {
+            T created = factory.call();
+            synchronized (this) {
+                if (!abandoned) {
+                    value = created;
+                    return created;
+                }
+            }
+            cleanup.accept(created);
+            return created;
+        }
+
+        private void abandon() {
+            T created;
+            synchronized (this) {
+                abandoned = true;
+                created = value;
+                value = null;
+            }
+            // Construction may finish after the test has already timed out.
+            if (created != null) SwingUtilities.invokeLater(() -> cleanup.accept(created));
         }
     }
 

@@ -297,6 +297,7 @@ class FirstLaunchPanelTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void firstLaunchTransitionsToExistingManagedPresentationWithoutChangingRegistration()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
@@ -400,6 +401,7 @@ class FirstLaunchPanelTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void sixChoiceLookupDisablesInstallSegmentsWithoutBlockingExistingImport()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
@@ -483,6 +485,7 @@ class FirstLaunchPanelTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void unavailableSnapshotDisablesInstallAndRetriesOnlyFromExplicitCommand() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         AtomicInteger requests = new AtomicInteger();
@@ -536,6 +539,7 @@ class FirstLaunchPanelTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void failedPartialRefreshRetainsWeeklyChoicesAndAllowsASuccessfulRetry() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         for (String failure : List.of("exception", "null", "interrupted")) {
@@ -605,6 +609,7 @@ class FirstLaunchPanelTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void reloadedFirstLaunchReusesTheInFlightSessionSnapshot() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         CountDownLatch firstStarted = new CountDownLatch(1);

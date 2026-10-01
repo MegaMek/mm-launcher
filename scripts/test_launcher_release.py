@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 import copy
+import base64
+import os
 import hashlib
 from pathlib import Path
 import subprocess
@@ -18,6 +20,7 @@ ENVIRONMENT = {
     "GITHUB_REPOSITORY": release.REPOSITORY,
     "GITHUB_REF": "refs/heads/main",
     "GITHUB_SHA": COMMIT,
+    "GITHUB_RUN_ID": "123",
 }
 
 
@@ -26,6 +29,7 @@ class FakeGitHub:
         self.version = version
         self.calls = []
         self.reference = None
+        self.candidate_reference = None
         self.release = None
         self.inventory = []
         self.existing_tag = None
@@ -43,8 +47,12 @@ class FakeGitHub:
         if method == "GET" and "/releases?" in endpoint:
             return copy.deepcopy(self.inventory)
         if method == "POST" and endpoint.endswith("/git/refs"):
-            self.reference = {"ref": data["ref"], "object": {"type": "commit", "sha": data["sha"]}}
-            return copy.deepcopy(self.reference)
+            reference = {"ref": data["ref"], "object": {"type": "commit", "sha": data["sha"], "url": "metadata"}}
+            if data["ref"].startswith("refs/heads/release-candidates/"):
+                self.candidate_reference = reference
+            else:
+                self.reference = reference
+            return copy.deepcopy(reference)
         if method == "POST" and endpoint.endswith("/releases"):
             self.release = {"id": 37, **data, "assets": [],
                             "html_url": f"https://github.com/{release.REPOSITORY}"
@@ -64,7 +72,7 @@ class FakeGitHub:
                 self.mutate_upload(metadata)
             self.release["assets"].append(metadata)
             return copy.deepcopy(metadata)
-        if method == "GET" and endpoint.endswith("/releases/37"):
+        if method == "GET" and (endpoint.endswith("/releases/37") or "/releases/tags/" in endpoint):
             result = copy.deepcopy(self.release)
             if self.mutate_staged:
                 self.mutate_staged(result)
@@ -105,11 +113,17 @@ class FakeBumpGitHub(FakeGitHub):
         self.mutate_commit = None
         self.fail_push = False
         self.concurrent_push = False
+        self.original = original
+        self.candidate_commit = None
+        self.unknown_push = False
+        self.mutate_blob = None
 
     def request(self, method, endpoint, data=None, file=None, missing_ok=False):
         if (method, endpoint) not in (
                 ("GET", f"{release.API}/git/ref/heads/main"),
                 ("GET", f"{release.API}/git/commits/{COMMIT}"),
+                ("GET", f"{release.API}/git/commits/" + "d" * 40),
+                ("GET", f"{release.API}/git/blobs/{release.blob_sha(self.original)}"),
                 ("GET", f"{release.API}/git/trees/" + "b" * 40),
                 ("GET", f"{release.API}/git/trees/" + "c" * 40),
                 ("POST", f"{release.API}/git/trees"),
@@ -120,7 +134,15 @@ class FakeBumpGitHub(FakeGitHub):
         if method == "GET" and endpoint.endswith("/git/ref/heads/main"):
             return copy.deepcopy(self.main)
         if method == "GET" and "/git/commits/" in endpoint:
+            if endpoint.endswith("d" * 40):
+                return copy.deepcopy(self.candidate_commit)
             return {"sha": COMMIT, "tree": {"sha": "b" * 40}}
+        if method == "GET" and "/git/blobs/" in endpoint:
+            blob = {"sha": release.blob_sha(self.original), "encoding": "base64",
+                    "content": base64.encodebytes(self.original.encode("utf-8")).decode("ascii")}
+            if self.mutate_blob:
+                self.mutate_blob(blob)
+            return blob
         if method == "GET" and "/git/trees/" in endpoint:
             return copy.deepcopy(self.changed_tree if endpoint.endswith("c" * 40) else self.tree)
         if method == "POST" and endpoint.endswith("/git/trees"):
@@ -133,16 +155,19 @@ class FakeBumpGitHub(FakeGitHub):
             return {"sha": result["sha"]}
         if method == "POST" and endpoint.endswith("/git/commits"):
             result = {"sha": "d" * 40, "tree": {"sha": data["tree"]},
-                      "parents": [{"sha": parent} for parent in data["parents"]]}
+                      "parents": [{"sha": parent, "url": "metadata"} for parent in data["parents"]]}
             if self.mutate_commit:
                 self.mutate_commit(result)
-            return result
+            self.candidate_commit = result
+            return copy.deepcopy(result)
         if self.concurrent_push:
             self.main["object"]["sha"] = "e" * 40
             raise release.ReleaseError("Simulated concurrent non-fast-forward push")
         if self.fail_push:
             raise release.ReleaseError("Simulated protected-branch permission denial")
         self.main["object"]["sha"] = data["sha"]
+        if self.unknown_push:
+            raise release.ReleaseError("Simulated lost main-update response")
         return copy.deepcopy(self.main)
 
 
@@ -163,6 +188,17 @@ class LauncherReleaseTest(unittest.TestCase):
 
     def assets(self):
         return release.validate_files(self.directory, VERSION)
+
+    def make_assets(self, version):
+        directory = self.root / ("assets-" + version)
+        directory.mkdir(exist_ok=True)
+        for suffix in release.INSTALLERS:
+            name = f"MegaMek-Launcher-{version}-{suffix}"
+            content = name.encode("ascii")
+            (directory / name).write_bytes(content)
+            sha = hashlib.sha256(content).hexdigest()
+            (directory / (name + ".sha256")).write_text(f"{sha}  {name}\n", encoding="ascii")
+        return release.validate_files(directory, version)
 
     def assert_no_publication(self, github):
         self.assertFalse(any(method == "PATCH" for method, _, _ in github.calls))
@@ -206,10 +242,10 @@ class LauncherReleaseTest(unittest.TestCase):
         self.assertEqual("d670460b4b4aece5915caf5c68d12f560a9fe3e4",
                          release.blob_sha("test content\n"))
 
-    def test_patch_bump_changes_only_version_file_and_fast_forwards_main_once(self):
+    def test_candidate_changes_only_version_file_and_never_advances_main(self):
         github = FakeBumpGitHub((self.root / "build.gradle.kts").read_text())
-        version, commit = release.bump_patch(github, self.root, ENVIRONMENT)
-        self.assertEqual(("0.14.6", "d" * 40), (version, commit))
+        version, commit, base = release.prepare_candidate(github, self.root, ENVIRONMENT)
+        self.assertEqual(("0.14.6", "d" * 40, COMMIT), (version, commit, base))
         writes = [(method, endpoint, data) for method, endpoint, data in github.calls if method != "GET"]
         self.assertEqual(3, len(writes))
         self.assertEqual({"base_tree": "b" * 40, "tree": [
@@ -217,9 +253,9 @@ class LauncherReleaseTest(unittest.TestCase):
              "content": 'version = "0.14.6"\n'}]}, writes[0][2])
         self.assertEqual([COMMIT], writes[1][2]["parents"])
         self.assertEqual("c" * 40, writes[1][2]["tree"])
-        self.assertEqual(("PATCH", f"{release.API}/git/refs/heads/main",
-                          {"sha": commit, "force": False}), writes[2])
-        self.assertEqual(commit, github.main["object"]["sha"])
+        self.assertEqual(("POST", f"{release.API}/git/refs",
+                          {"ref": "refs/heads/release-candidates/0.14.6/123", "sha": commit}), writes[2])
+        self.assertEqual(COMMIT, github.main["object"]["sha"])
         self.assertIsNone(github.reference)
         self.assertIsNone(github.release)
 
@@ -238,7 +274,7 @@ class LauncherReleaseTest(unittest.TestCase):
                 else:
                     github.tree["tree"][0]["mode"] = "100755"
                 with self.assertRaises(release.ReleaseError):
-                    release.bump_patch(github, self.root, ENVIRONMENT)
+                    release.prepare_candidate(github, self.root, ENVIRONMENT)
                 self.assertTrue(all(method == "GET" for method, _, _ in github.calls))
 
     def test_bump_rejects_tree_drift_or_wrong_parent_without_updating_main(self):
@@ -252,38 +288,160 @@ class LauncherReleaseTest(unittest.TestCase):
                 else:
                     github.mutate_commit = lambda commit: commit.update(parents=[])
                 with self.assertRaises(release.ReleaseError):
-                    release.bump_patch(github, self.root, ENVIRONMENT)
+                    release.prepare_candidate(github, self.root, ENVIRONMENT)
                 self.assertFalse(any(method == "PATCH" for method, _, _ in github.calls))
                 self.assertEqual(COMMIT, github.main["object"]["sha"])
 
-    def test_denied_or_concurrent_push_is_not_forced_retried_or_rolled_back(self):
+    @patch("builtins.print")
+    def test_denied_or_concurrent_finalization_is_not_forced_retried_or_rolled_back(self, output):
         for failure in ("permission", "concurrent"):
             with self.subTest(failure=failure):
                 github = FakeBumpGitHub((self.root / "build.gradle.kts").read_text())
+                version, commit, base = release.prepare_candidate(github, self.root, ENVIRONMENT)
+                assets = self.make_assets(version)
+                release.publish(github, version, commit, assets)
                 github.fail_push = failure == "permission"
                 github.concurrent_push = failure == "concurrent"
-                with self.assertRaises(release.ReleaseError):
-                    release.bump_patch(github, self.root, ENVIRONMENT)
-                self.assertEqual(1, sum(method == "PATCH" for method, _, _ in github.calls))
+                with self.assertRaisesRegex(release.ReleaseError, "synchronization pending"):
+                    release.finalize_main(github, version, commit, base, assets)
+                self.assertEqual(1, sum(method == "PATCH" and endpoint.endswith("/git/refs/heads/main")
+                                        for method, endpoint, _ in github.calls))
                 self.assertFalse(any(method == "DELETE" for method, _, _ in github.calls))
                 expected = "e" * 40 if failure == "concurrent" else COMMIT
                 self.assertEqual(expected, github.main["object"]["sha"])
-                self.assertIsNone(github.reference)
+                self.assertFalse(github.release["draft"], "a published release must never be rolled back")
 
     @patch("builtins.print")
-    def test_bump_cli_exports_new_version_and_commit_not_the_dispatch_commit(self, output):
+    def test_candidate_cli_exports_base_and_tested_commit_without_modifying_main(self, output):
         github = FakeBumpGitHub((self.root / "build.gradle.kts").read_text())
         outputs = self.root / "outputs"
         with patch("launcher_release.GitHub", return_value=github), \
                 patch("launcher_release.Path.cwd", return_value=self.root), \
                 patch("launcher_release.verify_checkout") as checkout, \
                 patch.dict(release.os.environ, {**ENVIRONMENT, "GITHUB_OUTPUT": str(outputs)}, clear=True), \
-                patch("launcher_release.sys.argv", ["launcher_release.py", "bump"]):
+                patch("launcher_release.sys.argv", ["launcher_release.py", "candidate"]):
             release.main()
         checkout.assert_called_once_with(self.root, COMMIT)
-        self.assertEqual("version=0.14.6\ncommit=" + "d" * 40 + "\n", outputs.read_text())
+        self.assertEqual("version=0.14.6\ncommit=" + "d" * 40 + "\nbase=" + COMMIT + "\n", outputs.read_text())
         output.assert_called_once_with(
-            "Committed launcher 0.14.6 to main at " + "d" * 40 + "; no release published yet")
+            "Prepared launcher 0.14.6 at " + "d" * 40 + "; main remains at " + COMMIT)
+
+    def test_candidate_run_identity_is_required_before_any_write(self):
+        for run in (None, "0", "../main", "123\n"):
+            github = FakeBumpGitHub((self.root / "build.gradle.kts").read_text())
+            with self.subTest(run=run), self.assertRaises(release.ReleaseError):
+                release.prepare_candidate(github, self.root, {**ENVIRONMENT, "GITHUB_RUN_ID": run})
+            self.assertEqual([], github.calls)
+
+    @patch("builtins.print")
+    def test_main_advances_only_after_confirmed_publication_and_finalize_is_read_only_on_retry(self, output):
+        github = FakeBumpGitHub((self.root / "build.gradle.kts").read_text())
+        version, commit, base = release.prepare_candidate(github, self.root, ENVIRONMENT)
+        assets = self.make_assets(version)
+        self.assertEqual(base, github.main["object"]["sha"], "a failed build cannot consume the version")
+        release.publish(github, version, commit, assets)
+        self.assertEqual(base, github.main["object"]["sha"], "publication and synchronization are separate")
+        release.finalize_main(github, version, commit, base, assets)
+        self.assertEqual(commit, github.main["object"]["sha"])
+        publication = next(i for i, call in enumerate(github.calls)
+                           if call[0:2] == ("PATCH", f"{release.API}/releases/37"))
+        synchronization = next(i for i, call in enumerate(github.calls)
+                               if call[0:2] == ("PATCH", f"{release.API}/git/refs/heads/main"))
+        self.assertLess(publication, synchronization)
+        before = len(github.calls)
+        release.finalize_main(github, version, commit, base, assets)
+        self.assertTrue(all(method == "GET" for method, _, _ in github.calls[before:]))
+        self.assertEqual(1, sum(endpoint.endswith("/git/refs/heads/main") and method == "PATCH"
+                                for method, endpoint, _ in github.calls))
+
+    def test_failed_upload_or_unpublished_draft_never_advances_main(self):
+        github = FakeBumpGitHub((self.root / "build.gradle.kts").read_text())
+        version, commit, base = release.prepare_candidate(github, self.root, ENVIRONMENT)
+        assets = self.make_assets(version)
+        github.fail_upload = True
+        with self.assertRaises(release.ReleaseError):
+            release.publish(github, version, commit, assets)
+        with self.assertRaises(release.ReleaseError):
+            release.finalize_main(github, version, commit, base, assets)
+        self.assertEqual(base, github.main["object"]["sha"])
+        self.assertFalse(any(method == "PATCH" and "/git/refs/" in endpoint
+                             for method, endpoint, _ in github.calls))
+
+    @patch("builtins.print")
+    def test_finalize_rejects_source_drift_tag_drift_missing_assets_and_changed_main(self, output):
+        for failure in ("source", "parent", "tag", "assets", "latest", "main"):
+            with self.subTest(failure=failure):
+                github = FakeBumpGitHub((self.root / "build.gradle.kts").read_text())
+                version, commit, base = release.prepare_candidate(github, self.root, ENVIRONMENT)
+                assets = self.make_assets(version)
+                release.publish(github, version, commit, assets)
+                if failure == "source":
+                    github.changed_tree["tree"][1]["sha"] = "e" * 40
+                elif failure == "parent":
+                    github.candidate_commit["parents"] = [{"sha": "e" * 40}]
+                elif failure == "tag":
+                    github.reference["object"]["sha"] = "e" * 40
+                elif failure == "assets":
+                    github.release["assets"].pop()
+                elif failure == "latest":
+                    github.mutate_latest = lambda item: item.update(id=99)
+                else:
+                    github.main["object"]["sha"] = "e" * 40
+                with self.assertRaisesRegex(release.ReleaseError, "synchronization pending"):
+                    release.finalize_main(github, version, commit, base, assets)
+                self.assertFalse(any(method == "PATCH" and "/git/refs/" in endpoint
+                                     for method, endpoint, _ in github.calls))
+
+    def test_malformed_candidate_metadata_and_blobs_fail_explicitly_without_main_writes(self):
+        for failure in ("parents", "tree", "encoding", "blob-sha", "blob-bytes"):
+            with self.subTest(failure=failure):
+                github = FakeBumpGitHub((self.root / "build.gradle.kts").read_text())
+                version, commit, base = release.prepare_candidate(github, self.root, ENVIRONMENT)
+                if failure == "parents":
+                    github.candidate_commit["parents"] = [None]
+                elif failure == "tree":
+                    github.candidate_commit["tree"] = []
+                elif failure == "encoding":
+                    github.mutate_blob = lambda blob: blob.update(content="not base64!")
+                elif failure == "blob-sha":
+                    github.mutate_blob = lambda blob: blob.update(sha="e" * 40)
+                else:
+                    github.mutate_blob = lambda blob: blob.update(
+                        content=base64.b64encode(b"wrong source").decode("ascii"))
+                with self.assertRaises(release.ReleaseError):
+                    release.verify_candidate(github, version, commit, base)
+                self.assertFalse(any(method == "PATCH" for method, _, _ in github.calls))
+
+    @patch("builtins.print")
+    def test_unknown_main_write_outcome_can_be_confirmed_without_repeating_the_write(self, output):
+        github = FakeBumpGitHub((self.root / "build.gradle.kts").read_text())
+        version, commit, base = release.prepare_candidate(github, self.root, ENVIRONMENT)
+        assets = self.make_assets(version)
+        release.publish(github, version, commit, assets)
+        github.unknown_push = True
+        with self.assertRaisesRegex(release.ReleaseError, "synchronization pending"):
+            release.finalize_main(github, version, commit, base, assets)
+        self.assertEqual(commit, github.main["object"]["sha"])
+        before = len(github.calls)
+        release.finalize_main(github, version, commit, base, assets)
+        self.assertTrue(all(method == "GET" for method, _, _ in github.calls[before:]))
+
+    @patch("builtins.print")
+    def test_finalize_cli_uses_exact_candidate_base_and_existing_artifacts(self, output):
+        github = FakeBumpGitHub((self.root / "build.gradle.kts").read_text())
+        version, commit, base = release.prepare_candidate(github, self.root, ENVIRONMENT)
+        assets = self.make_assets(version)
+        release.publish(github, version, commit, assets)
+        (self.root / "build.gradle.kts").write_text('version = "' + version + '"\n')
+        with patch.dict(os.environ, ENVIRONMENT), patch("launcher_release.Path.cwd", return_value=self.root), \
+                patch("launcher_release.GitHub", return_value=github), \
+                patch("launcher_release.verify_checkout") as checkout, \
+                patch("launcher_release.sys.argv", ["launcher_release.py", "finalize",
+                      "--version", version, "--commit", commit, "--base", base,
+                      "--assets", str(self.root / ("assets-" + version))]):
+            release.main()
+        checkout.assert_called_once_with(self.root, commit)
+        self.assertEqual(commit, github.main["object"]["sha"])
 
     def test_checkout_guard_requires_the_bumped_commit_even_with_original_dispatch_context(self):
         (self.root / "build.gradle.kts").write_text('version = "0.14.6"\n')
@@ -299,7 +457,7 @@ class LauncherReleaseTest(unittest.TestCase):
     @patch("builtins.print")
     def test_publish_cli_builds_new_version_assets_and_tags_bumped_not_dispatched_commit(self, output):
         github = FakeBumpGitHub((self.root / "build.gradle.kts").read_text())
-        version, commit = release.bump_patch(github, self.root, ENVIRONMENT)
+        version, commit, _ = release.prepare_candidate(github, self.root, ENVIRONMENT)
         (self.root / "build.gradle.kts").write_bytes(f'version = "{version}"\n'.encode("utf-8"))
         directory = self.root / "new-assets"
         directory.mkdir()

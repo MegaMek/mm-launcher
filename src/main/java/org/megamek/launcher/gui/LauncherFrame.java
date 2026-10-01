@@ -33,6 +33,8 @@
 
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.gui.AutomaticInstallationChecks.InstallationCheck;
+
 import org.megamek.launcher.channel.ChannelPreference;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.ChannelUpdateChecker;
@@ -1029,56 +1031,16 @@ public final class LauncherFrame extends JFrame {
     private void maybeCheckManagedCopiesOnOpen() {
         if (state == null || state.registry() == null || automaticChecksWorker != null) return;
         final long generation = homeGeneration;
-        final List<InstallationRecord> selectedRecords = state.registry().installations().stream()
-                .filter(record -> {
-                    LauncherServices.InstallationStatus local =
-                            installationLocalStatus(record);
-                    return managedUpdatesAvailable(local)
-                            && local.channelPreference().preference().checkOnOpen()
-                            && !checkedOnOpen.contains(checkOnOpenKey(
-                                    local.channelPreference().preference()));
-                })
-                .limit(32)
-                .toList();
+        final List<InstallationRecord> selectedRecords = AutomaticInstallationChecks.select(
+                state.registry().installations(), this::installationLocalStatus, checkedOnOpen);
         if (selectedRecords.isEmpty()) return;
-        automaticChecksWorker = new SwingWorker<>() {
-            @Override
-            protected Map<String, InstallationCheck> doInBackground() {
-                Map<String, InstallationCheck> results = new HashMap<>();
-                for (InstallationRecord record : selectedRecords) {
-                    if (isCancelled() || Thread.currentThread().isInterrupted()) {
-                        break;
-                    }
-                    try {
-                        ChannelPreferenceStore.ReadResult selected =
-                                services.channelPreference(record);
-                        if (selected.status() != ChannelPreferenceStore.Status.CONFIGURED) {
-                            continue;
-                        }
-                        if (!selected.preference().checkOnOpen()) continue;
-                        if (!services.canCheckOnOpen(record)) continue;
-                        String key = checkOnOpenKey(selected.preference());
-                        if (!checkedOnOpen.add(key)) continue;
-                        ChannelUpdateChecker.Result result = services.checkUpdates(record);
-                        if (services.isCheckBindingCurrent(record, result.preference())) {
-                            results.put(record.id(), new InstallationCheck(result, null));
-                        }
-                    } catch (InterruptedException error) {
-                        Thread.currentThread().interrupt();
-                        break;
-                    } catch (IOException | RuntimeException error) {
-                        results.put(record.id(),
-                                new InstallationCheck(null, errorDetail(error)));
-                    }
-                }
-                return Map.copyOf(results);
-            }
-
+        automaticChecksWorker = new AutomaticInstallationChecks(services, selectedRecords, checkedOnOpen) {
             @Override
             protected void done() {
                 if (automaticChecksWorker != this) return;
                 automaticChecksWorker = null;
-                if (isCancelled() || generation != homeGeneration || !isDisplayable()) return;
+                if (!AutomaticInstallationChecks.canApply(
+                        isCancelled(), generation, homeGeneration, isDisplayable())) return;
                 try {
                     installationChecks.putAll(get());
                 } catch (InterruptedException error) {
@@ -1510,8 +1472,7 @@ public final class LauncherFrame extends JFrame {
     }
 
     private static String checkOnOpenKey(ChannelPreference preference) {
-        return preference.installationId() + "|" + preference.registeredAt()
-                + "|" + preference.channel();
+        return AutomaticInstallationChecks.key(preference);
     }
 
     private JPopupMenu installationMenu(InstallationRecord record,
@@ -1647,10 +1608,7 @@ public final class LauncherFrame extends JFrame {
 
     private static boolean managedUpdatesAvailable(
             LauncherServices.InstallationStatus local) {
-        return hasOwnershipProvenance(local)
-                && local.previewEligibility().available()
-                && hasFixedChannel(local)
-                && !local.pendingUninstall();
+        return AutomaticInstallationChecks.available(local);
     }
 
     private static boolean hasFixedChannel(LauncherServices.InstallationStatus local) {
@@ -4503,14 +4461,6 @@ public final class LauncherFrame extends JFrame {
 
     private record HomeLoad(LauncherServices.HomeState state, Throwable error,
                             java.awt.image.BufferedImage artwork, Throwable artworkError) {
-    }
-
-    private record InstallationCheck(ChannelUpdateChecker.Result result, String error,
-                                     String channel) {
-        private InstallationCheck(ChannelUpdateChecker.Result result, String error) {
-            this(result, error, result == null || result.preference() == null
-                    ? null : result.preference().channel().toString());
-        }
     }
 
     private record CheckOnOpenSave(ChannelPreferenceStore.ReadResult authoritative,
