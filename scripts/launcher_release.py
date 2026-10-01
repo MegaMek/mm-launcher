@@ -1,6 +1,6 @@
 # Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Manual official launcher publication; no package installation or write retries."""
+"""Automatic patch versions for manual official releases; no write retries."""
 
 import argparse
 from dataclasses import dataclass
@@ -17,6 +17,7 @@ from urllib.parse import quote
 REPOSITORY = "MegaMek/mm-launcher"
 API = f"repos/{REPOSITORY}"
 VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
+VERSION_DECLARATION = re.compile(r'^version[ \t]*=[ \t]*"([^"\r\n]+)"[ \t]*\r?$', re.MULTILINE)
 MSI_LIMIT = 300 * 1024 * 1024
 PAGE_SIZE = 100
 MAX_PAGES = 10
@@ -39,21 +40,47 @@ def numeric_version(value):
     return parts
 
 
-def validate_source(version, root, environment):
+def source_version(root):
+    content = (root / "build.gradle.kts").read_bytes().decode("utf-8")
+    declarations = list(VERSION_DECLARATION.finditer(content))
+    if len(declarations) != 1:
+        raise ReleaseError("Expected exactly one version declaration in build.gradle.kts")
+    return content, declarations[0]
+
+
+def require_sha(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{40}", value):
+        raise ReleaseError("Expected an exact source commit or tree SHA")
+    return value
+
+
+def validate_source(version, root, environment, expected_commit=None):
     numeric_version(version)
     if environment.get("GITHUB_REPOSITORY") != REPOSITORY:
         raise ReleaseError(f"Publication is restricted to {REPOSITORY}")
     if environment.get("GITHUB_REF") != "refs/heads/main":
         raise ReleaseError("Publication must be dispatched from main")
-    commit = environment.get("GITHUB_SHA", "")
-    if not re.fullmatch(r"[0-9a-f]{40}", commit):
-        raise ReleaseError("Expected an exact source commit SHA")
-    declarations = re.findall(r'^version\s*=\s*"([^"\r\n]+)"\s*$',
-                              (root / "build.gradle.kts").read_text(encoding="utf-8"),
-                              re.MULTILINE)
-    if declarations != [version]:
+    dispatched = require_sha(environment.get("GITHUB_SHA"))
+    commit = dispatched if expected_commit is None else require_sha(expected_commit)
+    _, declaration = source_version(root)
+    if declaration.group(1) != version:
         raise ReleaseError("Requested version must exactly match build.gradle.kts")
     return commit
+
+
+def verify_checkout(root, commit):
+    require_sha(commit)
+    result = subprocess.run(["git", "-C", str(root), "rev-parse", "HEAD"],
+                            capture_output=True, text=True, check=False)
+    if result.returncode or result.stdout.strip() != commit:
+        raise ReleaseError(f"Checkout must match the exact prepared commit: {result.stderr.strip()}")
+
+
+def next_patch_version(value):
+    major, minor, patch = numeric_version(value)
+    candidate = f"{major}.{minor}.{patch + 1}"
+    numeric_version(candidate)
+    return candidate
 
 
 class GitHub:
@@ -103,6 +130,88 @@ def require_unused_version(github, version):
         if len(releases) < PAGE_SIZE:
             return
     raise ReleaseError("Release inventory pagination bound reached; refusing partial discovery")
+
+
+def verify_main(reference, commit):
+    target = reference.get("object") if isinstance(reference, dict) else None
+    if (not isinstance(reference, dict) or reference.get("ref") != "refs/heads/main"
+            or not isinstance(target, dict) or target.get("type") != "commit"
+            or target.get("sha") != commit):
+        raise ReleaseError("main changed since dispatch; inspect it and start a new release run")
+
+
+def prepare_patch(github, root, environment):
+    content, declaration = source_version(root)
+    current = declaration.group(1)
+    commit = validate_source(current, root, environment)
+    candidate = next_patch_version(current)
+    require_unused_version(github, candidate)
+    verify_main(github.request("GET", f"{API}/git/ref/heads/main"), commit)
+    updated = content[:declaration.start(1)] + candidate + content[declaration.end(1):]
+    return candidate, commit, content, updated
+
+
+def tree_entries(tree):
+    if (not isinstance(tree, dict) or tree.get("truncated") is not False
+            or not isinstance(tree.get("tree"), list)):
+        raise ReleaseError("Expected a complete Git tree")
+    require_sha(tree.get("sha"))
+    entries = {}
+    for entry in tree["tree"]:
+        if (not isinstance(entry, dict) or not isinstance(entry.get("path"), str)
+                or not entry["path"] or entry["path"] in entries
+                or not isinstance(entry.get("mode"), str)
+                or entry.get("type") not in ("blob", "tree", "commit")):
+            raise ReleaseError("Malformed or duplicated Git tree entry")
+        entries[entry["path"]] = (entry["mode"], entry["type"], require_sha(entry.get("sha")))
+    return entries
+
+
+def blob_sha(content):
+    data = content.encode("utf-8")
+    return hashlib.sha1(f"blob {len(data)}\0".encode("ascii") + data).hexdigest()
+
+
+def bump_patch(github, root, environment):
+    version, base, original, updated = prepare_patch(github, root, environment)
+    source = github.request("GET", f"{API}/git/commits/{base}")
+    if not isinstance(source, dict) or source.get("sha") != base or not isinstance(source.get("tree"), dict):
+        raise ReleaseError("Dispatched source commit identity changed")
+    base_tree = require_sha(source["tree"].get("sha"))
+    tree = github.request("GET", f"{API}/git/trees/{base_tree}")
+    entries = tree_entries(tree)
+    if tree["sha"] != base_tree or entries.get("build.gradle.kts") != ("100644", "blob", blob_sha(original)):
+        raise ReleaseError("Version source does not match the dispatched Git tree")
+
+    changed = github.request("POST", f"{API}/git/trees", {
+        "base_tree": base_tree,
+        "tree": [{"path": "build.gradle.kts", "mode": "100644", "type": "blob", "content": updated}],
+    })
+    if not isinstance(changed, dict):
+        raise ReleaseError("GitHub did not return the version-bump tree")
+    changed_sha = require_sha(changed.get("sha"))
+    verified = github.request("GET", f"{API}/git/trees/{changed_sha}")
+    expected = {**entries, "build.gradle.kts": ("100644", "blob", blob_sha(updated))}
+    if tree_entries(verified) != expected or verified["sha"] != changed_sha or changed_sha == base_tree:
+        raise ReleaseError("Version bump must change only the version file in the source tree")
+    commit = github.request("POST", f"{API}/git/commits", {
+        "message": (f"Bump launcher patch version to {version}\n\n"
+                    "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"),
+        "tree": changed_sha, "parents": [base],
+    })
+    if (not isinstance(commit, dict) or not isinstance(commit.get("tree"), dict)
+            or commit["tree"].get("sha") != changed_sha
+            or not isinstance(commit.get("parents"), list)
+            or len(commit["parents"]) != 1 or not isinstance(commit["parents"][0], dict)
+            or commit["parents"][0].get("sha") != base):
+        raise ReleaseError("Version bump commit must have the exact source tree and dispatched parent")
+    bumped = require_sha(commit.get("sha"))
+    if bumped == base:
+        raise ReleaseError("Version bump did not create a new commit")
+    reference = github.request("PATCH", f"{API}/git/refs/heads/main",
+                               {"sha": bumped, "force": False})
+    verify_main(reference, bumped)
+    return version, bumped
 
 
 @dataclass(frozen=True)
@@ -230,24 +339,34 @@ def publish(github, version, commit, assets):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "publish"))
-    parser.add_argument("--version", required=True)
+    parser.add_argument("command", choices=("prepare", "bump", "publish"))
+    parser.add_argument("--version")
     parser.add_argument("--commit")
     parser.add_argument("--assets", type=Path)
     args = parser.parse_args()
-    commit = validate_source(args.version, Path.cwd(), os.environ)
+    root = Path.cwd()
     github = GitHub()
-    if args.command == "prepare":
-        require_unused_version(github, args.version)
+    if args.command in ("prepare", "bump"):
+        if args.version is not None or args.commit is not None or args.assets is not None:
+            raise ReleaseError("Patch preparation and bumping derive their version from committed source")
         output = os.environ.get("GITHUB_OUTPUT")
         if not output:
             raise ReleaseError("GITHUB_OUTPUT is required for preparation")
+        dispatched = require_sha(os.environ.get("GITHUB_SHA"))
+        verify_checkout(root, dispatched)
+        if args.command == "prepare":
+            version, commit, _, _ = prepare_patch(github, root, os.environ)
+            print(f"Validated next patch {version} from {commit}; no remote writes performed")
+        else:
+            version, commit = bump_patch(github, root, os.environ)
+            print(f"Committed launcher {version} to main at {commit}; no release published yet")
         with Path(output).open("a", encoding="utf-8") as file:
-            file.write(f"version={args.version}\ncommit={commit}\n")
-        print(f"Validated launcher {args.version} at {commit}; no remote writes performed")
+            file.write(f"version={version}\ncommit={commit}\n")
     else:
-        if args.commit != commit or args.assets is None:
+        if args.version is None or args.commit is None or args.assets is None:
             raise ReleaseError("Publication requires the exact prepared commit and artifact directory")
+        commit = validate_source(args.version, root, os.environ, args.commit)
+        verify_checkout(root, commit)
         assets = validate_files(args.assets, args.version)
         publish(github, args.version, commit, assets)
 

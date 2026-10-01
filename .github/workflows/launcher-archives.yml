@@ -4,6 +4,12 @@ name: Launcher native installers
 
 on:
   workflow_call:
+    inputs:
+      source_commit:
+        description: "Exact source commit to build and test; defaults to the triggering commit"
+        required: false
+        type: string
+        default: ""
   workflow_dispatch:
   push:
     branches:
@@ -38,6 +44,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_commit || github.sha }}
       - name: Test launcher release tooling without network or publication
         run: python3 -B -m unittest discover -s scripts -p test_launcher_release.py
 
@@ -61,8 +69,12 @@ jobs:
             extensions: pkg
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
+    env:
+      SOURCE_COMMIT: ${{ inputs.source_commit || github.sha }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_commit || github.sha }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -94,17 +106,17 @@ jobs:
       - name: Build Windows installer (never install)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: .\gradlew.bat "-PbuildIdentifier=${{ github.sha }}" buildWindowsInstaller
+        run: .\gradlew.bat "-PbuildIdentifier=$env:SOURCE_COMMIT" buildWindowsInstaller
 
       - name: Build Linux installers (never install)
         if: runner.os == 'Linux'
         shell: bash
-        run: ./gradlew "-PbuildIdentifier=${{ github.sha }}" buildDebInstaller buildRpmInstaller
+        run: ./gradlew "-PbuildIdentifier=${SOURCE_COMMIT}" buildDebInstaller buildRpmInstaller
 
       - name: Build macOS installer (never install)
         if: runner.os == 'macOS'
         shell: bash
-        run: ./gradlew "-PbuildIdentifier=${{ github.sha }}" buildPkgInstaller
+        run: ./gradlew "-PbuildIdentifier=${SOURCE_COMMIT}" buildPkgInstaller
 
       - name: Verify exact installer/checksum pairs without installing
         shell: pwsh
@@ -226,12 +238,12 @@ jobs:
           $testTemp = Join-Path $env:GITHUB_WORKSPACE 'build\test-temp'
           New-Item -ItemType Directory -Force -Path $testTemp | Out-Null
           $env:JAVA_TOOL_OPTIONS = "-Djava.io.tmpdir=$testTemp"
-          .\gradlew.bat "-PbuildIdentifier=${{ github.sha }}" test
+          .\gradlew.bat "-PbuildIdentifier=$env:SOURCE_COMMIT" test
 
       - name: Test source on Linux with Xvfb
         if: runner.os == 'Linux'
         shell: bash
-        run: xvfb-run -a ./gradlew "-PbuildIdentifier=${{ github.sha }}" test
+        run: xvfb-run -a ./gradlew "-PbuildIdentifier=${SOURCE_COMMIT}" test
 
       - name: Test source on macOS
         if: runner.os == 'macOS'
@@ -239,7 +251,7 @@ jobs:
         run: |
           mkdir -p "${GITHUB_WORKSPACE}/build/test-temp"
           export JAVA_TOOL_OPTIONS="-Djava.io.tmpdir=${GITHUB_WORKSPACE}/build/test-temp"
-          ./gradlew "-PbuildIdentifier=${{ github.sha }}" test
+          ./gradlew "-PbuildIdentifier=${SOURCE_COMMIT}" test
 
       - name: Upload platform test reports
         if: always()

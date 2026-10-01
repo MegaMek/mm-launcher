@@ -120,7 +120,10 @@ class OtherCopyCheckSwingTest {
             assertNotNull(waitFor(() -> find(frame, "installationCards")));
 
             services.release.countDown();
-            Thread.sleep(150);
+            waitUntil(() -> {
+                JLabel status = find(frame, "installationStatus-" + services.opted.id());
+                return status != null && status.getText().contains("Update available");
+            });
             assertEquals(0, services.applies.get());
             assertEquals(1, services.calls.get());
         } finally {
@@ -139,11 +142,14 @@ class OtherCopyCheckSwingTest {
             try {
                 SwingUtilities.invokeAndWait(frame::showWindow);
                 assertTrue(services.started.await(5, TimeUnit.SECONDS));
-                Thread.sleep(100);
                 assertEquals(1, services.calls.get(),
                         "the second automatic check must wait for the first");
                 services.release.countDown();
-                waitUntil(() -> services.calls.get() == 2);
+                waitUntil(() -> {
+                    JButton button = find(frame, "manageInstallationsButton");
+                    return button != null && "Installations (2 updates)".equals(button.getText());
+                });
+                assertEquals(2, services.calls.get());
                 assertEquals(List.of(services.opted.id(), services.newMain.id()),
                         services.checkedIds);
             } finally {
@@ -245,8 +251,8 @@ class OtherCopyCheckSwingTest {
 
         @Override
         public ChannelUpdateChecker.Result checkUpdates(InstallationRecord expected) {
-            calls.incrementAndGet();
             checkedIds.add(expected.id());
+            calls.incrementAndGet();
             started.countDown();
             boolean waiting = true;
             while (waiting) {
@@ -307,22 +313,11 @@ class OtherCopyCheckSwingTest {
     }
 
     private static <T> T waitFor(java.util.function.Supplier<T> probe) throws Exception {
-        long deadline = System.nanoTime() + Duration.ofSeconds(8).toNanos();
-        while (System.nanoTime() < deadline) {
-            T value = onEdt(probe::get);
-            if (value != null) return value;
-            Thread.sleep(20);
-        }
-        throw new AssertionError("timed out waiting for Swing component");
+        return SwingTestSupport.await("other-copy presentation", probe::get);
     }
 
     private static void waitUntil(BooleanSupplier condition) throws Exception {
-        long deadline = System.nanoTime() + Duration.ofSeconds(8).toNanos();
-        while (System.nanoTime() < deadline) {
-            if (onEdt(condition::getAsBoolean)) return;
-            Thread.sleep(20);
-        }
-        throw new AssertionError("timed out waiting for Swing state");
+        SwingTestSupport.awaitCondition("other-copy state", condition::getAsBoolean);
     }
 
     @SuppressWarnings("unchecked")
@@ -338,23 +333,10 @@ class OtherCopyCheckSwingTest {
     }
 
     private static <T> T onEdt(java.util.concurrent.Callable<T> action) throws Exception {
-        if (SwingUtilities.isEventDispatchThread()) return action.call();
-        Object[] result = new Object[1];
-        SwingUtilities.invokeAndWait(() -> {
-            try {
-                result[0] = action.call();
-            } catch (Exception error) {
-                throw new RuntimeException(error);
-            }
-        });
-        @SuppressWarnings("unchecked") T cast = (T) result[0];
-        return cast;
+        return SwingTestSupport.onEdt(action);
     }
 
     private static void dispose(LauncherFrame frame) throws Exception {
-        SwingUtilities.invokeAndWait(() -> {
-            for (java.awt.Window window : frame.getOwnedWindows()) window.dispose();
-            frame.dispose();
-        });
+        SwingTestSupport.dispose(frame);
     }
 }

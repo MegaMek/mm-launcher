@@ -73,7 +73,6 @@ import javax.swing.JTextArea;
 import javax.swing.SwingUtilities;
 import java.awt.Component;
 import java.awt.Container;
-import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.WindowEvent;
@@ -123,8 +122,8 @@ class UpdateApplySwingTest {
                     Path.of(fixture.first.canonicalRoot()).resolve("docs/change.txt");
             Files.writeString(preservedDocument, "local customization");
 
-            SwingUtilities.invokeLater(update::doClick);
-            JDialog firstConsent = waitForDialog("Update application");
+            SwingTestSupport.startClick(frame, "applyUpdateButton");
+            JDialog firstConsent = waitForDialog(frame, "Update application");
             assertTrue(firstConsent instanceof RecommendedUpdateConsentDialog);
             assertEquals("recommendedUpdateConsentDialog", firstConsent.getName());
             assertEquals(FirstLaunchPanel.BACKGROUND,
@@ -166,18 +165,18 @@ class UpdateApplySwingTest {
             assertEquals(0, fixture.services.network.binaryRequests);
 
             fixture.services.blockNextApply();
-            SwingUtilities.invokeLater(update::doClick);
-            JDialog acceptedConsent = waitForDialog("Update application");
+            Component cardsBeforeUpdate = onEdt(() -> find(frame, "installationCards"));
+            SwingTestSupport.startClick(frame, "applyUpdateButton");
+            JDialog acceptedConsent = waitForDialog(frame, "Update application");
             click(acceptedConsent, "Update");
             assertTrue(fixture.services.applyStarted.await(5, TimeUnit.SECONDS),
                     "acceptance must proceed automatically from preparation into Apply");
-            assertNull(showingDialog("Authorize update Apply"));
+            assertNull(showingDialog(frame, "Authorize update Apply"));
             fixture.services.selectNewPreference();
             fixture.services.releaseApply.countDown();
-            waitUntil(() -> fixture.services.loadHomeCalls >= 2);
-            waitFor(() -> find(frame, "installationCards"));
-            assertNull(showingDialog("Update complete"));
-            assertNull(showingProgressDialog());
+            waitForReloadedCards(frame, cardsBeforeUpdate);
+            assertNull(showingDialog(frame, "Update complete"));
+            assertNull(showingProgressDialog(frame));
 
             assertEquals(1, fixture.services.previewCalls);
             assertEquals(1, fixture.services.applyCalls);
@@ -216,16 +215,17 @@ class UpdateApplySwingTest {
             SwingUtilities.invokeAndWait(frame::showWindow);
             navigateToInstallations(frame);
             JButton recommended = checkAndWaitForUpdate(frame);
+            Component cardsBeforeUpdate = onEdt(() -> find(frame, "installationCards"));
 
-            SwingUtilities.invokeLater(recommended::doClick);
-            JDialog firstConsent = waitForDialog("Update application");
+            SwingTestSupport.startClick(frame, "applyUpdateButton");
+            JDialog firstConsent = waitForDialog(frame, "Update application");
             cancelWithEscape(firstConsent);
             waitUntil(() -> !firstConsent.isDisplayable());
             assertEquals(0, fixture.services.network.binaryRequests,
                     "Escape before preparation must fetch no package body");
 
-            SwingUtilities.invokeLater(recommended::doClick);
-            JDialog closedConsent = waitForDialog("Update application");
+            SwingTestSupport.startClick(frame, "applyUpdateButton");
+            JDialog closedConsent = waitForDialog(frame, "Update application");
             SwingUtilities.invokeAndWait(() -> closedConsent.dispatchEvent(
                     new WindowEvent(closedConsent, WindowEvent.WINDOW_CLOSING)));
             waitUntil(() -> !closedConsent.isDisplayable());
@@ -233,14 +233,13 @@ class UpdateApplySwingTest {
                     "window close before preparation must fetch no package body");
             assertEquals(0, fixture.services.previewCalls);
 
-            SwingUtilities.invokeLater(recommended::doClick);
-            click(waitForDialog("Update application"), "Update");
+            SwingTestSupport.startClick(frame, "applyUpdateButton");
+            click(waitForDialog(frame, "Update application"), "Update");
             waitUntil(() -> fixture.services.applyCalls == 1);
-            waitUntil(() -> fixture.services.loadHomeCalls >= 2);
-            waitFor(() -> find(frame, "installationCards"));
-            assertNull(showingDialog("Authorize update Apply"));
-            assertNull(showingDialog("Update complete"));
-            assertNull(showingProgressDialog());
+            waitForReloadedCards(frame, cardsBeforeUpdate);
+            assertNull(showingDialog(frame, "Authorize update Apply"));
+            assertNull(showingDialog(frame, "Update complete"));
+            assertNull(showingProgressDialog(frame));
 
             assertEquals(1, fixture.services.network.binaryRequests);
             assertEquals(fixture.services.archive.length,
@@ -270,8 +269,8 @@ class UpdateApplySwingTest {
             SwingUtilities.invokeAndWait(frame::showWindow);
             navigateToInstallations(frame);
             JButton update = checkAndWaitForUpdate(frame);
-            SwingUtilities.invokeLater(update::doClick);
-            click(waitForDialog("Update application"), "Update");
+            SwingTestSupport.startClick(frame, "applyUpdateButton");
+            click(waitForDialog(frame, "Update application"), "Update");
             assertTrue(fixture.services.network.binaryStarted.await(5, TimeUnit.SECONDS));
 
             SwingUtilities.invokeAndWait(frame::dispose);
@@ -327,11 +326,11 @@ class UpdateApplySwingTest {
             SwingUtilities.invokeAndWait(frame::showWindow);
             navigateToInstallations(frame);
             JButton recommended = checkAndWaitForUpdate(frame);
-            SwingUtilities.invokeLater(recommended::doClick);
-            click(waitForDialog("Update application"), "Update");
+            SwingTestSupport.startClick(frame, "applyUpdateButton");
+            click(waitForDialog(frame, "Update application"), "Update");
             assertTrue(fixture.services.applyStarted.await(5, TimeUnit.SECONDS),
                     "test hook must pause after preparation and before backend revalidation");
-            assertNull(showingDialog("Authorize update Apply"));
+            assertNull(showingDialog(frame, "Authorize update Apply"));
 
             ChannelPreferenceStore channels = new ChannelPreferenceStore();
             RegistryData data = new RegistryStore().read(fixture.services.registry());
@@ -340,7 +339,7 @@ class UpdateApplySwingTest {
             channels.setCheckOnOpen(
                     fixture.services.registry(), fixture.first, selected, true);
             fixture.services.releaseApply.countDown();
-            JDialog failed = waitForDialog("Update failed — recovery may be required");
+            JDialog failed = waitForDialog(frame, "Update failed — recovery may be required");
             assertTrue(componentText(failed).contains("channel source")
                     || componentText(failed).contains("Channel check failed"));
             assertEquals(1, fixture.services.network.binaryRequests);
@@ -392,25 +391,25 @@ class UpdateApplySwingTest {
             SwingUtilities.invokeAndWait(frame::showWindow);
             navigateToInstallations(frame);
             JButton update = checkAndWaitForUpdate(frame);
-            SwingUtilities.invokeLater(update::doClick);
-            click(waitForDialog("Update application"), "Update");
+            Component cardsBeforeUpdate = onEdt(() -> find(frame, "installationCards"));
+            SwingTestSupport.startClick(frame, "applyUpdateButton");
+            click(waitForDialog(frame, "Update application"), "Update");
             waitUntil(() -> fixture.services.applyCalls == 1);
 
             // The Apply count precedes package cleanup. Wait for the failure
             // surface itself, not an unrelated home reload or a worker milestone.
             JDialog failed = waitFor(() -> {
-                for (Window window : Window.getWindows()) {
-                    if (window instanceof OperationProgressDialog dialog
-                            && dialog.isShowing()) {
-                        JButton close = find(dialog, "operationCancelButton");
-                        if (close != null && "Close".equals(close.getText())) return dialog;
-                    }
+                OperationProgressDialog dialog = SwingTestSupport.showingWindow(
+                        frame, OperationProgressDialog.class);
+                if (dialog != null) {
+                    JButton close = find(dialog, "operationCancelButton");
+                    if (close != null && "Close".equals(close.getText())) return dialog;
                 }
                 return null;
             }, Duration.ofSeconds(60));
             assertEquals("Update failed — recovery may be required", failed.getTitle());
             assertNotNull(find(failed, "operationViewDetailsButton"));
-            waitUntil(() -> fixture.services.loadHomeCalls >= 2);
+            waitForReloadedCards(frame, cardsBeforeUpdate);
             assertNull(find(frame, "recoverUpdateButton"),
                     "a failure before mutation must not invent a pending recovery");
         } finally {
@@ -429,10 +428,11 @@ class UpdateApplySwingTest {
             SwingUtilities.invokeAndWait(frame::showWindow);
             navigateToInstallations(frame);
             JButton update = checkAndWaitForUpdate(frame);
-            SwingUtilities.invokeLater(update::doClick);
-            click(waitForDialog("Update application"), "Update");
+            Component cardsBeforeUpdate = onEdt(() -> find(frame, "installationCards"));
+            SwingTestSupport.startClick(frame, "applyUpdateButton");
+            click(waitForDialog(frame, "Update application"), "Update");
 
-            JDialog warning = waitForDialog("Update complete — cleanup warning");
+            JDialog warning = waitForDialog(frame, "Update complete — cleanup warning");
             assertTrue(warning instanceof OperationProgressDialog);
             assertEquals(OperationProgressDialog.BACKGROUND,
                     warning.getContentPane().getBackground());
@@ -448,8 +448,8 @@ class UpdateApplySwingTest {
             assertTrue(close.isVisible());
             assertEquals("View logs", logs.getText());
             assertTrue(logs.isVisible());
-            assertNull(showingDialog("Update complete"));
-            waitUntil(() -> fixture.services.loadHomeCalls >= 2);
+            assertNull(showingDialog(frame, "Update complete"));
+            waitForReloadedCards(frame, cardsBeforeUpdate);
             assertNotNull(find(frame, "installationCards"));
             click(warning, "Close");
         } finally {
@@ -492,9 +492,16 @@ class UpdateApplySwingTest {
         return new Fixture(services, first, second, firstCurrent);
     }
 
+    private static void waitForReloadedCards(LauncherFrame frame, Component previous)
+            throws Exception {
+        SwingTestSupport.await("refreshed installation cards", () -> {
+            Component cards = find(frame, "installationCards");
+            return cards != null && cards != previous && cards.isShowing() ? cards : null;
+        });
+    }
+
     private static void navigateToInstallations(LauncherFrame frame) throws Exception {
-        JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
-        SwingUtilities.invokeAndWait(installations::doClick);
+        SwingTestSupport.click(frame, "manageInstallationsButton");
         waitFor(() -> find(frame, "installationCards"));
     }
 
@@ -510,15 +517,12 @@ class UpdateApplySwingTest {
                     error);
         }
         if ("applyUpdateButton".equals(action.getName())) return action;
-        JButton check = action;
-        SwingUtilities.invokeAndWait(check::doClick);
+        SwingTestSupport.click(frame, "checkUpdatesButton");
         return waitFor(() -> find(frame, "applyUpdateButton"));
     }
 
     private static void click(Container dialog, String text) throws Exception {
-        JButton button = findButtonText(dialog, text);
-        assertNotNull(button, "missing dialog button " + text);
-        SwingUtilities.invokeAndWait(button::doClick);
+        SwingTestSupport.startClickText(dialog, text);
     }
 
     private static void cancelWithEscape(JDialog dialog) throws Exception {
@@ -533,53 +537,16 @@ class UpdateApplySwingTest {
         });
     }
 
-    private static JDialog waitForDialog(String title) throws Exception {
-        try {
-            return waitFor(() -> {
-                for (Window window : Window.getWindows()) {
-                    if (window instanceof JDialog dialog && dialog.isShowing()
-                            && title.equals(dialog.getTitle())) {
-                        return dialog;
-                    }
-                }
-                return null;
-            });
-        } catch (AssertionError timeout) {
-            String visible = onEdt(() -> java.util.Arrays.stream(Window.getWindows())
-                    .filter(Window::isShowing).filter(JDialog.class::isInstance)
-                    .map(JDialog.class::cast).map(JDialog::getTitle)
-                    .toList().toString());
-            String workers = Thread.getAllStackTraces().entrySet().stream()
-                    .filter(entry -> entry.getKey().getName().contains("SwingWorker"))
-                    .map(entry -> entry.getKey().getName() + ": "
-                            + java.util.Arrays.toString(entry.getValue()))
-                    .collect(java.util.stream.Collectors.joining("\n"));
-            throw new AssertionError("timed out waiting for dialog " + title
-                    + "; showing dialogs: " + visible + "; workers: " + workers, timeout);
-        }
+    private static JDialog waitForDialog(LauncherFrame frame, String title) throws Exception {
+        return SwingTestSupport.dialog(frame, title);
     }
 
-    private static JDialog showingDialog(String title) throws Exception {
-        return onEdt(() -> {
-            for (Window window : Window.getWindows()) {
-                if (window instanceof JDialog dialog && dialog.isShowing()
-                        && title.equals(dialog.getTitle())) {
-                    return dialog;
-                }
-            }
-            return null;
-        });
+    private static JDialog showingDialog(LauncherFrame frame, String title) throws Exception {
+        return onEdt(() -> SwingTestSupport.showingDialog(frame, title));
     }
 
-    private static JDialog showingProgressDialog() throws Exception {
-        return onEdt(() -> {
-            for (Window window : Window.getWindows()) {
-                if (window instanceof OperationProgressDialog dialog && dialog.isShowing()) {
-                    return dialog;
-                }
-            }
-            return null;
-        });
+    private static JDialog showingProgressDialog(LauncherFrame frame) throws Exception {
+        return onEdt(() -> SwingTestSupport.showingWindow(frame, OperationProgressDialog.class));
     }
 
     private static <T> T waitFor(java.util.function.Supplier<T> probe) throws Exception {
@@ -588,25 +555,11 @@ class UpdateApplySwingTest {
 
     private static <T> T waitFor(java.util.function.Supplier<T> probe, Duration timeout)
             throws Exception {
-        long deadline = System.nanoTime() + timeout.toNanos();
-        while (System.nanoTime() < deadline) {
-            AtomicReference<T> value = new AtomicReference<>();
-            SwingUtilities.invokeAndWait(() -> value.set(probe.get()));
-            if (value.get() != null) return value.get();
-            Thread.sleep(20);
-        }
-        throw new AssertionError("timed out waiting for Swing component");
+        return SwingTestSupport.await("update presentation", probe::get, timeout);
     }
 
     private static void waitUntil(BooleanSupplier condition) throws Exception {
-        long deadline = System.nanoTime() + Duration.ofSeconds(8).toNanos();
-        while (System.nanoTime() < deadline) {
-            boolean[] result = new boolean[1];
-            SwingUtilities.invokeAndWait(() -> result[0] = condition.getAsBoolean());
-            if (result[0]) return;
-            Thread.sleep(20);
-        }
-        throw new AssertionError("timed out waiting for Swing state");
+        SwingTestSupport.awaitCondition("update state", condition::getAsBoolean);
     }
 
     @SuppressWarnings("unchecked")
@@ -647,29 +600,11 @@ class UpdateApplySwingTest {
     }
 
     private static <T> T onEdt(ThrowingSupplier<T> supplier) throws Exception {
-        AtomicReference<T> value = new AtomicReference<>();
-        AtomicReference<Throwable> failure = new AtomicReference<>();
-        SwingUtilities.invokeAndWait(() -> {
-            try {
-                value.set(supplier.get());
-            } catch (Throwable error) {
-                failure.set(error);
-            }
-        });
-        if (failure.get() != null) throw new RuntimeException(failure.get());
-        return value.get();
+        return SwingTestSupport.onEdt(supplier::get);
     }
 
     private static void dispose(LauncherFrame frame) throws Exception {
-        SwingUtilities.invokeAndWait(() -> {
-            for (Window window : Window.getWindows()) {
-                if (window == frame || window.getOwner() == frame
-                        || window.getOwner() instanceof JDialog) {
-                    window.dispose();
-                }
-            }
-            frame.dispose();
-        });
+        SwingTestSupport.dispose(frame);
     }
 
     private static Path createSuite(Path root, int version, String document) throws Exception {
@@ -753,7 +688,6 @@ class UpdateApplySwingTest {
         private final CurrentUpdateState secondCurrent;
         private final boolean unavailableInspection;
         private volatile InstallationRecord preferred;
-        private volatile int loadHomeCalls;
         private volatile int previewCalls;
         private volatile int applyCalls;
         private volatile boolean failApply;
@@ -805,7 +739,6 @@ class UpdateApplySwingTest {
 
         @Override
         public HomeState loadHome() throws IOException {
-            loadHomeCalls++;
             InstallationRecord record = preferred;
             OwnershipReceipt receipt = record.equals(first) ? firstReceipt : secondReceipt;
             CurrentUpdateState current = record.equals(first) ? firstCurrent : secondCurrent;

@@ -104,12 +104,7 @@ class UpdatePreviewConsentMaterialTest {
             assertEquals(0, fixture.services.previewCalls,
                     "the GUI must not expose standalone preview");
         } finally {
-            SwingUtilities.invokeAndWait(() -> {
-                for (Window window : Window.getWindows()) {
-                    if (window == frame || window.getOwner() == frame) window.dispose();
-                }
-                frame.dispose();
-            });
+            SwingTestSupport.dispose(frame);
         }
     }
 
@@ -160,65 +155,24 @@ class UpdatePreviewConsentMaterialTest {
     }
 
     private static <T> T onEdt(ThrowingSupplier<T> supplier) throws Exception {
-        AtomicReference<T> value = new AtomicReference<>();
-        AtomicReference<Throwable> failure = new AtomicReference<>();
-        SwingUtilities.invokeAndWait(() -> {
-            try {
-                value.set(supplier.get());
-            } catch (Throwable error) {
-                failure.set(error);
-            }
-        });
-        if (failure.get() != null) throw new RuntimeException(failure.get());
-        return value.get();
+        return SwingTestSupport.onEdt(supplier::get);
     }
 
     private static JDialog waitForDialog(Window owner, String title) throws Exception {
-        return waitFor(() -> {
-            for (Window window : Window.getWindows()) {
-                if (window instanceof JDialog dialog && dialog.isShowing()
-                        && title.equals(dialog.getTitle())
-                        && (dialog.getOwner() == owner || owner == null
-                        || dialog.getOwner() instanceof JDialog)) {
-                    return dialog;
-                }
-            }
-            return null;
-        });
+        return SwingTestSupport.dialog(owner, title);
     }
 
     private static <T> T waitFor(java.util.function.Supplier<T> probe) throws Exception {
-        long deadline = System.nanoTime() + Duration.ofSeconds(8).toNanos();
-        while (System.nanoTime() < deadline) {
-            AtomicReference<T> value = new AtomicReference<>();
-            SwingUtilities.invokeAndWait(() -> value.set(probe.get()));
-            if (value.get() != null) return value.get();
-            Thread.sleep(20);
-        }
-        throw new AssertionError("timed out waiting for Swing component");
+        return SwingTestSupport.await("consent presentation", probe::get);
     }
 
     private static void waitUntil(BooleanSupplier condition) throws Exception {
-        long deadline = System.nanoTime() + Duration.ofSeconds(8).toNanos();
-        while (System.nanoTime() < deadline) {
-            boolean[] result = new boolean[1];
-            SwingUtilities.invokeAndWait(() -> result[0] = condition.getAsBoolean());
-            if (result[0]) return;
-            Thread.sleep(20);
-        }
-        throw new AssertionError("timed out waiting for Swing state");
+        SwingTestSupport.awaitCondition("consent state", condition::getAsBoolean);
     }
 
     private static JPopupMenu openInstallationMenu(Container root, String recordId)
             throws Exception {
-        JButton button = waitFor(() -> find(root, "installationMenuButton-" + recordId));
-        SwingUtilities.invokeAndWait(button::doClick);
-        return waitFor(() -> {
-            for (var element : MenuSelectionManager.defaultManager().getSelectedPath()) {
-                if (element instanceof JPopupMenu menu) return menu;
-            }
-            return null;
-        });
+        return SwingTestSupport.installationMenu(root, recordId);
     }
 
     private static JMenuItem findMenuItem(JPopupMenu menu, String text) {

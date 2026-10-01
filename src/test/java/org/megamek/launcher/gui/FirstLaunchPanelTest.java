@@ -301,10 +301,13 @@ class FirstLaunchPanelTest {
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         Path registry = temp.resolve("registry.json");
+        CountDownLatch metadataStarted = new CountDownLatch(1);
+        CountDownLatch releaseMetadata = new CountDownLatch(1);
         LauncherServices services = new LauncherServices(registry) {
             @Override public org.megamek.launcher.channel.QuickInstallSnapshot
                     quickInstallSnapshot() throws InterruptedException {
-                Thread.sleep(150);
+                metadataStarted.countDown();
+                releaseMetadata.await();
                 return QuickInstallTestData.snapshot("0.51.0", "0.52.0");
             }
         };
@@ -312,6 +315,8 @@ class FirstLaunchPanelTest {
         try {
             onEdt(() -> { frame.showWindow(); return null; });
             waitFor(() -> findComponent(frame, "firstLaunchPanel") != null);
+            assertTrue(metadataStarted.await(5, TimeUnit.SECONDS));
+            releaseMetadata.countDown();
             waitFor(() -> "Install latest MekHQ Milestone (0.51.0)".equals(
                     find(frame, "downloadAndInstallButton").getText()));
             assertNull(onEdt(() -> findComponent(frame, "releaseChannelLabel")));
@@ -385,6 +390,7 @@ class FirstLaunchPanelTest {
             JLabel status = (JLabel) onEdt(() -> findComponent(frame, "homeStatusLabel"));
             assertNull(status, "managed Home uses the single homeInformationMessage instead");
         } finally {
+            releaseMetadata.countDown();
             onEdt(() -> {
                 for (var window : frame.getOwnedWindows()) window.dispose();
                 frame.dispose();
@@ -623,7 +629,6 @@ class FirstLaunchPanelTest {
             holdFirst.countDown();
             waitFor(() -> "Install latest MekHQ Milestone (1.0.0)".equals(
                     find(frame, "downloadAndInstallButton").getText()));
-            Thread.sleep(100);
             assertEquals("Install latest MekHQ Milestone (1.0.0)", onEdt(() ->
                     find(frame, "downloadAndInstallButton").getText()));
             assertEquals(1, requests.get());
@@ -780,27 +785,10 @@ class FirstLaunchPanelTest {
     }
 
     private static void waitFor(Callable<Boolean> condition) throws Exception {
-        for (int attempt = 0; attempt < 100; attempt++) {
-            if (onEdt(condition)) return;
-            Thread.sleep(30);
-        }
-        throw new AssertionError("Timed out waiting for home presentation");
+        SwingTestSupport.awaitCondition("home presentation", condition);
     }
 
     private static <T> T onEdt(Callable<T> operation) throws Exception {
-        java.util.concurrent.atomic.AtomicReference<T> result = new java.util.concurrent.atomic.AtomicReference<>();
-        java.util.concurrent.atomic.AtomicReference<Throwable> failure = new java.util.concurrent.atomic.AtomicReference<>();
-        SwingUtilities.invokeAndWait(() -> {
-            try {
-                result.set(operation.call());
-            } catch (Throwable error) {
-                failure.set(error);
-            }
-        });
-        if (failure.get() != null) {
-            if (failure.get() instanceof Error error) throw error;
-            throw new Exception(failure.get());
-        }
-        return result.get();
+        return SwingTestSupport.onEdt(operation);
     }
 }

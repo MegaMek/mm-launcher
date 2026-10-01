@@ -4,11 +4,6 @@ name: Publish launcher release
 
 on:
   workflow_dispatch:
-    inputs:
-      version:
-        description: "Launcher version already committed on main (for example 0.14.5)"
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -22,24 +17,39 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
-      version: ${{ steps.prepare.outputs.version }}
-      commit: ${{ steps.prepare.outputs.commit }}
+      version: ${{ steps.bump.outputs.version }}
+      commit: ${{ steps.bump.outputs.commit }}
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Validate official main source and unused release version
-        id: prepare
+      - name: Validate official main source and next unused patch version
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ inputs.version }}
-        run: python3 -B scripts/launcher_release.py prepare --version "$RELEASE_VERSION"
+        run: python3 -B scripts/launcher_release.py prepare
+      - name: Create repository-scoped release bot token
+        id: release-bot
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.LAUNCHER_RELEASE_APP_ID }}
+          private-key: ${{ secrets.LAUNCHER_RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: mm-launcher
+          permission-contents: write
+      - name: Commit next patch version to protected main
+        id: bump
+        env:
+          GH_TOKEN: ${{ steps.release-bot.outputs.token }}
+        run: python3 -B scripts/launcher_release.py bump
 
   installers:
     needs: prepare
     permissions:
       contents: read
     uses: ./.github/workflows/launcher-archives.yml
+    with:
+      source_commit: ${{ needs.prepare.outputs.commit }}
 
   publish:
     needs: [prepare, installers]
@@ -50,6 +60,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.prepare.outputs.commit }}
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:

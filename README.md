@@ -64,13 +64,16 @@ not the `%LOCALAPPDATA%` launcher registry, logs or installed games.
 ### Publishing a launcher release
 
 The manually dispatched `Publish launcher release` workflow is independent of the game-suite
-coordinator. Select **main** and enter the numeric launcher version already committed in
-`build.gradle.kts`, for example `0.14.5`. It refuses forks, other branches, existing tags/releases
-(including drafts), version mismatches, and a version not newer than every published stable
-launcher release. It never runs automatically on pushes or pull requests.
+coordinator. Select **main** and click **Run workflow**, with no version field. It increments the
+committed patch version (for example `0.14.5` to `0.14.6`), commits only that version change to
+`main` using a dedicated release bot, and captures the new commit. It refuses forks, other
+branches, stale dispatches, existing candidate tags/releases (including drafts), and a version
+not newer than every published stable launcher release. It never runs automatically on pushes
+or pull requests. Major/minor version changes remain explicit source changes.
 
-The workflow calls the ordinary native-installer CI and waits for all four platforms' builds,
-package inspections, source tests, and release tooling tests to pass. Only then does one write-enabled
+The workflow calls the ordinary native-installer CI at the captured version-bump commit and
+waits for all four platforms' builds, package inspections, source tests, and release tooling
+tests to pass. Only then does one write-enabled
 job download this run's five installers and five checksum files, check the exact filenames and
 hashes, create `v<version>` at the tested commit, and upload the complete asset set. GitHub must
 report the expected uploaded asset IDs, sizes, URLs, and SHA-256 digests, including the digest used
@@ -82,9 +85,15 @@ become the update target; it is cleared automatically only after verification. T
 verifies the official latest-stable endpoint. Installers remain unsigned and macOS packages are
 not notarized.
 
+The release bot needs one-time installation, repository-scoped Contents write permission, an
+explicit protected-main ruleset bypass, the `LAUNCHER_RELEASE_APP_ID` Actions variable, and
+the `LAUNCHER_RELEASE_APP_PRIVATE_KEY` Actions secret. Its token is revoked when preparation
+ends and is not passed to builds or publication. See
+[release bot setup](docs/archive-distribution-contract.md#release-bot-setup).
+
 Writes are not automatically retried, existing assets/tags are never overwritten, and failure
-does not automatically delete a tag, draft, or published release. Inspect any partial state before
-another attempt; a published release cannot be made unpublished by a failed post-publication
+does not automatically undo a version-bump commit or delete a tag, draft, or published release.
+Inspect any partial state before another attempt; a published release cannot be made unpublished by a failed post-publication
 check. Full Windows self-update still requires an older installed MSI and a newer published
 version. Publishing the same version as the installed launcher does not trigger an upgrade.
 See [the distribution contract](docs/archive-distribution-contract.md) for validation commands.
@@ -295,6 +304,26 @@ Set-Location C:\repos\megamek\mm-launcher
 if ($LASTEXITCODE -ne 0) { throw "Build failed with exit code $LASTEXITCODE." }
 .\build\install\mm-launcher\bin\mm-launcher.bat gui
 ```
+
+GUI tests use the package-local `SwingTestSupport` harness. Probe Swing state on the EDT,
+wait for the actual rendered result rather than service-entry counters or fixed sleeps,
+and reacquire controls after a render. Assertions and component counts also belong on
+the EDT: finding a component does not make a later off-EDT tree read safe. The shared
+counting helpers traverse the entire tree in one EDT turn.
+`click` looks up a showing, enabled control and
+clicks it in the same EDT turn. Use `startClick` or `startClickText` for actions that can
+open a synchronous modal dialog, then await the owned dialog and dismiss it; a synchronous
+click cannot finish while its modal dialog is open. Asynchronous listener failures are
+reported to the test, and waits have bounded, named timeout failures. Installation menus
+must belong to the exact clicked invoker; dialog lookup and recursive teardown must stay
+within the tested window's ownership tree.
+
+`SwingTestSupportTest` exercises hidden/disabled and replaced controls, modal interaction,
+exception propagation, timeout diagnostics, and unrelated-window isolation. The existing
+GUI classes use the same harness. They require a display (Xvfb on Linux); a headless skip
+is not GUI qualification. Two package-local testability hooks expose metadata-worker
+completion and let progress tests explicitly flush pending rendering, without changing
+the production worker or timer behavior.
 
 Review Home, Installations, Settings, the split **Install latest MekHQ Milestone** control,
 **Use existing installation**, **Install another version**, Update, recovery, Game Java
