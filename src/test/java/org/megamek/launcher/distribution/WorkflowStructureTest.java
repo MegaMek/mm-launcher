@@ -79,8 +79,18 @@ class WorkflowStructureTest {
         assertEquals(List.of("actions/checkout@v4"), actions(tooling));
         assertEquals("${{ inputs.source_commit || github.sha }}",
                 tooling.path("steps").get(0).path("with").path("ref").asText());
+        assertEquals("read", tooling.path("permissions").path("contents").asText());
+        assertEquals("read", tooling.path("permissions").path("actions").asText());
+        assertEquals("${{ steps.ci-plan.outputs.build_installers }}",
+                tooling.path("outputs").path("build_installers").asText());
         assertTrue(step(tooling, "Test launcher release tooling without network or publication")
                 .path("run").asText().contains("unittest discover -s scripts -p test_launcher_release.py"));
+        JsonNode plan = step(tooling,
+                "Determine whether this exact release candidate already passed installer CI");
+        assertEquals("ci-plan", plan.path("id").asText());
+        assertEquals("${{ github.token }}", plan.path("env").path("GH_TOKEN").asText());
+        assertEquals("${{ inputs.source_commit }}", plan.path("env").path("CI_SOURCE_COMMIT").asText());
+        assertEquals("python3 -B scripts/launcher_release.py ci-plan", plan.path("run").asText());
         for (String event : List.of("push", "pull_request")) {
             String paths = root.path("on").path(event).path("paths").toString();
             assertTrue(paths.contains("scripts/**"));
@@ -88,6 +98,8 @@ class WorkflowStructureTest {
             assertTrue(paths.contains(".github/workflows/launcher-gui-smoke.yml"));
         }
         JsonNode installers = jobs.path("installers");
+        assertEquals("release-tooling", installers.path("needs").asText());
+        assertEquals("needs.release-tooling.outputs.build_installers == 'true'", installers.path("if").asText());
         assertEquals("${{ inputs.source_commit || github.sha }}",
                 installers.path("steps").get(0).path("with").path("ref").asText());
         assertEquals("${{ inputs.source_commit || github.sha }}",
@@ -238,6 +250,8 @@ class WorkflowStructureTest {
         assertEquals("prepare", installers.path("needs").asText());
         assertEquals("./.github/workflows/launcher-archives.yml", installers.path("uses").asText());
         assertEquals("read", installers.path("permissions").path("contents").asText());
+        assertEquals("read", installers.path("permissions").path("actions").asText(),
+                "the reusable tooling job needs read-only release-run provenance access");
         assertEquals("${{ needs.prepare.outputs.commit }}",
                 installers.path("with").path("source_commit").asText());
         assertFalse(installers.has("secrets"), "installer jobs must not receive publisher secrets");

@@ -1,6 +1,6 @@
 # Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Automatic patch versions for manual official releases; no write retries."""
+"""Official launcher releases and read-only CI reuse checks; no write retries."""
 
 import argparse
 import base64
@@ -22,6 +22,7 @@ VERSION_DECLARATION = re.compile(r'^version[ \t]*=[ \t]*"([^"\r\n]+)"[ \t]*\r?$'
 MSI_LIMIT = 300 * 1024 * 1024
 PAGE_SIZE = 100
 MAX_PAGES = 10
+RELEASE_RUN = re.compile(r"^Launcher-Release-Run: ([1-9][0-9]{0,19})$", re.MULTILINE)
 INSTALLERS = (
     "windows-x64.msi", "linux-x64.deb", "linux-x64.rpm",
     "macos-intel.pkg", "macos-apple-silicon.pkg",
@@ -200,6 +201,7 @@ def prepare_candidate(github, root, environment):
         raise ReleaseError("Version bump must change only the version file in the source tree")
     commit = github.request("POST", f"{API}/git/commits", {
         "message": (f"Prepare launcher release candidate {version}\n\n"
+                    f"Launcher-Release-Run: {run}\n"
                     "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"),
         "tree": changed_sha, "parents": [base],
     })
@@ -389,6 +391,107 @@ def verify_tag(reference, version, commit):
         raise ReleaseError("Release tag does not bind the exact tested source commit")
 
 
+def verified_release_push(github, root, environment):
+    if (environment.get("GITHUB_EVENT_NAME") != "push"
+            or environment.get("GITHUB_REPOSITORY") != REPOSITORY
+            or environment.get("GITHUB_REF") != "refs/heads/main"
+            or environment.get("CI_SOURCE_COMMIT")):
+        return False, "PRs, manual runs, forks and reusable release builds always build installers."
+    commit = require_sha(environment.get("GITHUB_SHA"))
+    verify_checkout(root, commit)
+    candidate = github.request("GET", f"{API}/git/commits/{commit}")
+    if (not isinstance(candidate, dict) or candidate.get("sha") != commit
+            or not isinstance(candidate.get("message"), str)):
+        raise ReleaseError("Cannot inspect the exact pushed commit")
+    runs = RELEASE_RUN.findall(candidate["message"])
+    if len(runs) != 1:
+        return False, "Ordinary main change; no unique release-run provenance."
+    _, declaration = source_version(root)
+    version = declaration.group(1)
+    numeric_version(version)
+    published = github.request("GET", f"{API}/releases/tags/v{version}", missing_ok=True)
+    if published is None:
+        return False, "Candidate has not been published; installers must be built."
+    if (not isinstance(published, dict) or not isinstance(published.get("draft"), bool)
+            or not isinstance(published.get("prerelease"), bool)):
+        raise ReleaseError("Cannot determine the candidate release's publication state")
+    if published["draft"] or published["prerelease"]:
+        return False, "A draft or prerelease is not a verified stable release."
+    reference = github.request("GET", f"{API}/git/ref/tags/v{version}")
+    target = reference.get("object") if isinstance(reference, dict) else None
+    if not isinstance(target, dict):
+        raise ReleaseError("Cannot inspect the published release tag")
+    if target.get("sha") != commit or target.get("type") != "commit":
+        return False, "This push is not the exact published candidate."
+    verify_tag(reference, version, commit)
+    parents = candidate.get("parents")
+    if not isinstance(parents, list) or len(parents) != 1 or not isinstance(parents[0], dict):
+        raise ReleaseError("Release candidate must have exactly one captured base")
+    base = require_sha(parents[0].get("sha"))
+    verify_candidate(github, version, commit, base)
+    run_id = int(runs[0])
+    branch = f"refs/heads/release-candidates/{version}/{run_id}"
+    reference = github.request("GET", f"{API}/git/ref/heads/release-candidates/{version}/{run_id}")
+    if (not isinstance(reference, dict) or reference.get("ref") != branch
+            or not isinstance(reference.get("object"), dict)
+            or reference["object"].get("type") != "commit" or reference["object"].get("sha") != commit):
+        raise ReleaseError("Release-run branch does not bind this exact candidate")
+    run = github.request("GET", f"{API}/actions/runs/{run_id}")
+    if (not isinstance(run, dict) or not positive_id(run.get("id")) or run.get("id") != run_id
+            or run.get("event") != "workflow_dispatch" or run.get("head_branch") != "main"
+            or run.get("head_sha") != base or run.get("path") != ".github/workflows/launcher-release.yml"
+            or not isinstance(run.get("repository"), dict)
+            or run["repository"].get("full_name") != REPOSITORY):
+        raise ReleaseError("Candidate provenance is not the official release workflow at its captured base")
+    names = {"prepare", "publish", "installers / Release tooling contracts"}
+    names.update(f"installers / Native installers - {platform}"
+                 for platform in ("windows-x64", "linux-x64", "macos-intel", "macos-apple-silicon"))
+    jobs = {}
+    for page in range(1, MAX_PAGES + 1):
+        result = github.request("GET", f"{API}/actions/runs/{run_id}/jobs"
+                                f"?filter=latest&per_page={PAGE_SIZE}&page={page}")
+        if (not isinstance(result, dict) or not isinstance(result.get("jobs"), list)
+                or len(result["jobs"]) > PAGE_SIZE or type(result.get("total_count")) is not int):
+            raise ReleaseError("Invalid release-job inventory")
+        for job in result["jobs"]:
+            if (not isinstance(job, dict) or not isinstance(job.get("name"), str)
+                    or job["name"] in jobs or not positive_id(job.get("run_id"))
+                    or job.get("run_id") != run_id or job.get("head_sha") != base):
+                raise ReleaseError("Release jobs have duplicated or mismatched provenance")
+            jobs[job["name"]] = job
+        if len(jobs) == result["total_count"]:
+            break
+        if len(result["jobs"]) < PAGE_SIZE:
+            raise ReleaseError("Incomplete release-job inventory")
+    else:
+        raise ReleaseError("Release-job pagination bound reached")
+    if not names.issubset(jobs) or any(jobs[name].get("status") != "completed"
+                                     or jobs[name].get("conclusion") != "success" for name in names):
+        return False, "Release build/test/publication success is not confirmed; running installers."
+    metadata = published.get("assets")
+    if not isinstance(metadata, list) or len(metadata) != 10:
+        raise ReleaseError("Published release is missing the complete installer/checksum set")
+    expected_names = {f"MegaMek-Launcher-{version}-{suffix}{checksum}"
+                      for suffix in INSTALLERS for checksum in ("", ".sha256")}
+    assets = []
+    for item in metadata:
+        if (not isinstance(item, dict) or not isinstance(item.get("name"), str)
+                or item["name"] not in expected_names
+                or type(item.get("size")) is not int or item["size"] <= 0
+                or not isinstance(item.get("digest"), str)
+                or not re.fullmatch(r"sha256:[0-9a-f]{64}", item["digest"])):
+            raise ReleaseError("Published installer metadata is incomplete or malformed")
+        if item["name"].endswith(".msi") and item["size"] > MSI_LIMIT:
+            raise ReleaseError("Published MSI exceeds the updater size limit")
+        assets.append(Asset(Path(item["name"]), item["size"], item["digest"][7:]))
+    # Publication already verified the bytes; this gate checks their retained API identities.
+    verify_release(published, assets, version, False)
+    if {asset.path.name for asset in assets} != expected_names:
+        raise ReleaseError("Published release assets were duplicated or substituted")
+    return True, (f"Exact version-only candidate {commit} was built, tested and published by "
+                  f"https://github.com/{REPOSITORY}/actions/runs/{run_id}; no duplicate installer build.")
+
+
 def publish(github, version, commit, assets):
     require_unused_version(github, version)
     tag = "v" + version
@@ -425,7 +528,7 @@ def publish(github, version, commit, assets):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "candidate", "publish", "finalize"))
+    parser.add_argument("command", choices=("prepare", "candidate", "publish", "finalize", "ci-plan"))
     parser.add_argument("--version")
     parser.add_argument("--commit")
     parser.add_argument("--assets", type=Path)
@@ -433,6 +536,21 @@ def main():
     args = parser.parse_args()
     root = Path.cwd()
     github = GitHub()
+    if args.command == "ci-plan":
+        if any(value is not None for value in (args.version, args.commit, args.assets, args.base)):
+            raise ReleaseError("CI planning derives its identity from the triggering checkout")
+        output = os.environ.get("GITHUB_OUTPUT")
+        if not output:
+            raise ReleaseError("GITHUB_OUTPUT is required for CI planning")
+        reused, reason = verified_release_push(github, root, os.environ)
+        with Path(output).open("a", encoding="utf-8") as file:
+            file.write(f"build_installers={'false' if reused else 'true'}\n")
+        print(f"::notice::{reason}")
+        summary = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary:
+            with Path(summary).open("a", encoding="utf-8") as file:
+                file.write(f"### Installer CI decision\n\n{reason}\n")
+        return
     if args.command in ("prepare", "candidate"):
         if args.version is not None or args.commit is not None or args.assets is not None or args.base is not None:
             raise ReleaseError("Candidate preparation derives its version from committed source")
@@ -469,5 +587,5 @@ if __name__ == "__main__":
     try:
         main()
     except ReleaseError as error:
-        print(f"Launcher release failed: {error}. No automatic write retry or rollback.", file=sys.stderr)
+        print(f"Launcher release/CI check failed: {error}. No automatic write retry or rollback.", file=sys.stderr)
         sys.exit(1)

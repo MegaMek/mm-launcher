@@ -155,6 +155,7 @@ class FakeBumpGitHub(FakeGitHub):
             return {"sha": result["sha"]}
         if method == "POST" and endpoint.endswith("/git/commits"):
             result = {"sha": "d" * 40, "tree": {"sha": data["tree"]},
+                      "message": data["message"],
                       "parents": [{"sha": parent, "url": "metadata"} for parent in data["parents"]]}
             if self.mutate_commit:
                 self.mutate_commit(result)
@@ -169,6 +170,38 @@ class FakeBumpGitHub(FakeGitHub):
         if self.unknown_push:
             raise release.ReleaseError("Simulated lost main-update response")
         return copy.deepcopy(self.main)
+
+
+class FakeCiGitHub(FakeBumpGitHub):
+    def __init__(self, original):
+        super().__init__(original)
+        self.ci_run = {"id": 123, "event": "workflow_dispatch", "head_branch": "main",
+                       "head_sha": COMMIT, "path": ".github/workflows/launcher-release.yml",
+                       "repository": {"full_name": release.REPOSITORY},
+                       "status": "in_progress", "conclusion": None}
+        names = ["prepare", "installers / Release tooling contracts", "publish"]
+        names += [f"installers / Native installers - {platform}"
+                  for platform in ("windows-x64", "linux-x64", "macos-intel", "macos-apple-silicon")]
+        self.jobs = [{"name": name, "run_id": 123, "head_sha": COMMIT,
+                      "status": "completed", "conclusion": "success"} for name in names]
+        self.jobs.append({"name": "finalize", "run_id": 123, "head_sha": COMMIT,
+                          "status": "in_progress", "conclusion": None})
+        self.job_response = None
+
+    def request(self, method, endpoint, data=None, file=None, missing_ok=False):
+        if method == "GET" and ("/git/ref/heads/release-candidates/" in endpoint
+                                or "/actions/runs/" in endpoint):
+            self.calls.append((method, endpoint, copy.deepcopy(data)))
+            if "/git/ref/heads/release-candidates/" in endpoint:
+                return copy.deepcopy(self.candidate_reference)
+            if "/jobs?" in endpoint:
+                if self.job_response is not None:
+                    return copy.deepcopy(self.job_response)
+                page = int(endpoint.rsplit("=", 1)[1])
+                return {"total_count": len(self.jobs),
+                        "jobs": copy.deepcopy(self.jobs[(page - 1) * 100:page * 100])}
+            return copy.deepcopy(self.ci_run)
+        return super().request(method, endpoint, data, file, missing_ok)
 
 
 class LauncherReleaseTest(unittest.TestCase):
@@ -199,6 +232,189 @@ class LauncherReleaseTest(unittest.TestCase):
             sha = hashlib.sha256(content).hexdigest()
             (directory / (name + ".sha256")).write_text(f"{sha}  {name}\n", encoding="ascii")
         return release.validate_files(directory, version)
+
+    def ci_fixture(self):
+        (self.root / "build.gradle.kts").write_bytes(f'version = "{VERSION}"\n'.encode("utf-8"))
+        github = FakeCiGitHub((self.root / "build.gradle.kts").read_text())
+        version, commit, _ = release.prepare_candidate(github, self.root, ENVIRONMENT)
+        with patch("builtins.print"):
+            release.publish(github, version, commit, self.make_assets(version))
+        (self.root / "build.gradle.kts").write_bytes(f'version = "{version}"\n'.encode("utf-8"))
+        github.calls.clear()
+        environment = {**ENVIRONMENT, "GITHUB_EVENT_NAME": "push", "GITHUB_SHA": commit}
+        return github, environment
+
+    def ci_plan(self, github, environment):
+        with patch("launcher_release.verify_checkout") as checkout:
+            result = release.verified_release_push(github, self.root, environment)
+        if environment.get("GITHUB_EVENT_NAME") == "push" and not environment.get("CI_SOURCE_COMMIT"):
+            checkout.assert_called_once_with(self.root, environment["GITHUB_SHA"])
+        self.assertTrue(all(method == "GET" for method, _, _ in github.calls))
+        return result
+
+    def test_release_finalization_push_reuses_builds_before_the_workflow_finishes(self):
+        github, environment = self.ci_fixture()
+        reused, reason = self.ci_plan(github, environment)
+        self.assertTrue(reused)
+        self.assertIn("actions/runs/123", reason)
+        self.assertEqual("in_progress", github.ci_run["status"])
+
+    def test_pr_manual_reusable_and_fork_ci_always_build_without_provenance_requests(self):
+        for changes in ({"GITHUB_EVENT_NAME": "pull_request"}, {"GITHUB_EVENT_NAME": "workflow_dispatch"},
+                        {"CI_SOURCE_COMMIT": "d" * 40}, {"GITHUB_REPOSITORY": "someone/mm-launcher"},
+                        {"GITHUB_REF": "refs/heads/feature"}):
+            github = FakeGitHub()
+            with self.subTest(changes=changes), patch("launcher_release.verify_checkout") as checkout:
+                reused, _ = release.verified_release_push(github, self.root,
+                        {**ENVIRONMENT, "GITHUB_EVENT_NAME": "push", **changes})
+            self.assertFalse(reused)
+            self.assertEqual([], github.calls)
+            checkout.assert_not_called()
+
+    def test_ordinary_pushes_and_unpublished_candidates_never_skip_installers(self):
+        for state in ("ordinary", "duplicate-marker", "missing", "draft", "prerelease", "other-tag-sha"):
+            github, environment = self.ci_fixture()
+            if state == "ordinary":
+                github.candidate_commit["message"] = "Regular code change by the release bot"
+            elif state == "duplicate-marker":
+                github.candidate_commit["message"] += "\nLauncher-Release-Run: 456"
+            elif state == "missing":
+                github.release = None
+            elif state in ("draft", "prerelease"):
+                github.release[state] = True
+            else:
+                github.reference["object"]["sha"] = "e" * 40
+            with self.subTest(state=state):
+                self.assertFalse(self.ci_plan(github, environment)[0])
+
+    def test_spoofed_release_trailer_cannot_skip_without_matching_branch_run_and_tree(self):
+        for drift in ("branch", "run-id", "workflow", "base", "event", "repository", "tree"):
+            github, environment = self.ci_fixture()
+            if drift == "branch":
+                github.candidate_reference["object"]["sha"] = "e" * 40
+            elif drift == "run-id":
+                github.ci_run["id"] = 456
+            elif drift == "workflow":
+                github.ci_run["path"] = ".github/workflows/launcher-archives.yml"
+            elif drift == "base":
+                github.ci_run["head_sha"] = "e" * 40
+            elif drift == "event":
+                github.ci_run["event"] = "push"
+            elif drift == "repository":
+                github.ci_run["repository"]["full_name"] = "someone/mm-launcher"
+            else:
+                github.changed_tree["tree"][1]["sha"] = "e" * 40
+            with self.subTest(drift=drift), self.assertRaises(release.ReleaseError):
+                self.ci_plan(github, environment)
+
+    def test_every_required_release_job_must_have_succeeded_to_reuse_installers(self):
+        for name in ("prepare", "installers / Release tooling contracts", "publish",
+                     "installers / Native installers - windows-x64",
+                     "installers / Native installers - linux-x64",
+                     "installers / Native installers - macos-intel",
+                     "installers / Native installers - macos-apple-silicon"):
+            github, environment = self.ci_fixture()
+            next(job for job in github.jobs if job["name"] == name)["conclusion"] = "failure"
+            with self.subTest(name=name):
+                self.assertFalse(self.ci_plan(github, environment)[0])
+
+    def test_latest_job_inventory_supports_failed_finalization_reruns_and_pagination(self):
+        github, environment = self.ci_fixture()
+        github.ci_run["run_attempt"] = 2
+        github.jobs[-1]["run_attempt"] = 2
+        for index in range(93):
+            github.jobs.append({"name": f"extra-{index}", "run_id": 123, "head_sha": COMMIT,
+                                "status": "completed", "conclusion": "success", "run_attempt": 1})
+        self.assertTrue(self.ci_plan(github, environment)[0])
+        self.assertEqual(2, sum("/jobs?filter=latest" in endpoint for _, endpoint, _ in github.calls))
+
+    def test_malformed_or_partial_release_job_inventories_fail_explicitly(self):
+        for failure in ("shape", "partial", "duplicate", "wrong-sha", "wrong-run", "bound"):
+            github, environment = self.ci_fixture()
+            if failure == "shape":
+                github.job_response = {"total_count": True, "jobs": []}
+            elif failure == "partial":
+                github.job_response = {"total_count": 100, "jobs": github.jobs}
+            elif failure == "duplicate":
+                github.jobs.append(copy.deepcopy(github.jobs[0]))
+            elif failure == "wrong-sha":
+                github.jobs[0]["head_sha"] = "e" * 40
+            elif failure == "wrong-run":
+                github.jobs[0]["run_id"] = 456
+            else:
+                github.jobs += [{"name": f"extra-{index}", "run_id": 123, "head_sha": COMMIT}
+                                for index in range(100)]
+            with self.subTest(failure=failure), patch("launcher_release.MAX_PAGES", 1), \
+                    self.assertRaises(release.ReleaseError):
+                self.ci_plan(github, environment)
+
+    def test_release_reuse_rejects_missing_or_malformed_public_assets(self):
+        for failure in ("missing", "name", "duplicate", "digest", "size", "msi-limit", "url", "id"):
+            github, environment = self.ci_fixture()
+            asset = github.release["assets"][0]
+            if failure == "missing":
+                github.release["assets"].pop()
+            elif failure == "name":
+                asset["name"] = []
+            elif failure == "duplicate":
+                github.release["assets"][1] = copy.deepcopy(asset)
+            elif failure == "digest":
+                asset["digest"] = "sha256:wrong"
+            elif failure == "size":
+                asset["size"] = 0
+            elif failure == "msi-limit":
+                asset["size"] = release.MSI_LIMIT + 1
+            elif failure == "url":
+                asset["browser_download_url"] = "https://unofficial.invalid/file.msi"
+            else:
+                asset["id"] = True
+            with self.subTest(failure=failure), self.assertRaises(release.ReleaseError):
+                self.ci_plan(github, environment)
+
+    @patch("builtins.print")
+    def test_ci_plan_cli_records_exact_skip_output_and_explains_it_in_the_summary(self, output):
+        github, environment = self.ci_fixture()
+        outputs = self.root / "ci-output.txt"
+        summary = self.root / "ci-summary.txt"
+        with patch.dict(os.environ, {**environment, "GITHUB_OUTPUT": str(outputs),
+                                     "GITHUB_STEP_SUMMARY": str(summary)}), \
+                patch("launcher_release.Path.cwd", return_value=self.root), \
+                patch("launcher_release.GitHub", return_value=github), \
+                patch("launcher_release.verify_checkout"), \
+                patch("launcher_release.sys.argv", ["launcher_release.py", "ci-plan"]):
+            release.main()
+        self.assertEqual("build_installers=false\n", outputs.read_text())
+        self.assertIn("actions/runs/123", summary.read_text())
+        output.assert_called_once()
+        self.assertTrue(output.call_args.args[0].startswith("::notice::"))
+
+    @patch("builtins.print")
+    def test_ci_plan_cli_explicitly_preserves_ordinary_builds(self, output):
+        github, environment = self.ci_fixture()
+        github.candidate_commit["message"] = "Ordinary main change"
+        outputs = self.root / "ci-output.txt"
+        with patch.dict(os.environ, {**environment, "GITHUB_OUTPUT": str(outputs),
+                                     "GITHUB_STEP_SUMMARY": ""}), \
+                patch("launcher_release.Path.cwd", return_value=self.root), \
+                patch("launcher_release.GitHub", return_value=github), \
+                patch("launcher_release.verify_checkout"), \
+                patch("launcher_release.sys.argv", ["launcher_release.py", "ci-plan"]):
+            release.main()
+        self.assertEqual("build_installers=true\n", outputs.read_text())
+        self.assertIn("Ordinary main change", output.call_args.args[0])
+
+    def test_ci_plan_failure_never_exports_a_skip_decision(self):
+        github, environment = self.ci_fixture()
+        github.job_response = {"total_count": 100, "jobs": github.jobs}
+        outputs = self.root / "ci-output.txt"
+        with patch.dict(os.environ, {**environment, "GITHUB_OUTPUT": str(outputs)}), \
+                patch("launcher_release.Path.cwd", return_value=self.root), \
+                patch("launcher_release.GitHub", return_value=github), \
+                patch("launcher_release.verify_checkout"), \
+                patch("launcher_release.sys.argv", ["launcher_release.py", "ci-plan"]), \
+                self.assertRaises(release.ReleaseError):
+            release.main()
+        self.assertFalse(outputs.exists())
 
     def assert_no_publication(self, github):
         self.assertFalse(any(method == "PATCH" for method, _, _ in github.calls))

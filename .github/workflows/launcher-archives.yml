@@ -44,14 +44,27 @@ jobs:
     name: Release tooling contracts
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      build_installers: ${{ steps.ci-plan.outputs.build_installers }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ inputs.source_commit || github.sha }}
       - name: Test launcher release tooling without network or publication
         run: python3 -B -m unittest discover -s scripts -p test_launcher_release.py
+      - name: Determine whether this exact release candidate already passed installer CI
+        id: ci-plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_SOURCE_COMMIT: ${{ inputs.source_commit }}
+        run: python3 -B scripts/launcher_release.py ci-plan
 
   installers:
+    needs: release-tooling
+    if: needs.release-tooling.outputs.build_installers == 'true'
     name: Native installers - ${{ matrix.id }}
     strategy:
       fail-fast: false

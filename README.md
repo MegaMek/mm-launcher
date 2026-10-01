@@ -18,6 +18,15 @@ Run `./gradlew test buildDebInstaller buildRpmInstaller` on Linux,
 WiX 3.14 in `.tools/wix314`; CI verifies the downloaded binaries.
 The former archive tasks remain available for development but are not CI outputs.
 
+After a release updates `main`, the native-installer workflow still appears, but its
+small read-only tooling job can skip the four duplicate installer builds. It verifies
+the exact published tag, version-only candidate and candidate branch, plus successful
+build/test/publication jobs from the original release run. A release-run trailer is only
+a lookup hint, not permission to skip CI. PRs, ordinary code changes, manual builds and
+the release workflow's pinned candidate builds still build all platforms. The decision
+and original run link appear in the workflow summary. Advisory desktop tests still run
+separately; they do not rebuild installers.
+
 `test` is the required headless gate: backend/file-safety tests, deterministic UI
 components and state, the production automatic-check worker, and safe Windows helper
 execution. Tests that open native windows are tagged `native-gui` and run separately:

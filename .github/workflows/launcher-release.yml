@@ -48,6 +48,7 @@ jobs:
     needs: prepare
     permissions:
       contents: read
+      actions: read
     uses: ./.github/workflows/launcher-archives.yml
     with:
       source_commit: ${{ needs.prepare.outputs.commit }}

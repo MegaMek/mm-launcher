@@ -91,6 +91,37 @@ and never passed to installer/test jobs or publication.
 Artifacts come from the current workflow run, not a previous build or independently selected
 latest artifact.
 
+### Avoiding duplicate installer builds after publication
+
+Candidate commits retain a `Launcher-Release-Run` trailer identifying their original
+workflow run. After finalization pushes that commit to main, the ordinary native workflow
+first runs its offline tooling tests and a read-only `launcher_release.py ci-plan` check.
+Only an official main push without a pinned source input can reuse release verification.
+PRs, forks, manual native builds and reusable candidate builds always run all four platforms.
+
+The check does not trust a bot identity, commit title or trailer by itself. Before emitting
+`build_installers=false`, it verifies the pushed checkout, published stable tag SHA,
+exact version-only tree/single base parent, run-specific candidate branch, and official
+manual release workflow at that same base. The original prepare, tooling, four native
+build/test jobs and publication job must all have succeeded. It checks the latest execution
+of each job, including successful jobs retained when only failed finalization is rerun.
+Finalization/the overall run may still be in progress when the push arrives; publication
+success is the relevant completed prerequisite.
+
+The published record must retain all ten uploaded, uniquely identified assets with exact
+official URLs, positive sizes, valid SHA-256 metadata and an updater-compatible MSI size.
+This metadata check does not download installers again; the successful publication job
+already verified their bytes. Missing publication or unconfirmed successful jobs means a
+normal installer build, with an explicit explanation. Malformed/mismatched provenance or
+API failures fail explicitly, never silently skip tests.
+
+Only the tooling job gains repository-scoped `actions: read` alongside `contents: read`
+for provenance lookup; the release caller permits that read-only scope. No App credentials
+or write permissions are introduced. The installer matrix depends on the tooling decision.
+The workflow summary links to the original verified release run when duplicate builds are
+skipped. The independent advisory desktop workflow is unchanged and still runs actual
+window tests after a main push; it does not package installers.
+
 The default `test` task excludes `archive` and `native-gui` tags and forces headless mode.
 It still compiles all tests and runs backend/material safety checks, safe Windows helper
 execution, deterministic UI components/state, and the actual automatic-check worker.
@@ -220,8 +251,10 @@ can commit a version:
 The bypass grants the App real repository write authority, not a server-enforced restriction
 to one file. The workflow narrows its installation token to this repository and verifies that
 the generated commit changes only the version file. Protect the App key and workflow changes.
-GitHub App-authored main pushes may also trigger ordinary read-only CI; that separate run
-cannot publish and is not substituted for this release run's installer/test matrix.
+GitHub App-authored main pushes trigger ordinary read-only CI. Proven release-finalization
+pushes skip duplicate installer builds through the guard above; advisory desktop tests
+remain separate. These push runs cannot publish and are never substituted for the release
+run's required installer/test matrix.
 Missing configuration, denied bypass, or GitHub write failures fail explicitly; there is
 no personal-token fallback.
 
