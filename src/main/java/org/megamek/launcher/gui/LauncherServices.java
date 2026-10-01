@@ -73,6 +73,7 @@ import org.megamek.launcher.update.PreparedUpdate;
 import org.megamek.launcher.update.PreparedUpdateService;
 import org.megamek.launcher.update.RealUpdateService;
 import org.megamek.launcher.update.UninstallService;
+import org.megamek.launcher.update.WindowsMsiUpdate;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -181,6 +182,39 @@ public class LauncherServices {
 
     public Path operationLogLocation() {
         return operationLogs.defaultDirectory();
+    }
+
+    public LauncherUpdateCheck checkLauncherUpdate(WindowsMsiUpdate.ReportResult report,
+                                                   LauncherReleaseLookup lookup)
+            throws IOException, InterruptedException {
+        String notice = launcherUpdateNotice(report);
+        if (report != null && report.pending()) {
+            return new LauncherUpdateCheck(null, notice, true);
+        }
+        if (report != null && !report.installed() && !report.recovered()) {
+            throw new IOException(notice);
+        }
+        try {
+            return new LauncherUpdateCheck(lookup.check(), notice, false);
+        } catch (IOException | InterruptedException error) {
+            if (notice != null) {
+                throw new IOException(notice + "\nLauncher release lookup also failed: "
+                        + error.getMessage(), error);
+            }
+            throw error;
+        }
+    }
+
+    private String launcherUpdateNotice(WindowsMsiUpdate.ReportResult report)
+            throws IOException, InterruptedException {
+        if (report == null) return null;
+        if (!report.recovered()) return report.message();
+        LoggedOperation recovery = beginOperation(OperationType.RECOVERY, ignored -> {}, List.of());
+        recovery.context().phase(OperationPhase.METADATA, report.message());
+        String warning = recovery.finish(OperationOutcome.SUCCEEDED,
+                "Stale launcher update report reconciled; previous installer completion result is unknown.", null);
+        if (warning != null) throw new IOException(warning);
+        return null;
     }
 
     public Path normalInstallDestination() throws IOException {
@@ -1010,6 +1044,13 @@ public class LauncherServices {
 
     public record SettingsView(Path defaultJava, Integer defaultJavaFeature,
                                boolean persisted) {
+    }
+
+    public record LauncherUpdateCheck(WindowsMsiUpdate.Candidate candidate, String message, boolean pending) {}
+
+    @FunctionalInterface
+    public interface LauncherReleaseLookup {
+        WindowsMsiUpdate.Candidate check() throws IOException, InterruptedException;
     }
 
     public static final class LoggedOperation {

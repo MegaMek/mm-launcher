@@ -79,8 +79,10 @@ failures are acknowledged so a later manual check can retry. Incomplete reports 
 retained as diagnostic evidence: identified targets are confirmed as updated only
 with a matching installed version and an exited helper. If the old version is still
 confirmed installed, the failed attempt is acknowledged so a later check can retry.
-Old reports without a target are explicitly reported
-as an unknown previous result, not a successful update, after checking that the old
+Safely reconciled incomplete reports do not show a popup or get appended to an update
+confirmation or release-lookup error. Their original evidence is archived and recovery
+details are saved in local operation logs. Old reports without a target remain an unknown
+previous result, not a claimed successful update, after checking that the old
 helper is absent and Windows confirms the current installation. A successful installation
 with staged MSI cleanup failure is reported as a cleanup warning, not as an
 installation failure. Pending or unrecognized results remain for review; a

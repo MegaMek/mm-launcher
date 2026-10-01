@@ -201,7 +201,8 @@ registry. New pending reports bind the target version and helper PID/start time.
 An active helper keeps its report and produces an informational finishing state.
 An exited helper with an incomplete report requires Windows to confirm the exact
 target's running and installed version before acknowledgement; the original
-report is archived with a diagnostic warning. If Windows instead confirms the
+report is archived and reconciliation is recorded in local operation logs without
+an interrupting popup. If Windows instead confirms the
 old running version is still installed, archive the incomplete failed attempt
 and allow a later check to retry, without claiming an upgrade. Reservations
 without a recorded helper identity remain for review. New completed reports
@@ -210,8 +211,12 @@ retain the exact target even when cleanup warnings or reboot notices apply.
 Legacy plain `pending` reports contain no target. Their helper is identified
 by the encoded script's exact report path. Only when that helper is absent and
 Windows confirms the current installation may the report be archived and checks
-resume, with an explicit unknown-previous-result notice, not a claimed successful
-upgrade. Changed, oversized, linked, malformed, or unverifiable reports remain
+resume. The unknown previous result is recorded in local operation diagnostics, not
+shown as a popup or claimed successful upgrade. These safely reconciled details are
+also omitted from update confirmations and release-lookup errors; genuine failures,
+reboot-required success, cleanup warnings and unresolved pending states keep their
+existing presentation. Failure to save recovery diagnostics is surfaced explicitly.
+Changed, oversized, linked, malformed, or unverifiable reports remain
 for review.
 
 Material Windows regressions execute the real helper script with harmless

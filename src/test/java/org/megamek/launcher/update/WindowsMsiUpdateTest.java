@@ -105,12 +105,14 @@ class WindowsMsiUpdateTest {
         var incomplete = WindowsMsiUpdate.consumeReport(path, "0.1.0", () -> {},
                 (file, pid, started) -> false);
         assertFalse(incomplete.installed());
+        assertFalse(incomplete.recovered(), "a failed attempt still needs user attention");
         assertTrue(incomplete.message().contains("still 0.1.0"));
         assertFalse(Files.exists(path));
         report("pending:0.1.1:12345:123456789");
         var result = WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {},
                 (file, pid, started) -> false);
         assertTrue(result.installed());
+        assertTrue(result.recovered(), "a verified target with an exited helper is safely reconciled");
         assertTrue(result.message().contains("did not save"));
         assertFalse(Files.exists(path));
     }
@@ -134,6 +136,7 @@ class WindowsMsiUpdateTest {
         Path path = report("installed-reboot-required:0.1.1");
         var result = WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {});
         assertTrue(result.installed());
+        assertFalse(result.recovered(), "a required restart must remain visible");
         assertTrue(result.message().contains("no restart was forced"));
         assertFalse(Files.exists(path));
     }
@@ -181,6 +184,7 @@ class WindowsMsiUpdateTest {
         Path path = report("installation succeeded; staged MSI cleanup failed");
         var warning = WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {});
         assertTrue(warning.installed());
+        assertFalse(warning.recovered(), "a cleanup warning must remain visible");
         assertTrue(warning.message().contains("cleanup failed"));
         assertFalse(Files.exists(path));
         report("installed:0.1.1");

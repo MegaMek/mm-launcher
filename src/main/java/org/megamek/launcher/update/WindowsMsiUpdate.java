@@ -369,15 +369,19 @@ public final class WindowsMsiUpdate {
                 + "'/l*v',('\"'+$installerLog+'\"'))";
     }
 
-    public enum ReportState { INSTALLED, FAILED, PENDING, RECOVERED }
+    public enum ReportState { INSTALLED, FAILED, PENDING, RECOVERED, INSTALLED_RECOVERED }
 
     public record ReportResult(ReportState state, String message) {
         public ReportResult(boolean installed, String message) {
             this(installed ? ReportState.INSTALLED : ReportState.FAILED, message);
         }
-        public boolean installed() { return state == ReportState.INSTALLED; }
+        public boolean installed() {
+            return state == ReportState.INSTALLED || state == ReportState.INSTALLED_RECOVERED;
+        }
         public boolean pending() { return state == ReportState.PENDING; }
-        public boolean recovered() { return state == ReportState.RECOVERED; }
+        public boolean recovered() {
+            return state == ReportState.RECOVERED || state == ReportState.INSTALLED_RECOVERED;
+        }
     }
 
     @FunctionalInterface
@@ -479,7 +483,7 @@ public final class WindowsMsiUpdate {
             }
             installedVersionCheck.verify();
             Path saved = acknowledgeReport(report, original, true);
-            return new ReportResult(true, "Windows confirms launcher " + runningVersion
+            return new ReportResult(ReportState.INSTALLED_RECOVERED, "Windows confirms launcher " + runningVersion
                     + " is installed, but the helper did not save its final result. The incomplete report "
                     + "was retained at " + saved + ". Diagnostics: " + helperLog(report));
         }
