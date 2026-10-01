@@ -84,6 +84,11 @@ stage. The upload operation briefly uses GitHub's draft flag so an incomplete as
 become the update target; it is cleared automatically only after verification. The workflow then
 verifies the official latest-stable endpoint. Installers remain unsigned and macOS packages are
 not notarized.
+During upload, GitHub may give draft assets a temporary `untagged-...` download address.
+The publisher accepts it only when it matches that draft's official release-page address and
+the exact asset name. Once published, every download address must use the final `v<version>`
+tag, including on the latest-stable endpoint. Asset IDs, sizes, states and SHA-256 checks remain
+mandatory throughout.
 
 The release bot needs one-time installation, repository-scoped Contents write permission, an
 explicit protected-main ruleset bypass, the `LAUNCHER_RELEASE_APP_ID` Actions variable, and
