@@ -609,8 +609,33 @@ tasks.withType<AbstractArchiveTask>().configureEach {
 }
 
 tasks.test {
+    systemProperty("java.awt.headless", "true")
     useJUnitPlatform {
+        excludeTags("archive", "native-gui")
+    }
+}
+
+tasks.register<Test>("nativeGuiTest") {
+    description = "Runs advisory desktop integration tests; requires a working display."
+    group = "verification"
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    systemProperty("java.awt.headless", "false")
+    useJUnitPlatform {
+        includeTags("native-gui")
         excludeTags("archive")
+    }
+    val resultsDirectory = reports.junitXml.outputLocation
+    doLast {
+        val xml = javax.xml.parsers.DocumentBuilderFactory.newInstance()
+        xml.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true)
+        val executed = resultsDirectory.get().asFile.listFiles()
+            .orEmpty().filter { it.name.startsWith("TEST-") && it.extension == "xml" }
+            .sumOf {
+                val suite = xml.newDocumentBuilder().parse(it).documentElement
+                suite.getAttribute("tests").toInt() - suite.getAttribute("skipped").toInt()
+            }
+        if (executed == 0) throw GradleException("Native GUI tests require a display; no tests executed.")
     }
 }
 

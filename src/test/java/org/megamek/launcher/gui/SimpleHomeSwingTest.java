@@ -109,6 +109,7 @@ class SimpleHomeSwingTest {
     @TempDir Path temp;
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void firstLaunchMetadataLoadingIsNonBlockingDisabledAndSessionDeduplicated()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
@@ -165,6 +166,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void failedMetadataRequiresOneExplicitDeduplicatedRetry() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
@@ -210,6 +212,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void firstHomeSplitRoutesExplicitChoicesWithoutOpeningNetworkOrChangingDefault()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
@@ -513,6 +516,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void browsedChangeLocationRetainsCapturedRecordWhenANewerRecordReusesTheTag() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
@@ -545,6 +549,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void changeLocationDisposesTheOldQuoteAndReplansBeforeReconfirmation() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
@@ -614,6 +619,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void latestMekHQDevelopmentCompletesThroughSharedInstallerAndShowsDevelopment()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
@@ -660,6 +666,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void concurrentMainIsPreservedAndInstallNoticePointsToInstallations() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
@@ -691,6 +698,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void publishedNormalFailureRevealsRepairOnlyInCompactFailureState() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
@@ -731,6 +739,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void installationCardsDoNotSilentlyChangePreferencesAndBlockersStayActionable()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
@@ -759,6 +768,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void moreMenuPreferencesResetHonorsCancelAndReportsBackupOnConfirmation()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
@@ -808,6 +818,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void repairMenuRequiresHealthyManagedCopyAndNoPendingRecovery() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         FakeServices services = new FakeServices(temp.resolve("repair-menu.json"));
@@ -841,6 +852,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void adoptedManagedCopyHasNoRepairMenuAction() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         FakeServices services = new FakeServices(temp.resolve("adopted-repair-menu.json"));
@@ -861,6 +873,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void repairRequiresConsentBeforeCallingFacade() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         FakeServices services = new FakeServices(temp.resolve("repair-consent.json"));
@@ -912,6 +925,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void repairFailureKeepsProgressAndRecoveryGuidanceVisible() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         FakeServices services = new FakeServices(temp.resolve("repair-failure.json"));
@@ -938,6 +952,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void repairProgressUsesDownloadOnlyPercentageAndPlainLanguageStages() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         LauncherFrame frame = onEdt(() -> new LauncherFrame(
@@ -993,6 +1008,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void homeUsesUnionOfProductsEvenWhenOldDefaultContainsOnlyMegaMek() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
@@ -1022,6 +1038,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void managedHomeFitsAllActionsAtTheInitialAndConstrainedWindowSizes() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing layout requires a display");
@@ -1101,6 +1118,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void settingsColumnsStayEqualAndStackWithoutLosingNavigation() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing bounds require a display");
@@ -1148,6 +1166,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void settingsLoadingAndErrorKeepResponsiveGroupsAndNewsActions() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         FakeServices services = new FakeServices(temp.resolve("settings-error-layout.json"));
@@ -1190,6 +1209,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void successfulGameExitDuringSettingsLoadDoesNotReloadOrShowBusyDialog()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
@@ -1262,6 +1282,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void latestNewsLoadsIndependentlyOfSettingsAndOnlyOncePerWindow() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         FakeServices services = new FakeServices(temp.resolve("news.json"));
@@ -1325,6 +1346,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void unavailableNewsLeavesArchiveAndSettingsUsable() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         FakeServices services = new FakeServices(temp.resolve("news-unavailable.json"));
@@ -1351,6 +1373,7 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void directLaunchMinimizesSafelyAndRestoredWindowAllowsAnotherLaunch()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),

@@ -93,6 +93,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @Tag("gui-smoke")
+@Tag("native-gui")
 class ExistingImportSwingTest {
     @TempDir Path temp;
 

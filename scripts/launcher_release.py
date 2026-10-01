@@ -3,6 +3,7 @@
 """Automatic patch versions for manual official releases; no write retries."""
 
 import argparse
+import base64
 from dataclasses import dataclass
 import hashlib
 import json
@@ -172,7 +173,10 @@ def blob_sha(content):
     return hashlib.sha1(f"blob {len(data)}\0".encode("ascii") + data).hexdigest()
 
 
-def bump_patch(github, root, environment):
+def prepare_candidate(github, root, environment):
+    run = environment.get("GITHUB_RUN_ID")
+    if not isinstance(run, str) or not re.fullmatch("[1-9][0-9]{0,19}", run):
+        raise ReleaseError("Candidate preparation requires the exact positive workflow run ID")
     version, base, original, updated = prepare_patch(github, root, environment)
     source = github.request("GET", f"{API}/git/commits/{base}")
     if not isinstance(source, dict) or source.get("sha") != base or not isinstance(source.get("tree"), dict):
@@ -195,7 +199,7 @@ def bump_patch(github, root, environment):
     if tree_entries(verified) != expected or verified["sha"] != changed_sha or changed_sha == base_tree:
         raise ReleaseError("Version bump must change only the version file in the source tree")
     commit = github.request("POST", f"{API}/git/commits", {
-        "message": (f"Bump launcher patch version to {version}\n\n"
+        "message": (f"Prepare launcher release candidate {version}\n\n"
                     "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"),
         "tree": changed_sha, "parents": [base],
     })
@@ -208,10 +212,83 @@ def bump_patch(github, root, environment):
     bumped = require_sha(commit.get("sha"))
     if bumped == base:
         raise ReleaseError("Version bump did not create a new commit")
-    reference = github.request("PATCH", f"{API}/git/refs/heads/main",
-                               {"sha": bumped, "force": False})
-    verify_main(reference, bumped)
-    return version, bumped
+    candidate_ref = f"refs/heads/release-candidates/{version}/{run}"
+    reference = github.request("POST", f"{API}/git/refs", {"ref": candidate_ref, "sha": bumped})
+    if (not isinstance(reference, dict) or reference.get("ref") != candidate_ref
+            or not isinstance(reference.get("object"), dict)
+            or reference["object"].get("type") != "commit" or reference["object"].get("sha") != bumped):
+        raise ReleaseError("Candidate branch does not bind the exact version-only commit")
+    return version, bumped, base
+
+
+def verify_candidate(github, version, commit, base):
+    numeric_version(version)
+    require_sha(commit)
+    require_sha(base)
+    candidate = github.request("GET", f"{API}/git/commits/{commit}")
+    original = github.request("GET", f"{API}/git/commits/{base}")
+    if (not isinstance(candidate, dict) or candidate.get("sha") != commit
+            or not isinstance(candidate.get("parents"), list) or len(candidate["parents"]) != 1
+            or not isinstance(candidate["parents"][0], dict) or candidate["parents"][0].get("sha") != base
+            or not isinstance(original, dict) or original.get("sha") != base):
+        raise ReleaseError("Candidate must have exactly the captured main commit as its parent")
+    trees = []
+    for item in (original, candidate):
+        if not isinstance(item.get("tree"), dict):
+            raise ReleaseError("Candidate commit has no Git tree")
+        tree_sha = require_sha(item["tree"].get("sha"))
+        tree = github.request("GET", f"{API}/git/trees/{tree_sha}")
+        if not isinstance(tree, dict) or tree.get("sha") != tree_sha:
+            raise ReleaseError("Candidate Git tree identity changed")
+        trees.append(tree_entries(tree))
+    entry = trees[0].get("build.gradle.kts")
+    if entry is None or entry[:2] != ("100644", "blob"):
+        raise ReleaseError("Candidate base has no regular version source")
+    blob = github.request("GET", f"{API}/git/blobs/{entry[2]}")
+    if (not isinstance(blob, dict) or blob.get("sha") != entry[2]
+            or blob.get("encoding") != "base64" or not isinstance(blob.get("content"), str)):
+        raise ReleaseError("Cannot verify candidate base version bytes")
+    try:
+        content = base64.b64decode(blob["content"].replace("\n", ""), validate=True).decode("utf-8")
+    except (ValueError, UnicodeError) as error:
+        raise ReleaseError("Malformed candidate base version blob") from error
+    declarations = list(VERSION_DECLARATION.finditer(content))
+    if blob_sha(content) != entry[2] or len(declarations) != 1:
+        raise ReleaseError("Candidate base version blob does not match its Git tree")
+    declaration = declarations[0]
+    if next_patch_version(declaration.group(1)) != version:
+        raise ReleaseError("Candidate must increment exactly one patch from its base")
+    updated = content[:declaration.start(1)] + version + content[declaration.end(1):]
+    expected = {**trees[0], "build.gradle.kts": ("100644", "blob", blob_sha(updated))}
+    if trees[1] != expected:
+        raise ReleaseError("Candidate must change only the exact version literal")
+
+
+def finalize_main(github, version, commit, base, assets):
+    try:
+        verify_candidate(github, version, commit, base)
+        published = github.request("GET", f"{API}/releases/tags/v{version}")
+        identifier = verify_release(published, assets, version, False)
+        identities = {item["name"]: item["id"] for item in published["assets"]}
+        verify_tag(github.request("GET", f"{API}/git/ref/tags/v{version}"), version, commit)
+        if verify_release(github.request("GET", f"{API}/releases/latest"),
+                          assets, version, False, identities) != identifier:
+            raise ReleaseError("Candidate is not the confirmed latest stable release")
+        reference = github.request("GET", f"{API}/git/ref/heads/main")
+        if (isinstance(reference, dict) and isinstance(reference.get("object"), dict)
+                and reference["object"].get("sha") == commit):
+            verify_main(reference, commit)
+            print(f"Published launcher {version}; main is already synchronized at {commit}")
+            return
+        verify_main(reference, base)
+        reference = github.request("PATCH", f"{API}/git/refs/heads/main",
+                                   {"sha": commit, "force": False})
+        verify_main(reference, commit)
+    except ReleaseError as error:
+        raise ReleaseError(f"Version synchronization pending for {version}: {error}. "
+                           "Inspect the public release and main; resume finalization only, "
+                           "never republish or force-update main") from error
+    print(f"Published launcher {version}; synchronized main to {commit}")
 
 
 @dataclass(frozen=True)
@@ -348,16 +425,17 @@ def publish(github, version, commit, assets):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "bump", "publish"))
+    parser.add_argument("command", choices=("prepare", "candidate", "publish", "finalize"))
     parser.add_argument("--version")
     parser.add_argument("--commit")
     parser.add_argument("--assets", type=Path)
+    parser.add_argument("--base")
     args = parser.parse_args()
     root = Path.cwd()
     github = GitHub()
-    if args.command in ("prepare", "bump"):
-        if args.version is not None or args.commit is not None or args.assets is not None:
-            raise ReleaseError("Patch preparation and bumping derive their version from committed source")
+    if args.command in ("prepare", "candidate"):
+        if args.version is not None or args.commit is not None or args.assets is not None or args.base is not None:
+            raise ReleaseError("Candidate preparation derives its version from committed source")
         output = os.environ.get("GITHUB_OUTPUT")
         if not output:
             raise ReleaseError("GITHUB_OUTPUT is required for preparation")
@@ -367,17 +445,24 @@ def main():
             version, commit, _, _ = prepare_patch(github, root, os.environ)
             print(f"Validated next patch {version} from {commit}; no remote writes performed")
         else:
-            version, commit = bump_patch(github, root, os.environ)
-            print(f"Committed launcher {version} to main at {commit}; no release published yet")
+            version, commit, base = prepare_candidate(github, root, os.environ)
+            print(f"Prepared launcher {version} at {commit}; main remains at {base}")
         with Path(output).open("a", encoding="utf-8") as file:
             file.write(f"version={version}\ncommit={commit}\n")
+            if args.command == "candidate":
+                file.write(f"base={base}\n")
     else:
         if args.version is None or args.commit is None or args.assets is None:
             raise ReleaseError("Publication requires the exact prepared commit and artifact directory")
         commit = validate_source(args.version, root, os.environ, args.commit)
         verify_checkout(root, commit)
         assets = validate_files(args.assets, args.version)
-        publish(github, args.version, commit, assets)
+        if args.command == "publish":
+            if args.base is not None:
+                raise ReleaseError("Publication does not update main; use finalize afterward")
+            publish(github, args.version, commit, assets)
+        else:
+            finalize_main(github, args.version, commit, require_sha(args.base), assets)
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ on:
     paths:
       - ".github/workflows/launcher-archives.yml"
       - ".github/workflows/launcher-release.yml"
+      - ".github/workflows/launcher-gui-smoke.yml"
       - "build.gradle.kts"
       - "gradle/**"
       - "gradlew"
@@ -27,6 +28,7 @@ on:
     paths:
       - ".github/workflows/launcher-archives.yml"
       - ".github/workflows/launcher-release.yml"
+      - ".github/workflows/launcher-gui-smoke.yml"
       - "build.gradle.kts"
       - "gradle/**"
       - "gradlew"
@@ -229,6 +231,7 @@ jobs:
             build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.pkg
             build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.pkg.sha256
           if-no-files-found: error
+          overwrite: true
           retention-days: 14
 
       - name: Test source on Windows
@@ -240,10 +243,10 @@ jobs:
           $env:JAVA_TOOL_OPTIONS = "-Djava.io.tmpdir=$testTemp"
           .\gradlew.bat "-PbuildIdentifier=$env:SOURCE_COMMIT" test
 
-      - name: Test source on Linux with Xvfb
+      - name: Test source on Linux
         if: runner.os == 'Linux'
         shell: bash
-        run: xvfb-run -a ./gradlew "-PbuildIdentifier=${SOURCE_COMMIT}" test
+        run: ./gradlew "-PbuildIdentifier=${SOURCE_COMMIT}" test
 
       - name: Test source on macOS
         if: runner.os == 'macOS'
@@ -260,4 +263,5 @@ jobs:
           name: MegaMek-Launcher-test-reports-${{ matrix.id }}
           path: build/test-results/**/*.xml
           if-no-files-found: warn
+          overwrite: true
           retention-days: 14

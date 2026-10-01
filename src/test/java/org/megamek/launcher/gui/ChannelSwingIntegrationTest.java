@@ -73,6 +73,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@org.junit.jupiter.api.Tag("native-gui")
 class ChannelSwingIntegrationTest {
     @TempDir Path temp;
 
@@ -82,7 +83,7 @@ class ChannelSwingIntegrationTest {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing channel integration requires a display");
         FakeServices services = new FakeServices(temp.resolve("registry.json"));
-        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        LauncherFrame frame = SwingTestSupport.createWindow(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             assertEquals("Launch MegaMek Milestone (0.51.0)",
@@ -162,7 +163,7 @@ class ChannelSwingIntegrationTest {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing channel integration requires a display");
         FakeServices services = new FakeServices(temp.resolve("opt-in-registry.json"), true);
-        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        LauncherFrame frame = SwingTestSupport.createWindow(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             assertTrue(services.started.await(30, TimeUnit.SECONDS));
@@ -193,7 +194,7 @@ class ChannelSwingIntegrationTest {
                     "actual Swing channel integration requires a display");
             FakeServices services = new FakeServices(temp.resolve("save-failure.json"));
             services.saveFailure = new IOException("fixture preference write failed");
-            LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+            LauncherFrame frame = SwingTestSupport.createWindow(() -> new LauncherFrame(services));
             try {
                 SwingUtilities.invokeAndWait(frame::showWindow);
                 JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
@@ -221,7 +222,7 @@ class ChannelSwingIntegrationTest {
                 Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                         "actual Swing channel integration requires a display");
                 FakeServices services = new FakeServices(temp.resolve("manual-off.json"));
-                LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+                LauncherFrame frame = SwingTestSupport.createWindow(() -> new LauncherFrame(services));
                 try {
                     SwingUtilities.invokeAndWait(frame::showWindow);
                     waitFor(() -> find(frame, "launch-megamek-button"));
@@ -249,7 +250,7 @@ class ChannelSwingIntegrationTest {
                 "actual Swing channel integration requires a display");
         FakeServices services = new FakeServices(temp.resolve("failed-check.json"), true);
         services.checkFailure = new IOException("fixture metadata unavailable");
-        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        LauncherFrame frame = SwingTestSupport.createWindow(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             assertTrue(services.started.await(30, TimeUnit.SECONDS));

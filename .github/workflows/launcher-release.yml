@@ -17,8 +17,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     outputs:
-      version: ${{ steps.bump.outputs.version }}
-      commit: ${{ steps.bump.outputs.commit }}
+      version: ${{ steps.candidate.outputs.version }}
+      commit: ${{ steps.candidate.outputs.commit }}
+      base: ${{ steps.candidate.outputs.base }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,11 +38,11 @@ jobs:
           owner: ${{ github.repository_owner }}
           repositories: mm-launcher
           permission-contents: write
-      - name: Commit next patch version to protected main
-        id: bump
+      - name: Prepare version-only candidate outside main
+        id: candidate
         env:
           GH_TOKEN: ${{ steps.release-bot.outputs.token }}
-        run: python3 -B scripts/launcher_release.py bump
+        run: python3 -B scripts/launcher_release.py candidate
 
   installers:
     needs: prepare
@@ -76,3 +77,37 @@ jobs:
           python3 -B scripts/launcher_release.py publish \
             --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
             --assets build/release
+
+  finalize:
+    needs: [prepare, publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: MegaMek-Launcher-*-installers
+          path: build/release
+          merge-multiple: true
+      - name: Create repository-scoped version synchronization token
+        id: release-bot
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ vars.LAUNCHER_RELEASE_APP_ID }}
+          private-key: ${{ secrets.LAUNCHER_RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: mm-launcher
+          permission-contents: write
+      - name: Confirm published release and synchronize main
+        env:
+          GH_TOKEN: ${{ steps.release-bot.outputs.token }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
+          RELEASE_BASE: ${{ needs.prepare.outputs.base }}
+        run: |
+          python3 -B scripts/launcher_release.py finalize \
+            --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
+            --base "$RELEASE_BASE" --assets build/release

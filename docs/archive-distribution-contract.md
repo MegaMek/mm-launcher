@@ -64,8 +64,9 @@ The macOS app bundle includes a MegaMek.png-derived ICNS in `Contents/Resources`
 `Publish launcher release` is a separate, manual-only entry point in
 [launcher-release.yml](../.github/workflows/launcher-release.yml). Dispatch it from official
 `MegaMek/mm-launcher` **main** with no version input. The workflow reads the version committed
-at dispatch, increments only its patch number, and creates a version-only commit on `main`.
-For example, committed `0.14.5` becomes `0.14.6` before any installer is built.
+at dispatch and increments only its patch number on a run-specific
+`release-candidates/<version>/<run-id>` branch. For example, committed `0.14.5` produces
+a `0.14.6` candidate while `main` remains `0.14.5` throughout builds and publication.
 Versions are canonical `major.minor.patch` within Windows Installer's numeric limits; a patch
 at 65535 fails rather than silently rolling into a different minor version.
 It must be unused (with or without a `v` tag prefix) and newer than every published stable
@@ -74,20 +75,32 @@ The workflow serializes publication attempts without cancelling an in-flight att
 
 Preparation first validates the candidate using read-only access. A dedicated GitHub App then
 creates a Git tree differing only in the version literal in `build.gradle.kts`, verifies the
-tree and single parent, and updates `main` without force. `main` must still match the dispatched
+tree and single parent, and creates the candidate branch without touching `main`.
+At preparation, `main` must still match the dispatched
 commit; an intervening change or stale queued dispatch fails instead of overwriting newer work.
 The version file's formatting and other content are preserved.
 
 The workflow then calls the existing native-installer workflow, including all four platforms'
-source tests and offline
-release tooling tests. Every checkout and build identifier uses the exact new version-bump
+required headless tests and offline
+release tooling tests. Every checkout and build identifier uses the exact candidate
 commit, not the older workflow-triggering SHA. Publication requires that entire called workflow
 to succeed. Only the publication job receives workflow-token `contents: write`; ordinary CI
 and preparation keep that token read-only. The App's short-lived Contents-write token is
-restricted to this repository, used only for the bump, revoked at the end of preparation,
+restricted to this repository, used only for candidate creation, revoked at the end of preparation,
 and never passed to installer/test jobs or publication.
 Artifacts come from the current workflow run, not a previous build or independently selected
 latest artifact.
+
+The default `test` task excludes `archive` and `native-gui` tags and forces headless mode.
+It still compiles all tests and runs backend/material safety checks, safe Windows helper
+execution, deterministic UI components/state, and the actual automatic-check worker.
+Mixed classes retain their headless-safe methods in this gate. `nativeGuiTest` selects only
+display-dependent methods, requires actual execution rather than an all-skipped success, and
+runs in the independent [advisory desktop workflow](../.github/workflows/launcher-gui-smoke.yml)
+on PRs, main, manual dispatch, and a weekly schedule across all four platforms (Linux uses
+Xvfb). Failures stay visibly red with retained reports; there are no automatic retries,
+`continue-on-error`, or release dependencies on that workflow. Its jobs must not become
+required branch checks.
 
 Before any release/tag write, [launcher_release.py](../scripts/launcher_release.py) requires exactly
 the five expected installer/checksum pairs, nonempty regular files, matching SHA-256 values, and
@@ -98,6 +111,14 @@ upload implementation detail: no human draft-review gate is added. After all che
 job publishes a normal stable release and verifies the latest-stable endpoint consumed by the
 Windows updater.
 
+Only then does a separate finalization job obtain a fresh, repository-scoped App token.
+It re-verifies the candidate's exact parent, base blob and version-only tree; the public
+release's complete assets/checksums; the tested tag SHA; and the latest stable endpoint.
+If `main` still matches the captured base, it advances `main` to the tested candidate with
+`force: false`. An already-synchronized candidate is acknowledged without a write.
+A changed main or denied/ambiguous write fails explicitly as **version synchronization pending**;
+the workflow never overwrites parallel work.
+
 While the release is a draft, GitHub can return an `untagged-...` download URL.
 Staging accepts either the final versioned URL or the temporary URL derived from
 that same draft's official `html_url`, with the exact asset filename. A different
@@ -107,13 +128,19 @@ publication response and the latest-stable response. The asset IDs, uploaded
 state, sizes and SHA-256 digests are still checked at every stage.
 
 No write is retried automatically, no existing asset/tag is replaced, and no automatic rollback
-deletes release evidence or reverts the version commit. A failed build leaves the bumped
-version on `main`; a fresh dispatch increments again, so unpublished patch numbers can be skipped.
-Rerunning only failed installer/publisher jobs retains the successful preparation outputs.
-Rerunning all jobs after a successful bump fails the stale-source guard rather than bumping
-twice from the original dispatch. A failed run can leave a tag or upload draft; a
-post-publication check failure can leave a public release. Inspect remote state before taking
-any recovery action.
+deletes release evidence or reverts a version commit. A failed build or unpublished draft leaves
+`main` unchanged; the candidate branch remains available as evidence. Failed installer jobs can
+be rerun using the successful preparation outputs and exact SHA; their same-run CI artifacts
+are replaceable to prevent upload-name collisions. This never permits overwriting public
+release assets. Rerunning all jobs does not reuse an existing candidate branch.
+A failed publisher can leave a tag, draft, or public release: inspect remote state before
+any retry, and never blindly rerun publication after an ambiguous result.
+Publication and a branch update are separate GitHub operations, not an atomic transaction.
+After successful publication with failed finalization, rerun **only finalization**, retaining
+the same candidate/base outputs and installer artifacts; do not rebuild, republish, or
+dispatch another patch. If main has advanced independently, the guard keeps rejecting the
+candidate: an authorized owner must review manual version synchronization that preserves
+newer source changes, rather than forcing the old candidate onto main.
 The workflow never installs packages, signs/notarizes, assembles a game suite, or updates an
 installed launcher on a runner. A real self-update test requires separate explicit authorization
 to publish and to upgrade an older Windows MSI installation.
@@ -163,10 +190,11 @@ installer failure/cancellation, reboot-required success, checksum drift, cleanup
 warnings, report-write errors, and relaunch ordering. GUI tests exercise the
 themed consent, and download tests cover byte progress and cancellation.
 
-Run the self-update regressions on Windows with a display:
+Run the self-update regressions on Windows; only the second command needs a display:
 
 ```powershell
-.\gradlew.bat test --tests "*WindowsMsi*Test" --tests "*LauncherUpdateDialogTest" --no-daemon --console=plain
+.\gradlew.bat test --tests "*WindowsMsi*Test" --no-daemon --console=plain
+.\gradlew.bat nativeGuiTest --tests "*LauncherUpdateDialogTest" --no-daemon --console=plain
 ```
 
 ### Release bot setup

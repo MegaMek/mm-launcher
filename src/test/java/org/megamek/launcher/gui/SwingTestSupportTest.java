@@ -80,19 +80,51 @@ class SwingTestSupportTest {
         AssertionError failure = assertThrows(AssertionError.class, () ->
                 SwingTestSupport.await("fixture ready state", () -> null, Duration.ofMillis(50)));
         assertTrue(failure.getMessage().contains("fixture ready state"));
+        assertTrue(failure.getMessage().contains("AWT-EventQueue"));
     }
 
     @Test
+    void timedOutOwnedFixtureIsCleanedWhenConstructionEventuallyFinishes() throws Exception {
+        java.util.concurrent.CountDownLatch started = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.CountDownLatch cleaned = new java.util.concurrent.CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicInteger cleanups = new java.util.concurrent.atomic.AtomicInteger();
+        SwingTestSupport.onEdt(() -> null);
+        try {
+            AssertionError error = assertThrows(AssertionError.class, () -> SwingTestSupport.ownedOnEdt(() -> {
+                started.countDown();
+                release.await();
+                return "owned fixture";
+            }, value -> {
+                assertTrue(SwingUtilities.isEventDispatchThread());
+                assertEquals("owned fixture", value);
+                cleanups.incrementAndGet();
+                cleaned.countDown();
+            }, Duration.ofSeconds(1)));
+            assertEquals(0, started.getCount(), "construction must have started before the timeout");
+            assertTrue(error.getMessage().contains("AWT-EventQueue"));
+        } finally {
+            release.countDown();
+        }
+        assertTrue(cleaned.await(5, java.util.concurrent.TimeUnit.SECONDS));
+        assertEquals(1, cleanups.get());
+        assertTrue(SwingTestSupport.onEdt(SwingUtilities::isEventDispatchThread));
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void hiddenButtonIsNotClickedUntilShowing() throws Exception {
         readiness(false, false);
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void disabledButtonIsNotClickedUntilEnabled() throws Exception {
         readiness(true, false);
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void componentReplacementClicksTheNewButtonNotTheCachedOne() throws Exception {
         readiness(false, true);
     }
@@ -153,6 +185,7 @@ class SwingTestSupportTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void asynchronousModalClickAllowsTheTestToFindAndCloseTheDialog() throws Exception {
         JButton open = SwingTestSupport.onEdt(() -> {
             JButton button = new JButton("Open");
@@ -183,6 +216,7 @@ class SwingTestSupportTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void timedOutModalClickCanStillBeJoinedDuringScopedTeardown() throws Exception {
         JButton open = SwingTestSupport.onEdt(() -> {
             JButton button = new JButton("Open");
@@ -210,6 +244,7 @@ class SwingTestSupportTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void asynchronousListenerFailureReachesTheWaitingTest() throws Exception {
         IllegalStateException expected = new IllegalStateException("fixture click failure");
         JButton fail = SwingTestSupport.onEdt(() -> {
@@ -230,6 +265,7 @@ class SwingTestSupportTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void dialogLookupAndCleanupNeverUseAnUnrelatedFrame() throws Exception {
         JFrame owner = window(new JButton("Owner"));
         JFrame unrelated = window(new JButton("Unrelated"));
@@ -251,7 +287,7 @@ class SwingTestSupportTest {
 
     private static JFrame window(JButton button) throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "Swing readiness needs a display");
-        return SwingTestSupport.onEdt(() -> {
+        return SwingTestSupport.createWindow(() -> {
             JFrame frame = new JFrame("Swing fixture");
             frame.add(button);
             frame.setSize(300, 160);
@@ -261,7 +297,7 @@ class SwingTestSupportTest {
     }
 
     private static JDialog modeless(java.awt.Window owner, String title) throws Exception {
-        return SwingTestSupport.onEdt(() -> {
+        return SwingTestSupport.createWindow(() -> {
             JDialog dialog = new JDialog(owner, title);
             dialog.setSize(180, 100);
             dialog.setVisible(true);

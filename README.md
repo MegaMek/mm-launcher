@@ -18,6 +18,15 @@ Run `./gradlew test buildDebInstaller buildRpmInstaller` on Linux,
 WiX 3.14 in `.tools/wix314`; CI verifies the downloaded binaries.
 The former archive tasks remain available for development but are not CI outputs.
 
+`test` is the required headless gate: backend/file-safety tests, deterministic UI
+components and state, the production automatic-check worker, and safe Windows helper
+execution. Tests that open native windows are tagged `native-gui` and run separately:
+`.\gradlew.bat nativeGuiTest` on Windows, `./gradlew nativeGuiTest` on macOS,
+or `xvfb-run -a ./gradlew nativeGuiTest` on Linux. The independent
+**Launcher desktop smoke tests (advisory)** workflow reports real failures on all four
+platforms, but does not block release publication. Do not make its jobs required branch
+checks. It must execute tests, not report an all-skipped run as success.
+
 The Windows MSI is an additional per-user installation (bundled Java, fixed
 install folder, persistent upgrade UUID). Installed Apps, Start Menu, the
 desktop shortcut, and executable are named **MegaMek Launcher**; the icon on
@@ -80,14 +89,15 @@ not the `%LOCALAPPDATA%` launcher registry, logs or installed games.
 
 The manually dispatched `Publish launcher release` workflow is independent of the game-suite
 coordinator. Select **main** and click **Run workflow**, with no version field. It increments the
-committed patch version (for example `0.14.5` to `0.14.6`), commits only that version change to
-`main` using a dedicated release bot, and captures the new commit. It refuses forks, other
+committed patch version (for example `0.14.5` to `0.14.6`), prepares a version-only commit on
+`release-candidates/<version>/<run-id>` using a dedicated release bot, and captures that
+exact candidate. **Main's version does not change during preparation or builds.** It refuses forks, other
 branches, stale dispatches, existing candidate tags/releases (including drafts), and a version
 not newer than every published stable launcher release. It never runs automatically on pushes
 or pull requests. Major/minor version changes remain explicit source changes.
 
-The workflow calls the ordinary native-installer CI at the captured version-bump commit and
-waits for all four platforms' builds, package inspections, source tests, and release tooling
+The workflow calls the ordinary native-installer CI at the captured candidate commit and
+waits for all four platforms' builds, package inspections, required headless tests, and release tooling
 tests to pass. Only then does one write-enabled
 job download this run's five installers and five checksum files, check the exact filenames and
 hashes, create `v<version>` at the tested commit, and upload the complete asset set. GitHub must
@@ -98,7 +108,9 @@ Publication goes straight to a stable release in that same run, with no draft-re
 stage. The upload operation briefly uses GitHub's draft flag so an incomplete asset set cannot
 become the update target; it is cleared automatically only after verification. The workflow then
 verifies the official latest-stable endpoint. Installers remain unsigned and macOS packages are
-not notarized.
+not notarized. A separate finalization job rechecks the published release, latest endpoint,
+tested tag, and version-only candidate, then fast-forwards `main` without force. Main must
+still match the captured base commit; concurrent work is never overwritten.
 During upload, GitHub may give draft assets a temporary `untagged-...` download address.
 The publisher accepts it only when it matches that draft's official release-page address and
 the exact asset name. Once published, every download address must use the final `v<version>`
@@ -107,14 +119,20 @@ mandatory throughout.
 
 The release bot needs one-time installation, repository-scoped Contents write permission, an
 explicit protected-main ruleset bypass, the `LAUNCHER_RELEASE_APP_ID` Actions variable, and
-the `LAUNCHER_RELEASE_APP_PRIVATE_KEY` Actions secret. Its token is revoked when preparation
-ends and is not passed to builds or publication. See
+the `LAUNCHER_RELEASE_APP_PRIVATE_KEY` Actions secret. Preparation and finalization each use
+a fresh, repository-scoped App token, revoked at the end of their job; neither token is
+passed to builds or publication. See
 [release bot setup](docs/archive-distribution-contract.md#release-bot-setup).
 
 Writes are not automatically retried, existing assets/tags are never overwritten, and failure
-does not automatically undo a version-bump commit or delete a tag, draft, or published release.
-Inspect any partial state before another attempt; a published release cannot be made unpublished by a failed post-publication
-check. Full Windows self-update still requires an older installed MSI and a newer published
+does not delete a candidate branch, tag, draft, or published release.
+A failed build or unpublished draft leaves `main` unchanged. Inspect any partial state before
+another attempt: publication and the main update cannot be one atomic transaction.
+If publication succeeded but finalization failed, resume only finalization after inspection,
+using the same candidate and artifacts; do not publish or increment again. An already-synchronized
+candidate is confirmed without another write. If `main` has advanced independently, an owner
+must review a manual version synchronization that preserves that newer work.
+Full Windows self-update still requires an older installed MSI and a newer published
 version. Publishing the same version as the installed launcher does not trigger an upgrade.
 See [the distribution contract](docs/archive-distribution-contract.md) for validation commands.
 

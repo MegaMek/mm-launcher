@@ -523,6 +523,13 @@ cancelling before publication closes the opaque prepared handle and removes its 
 The fixed channel cannot be edited after success.
 
 Tests should use a disposable `--registry`, fixture installation, fake `ReleaseTransport`, and fake
-`ProcessRunner`; they must not download or launch a real game. A separate non-headless smoke test
-may show `LauncherFrame`, wait for its empty home, exercise the Manage dialog, then dispose it on
-the EDT. Skip that smoke test only when `GraphicsEnvironment.isHeadless()` is true.
+`ProcessRunner`; they must not download or launch a real game. The default `test` task runs
+headless, retaining component/state assertions and the production automatic-check worker's
+opt-in, eligibility, bounded selection, deduplication, cancellation, binding and EDT behavior.
+Tests that need actual windows are tagged `native-gui` at method level in mixed classes and
+run with `nativeGuiTest` in the independent advisory desktop workflow, not the release gate.
+Missing display/all-skipped execution is not a successful advisory run.
+Native smoke tests must dispose their own windows on the EDT. `SwingTestSupport.createWindow`
+also disposes a fixture that finishes construction after its caller times out; ordinary EDT
+read probes must never acquire that disposal behavior. Timeout failures retain thread stacks,
+including the event-dispatch thread, for diagnosis instead of relying on larger time budgets.

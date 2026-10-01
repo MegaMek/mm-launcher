@@ -89,6 +89,7 @@ class LauncherSwingSmokeTest {
     @TempDir Path temp;
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void showsAccessibleEmptyHomeSplitAndCloses() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing smoke requires a display");
@@ -136,6 +137,7 @@ class LauncherSwingSmokeTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void styledSubfolderDialogValidatesInlineAndSupportsContinueCancelAndEscape()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
@@ -175,6 +177,7 @@ class LauncherSwingSmokeTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void corruptRegistryShowsNonblankRetrySurface() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
@@ -190,6 +193,7 @@ class LauncherSwingSmokeTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void damagedPreferredStillRendersActionableHomeAndOpensManage() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
@@ -213,6 +217,7 @@ class LauncherSwingSmokeTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void registeredCopyCanDownloadFromManageWithoutRemovingExistingCopy() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
@@ -299,6 +304,7 @@ class LauncherSwingSmokeTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void releasePagingStartsDisabledAndRetriesFailedPage() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
@@ -345,6 +351,7 @@ class LauncherSwingSmokeTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void installPickerUsesOneProductChannelFetchAndSimpleHumanSizedRows()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
@@ -437,6 +444,7 @@ class LauncherSwingSmokeTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void releasePickerDiscardsInFlightResultsAfterProductChange() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
@@ -469,6 +477,7 @@ class LauncherSwingSmokeTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void failedInstallUsesOneCompactFailureSurfaceAndClosesStream() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing worker controls require a display");
@@ -526,6 +535,7 @@ class LauncherSwingSmokeTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void activeOperationCancelButtonRemainsReachableWhileBusyAndDisposesWorkerResources()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
@@ -560,6 +570,7 @@ class LauncherSwingSmokeTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void progressDialogIsCompactStyledAndKeepsOnlyBoundedHiddenDetails() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing progress controls require a display");
@@ -664,6 +675,7 @@ class LauncherSwingSmokeTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void progressDialogKeepsExpectedValidationFailureSimple() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing progress controls require a display");
@@ -704,6 +716,7 @@ class LauncherSwingSmokeTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void progressDialogShowsAtomicCutoffReasonAndDeniesLateCancellation()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
@@ -747,6 +760,7 @@ class LauncherSwingSmokeTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void adoptionProgressDistinguishesEachScanAndNeverShowsRunningFinished()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
