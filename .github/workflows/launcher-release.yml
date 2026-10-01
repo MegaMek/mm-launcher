@@ -79,6 +79,27 @@ jobs:
             --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
             --assets build/release
 
+      - name: Record verified publication for later CI reuse
+        id: provenance
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: |
+          python3 -B scripts/launcher_release.py record \
+            --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
+            --assets build/release --provenance build/launcher-release-provenance.json
+      - name: Retain immutable publication provenance
+        if: steps.provenance.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-release-provenance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/launcher-release-provenance.json
+          if-no-files-found: error
+          retention-days: 14
+
   finalize:
     needs: [prepare, publish]
     runs-on: ubuntu-24.04

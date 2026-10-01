@@ -5,10 +5,13 @@ import copy
 import base64
 import os
 import hashlib
+import io
+import json
 from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 
 import launcher_release as release
@@ -21,6 +24,7 @@ ENVIRONMENT = {
     "GITHUB_REF": "refs/heads/main",
     "GITHUB_SHA": COMMIT,
     "GITHUB_RUN_ID": "123",
+    "GITHUB_RUN_ATTEMPT": "1",
 }
 
 
@@ -183,10 +187,36 @@ class FakeCiGitHub(FakeBumpGitHub):
         names += [f"installers / Native installers - {platform}"
                   for platform in ("windows-x64", "linux-x64", "macos-intel", "macos-apple-silicon")]
         self.jobs = [{"name": name, "run_id": 123, "head_sha": COMMIT,
-                      "status": "completed", "conclusion": "success"} for name in names]
+                      "status": "completed", "conclusion": "success", "run_attempt": 1} for name in names]
         self.jobs.append({"name": "finalize", "run_id": 123, "head_sha": COMMIT,
                           "status": "in_progress", "conclusion": None})
         self.job_response = None
+        self.artifacts = []
+        self.artifact_response = None
+        self.archives = {}
+        self.provenance = None
+
+    def retain_provenance(self, record):
+        self.provenance = copy.deepcopy(record)
+        content = io.BytesIO()
+        with zipfile.ZipFile(content, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(release.PROVENANCE_FILE, json.dumps(record))
+        self.retain_archive(content.getvalue())
+
+    def retain_archive(self, content):
+        self.archives[987] = content
+        self.artifacts = [{
+            "id": 987, "name": "launcher-release-provenance-123-1", "expired": False,
+            "size_in_bytes": len(content), "digest": "sha256:" + hashlib.sha256(content).hexdigest(),
+            "workflow_run": {"id": 123, "head_sha": COMMIT, "head_branch": "main"},
+        }]
+
+    def download(self, endpoint):
+        self.calls.append(("GET", endpoint, None))
+        self.assert_endpoint = f"{release.API}/actions/artifacts/987/zip"
+        if endpoint != self.assert_endpoint:
+            raise AssertionError(f"Unexpected artifact download: {endpoint}")
+        return self.archives[987]
 
     def request(self, method, endpoint, data=None, file=None, missing_ok=False):
         if method == "GET" and ("/git/ref/heads/release-candidates/" in endpoint
@@ -200,6 +230,12 @@ class FakeCiGitHub(FakeBumpGitHub):
                 page = int(endpoint.rsplit("=", 1)[1])
                 return {"total_count": len(self.jobs),
                         "jobs": copy.deepcopy(self.jobs[(page - 1) * 100:page * 100])}
+            if "/artifacts?" in endpoint:
+                if self.artifact_response is not None:
+                    return copy.deepcopy(self.artifact_response)
+                page = int(endpoint.rsplit("=", 1)[1])
+                return {"total_count": len(self.artifacts),
+                        "artifacts": copy.deepcopy(self.artifacts[(page - 1) * 100:page * 100])}
             return copy.deepcopy(self.ci_run)
         return super().request(method, endpoint, data, file, missing_ok)
 
@@ -239,6 +275,10 @@ class LauncherReleaseTest(unittest.TestCase):
         version, commit, _ = release.prepare_candidate(github, self.root, ENVIRONMENT)
         with patch("builtins.print"):
             release.publish(github, version, commit, self.make_assets(version))
+        provenance = self.root / release.PROVENANCE_FILE
+        release.record_publication(github, version, commit, self.make_assets(version), ENVIRONMENT, provenance)
+        github.retain_provenance(json.loads(provenance.read_text(encoding="utf-8")))
+        provenance.unlink()
         (self.root / "build.gradle.kts").write_bytes(f'version = "{version}"\n'.encode("utf-8"))
         github.calls.clear()
         environment = {**ENVIRONMENT, "GITHUB_EVENT_NAME": "push", "GITHUB_SHA": commit}
@@ -370,6 +410,130 @@ class LauncherReleaseTest(unittest.TestCase):
                 asset["id"] = True
             with self.subTest(failure=failure), self.assertRaises(release.ReleaseError):
                 self.ci_plan(github, environment)
+
+    def test_reuploaded_different_bytes_under_all_original_names_cannot_reuse_ci(self):
+        github, environment = self.ci_fixture()
+        for asset in github.release["assets"]:
+            asset["id"] += 1000
+            asset["size"] += 1
+            asset["digest"] = "sha256:" + "b" * 64
+        with self.assertRaises(release.ReleaseError):
+            self.ci_plan(github, environment)
+
+    def test_current_release_must_match_original_asset_ids_sizes_digests_and_release_id(self):
+        for field, value in (("id", 999), ("size", 1000), ("digest", "sha256:" + "b" * 64),
+                             ("release_id", 38)):
+            github, environment = self.ci_fixture()
+            if field == "release_id":
+                github.release["id"] = value
+            else:
+                github.release["assets"][0][field] = value
+            with self.subTest(field=field), self.assertRaises(release.ReleaseError):
+                self.ci_plan(github, environment)
+
+    def test_missing_expired_or_earlier_attempt_provenance_requires_normal_builds(self):
+        for state in ("missing", "expired", "earlier-attempt"):
+            github, environment = self.ci_fixture()
+            if state == "missing":
+                github.artifacts.clear()
+            elif state == "expired":
+                github.artifacts[0]["expired"] = True
+            else:
+                next(job for job in github.jobs if job["name"] == "publish")["run_attempt"] = 2
+            with self.subTest(state=state):
+                self.assertFalse(self.ci_plan(github, environment)[0])
+                self.assertFalse(any("/zip" in endpoint for _, endpoint, _ in github.calls))
+
+    def test_provenance_record_binds_schema_repository_version_commit_run_and_attempt(self):
+        for field, value in (("schema_version", True), ("repository", "someone/mm-launcher"),
+                             ("version", "0.14.99"), ("commit", "e" * 40), ("run_id", 456),
+                             ("run_attempt", 2), ("release_id", True), ("assets", [])):
+            github, environment = self.ci_fixture()
+            record = copy.deepcopy(github.provenance)
+            record[field] = value
+            github.retain_provenance(record)
+            with self.subTest(field=field), self.assertRaises(release.ReleaseError):
+                self.ci_plan(github, environment)
+
+    def test_artifact_identity_digest_size_and_inventory_are_verified_before_reuse(self):
+        for failure in ("run", "sha", "branch", "digest", "size", "duplicate-name",
+                        "partial", "malformed", "wrong-bytes"):
+            github, environment = self.ci_fixture()
+            artifact = github.artifacts[0]
+            if failure == "run":
+                artifact["workflow_run"]["id"] = 456
+            elif failure == "sha":
+                artifact["workflow_run"]["head_sha"] = "e" * 40
+            elif failure == "branch":
+                artifact["workflow_run"]["head_branch"] = "feature"
+            elif failure == "digest":
+                artifact["digest"] = "sha256:" + "e" * 64
+            elif failure == "size":
+                artifact["size_in_bytes"] = release.PROVENANCE_ARCHIVE_LIMIT + 1
+            elif failure == "duplicate-name":
+                github.artifacts.append({**artifact, "id": 988})
+            elif failure == "partial":
+                github.artifact_response = {"total_count": 2, "artifacts": github.artifacts}
+            elif failure == "malformed":
+                github.artifact_response = {"total_count": 1, "artifacts": "invalid"}
+            else:
+                github.archives[987] = b"changed artifact"
+            with self.subTest(failure=failure), self.assertRaises(release.ReleaseError):
+                self.ci_plan(github, environment)
+
+    def test_provenance_artifact_pagination_and_successful_publish_attempt_survive_finalize_reruns(self):
+        github, environment = self.ci_fixture()
+        github.ci_run["run_attempt"] = 2
+        github.jobs[-1]["run_attempt"] = 2
+        github.artifacts = [{"id": 2000 + index, "name": f"other-{index}"} for index in range(100)] \
+                + github.artifacts
+        self.assertTrue(self.ci_plan(github, environment)[0])
+        self.assertEqual(2, sum("/artifacts?" in endpoint for _, endpoint, _ in github.calls))
+        self.assertEqual(1, sum("/zip" in endpoint for _, endpoint, _ in github.calls))
+
+    def test_provenance_archive_only_accepts_one_bounded_unambiguous_json_record(self):
+        for failure in ("not-zip", "extra-file", "oversized-json", "duplicate-json-field", "invalid-json"):
+            github, environment = self.ci_fixture()
+            content = io.BytesIO()
+            with zipfile.ZipFile(content, "w", zipfile.ZIP_DEFLATED) as archive:
+                record = json.dumps(github.provenance)
+                if failure == "extra-file":
+                    archive.writestr("../extra", "not extracted")
+                elif failure == "oversized-json":
+                    record = " " * (release.PROVENANCE_LIMIT + 1)
+                elif failure == "duplicate-json-field":
+                    record = '{"schema_version":1,' + record[1:]
+                elif failure == "invalid-json":
+                    record = "{invalid"
+                archive.writestr(release.PROVENANCE_FILE, record)
+            github.retain_archive(b"not a ZIP archive" if failure == "not-zip" else content.getvalue())
+            with self.subTest(failure=failure), self.assertRaises(release.ReleaseError):
+                self.ci_plan(github, environment)
+
+    def test_publication_record_is_verified_against_original_files_not_current_metadata_alone(self):
+        github, _ = self.ci_fixture()
+        github.release["assets"][0]["digest"] = "sha256:" + "b" * 64
+        destination = self.root / "unverified.json"
+        with self.assertRaises(release.ReleaseError):
+            release.record_publication(github, github.version, "d" * 40,
+                                       self.make_assets(github.version), ENVIRONMENT, destination)
+        self.assertFalse(destination.exists())
+        self.assertTrue(all(method == "GET" for method, _, _ in github.calls))
+
+    def test_record_cli_retains_only_read_only_verified_publication_identity(self):
+        github, environment = self.ci_fixture()
+        destination = self.root / "provenance" / release.PROVENANCE_FILE
+        with patch.dict(os.environ, environment), \
+                patch("launcher_release.Path.cwd", return_value=self.root), \
+                patch("launcher_release.GitHub", return_value=github), \
+                patch("launcher_release.verify_checkout"), \
+                patch("launcher_release.sys.argv", ["launcher_release.py", "record",
+                    "--version", github.version, "--commit", environment["GITHUB_SHA"],
+                    "--assets", str(self.root / ("assets-" + github.version)),
+                    "--provenance", str(destination)]):
+            release.main()
+        self.assertEqual(github.provenance, json.loads(destination.read_text(encoding="utf-8")))
+        self.assertTrue(all(method == "GET" for method, _, _ in github.calls))
 
     @patch("builtins.print")
     def test_ci_plan_cli_records_exact_skip_output_and_explains_it_in_the_summary(self, output):

@@ -108,12 +108,24 @@ of each job, including successful jobs retained when only failed finalization is
 Finalization/the overall run may still be in progress when the push arrives; publication
 success is the relevant completed prerequisite.
 
-The published record must retain all ten uploaded, uniquely identified assets with exact
-official URLs, positive sizes, valid SHA-256 metadata and an updater-compatible MSI size.
-This metadata check does not download installers again; the successful publication job
-already verified their bytes. Missing publication or unconfirmed successful jobs means a
-normal installer build, with an explicit explanation. Malformed/mismatched provenance or
-API failures fail explicitly, never silently skip tests.
+After publication, a read-only step checks the public release against the original local
+installer/checksum bytes and writes `launcher-release-provenance.json`. The same publish
+job retains it using immutable v4 Actions artifacts, named
+`launcher-release-provenance-<run-id>-<publish-attempt>`, without overwrite, for 14 days.
+Recording/upload failures are visible but nonblocking: this evidence enables a CI
+optimization, not publication safety, and its absence must cause normal installer builds.
+
+The gate uses the successful publication job's attempt, not the overall run's latest
+attempt, so finalization-only reruns can retain valid proof. It checks the artifact's
+original run/base identity and archive SHA-256, then reads only one JSON file (16 KiB
+uncompressed, 64 KiB archive maximum) without extraction. The record must bind the
+repository, version, candidate SHA, run/attempt, release ID and all ten original asset
+IDs, sizes and SHA-256 digests. Current public metadata is checked against that independent
+record, including exact official URLs and an updater-compatible MSI size. Deleting and
+re-uploading assets cannot satisfy the gate merely by keeping their names and URLs.
+No installer is downloaded again. Missing/expired provenance, missing publication or
+unconfirmed successful jobs means a normal installer build, with an explicit explanation.
+Malformed/mismatched provenance or API failures fail explicitly, never silently skip tests.
 
 Only the tooling job gains repository-scoped `actions: read` alongside `contents: read`
 for provenance lookup; the release caller permits that read-only scope. No App credentials

@@ -21,7 +21,12 @@ The former archive tasks remain available for development but are not CI outputs
 After a release updates `main`, the native-installer workflow still appears, but its
 small read-only tooling job can skip the four duplicate installer builds. It verifies
 the exact published tag, version-only candidate and candidate branch, plus successful
-build/test/publication jobs from the original release run. A release-run trailer is only
+build/test/publication jobs from the original release run. Current release and asset IDs,
+sizes and SHA-256 digests must also match the small immutable provenance artifact from
+that run's successful publication attempt. The gate downloads only that bounded record,
+not installers. Missing or expired evidence means normal builds; replaced assets fail
+explicitly. Recording/uploading this optional evidence does not block publication.
+A release-run trailer is only
 a lookup hint, not permission to skip CI. PRs, ordinary code changes, manual builds and
 the release workflow's pinned candidate builds still build all platforms. The decision
 and original run link appear in the workflow summary. Advisory desktop tests still run

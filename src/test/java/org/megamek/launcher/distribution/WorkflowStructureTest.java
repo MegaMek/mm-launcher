@@ -261,7 +261,8 @@ class WorkflowStructureTest {
         assertEquals(List.of("prepare", "installers"), prerequisites);
         assertFalse(publish.has("if"), "default success dependency guard must not be bypassed");
         assertEquals("write", publish.path("permissions").path("contents").asText());
-        assertEquals(List.of("actions/checkout@v4", "actions/download-artifact@v4"), actions(publish));
+        assertEquals(List.of("actions/checkout@v4", "actions/download-artifact@v4",
+                "actions/upload-artifact@v4"), actions(publish));
         assertEquals("${{ needs.prepare.outputs.commit }}",
                 publish.path("steps").get(0).path("with").path("ref").asText());
         assertFalse(publish.path("steps").get(0).path("with").path("persist-credentials").asBoolean());
@@ -277,6 +278,26 @@ class WorkflowStructureTest {
                 publication.path("env").path("RELEASE_VERSION").asText());
         assertTrue(publication.path("run").asText().contains("launcher_release.py publish"));
         assertTrue(publication.path("run").asText().contains("--assets build/release"));
+        assertFalse(publication.path("continue-on-error").asBoolean(), "publication failures still block main");
+        JsonNode provenance = step(publish, "Record verified publication for later CI reuse");
+        assertEquals("provenance", provenance.path("id").asText());
+        assertTrue(provenance.path("continue-on-error").asBoolean(), "optional CI reuse must not block a release");
+        assertEquals(publication.path("env"), provenance.path("env"));
+        assertTrue(provenance.path("run").asText().contains("launcher_release.py record"));
+        assertTrue(provenance.path("run").asText().contains("--provenance build/launcher-release-provenance.json"));
+        JsonNode retained = step(publish, "Retain immutable publication provenance");
+        assertEquals("steps.provenance.outcome == 'success'", retained.path("if").asText());
+        assertTrue(retained.path("continue-on-error").asBoolean());
+        assertEquals("launcher-release-provenance-${{ github.run_id }}-${{ github.run_attempt }}",
+                retained.path("with").path("name").asText());
+        assertEquals("build/launcher-release-provenance.json", retained.path("with").path("path").asText());
+        assertEquals("error", retained.path("with").path("if-no-files-found").asText());
+        assertEquals(14, retained.path("with").path("retention-days").asInt());
+        assertFalse(retained.path("with").path("overwrite").asBoolean(), "the evidence must not be replaced");
+        assertTrue(text.indexOf("Validate and publish the complete stable launcher release")
+                < text.indexOf("Record verified publication for later CI reuse"));
+        assertTrue(text.indexOf("Record verified publication for later CI reuse")
+                < text.indexOf("Retain immutable publication provenance"));
         JsonNode finalize = jobs.path("finalize");
         List<String> finalPrerequisites = new ArrayList<>();
         finalize.path("needs").forEach(dependency -> finalPrerequisites.add(dependency.asText()));
