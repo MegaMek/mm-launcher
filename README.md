@@ -307,7 +307,10 @@ if ($LASTEXITCODE -ne 0) { throw "Build failed with exit code $LASTEXITCODE." }
 
 GUI tests use the package-local `SwingTestSupport` harness. Probe Swing state on the EDT,
 wait for the actual rendered result rather than service-entry counters or fixed sleeps,
-and reacquire controls after a render. `click` looks up a showing, enabled control and
+and reacquire controls after a render. Assertions and component counts also belong on
+the EDT: finding a component does not make a later off-EDT tree read safe. The shared
+counting helpers traverse the entire tree in one EDT turn.
+`click` looks up a showing, enabled control and
 clicks it in the same EDT turn. Use `startClick` or `startClickText` for actions that can
 open a synchronous modal dialog, then await the owned dialog and dismiss it; a synchronous
 click cannot finish while its modal dialog is open. Asynchronous listener failures are

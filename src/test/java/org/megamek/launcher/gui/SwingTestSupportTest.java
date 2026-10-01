@@ -10,7 +10,9 @@ import org.junit.jupiter.api.Test;
 import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JFrame;
+import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
+import java.awt.Component;
 import java.awt.GraphicsEnvironment;
 import java.time.Duration;
 import java.util.concurrent.CountDownLatch;
@@ -37,6 +39,40 @@ class SwingTestSupportTest {
         AssertionError expected = new AssertionError("fixture assertion");
         assertSame(expected, assertThrows(AssertionError.class,
                 () -> SwingTestSupport.onEdt(() -> { throw expected; })));
+    }
+
+    @Test
+    void componentCountsReadTheWholeTreeAndPropertiesOnEdt() throws Exception {
+        JPanel root = SwingTestSupport.onEdt(() -> {
+            JPanel panel = new JPanel() {
+                @Override public Component[] getComponents() {
+                    assertTrue(SwingUtilities.isEventDispatchThread(), "tree reads must use the EDT");
+                    return super.getComponents();
+                }
+            };
+            JPanel nested = new JPanel();
+            JButton button = new JButton("Import") {
+                @Override public String getName() {
+                    assertTrue(SwingUtilities.isEventDispatchThread(), "name reads must use the EDT");
+                    return super.getName();
+                }
+
+                @Override public String getText() {
+                    assertTrue(SwingUtilities.isEventDispatchThread(), "text reads must use the EDT");
+                    return super.getText();
+                }
+            };
+            button.setName("import");
+            nested.add(button);
+            panel.add(nested);
+            return panel;
+        });
+
+        AssertionError invalidRead = assertThrows(AssertionError.class, root::getComponents);
+        assertTrue(invalidRead.getMessage().contains("tree reads must use the EDT"));
+        assertEquals(1, SwingTestSupport.countNamed(root, "import"));
+        assertEquals(1, SwingTestSupport.countButtonText(root, "Import"));
+        assertEquals(0, SwingTestSupport.countNamed(root, "missing"));
     }
 
     @Test

@@ -5,6 +5,7 @@
 package org.megamek.launcher.gui;
 
 import javax.swing.AbstractButton;
+import javax.swing.JButton;
 import javax.swing.JDialog;
 import javax.swing.JPopupMenu;
 import javax.swing.MenuSelectionManager;
@@ -23,6 +24,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.Predicate;
 
 final class SwingTestSupport {
     private static final Duration TIMEOUT = Duration.ofSeconds(8);
@@ -177,6 +179,24 @@ final class SwingTestSupport {
                     + ", expected " + type.getName());
         }
         return type.cast(component);
+    }
+
+    static int countNamed(Container root, String name) throws Exception {
+        return onEdt(() -> count(root, child -> name.equals(child.getName())));
+    }
+
+    static int countButtonText(Container root, String text) throws Exception {
+        return onEdt(() -> count(root, child ->
+                child instanceof JButton button && text.equals(button.getText())));
+    }
+
+    private static int count(Container root, Predicate<Component> matches) {
+        int count = 0;
+        for (Component child : root.getComponents()) {
+            if (matches.test(child)) count++;
+            if (child instanceof Container nested) count += count(nested, matches);
+        }
+        return count;
     }
 
     private static AbstractButton buttonText(Container root, String text) {

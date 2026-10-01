@@ -245,42 +245,44 @@ class ExistingImportSwingTest {
                 frame.showWindow();
                 return null;
             });
-            JButton visibleImport = waitFor(() -> findButton(frame, "useExistingCopyButton"));
-            assertEquals(1, countNamed(frame, "useExistingCopyButton"));
-            assertEquals("Use existing installation", visibleImport.getText());
-            JLabel caption = waitFor(() -> (JLabel) find(frame, "existingCopyCaption"));
-            assertEquals("MegaMek, MekHQ, or MegaMekLab", caption.getText());
-
+            waitFor(() -> findButton(frame, "useExistingCopyButton"));
             onEdt(() -> {
-                visibleImport.doClick();
+                assertEquals(1, countNamed(frame, "useExistingCopyButton"));
+                assertEquals("Use existing installation",
+                        findButton(frame, "useExistingCopyButton").getText());
+                JLabel caption = (JLabel) find(frame, "existingCopyCaption");
+                assertNotNull(caption);
+                assertEquals("MegaMek, MekHQ, or MegaMekLab", caption.getText());
                 return null;
             });
+            SwingTestSupport.click(frame, "useExistingCopyButton");
             assertNotNull(waitFor(() -> findButton(frame, "launch-megamek-button")));
             assertNull(onEdt(() -> findButton(frame, "launch-mekhq-button")));
             assertNull(onEdt(() -> findButton(frame, "launch-lab-button")));
-            assertFalse(hasShowingDialog(frame, "Input"));
-            assertFalse(hasShowingDialog(frame, "Confirm existing installation"));
-            assertFalse(hasShowingDialog(frame, "Import complete"));
+            onEdt(() -> {
+                assertFalse(hasShowingDialog(frame, "Input"));
+                assertFalse(hasShowingDialog(frame, "Confirm existing installation"));
+                assertFalse(hasShowingDialog(frame, "Import complete"));
+                return null;
+            });
             assertEquals("MegaMek existing installation",
                     services.loadHome().preferred().name());
 
-            JButton installations =
-                    waitFor(() -> findButton(frame, "manageInstallationsButton"));
+            SwingTestSupport.click(frame, "manageInstallationsButton");
+            SwingTestSupport.click(frame, "manageAddExistingButton");
+            waitUntil(() -> {
+                JButton mekHQ = findButton(frame, "launch-mekhq-button");
+                JButton lab = findButton(frame, "launch-lab-button");
+                return mekHQ != null && mekHQ.isShowing() && lab != null && lab.isShowing();
+            });
             onEdt(() -> {
-                installations.doClick();
+                assertNotNull(findButton(frame, "manageInstallationsButton"),
+                        "successful import follows the normal install flow back to Home");
+                assertFalse(hasShowingDialog(frame, "Input"));
+                assertFalse(hasShowingDialog(frame, "Confirm existing installation"));
+                assertFalse(hasShowingDialog(frame, "Import complete"));
                 return null;
             });
-            JButton advancedImport =
-                    waitFor(() -> findButton(frame, "manageAddExistingButton"));
-            onEdt(() -> {
-                advancedImport.doClick();
-                return null;
-            });
-            assertNotNull(waitFor(() -> findButton(frame, "manageInstallationsButton")),
-                    "successful import follows the normal install flow back to Home");
-            assertFalse(hasShowingDialog(frame, "Input"));
-            assertFalse(hasShowingDialog(frame, "Confirm existing installation"));
-            assertFalse(hasShowingDialog(frame, "Import complete"));
 
             RegistryData data = services.readRegistry();
             assertEquals(2, data.installations().size());
@@ -289,7 +291,7 @@ class ExistingImportSwingTest {
             assertTrue(data.installations().stream().anyMatch(record ->
                     "MekHQ existing installation".equals(record.name())));
             assertFalse(Files.readString(registry).contains("javaExecutable"));
-            assertEquals(2, prompts.folderRequests);
+            assertEquals(2, onEdt(() -> prompts.folderRequests));
             assertTrue(runner.commands.isEmpty(), "import must not execute Java");
             ChannelPreferenceStore channels = new ChannelPreferenceStore();
             for (var record : data.installations()) {
@@ -299,31 +301,28 @@ class ExistingImportSwingTest {
                         "an imported folder must remain receipt-less");
             }
 
-            JButton manageAgain = waitFor(() -> findButton(frame,
-                    "manageInstallationsButton"));
-            onEdt(() -> {
-                manageAgain.doClick();
-                return null;
-            });
+            SwingTestSupport.click(frame, "manageInstallationsButton");
             for (var record : data.installations()) {
                 JLabel provenance = waitFor(() -> (JLabel) find(frame,
                         "installationProvenance-" + record.id()));
-                assertEquals("Imported copy · Launch only · Updates unavailable",
-                        provenance.getText());
-                assertNull(find(frame, "installationStatus-" + record.id()),
-                        "the imported-copy provenance already explains launch-only status");
-                JLabel title = (JLabel) find(frame, "installationName-" + record.id());
-                int[] positions = onEdt(() -> new int[]{
-                        SwingUtilities.convertPoint(title, 0, 0, frame).x,
-                        SwingUtilities.convertPoint(provenance, 0, 0, frame).x,
-                        SwingUtilities.convertPoint(provenance, 0, 0, frame).y
-                                - SwingUtilities.convertPoint(title, 0, title.getHeight(), frame).y
+                int[] positions = onEdt(() -> {
+                    assertEquals("Imported copy · Launch only · Updates unavailable",
+                            provenance.getText());
+                    assertNull(find(frame, "installationStatus-" + record.id()),
+                            "the imported-copy provenance already explains launch-only status");
+                    JLabel title = (JLabel) find(frame, "installationName-" + record.id());
+                    return new int[]{
+                            SwingUtilities.convertPoint(title, 0, 0, frame).x,
+                            SwingUtilities.convertPoint(provenance, 0, 0, frame).x,
+                            SwingUtilities.convertPoint(provenance, 0, 0, frame).y
+                                    - SwingUtilities.convertPoint(title, 0, title.getHeight(), frame).y
+                    };
                 });
                 assertEquals(positions[0], positions[1], "title and body share the left edge");
                 assertTrue(positions[2] > 0, "the title has space before the body");
                 assertNotNull(waitFor(() -> findButton(frame,
                         "enableManagedUpdatesButton-" + record.id())));
-                assertNull(find(frame, "checkOnOpenCheckbox-" + record.id()));
+                assertNull(onEdt(() -> find(frame, "checkOnOpenCheckbox-" + record.id())));
             }
             assertNull(onEdt(() -> findButton(frame, "chooseChannelButton")));
             assertNull(onEdt(() -> findButton(frame, "updateChecksButton")));
@@ -916,13 +915,8 @@ class ExistingImportSwingTest {
         }
     }
 
-    private static int countNamed(Container root, String name) {
-        int count = 0;
-        for (Component child : root.getComponents()) {
-            if (name.equals(child.getName())) count++;
-            if (child instanceof Container nested) count += countNamed(nested, name);
-        }
-        return count;
+    private static int countNamed(Container root, String name) throws Exception {
+        return SwingTestSupport.countNamed(root, name);
     }
 
     private static Component find(Container root, String name) {
@@ -941,13 +935,8 @@ class ExistingImportSwingTest {
         return found instanceof JButton button ? button : null;
     }
 
-    private static int countButtonText(Container root, String text) {
-        int count = 0;
-        for (Component child : root.getComponents()) {
-            if (child instanceof JButton button && text.equals(button.getText())) count++;
-            if (child instanceof Container nested) count += countButtonText(nested, text);
-        }
-        return count;
+    private static int countButtonText(Container root, String text) throws Exception {
+        return SwingTestSupport.countButtonText(root, text);
     }
 
     private static JDialog findDialog(LauncherFrame frame, String name) {
