@@ -118,6 +118,57 @@ The workflow never installs packages, signs/notarizes, assembles a game suite, o
 installed launcher on a runner. A real self-update test requires separate explicit authorization
 to publish and to upgrade an older Windows MSI installation.
 
+### Installed Windows self-update
+
+Startup and Settings use the same update check. A single themed **Update now**
+consent covers the exact offered version's download, checksum and MSI identity
+verification, launcher shutdown, and installation. Download/verification use the
+shared cancellable operation progress and persistent diagnostics; handoff is
+non-cancellable. No second installation confirmation is shown.
+
+The helper waits for the original launcher process to exit, checks the staged
+checksum again, and launches Windows Installer with `/passive /norestart` and a
+verbose diagnostic log. It imports its own Windows PowerShell utility module
+explicitly, avoiding incompatible PowerShell 7 module search paths inherited by
+Java processes. Progress is visible without a setup wizard. Installer
+exit 0 is successful; 3010 is successful with a restart-required notice, never
+a forced restart. Failed or cancelled installations are not reported as success.
+Only a successful installation reopens the fixed installed launcher entry point,
+after the completed report has been written atomically.
+
+The helper's Windows PowerShell completion writer passes `[NullString]::Value`
+to `File.Replace`; passing `$null` binds an empty backup path and leaves the
+report pending. Both helper output and installer logs are retained beside the
+registry. New pending reports bind the target version and helper PID/start time.
+An active helper keeps its report and produces an informational finishing state.
+An exited helper with an incomplete report requires Windows to confirm the exact
+target's running and installed version before acknowledgement; the original
+report is archived with a diagnostic warning. If Windows instead confirms the
+old running version is still installed, archive the incomplete failed attempt
+and allow a later check to retry, without claiming an upgrade. Reservations
+without a recorded helper identity remain for review. New completed reports
+retain the exact target even when cleanup warnings or reboot notices apply.
+
+Legacy plain `pending` reports contain no target. Their helper is identified
+by the encoded script's exact report path. Only when that helper is absent and
+Windows confirms the current installation may the report be archived and checks
+resume, with an explicit unknown-previous-result notice, not a claimed successful
+upgrade. Changed, oversized, linked, malformed, or unverifiable reports remain
+for review.
+
+Material Windows regressions execute the real helper script with harmless
+installer/launcher substitutes; they never run `msiexec` or install software.
+They cover parent shutdown, real Windows PowerShell report replacement,
+installer failure/cancellation, reboot-required success, checksum drift, cleanup
+warnings, report-write errors, and relaunch ordering. GUI tests exercise the
+themed consent, and download tests cover byte progress and cancellation.
+
+Run the self-update regressions on Windows with a display:
+
+```powershell
+.\gradlew.bat test --tests "*WindowsMsi*Test" --tests "*LauncherUpdateDialogTest" --no-daemon --console=plain
+```
+
 ### Release bot setup
 
 An authorized administrator must complete this one-time setup before the automatic workflow

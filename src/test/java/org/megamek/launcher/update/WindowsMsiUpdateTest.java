@@ -52,10 +52,10 @@ class WindowsMsiUpdateTest {
         return path;
     }
 
-    @Test void pendingAndUnknownResultsRemainForReview() throws Exception {
+    @Test void activePendingAndUnknownResultsRemainForReview() throws Exception {
         Path path = report("pending");
-        assertThrows(IOException.class, () -> WindowsMsiUpdate.consumeReport(path, "0.1.1",
-                () -> fail("pending must not verify MSI")));
+        assertTrue(WindowsMsiUpdate.consumeReport(path, "0.1.1",
+                () -> fail("active helper must not verify MSI"), (file, pid, started) -> true).pending());
         assertEquals("pending", Files.readString(path));
         Files.writeString(path, "installed:0.1.1garbage");
         assertThrows(IOException.class, () -> WindowsMsiUpdate.consumeReport(path, "0.1.1",
@@ -71,6 +71,71 @@ class WindowsMsiUpdateTest {
         assertThrows(IOException.class, () -> WindowsMsiUpdate.consumeReport(link, "0.1.1",
                 () -> fail("link must not verify MSI")));
         assertTrue(Files.isSymbolicLink(link));
+    }
+
+    @Test void legacyIncompleteReportIsRetainedAndNeverClaimedAsConfirmedUpdate() throws Exception {
+        Path path = report("pending");
+        var result = WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {},
+                (file, pid, started) -> false);
+        assertTrue(result.recovered());
+        assertFalse(result.installed(), "the previous target and result are unknown");
+        assertTrue(result.message().contains("did not record"));
+        assertFalse(Files.exists(path));
+        try (var files = Files.list(temp)) {
+            Path retained = files.filter(file -> file.getFileName().toString().contains(".incomplete-"))
+                    .findFirst().orElseThrow();
+            assertEquals("pending", Files.readString(retained));
+        }
+        report("pending");
+        assertThrows(IOException.class, () -> WindowsMsiUpdate.consumeReport(path, "0.1.1",
+                () -> { throw new IOException("installed version could not be confirmed"); },
+                (file, pid, started) -> false));
+        assertEquals("pending", Files.readString(path));
+    }
+
+    @Test void identifiedHelperMustFinishBeforeInstalledVersionCanReconcileItsReport() throws Exception {
+        Path path = report("pending:0.1.1:12345:123456789");
+        assertTrue(WindowsMsiUpdate.consumeReport(path, "0.1.1",
+                () -> fail("active helper cannot be acknowledged"), (file, pid, started) -> {
+                    assertEquals(12345, pid);
+                    assertEquals(123456789, started);
+                    return true;
+                }).pending());
+        assertEquals("pending:0.1.1:12345:123456789", Files.readString(path));
+        var incomplete = WindowsMsiUpdate.consumeReport(path, "0.1.0", () -> {},
+                (file, pid, started) -> false);
+        assertFalse(incomplete.installed());
+        assertTrue(incomplete.message().contains("still 0.1.0"));
+        assertFalse(Files.exists(path));
+        report("pending:0.1.1:12345:123456789");
+        var result = WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {},
+                (file, pid, started) -> false);
+        assertTrue(result.installed());
+        assertTrue(result.message().contains("did not save"));
+        assertFalse(Files.exists(path));
+    }
+
+    @Test void malformedOrChangedPendingReportsCannotBeAcknowledged() throws Exception {
+        for (String invalid : new String[]{"pending:0.1.1:no-pid:123", "pending:0.1.1:0:123",
+                "pending:0.1.1:123:0", "pending:0.1.1:123:123:extra"}) {
+            Path path = report(invalid);
+            assertThrows(IOException.class, () -> WindowsMsiUpdate.consumeReport(path, "0.1.1",
+                    () -> fail("malformed input cannot verify MSI"), (file, pid, started) -> false));
+            assertEquals(invalid, Files.readString(path));
+        }
+        Path path = report("pending");
+        assertThrows(IOException.class, () -> WindowsMsiUpdate.consumeReport(path, "0.1.1",
+                () -> Files.writeString(path, "pending:0.1.2:123:123"),
+                (file, pid, started) -> false));
+        assertEquals("pending:0.1.2:123:123", Files.readString(path));
+    }
+
+    @Test void restartRequiredResultIsConfirmedWithoutForcingAComputerRestart() throws Exception {
+        Path path = report("installed-reboot-required:0.1.1");
+        var result = WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {});
+        assertTrue(result.installed());
+        assertTrue(result.message().contains("no restart was forced"));
+        assertFalse(Files.exists(path));
     }
 
     private Path reportTarget() throws IOException {
@@ -164,13 +229,29 @@ class WindowsMsiUpdateTest {
         assertTrue(script.contains("('\"'+$msi+'\"')"));
         assertFalse(script.contains("'\\\"'"));
         assertTrue(script.contains("while(Get-Process -Id 12345"));
-        assertTrue(script.indexOf("while(Get-Process") < script.indexOf("Start-Process msiexec.exe"));
+        assertTrue(script.indexOf("while(Get-Process") < script.indexOf("Starting Windows Installer"));
         assertTrue(script.contains("[IO.Directory]::Delete($dir)"));
         assertTrue(script.contains("'handoff failed: '"));
         assertTrue(script.contains("'installed:0.1.1'"));
-        assertTrue(script.contains("[IO.File]::Replace($tmp,$report,$null)"));
+        assertTrue(script.contains("[IO.File]::Replace($tmp,$report,[NullString]::Value)"));
         assertTrue(script.indexOf("[IO.Directory]::Delete($dir)")
-                < script.indexOf("[IO.File]::Replace($tmp,$report,$null)"));
+                < script.indexOf("[IO.File]::Replace($tmp,$report,[NullString]::Value)"));
+        assertTrue(script.indexOf("[IO.File]::Replace")
+                < script.lastIndexOf("Start-Process -FilePath"));
+        assertTrue(script.contains("'/passive'"));
+        assertFalse(script.contains("'/qn'"));
+    }
+
+    @Test void cleanupAndRebootCompletionReportsKeepTheirExactTargetVersion() throws Exception {
+        for (String completion : new String[]{"installed-cleanup-warning", "installed-reboot-required",
+                "installed-reboot-required-cleanup-warning"}) {
+            Path path = report(completion + ":0.1.1");
+            var result = WindowsMsiUpdate.consumeReport(path, "0.1.0",
+                    () -> fail("wrong running version cannot confirm a completed update"));
+            assertFalse(result.installed());
+            assertTrue(result.message().contains("reported version 0.1.1"));
+            assertFalse(Files.exists(path));
+        }
     }
 
     @Test void cannotDiscardAnUnownedPath() {

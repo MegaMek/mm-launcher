@@ -40,6 +40,10 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import org.megamek.launcher.release.JavaReleaseTransport;
 import org.megamek.launcher.release.ReleaseTransport;
+import org.megamek.launcher.operation.OperationContext;
+import org.megamek.launcher.operation.OperationPhase;
+import org.megamek.launcher.operation.OperationType;
+import org.megamek.launcher.operation.ProgressUnit;
 
 import java.io.IOException;
 import java.net.URI;
@@ -48,11 +52,13 @@ import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
 import java.util.Locale;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Pattern;
 
@@ -158,7 +164,24 @@ public final class WindowsMsiUpdate {
     }
 
     public Path stage(Candidate candidate) throws IOException, InterruptedException {
-        if (!available() || candidate == null || compare(candidate.version(), currentVersion()) <= 0)
+        return stage(candidate, OperationContext.none(OperationType.LAUNCHER_UPDATE));
+    }
+
+    public Path stage(Candidate candidate, OperationContext context) throws IOException, InterruptedException {
+        context.checkpoint();
+        if (!available()) throw new IOException("Not a Windows MSI installation");
+        return stage(candidate, currentVersion(), context, WindowsMsiUpdate::verifyIdentity);
+    }
+
+    @FunctionalInterface
+    interface MsiIdentityCheck {
+        void verify(Path file, String version) throws IOException, InterruptedException;
+    }
+
+    Path stage(Candidate candidate, String installedVersion, OperationContext context,
+               MsiIdentityCheck identityCheck) throws IOException, InterruptedException {
+        context.checkpoint();
+        if (candidate == null || compare(candidate.version(), installedVersion) <= 0)
             throw new IOException("Not a newer Windows MSI update");
         String tag = candidate.tag();
         if (!TAG.matcher(tag).matches() || !tag.replaceFirst("^v", "").equals(candidate.version())
@@ -171,13 +194,16 @@ public final class WindowsMsiUpdate {
         Path directory = Files.createTempDirectory("mm-launcher-msi-");
         Path file = directory.resolve(candidate.name());
         try {
+            context.phase(OperationPhase.DOWNLOAD, "Downloading the official launcher installer");
             URI uri = candidate.url();
             MessageDigest sha = MessageDigest.getInstance("SHA-256");
             try (var output = Files.newOutputStream(file)) {
                 long count = 0;
                 for (int redirects = 0; ; redirects++) {
                     if (!safeDownloadUri(uri, redirects == 0)) throw new IOException("Unsafe MSI download URL");
-                    try (var response = transport.get(uri, "application/octet-stream")) {
+                    context.checkpoint();
+                    try (var response = transport.get(uri, "application/octet-stream");
+                         var ignored = context.interruptible(response)) {
                         if (response.status() >= 300 && response.status() < 400) {
                             if (redirects >= 4) throw new IOException("Too many MSI download redirects");
                             String location = response.firstHeader("location");
@@ -193,10 +219,13 @@ public final class WindowsMsiUpdate {
                         byte[] buffer = new byte[65536];
                         int n;
                         while ((n = response.body().read(buffer)) != -1) {
+                            context.checkpoint();
                             if (count > candidate.size() - n) throw new IOException("MSI exceeds published size");
                             sha.update(buffer, 0, n);
                             output.write(buffer, 0, n);
                             count += n;
+                            context.progress(OperationPhase.DOWNLOAD, count, candidate.size(),
+                                    ProgressUnit.BYTES, "Downloading launcher " + candidate.version());
                         }
                         break;
                     }
@@ -204,12 +233,28 @@ public final class WindowsMsiUpdate {
                 if (count != candidate.size() || !HexFormat.of().formatHex(sha.digest())
                         .equalsIgnoreCase(candidate.sha256())) throw new IOException("MSI size or SHA-256 mismatch");
             }
-            verifyIdentity(file, candidate.version());
+            context.phase(OperationPhase.VERIFY, "Checking the checksum and Windows installer identity");
+            identityCheck.verify(file, candidate.version());
+            context.checkpoint();
             staged.put(file, candidate.sha256());
             return file;
         } catch (IOException | InterruptedException | RuntimeException | NoSuchAlgorithmException error) {
-            Files.deleteIfExists(file);
-            Files.deleteIfExists(directory);
+            try {
+                context.cleanupPreservingCancellation(() -> {
+                    Files.deleteIfExists(file);
+                    Files.deleteIfExists(directory);
+                });
+            } catch (Exception cleanup) {
+                error.addSuppressed(cleanup);
+            }
+            if (context.cancellationRequested()) {
+                try {
+                    context.checkpoint();
+                } catch (org.megamek.launcher.operation.OperationCancelledException cancelled) {
+                    cancelled.addSuppressed(error);
+                    throw cancelled;
+                }
+            }
             if (error instanceof InterruptedException interrupted) throw interrupted;
             if (error instanceof IOException io) throw io;
             throw new IOException("Could not stage the MSI update", error);
@@ -320,19 +365,61 @@ public final class WindowsMsiUpdate {
 
     static String installerArguments(String msiVariable) {
         // PowerShell single quotes here delimit a literal double-quote, not a backslash.
-        return "@('/i',('\"'+" + msiVariable + "+'\"'),'/qn','/norestart')";
+        return "@('/i',('\"'+" + msiVariable + "+'\"'),'/passive','/norestart',"
+                + "'/l*v',('\"'+$installerLog+'\"'))";
     }
 
-    public record ReportResult(boolean installed, String message) {}
+    public enum ReportState { INSTALLED, FAILED, PENDING, RECOVERED }
+
+    public record ReportResult(ReportState state, String message) {
+        public ReportResult(boolean installed, String message) {
+            this(installed ? ReportState.INSTALLED : ReportState.FAILED, message);
+        }
+        public boolean installed() { return state == ReportState.INSTALLED; }
+        public boolean pending() { return state == ReportState.PENDING; }
+        public boolean recovered() { return state == ReportState.RECOVERED; }
+    }
 
     @FunctionalInterface
     interface InstalledVersionCheck {
         void verify() throws IOException, InterruptedException;
     }
 
+    @FunctionalInterface
+    interface HelperCheck {
+        boolean active(Path report, long pid, long started) throws IOException, InterruptedException;
+    }
+
+    private static boolean helperActive(Path report, long pid, long started)
+            throws IOException, InterruptedException {
+        if (pid > 0) {
+            var process = ProcessHandle.of(pid);
+            if (process.isEmpty() || !process.get().isAlive()) return false;
+            var actualStart = process.get().info().startInstant();
+            if (actualStart.isEmpty()) throw new IOException("Cannot confirm launcher update helper identity");
+            return actualStart.get().toEpochMilli() == started;
+        }
+        // Old launchers recorded only "pending", so identify their helper by its
+        // encoded script and exact report path, not by every PowerShell process.
+        String needle = "$report=" + literal(report.toString()) + ";$msi=";
+        String script = "$ErrorActionPreference='Stop';$needle=" + literal(needle) + ";"
+                + "foreach($p in @(Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\")){"
+                + "if($p.ProcessId -eq $PID){continue};"
+                + "$m=[regex]::Match([string]$p.CommandLine,"
+                + "'(?i)(?:^|\\s)-EncodedCommand\\s+([A-Za-z0-9+/=]+)(?:\\s|$)');"
+                + "if(!$m.Success){continue};"
+                + "$code=[Text.Encoding]::Unicode.GetString([Convert]::FromBase64String($m.Groups[1].Value));"
+                + "if($code.Contains($needle) -and $code.Contains('Get-FileHash -LiteralPath $msi'))"
+                + "{[Console]::Out.Write('active');exit}};[Console]::Out.Write('absent')";
+        String result = powershell(script);
+        if (!result.equals("active") && !result.equals("absent"))
+            throw new IOException("Cannot determine whether the previous launcher updater is still running");
+        return result.equals("active");
+    }
+
     /**
-     * Acknowledge a completed helper result before any network lookup. Pending and unrecognized
-     * files are never removed; completed failures are acknowledged so a later check can retry.
+     * Acknowledge completed results before network lookup. Active helpers retain their report.
+     * Incomplete results can be archived only after helper and installed-version checks.
      */
     public static ReportResult consumeReport(Path report, String runningVersion)
             throws IOException, InterruptedException {
@@ -342,35 +429,92 @@ public final class WindowsMsiUpdate {
     static synchronized ReportResult consumeReport(Path report, String runningVersion,
                                                     InstalledVersionCheck installedVersionCheck)
             throws IOException, InterruptedException {
+        return consumeReport(report, runningVersion, installedVersionCheck, WindowsMsiUpdate::helperActive);
+    }
+
+    static synchronized ReportResult consumeReport(Path report, String runningVersion,
+                                                    InstalledVersionCheck installedVersionCheck,
+                                                    HelperCheck helperCheck)
+            throws IOException, InterruptedException {
         byte[] original = reportBytes(report);
         if (original == null) return null;
         String outcome = new String(original, StandardCharsets.UTF_8);
+        if (outcome.startsWith("starting:") && VERSION.matcher(outcome.substring(9)).matches()) {
+            return new ReportResult(ReportState.PENDING,
+                    "An update handoff started, but its helper identity was not recorded yet. "
+                    + "The report was retained; wait or review diagnostics before retrying: " + helperLog(report));
+        }
         if ("pending".equals(outcome)) {
-            throw new IOException("Previous MSI update is still pending; the launcher has not exited "
-                    + "or Windows Installer has not completed.");
+            if (helperCheck.active(report, 0, 0)) return pendingResult(report);
+            if (!VERSION.matcher(runningVersion).matches())
+                throw new IOException("Cannot reconcile an incomplete report without a valid launcher version");
+            installedVersionCheck.verify();
+            Path saved = acknowledgeReport(report, original, true);
+            return new ReportResult(ReportState.RECOVERED,
+                    "The previous updater did not record its completion result. Windows confirms this "
+                    + "installed launcher is " + runningVersion + ". The incomplete report was retained at "
+                    + saved + "; update checks can continue.");
+        }
+        if (outcome.startsWith("pending:")) {
+            String[] fields = outcome.split(":", -1);
+            if (fields.length != 4 || !VERSION.matcher(fields[1]).matches())
+                throw new IOException("Unrecognized pending launcher update report; retained at " + report);
+            long pid;
+            long started;
+            try {
+                pid = Long.parseLong(fields[2]);
+                started = Long.parseLong(fields[3]);
+                if (pid <= 0 || started <= 0) throw new NumberFormatException("nonpositive helper identity");
+            } catch (NumberFormatException error) {
+                throw new IOException("Invalid launcher update helper identity; report retained at " + report, error);
+            }
+            if (helperCheck.active(report, pid, started)) return pendingResult(report);
+            if (!fields[1].equals(runningVersion)) {
+                installedVersionCheck.verify();
+                Path saved = acknowledgeReport(report, original, true);
+                return new ReportResult(false, "The updater stopped without a completion result for " + fields[1]
+                        + ". Windows confirms the installed launcher is still " + runningVersion
+                        + ". The incomplete report was retained at " + saved
+                        + "; another update check can retry. Diagnostics: " + helperLog(report));
+            }
+            installedVersionCheck.verify();
+            Path saved = acknowledgeReport(report, original, true);
+            return new ReportResult(true, "Windows confirms launcher " + runningVersion
+                    + " is installed, but the helper did not save its final result. The incomplete report "
+                    + "was retained at " + saved + ". Diagnostics: " + helperLog(report));
         }
         ReportResult result;
-        if (outcome.startsWith("installed:") && VERSION.matcher(outcome.substring(10)).matches()) {
-            if (!outcome.substring(10).equals(runningVersion)) {
+        String[] completed = outcome.split(":", -1);
+        if (completed.length == 2 && java.util.Set.of("installed", "installed-reboot-required",
+                "installed-cleanup-warning", "installed-reboot-required-cleanup-warning").contains(completed[0])
+                && VERSION.matcher(completed[1]).matches()) {
+            if (!completed[1].equals(runningVersion)) {
                 result = new ReportResult(false, "Previous MSI update reported version "
-                        + outcome.substring(10) + ", but this launcher is " + runningVersion
+                        + completed[1] + ", but this launcher is " + runningVersion
                         + ". Check the installed launcher and retry the update check.");
             } else {
                 try {
                     installedVersionCheck.verify();
-                    result = new ReportResult(true, null);
+                    result = new ReportResult(true, "Launcher updated to " + runningVersion + "."
+                            + (completed[0].endsWith("-cleanup-warning")
+                            ? " Staged MSI cleanup failed; review the leftover temporary files when safe. Diagnostics: "
+                            + helperLog(report) : "")
+                            + (completed[0].contains("-reboot-required")
+                            ? " Windows reports that a computer restart is required; no restart was forced." : ""));
                 } catch (IOException error) {
                     result = new ReportResult(false, "The MSI helper reported success, but the "
                             + "installed Windows Installer version could not be confirmed: "
                             + error.getMessage() + ". Check the installation and retry.");
                 }
             }
-        } else if ("installation succeeded; staged MSI cleanup failed".equals(outcome)) {
+        } else if ("installation succeeded; staged MSI cleanup failed".equals(outcome)
+                || "installation succeeded; staged MSI cleanup failed; restart required".equals(outcome)) {
             try {
                 installedVersionCheck.verify();
                 result = new ReportResult(true, "Launcher MSI installation succeeded, but staged MSI "
                         + "cleanup failed. Remove the leftover mm-launcher-msi- directory from "
-                        + "your temporary files when safe.");
+                        + "your temporary files when safe."
+                        + (outcome.endsWith("; restart required") ? " Windows also requires a computer restart." : ""));
             } catch (IOException error) {
                 result = new ReportResult(false, "The MSI helper reported installation success with "
                         + "a cleanup warning, but the installed version could not be confirmed: "
@@ -381,18 +525,35 @@ public final class WindowsMsiUpdate {
                 && outcome.length() > "handoff failed: ".length()) {
             result = new ReportResult(false, "Previous MSI update did not complete (Windows Installer "
                     + "result: " + outcome.replaceAll("\\p{Cntrl}", " ") + "). "
-                    + "Check Windows Installer and retry the launcher update check.");
+                    + "Check Windows Installer and retry the launcher update check. Diagnostics: "
+                    + helperLog(report) + " and " + installerLog(report));
         } else {
             throw new IOException("Unrecognized MSI update result. The report was retained at "
                     + report + " for inspection; do not retry until it is resolved.");
         }
         // The helper replaces pending atomically only after installation and cleanup are finished.
         // Refuse to acknowledge a file that changed during validation (including a new link).
+        acknowledgeReport(report, original, false);
+        return result;
+    }
+
+    private static ReportResult pendingResult(Path report) {
+        return new ReportResult(ReportState.PENDING,
+                "Windows Installer is still finishing the launcher update. Wait, then check again. "
+                + "Diagnostics: " + helperLog(report));
+    }
+
+    private static Path acknowledgeReport(Path report, byte[] original, boolean retain) throws IOException {
         if (!java.util.Arrays.equals(original, reportBytes(report))) {
             throw new IOException("MSI update result changed during review; retry after the helper finishes.");
         }
+        if (retain) {
+            Path saved = report.resolveSibling(report.getFileName() + ".incomplete-" + UUID.randomUUID() + ".txt");
+            Files.move(report, saved, StandardCopyOption.ATOMIC_MOVE);
+            return saved;
+        }
         Files.delete(report);
-        return result;
+        return report;
     }
 
     private static byte[] reportBytes(Path report) throws IOException {
@@ -412,19 +573,41 @@ public final class WindowsMsiUpdate {
     }
 
     static String handoffScript(Path file, String version, String sha256, Path report, long parentPid) {
+        return handoffScript(file, version, sha256, report, parentPid,
+                Path.of(System.getProperty("jpackage.app-path", "MegaMek Launcher.exe")),
+                Path.of("msiexec.exe"));
+    }
+
+    public static Path helperLog(Path report) {
+        return report.resolveSibling("msi-update-helper.log");
+    }
+
+    public static Path installerLog(Path report) {
+        return report.resolveSibling("msi-update-installer.log");
+    }
+
+    static String handoffScript(Path file, String version, String sha256, Path report, long parentPid,
+                                Path launcher, Path installer) {
         Path directory = file.getParent();
         return "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue';"
                 + "$report=" + literal(report.toString()) + ";$msi=" + literal(file.toString()) + ";"
                 + "$dir=" + literal(directory.toString()) + ";"
-                + "$outcome='';try { while(Get-Process -Id " + parentPid
+                + "$installerLog=" + literal(installerLog(report).toString()) + ";"
+                + "$outcome='';try {"
+                + "Import-Module ([IO.Path]::Combine($PSHOME,'Modules','Microsoft.PowerShell.Utility',"
+                + "'Microsoft.PowerShell.Utility.psd1'));"
+                + "Write-Output 'Waiting for launcher shutdown';while(Get-Process -Id " + parentPid
                 + " -ErrorAction SilentlyContinue){Start-Sleep -Milliseconds 500};"
                 + "if((Get-FileHash -LiteralPath $msi -Algorithm SHA256).Hash -ine "
                 + literal(sha256) + "){throw 'Staged MSI digest changed'};"
-                + "$p=Start-Process msiexec.exe -ArgumentList " + installerArguments("$msi")
+                + "Write-Output 'Starting Windows Installer';$p=Start-Process -FilePath " + literal(installer.toString())
+                + " -ArgumentList " + installerArguments("$msi")
                 + " -Wait -PassThru; if($p.ExitCode -eq 0)"
                 + " { $outcome=" + literal("installed:" + version) + " }"
+                + " elseif($p.ExitCode -eq 3010)"
+                + " { $outcome=" + literal("installed-reboot-required:" + version) + " }"
                 + " else { $outcome=[string]$p.ExitCode } }"
-                + "catch { $outcome='handoff failed: '+$_.Exception.Message }"
+                + "catch { $outcome='handoff failed: '+$_.Exception.Message;Write-Error $_ -ErrorAction Continue }"
                 + "finally { try {"
                 + "if(([IO.File]::GetAttributes($dir) -band [IO.FileAttributes]::ReparsePoint) -eq 0"
                 + " -and [IO.File]::Exists($msi)"
@@ -433,22 +616,32 @@ public final class WindowsMsiUpdate {
                 + literal(sha256) + ") {"
                 + "[IO.File]::Delete($msi); [IO.Directory]::Delete($dir) }"
                 + "else { throw 'Staged MSI path changed; cleanup refused' }"
-                + "} catch { if($outcome -eq " + literal("installed:" + version) + ")"
-                + " { $outcome='installation succeeded; staged MSI cleanup failed' } };"
+                + "} catch { Write-Error $_ -ErrorAction Continue;"
+                + "if($outcome -eq " + literal("installed:" + version) + ")"
+                + " { $outcome=" + literal("installed-cleanup-warning:" + version) + " }"
+                + "elseif($outcome -eq " + literal("installed-reboot-required:" + version) + ")"
+                + " { $outcome=" + literal("installed-reboot-required-cleanup-warning:" + version) + " } };"
                 + "$tmp=[IO.Path]::Combine([IO.Path]::GetDirectoryName($report),"
                 + "[IO.Path]::GetRandomFileName());"
                 + "try { $bytes=[Text.Encoding]::UTF8.GetBytes($outcome);"
                 + "$stream=[IO.File]::Open($tmp,[IO.FileMode]::CreateNew);"
                 + "try { $stream.Write($bytes,0,$bytes.Length); $stream.Flush($true) }"
                 + "finally { $stream.Dispose() };"
-                + "[IO.File]::Replace($tmp,$report,$null) }"
-                + "finally { if([IO.File]::Exists($tmp)){[IO.File]::Delete($tmp)} } }";
+                + "[IO.File]::Replace($tmp,$report,[NullString]::Value) }"
+                + "finally { if([IO.File]::Exists($tmp)){[IO.File]::Delete($tmp)} } };"
+                + "Write-Output $outcome;"
+                + "if($outcome -eq " + literal("installed:" + version)
+                + " -or $outcome -eq " + literal("installed-reboot-required:" + version)
+                + " -or $outcome -eq " + literal("installed-cleanup-warning:" + version)
+                + " -or $outcome -eq " + literal("installed-reboot-required-cleanup-warning:" + version) + ")"
+                + " { Start-Process -FilePath " + literal(launcher.toString()) + " }";
     }
 
     /** The helper waits for this JVM to exit; exit status is retained for the next launch. */
     public void handoff(Path file, String version, String sha256, Path report)
             throws IOException, InterruptedException {
         verifyInstalledVersion();
+        if (!available()) throw new IOException("Launcher self-update requires the installed Windows entry point");
         if (sha256 == null || !sha256.matches("[0-9a-fA-F]{64}"))
             throw new IOException("MSI digest is invalid");
         verifyIdentity(file, version);
@@ -457,16 +650,38 @@ public final class WindowsMsiUpdate {
             throw new IOException("Previous MSI update result has not been reviewed");
         if (!sha256.equalsIgnoreCase(staged.get(file)))
             throw new IOException("MSI staging path is not owned or its digest differs");
+        Path log = helperLog(report);
+        if (Files.exists(log, LinkOption.NOFOLLOW_LINKS)
+                && !Files.isRegularFile(log, LinkOption.NOFOLLOW_LINKS))
+            throw new IOException("MSI helper log is not a regular file: " + log);
+        Path installerLog = installerLog(report);
+        if (Files.exists(installerLog, LinkOption.NOFOLLOW_LINKS)
+                && !Files.isRegularFile(installerLog, LinkOption.NOFOLLOW_LINKS))
+            throw new IOException("MSI installer log is not a regular file: " + installerLog);
         String script = handoffScript(file, version, sha256, report, ProcessHandle.current().pid());
         String encoded = java.util.Base64.getEncoder().encodeToString(
                 script.getBytes(StandardCharsets.UTF_16LE));
-        Files.writeString(report, "pending", java.nio.file.StandardOpenOption.CREATE_NEW);
+        Files.writeString(report, "starting:" + version, java.nio.file.StandardOpenOption.CREATE_NEW);
+        Process helper = null;
         try {
-            new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive",
+            helper = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive",
                     "-EncodedCommand", encoded)
-                    .redirectOutput(ProcessBuilder.Redirect.DISCARD)
-                    .redirectError(ProcessBuilder.Redirect.DISCARD).start();
+                    .redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.appendTo(log.toFile())).start();
+            long started = helper.info().startInstant().orElseThrow(
+                    () -> new IOException("Cannot record MSI update helper identity")).toEpochMilli();
+            Path temporary = Files.createTempFile(report.toAbsolutePath().getParent(), "msi-update-", ".tmp");
+            try {
+                Files.writeString(temporary, "pending:" + version + ":" + helper.pid() + ":" + started);
+                byte[] current = reportBytes(report);
+                if (current == null || !("starting:" + version).equals(new String(current, StandardCharsets.UTF_8)))
+                    throw new IOException("MSI update report changed while starting the helper");
+                Files.move(temporary, report, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            } finally {
+                Files.deleteIfExists(temporary);
+            }
         } catch (IOException error) {
+            if (helper != null && helper.isAlive()) helper.destroyForcibly();
             Files.deleteIfExists(report);
             throw error;
         }

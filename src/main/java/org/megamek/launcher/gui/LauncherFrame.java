@@ -2635,11 +2635,14 @@ public final class LauncherFrame extends JFrame {
         run("Checking launcher release", () -> {
             WindowsMsiUpdate.ReportResult result = WindowsMsiUpdate.consumeReport(
                     launcherUpdateReport(), WindowsMsiUpdate.currentVersion());
-            if (result != null && !result.installed()) {
+            if (result != null && result.pending()) {
+                return new LauncherCheck(null, result.message(), true);
+            }
+            if (result != null && !result.installed() && !result.recovered()) {
                 throw new IOException(result.message());
             }
             try {
-                return new LauncherCheck(launcherUpdater.check(), result == null ? null : result.message());
+                return new LauncherCheck(launcherUpdater.check(), result == null ? null : result.message(), false);
             } catch (IOException | InterruptedException error) {
                 if (result != null && result.message() != null) {
                     throw new IOException(result.message() + "\nLauncher release lookup also failed: "
@@ -2648,49 +2651,46 @@ public final class LauncherFrame extends JFrame {
                 throw error;
             }
         }, checked -> {
-            if (checked.warning() != null) {
-                JOptionPane.showMessageDialog(this, checked.warning(), "Launcher MSI cleanup warning",
-                        JOptionPane.WARNING_MESSAGE);
+            if (checked.pending()) {
+                status.setText(checked.message());
+                if (explicit) LauncherAlertDialog.showMessage(this, guiScale,
+                        "Launcher update in progress", checked.message());
+                return;
             }
             WindowsMsiUpdate.Candidate candidate = checked.candidate();
             if (candidate == null) {
-                status.setText("Launcher is up to date.");
+                status.setText(checked.message() == null ? "Launcher is up to date." : checked.message());
+                if (checked.message() != null) LauncherAlertDialog.showMessage(this, guiScale,
+                        "Launcher update result", checked.message());
                 return;
             }
-            int choice = JOptionPane.showConfirmDialog(this,
-                    "Official MegaMek Launcher " + candidate.version()
-                            + " is available. Download and install the Windows MSI update?\n"
-                            + "The launcher will close before Windows Installer starts.",
-                    "Launcher update", JOptionPane.YES_NO_OPTION);
-            if (choice != JOptionPane.YES_OPTION) return;
-            run("Verifying launcher MSI", () -> launcherUpdater.stage(candidate), msi -> {
-                int install = JOptionPane.showConfirmDialog(this,
-                        "Verified official MSI " + candidate.version()
-                                + ". Close the launcher and install now?",
-                        "Install launcher update", JOptionPane.YES_NO_OPTION);
-                if (install != JOptionPane.YES_OPTION) {
-                    try {
-                        launcherUpdater.discard(msi);
-                    } catch (IOException error) {
-                        showError("Discarding staged launcher MSI failed", error);
-                    }
-                    return;
-                }
-                run("Starting Windows Installer handoff", () -> {
-                    launcherUpdater.handoff(msi, candidate.version(),
-                            candidate.sha256(), launcherUpdateReport());
+            if (!confirmLauncherUpdate(this, guiScale, candidate, checked.message())) return;
+            OperationProgressDialog progress = new OperationProgressDialog(this,
+                    "Updating launcher", "launcherUpdateProgressLog", this::showOperationLogs);
+            progress.setVisible(true);
+            runOperation("Updating launcher", OperationType.LAUNCHER_UPDATE, List.of(), progress, context -> {
+                Path msi = launcherUpdater.stage(candidate, context);
+                try {
+                    context.phase(org.megamek.launcher.operation.OperationPhase.APPLY,
+                            "Closing the launcher; Windows Installer will show installation progress. Diagnostics: "
+                                    + WindowsMsiUpdate.helperLog(launcherUpdateReport()) + " and "
+                                    + WindowsMsiUpdate.installerLog(launcherUpdateReport()));
+                    context.enterFinalization("Windows Installer handoff has started.");
+                    launcherUpdater.handoff(msi, candidate.version(), candidate.sha256(), launcherUpdateReport());
                     return null;
-                }, ignored -> {
-                    dispose();
-                    System.exit(0);
-                }, error -> {
+                } catch (Exception error) {
                     try {
                         launcherUpdater.discard(msi);
                     } catch (IOException cleanup) {
                         error.addSuppressed(cleanup);
                     }
-                });
-            });
+                    throw error;
+                }
+            }, ignored -> {
+                progress.dispose();
+                dispose();
+                System.exit(0);
+            }, error -> progress.append("\nLauncher update failed: " + errorDetail(error) + "\n"), () -> {});
         }, error -> {
             if (!explicit) {
                 status.setText("Launcher update: " + SanitizedErrors.text(error.getMessage()));
@@ -2699,7 +2699,17 @@ public final class LauncherFrame extends JFrame {
         }, () -> {}, explicit, explicit);
     }
 
-    private record LauncherCheck(WindowsMsiUpdate.Candidate candidate, String warning) {}
+    static boolean confirmLauncherUpdate(Window owner, GuiScale scale,
+                                          WindowsMsiUpdate.Candidate candidate, String notice) {
+        String message = "MegaMek Launcher " + candidate.version() + " is available.\n\n"
+                + "Update now will download and verify the installer, close the launcher, and "
+                + "show Windows installation progress. The launcher will reopen after a successful update.\n"
+                + "Your settings and registered games will be kept. Close running games before updating.";
+        if (notice != null) message = notice + "\n\n" + message;
+        return LauncherAlertDialog.showConfirm(owner, scale, "Update MegaMek Launcher", message, "Update now");
+    }
+
+    private record LauncherCheck(WindowsMsiUpdate.Candidate candidate, String message, boolean pending) {}
 
     private void chooseDefaultJava() {
         run("Finding Java runtimes", services::javaCandidates,
