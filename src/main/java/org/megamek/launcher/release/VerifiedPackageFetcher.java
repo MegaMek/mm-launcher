@@ -41,6 +41,7 @@ import org.megamek.launcher.update.StrictPathSafety;
 
 import java.io.IOException;
 import java.io.PrintStream;
+import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
@@ -79,6 +80,86 @@ public final class VerifiedPackageFetcher {
         this.extractor = extractor;
     }
 
+    /** Reads bounded JSON metadata without creating a package workspace or extracting anything. */
+    public byte[] readMetadataAsset(OfficialRepository repository, ReleaseCatalog.Release release,
+                                    ReleaseCatalog.Asset asset, int maximum)
+            throws IOException, InterruptedException {
+        if (release.draft() || !release.assets().contains(asset)
+                || !asset.name().endsWith(".json") || maximum <= 0 || maximum > 1024 * 1024
+                || asset.size() <= 0 || asset.size() > maximum) {
+            throw new IOException("metadata asset identity or size is invalid");
+        }
+        ReleaseCatalog.validateInitialAssetUri(repository, release.tag(), asset);
+        try (ReleaseTransport.Response response = openDownload(asset.url(),
+                OperationContext.none(OperationType.UPDATE_PREVIEW))) {
+            requireContentLength(response, asset);
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            byte[] buffer = new byte[8192];
+            int count;
+            while ((count = response.body().read(buffer)) >= 0) {
+                if (count == 0) continue;
+                if (output.size() > asset.size() - count) {
+                    throw new IOException("metadata download exceeds declared size");
+                }
+                output.write(buffer, 0, count);
+            }
+            byte[] bytes = output.toByteArray();
+            if (bytes.length != asset.size()) throw new IOException("metadata download is truncated");
+            verifyDigest(asset, java.util.HexFormat.of().formatHex(sha256().digest(bytes)));
+            return bytes;
+        }
+    }
+
+    private ReleaseTransport.Response openDownload(URI initial, OperationContext context)
+            throws IOException, InterruptedException {
+        URI uri = initial;
+        for (int redirects = 0; ; redirects++) {
+            context.checkpoint();
+            ReleaseCatalog.validateDownloadUri(uri, redirects == 0);
+            ReleaseTransport.Response response = transport.get(uri, "application/octet-stream");
+            if (response.status() == 200) return response;
+            try (response) {
+                if (response.status() < 300 || response.status() > 399) {
+                    throw new IOException("release asset download returned HTTP " + response.status());
+                }
+                if (redirects >= MAX_REDIRECTS) throw new IOException("too many download redirects");
+                String location = response.firstHeader("location");
+                if (location == null) throw new IOException("download redirect has no Location");
+                try {
+                    uri = uri.resolve(URI.create(location));
+                } catch (IllegalArgumentException error) {
+                    throw new IOException("download redirect has invalid Location", error);
+                }
+                ReleaseCatalog.validateDownloadUri(uri, false);
+            }
+        }
+    }
+
+    private static void requireContentLength(ReleaseTransport.Response response,
+                                              ReleaseCatalog.Asset asset) throws IOException {
+        String length = response.firstHeader("content-length");
+        if (length == null) return;
+        try {
+            if (Long.parseLong(length) != asset.size()) {
+                throw new IOException("download Content-Length differs from release metadata");
+            }
+        } catch (NumberFormatException error) {
+            throw new IOException("download Content-Length is invalid", error);
+        }
+    }
+
+    private static PackageDigest.Sha256 verifyDigest(ReleaseCatalog.Asset asset, String actual)
+            throws IOException {
+        if (asset.publishedDigest().orElse(null) instanceof PackageDigest.ValidPublished published) {
+            if (!actual.equals(published.value().hex())) throw new IOException("download SHA-256 mismatch");
+            return published.value();
+        }
+        if (asset.publishedDigest().orElse(null) instanceof PackageDigest.MalformedPublished) {
+            throw new IOException("published SHA-256 is malformed");
+        }
+        return PackageDigest.computed(actual);
+    }
+
     public Workspace fetch(OfficialRepository repository, String tag, Path safeParent,
                            String stagingPrefix, PrintStream progress)
             throws IOException, InterruptedException {
@@ -100,8 +181,9 @@ public final class VerifiedPackageFetcher {
         try (OperationContext.WorkerRegistration ignored = context.activate()) {
             context.phase(OperationPhase.METADATA, "Resolving exact release metadata");
             ReleaseCatalog.Release release = catalog.exact(repository, tag);
-            ReleaseCatalog.Asset asset = catalog.selectInstallAsset(repository, release);
-            requireExpected(asset, expected);
+            ReleaseCatalog.Asset selected = catalog.selectInstallAsset(repository, release);
+            ReleaseCatalog.Asset asset = resolveExpectedAsset(release, selected, expected);
+            release = ReleaseCatalog.withAsset(release, selected, asset);
             Path staging = createOwnedStaging(safeParent, stagingPrefix);
             try {
                 Path archive = staging.resolve("package.tar.gz");
@@ -110,6 +192,7 @@ public final class VerifiedPackageFetcher {
                 context.phase(OperationPhase.EXTRACT, "Opening verified package archive");
                 Path extracted = extractor.extract(archive, staging.resolve("expanded"), context,
                         OperationPhase.EXTRACT);
+                requireSuiteProductVersion(repository, release.tag(), extracted, expected);
                 return new Workspace(staging, archive, extracted, release, asset,
                         resolvedDigest, FileIdentity.read(archive));
             } catch (IOException | InterruptedException | RuntimeException e) {
@@ -150,9 +233,10 @@ public final class VerifiedPackageFetcher {
         context.phase(OperationPhase.PREPARE_INSTALL,
                 "Refreshing metadata for the retained package");
         ReleaseCatalog.Release freshRelease = catalog.exact(repository, tag);
-        ReleaseCatalog.Asset freshAsset = catalog.selectInstallAsset(repository, freshRelease);
-        requireExpected(freshAsset, expected);
+        ReleaseCatalog.Asset freshAsset = resolveExpectedAsset(freshRelease,
+                catalog.selectInstallAsset(repository, freshRelease), expected);
         if (!workspace.release().tag().equals(tag)
+                || !workspace.release().id().equals(freshRelease.id())
                 || !sameTransferMetadata(workspace.asset(), freshAsset)) {
             throw new IOException("target release or asset metadata changed; restart the update "
                     + "attempt (the retained package was not applied)");
@@ -164,8 +248,22 @@ public final class VerifiedPackageFetcher {
                 freshAsset.size());
         context.phase(OperationPhase.PREPARE_INSTALL,
                 "Extracting retained package for final validation");
-        return extractor.extract(workspace.archive, workspace.staging.resolve("apply-expanded"),
+        Path extracted = extractor.extract(workspace.archive, workspace.staging.resolve("apply-expanded"),
                 context, OperationPhase.PREPARE_INSTALL);
+        requireSuiteProductVersion(repository, tag, extracted, expected);
+        return extracted;
+    }
+
+    private static void requireSuiteProductVersion(OfficialRepository repository, String tag,
+                                                   Path extracted, ExpectedAsset expected) throws IOException {
+        if (expected == null || !expected.suiteRecord()) return;
+        var inspection = new org.megamek.launcher.onboarding.InstallationInspector().inspect(extracted);
+        var product = inspection.products().stream()
+                .filter(candidate -> candidate.key().equals(repository.requiredProduct())).findFirst();
+        var version = product.flatMap(candidate -> VersionIdentity.fromExact(candidate.build()));
+        if (version.isEmpty() || !version.equals(VersionIdentity.fromExact(tag))) {
+            throw new IOException("suite archive primary product version differs from its record");
+        }
     }
 
     private PackageDigest.Sha256 download(
@@ -173,45 +271,13 @@ public final class VerifiedPackageFetcher {
                           Path output, PrintStream progress, OperationContext context)
             throws IOException, InterruptedException {
         ReleaseCatalog.validateInitialAssetUri(repository, tag, asset);
-        URI uri = asset.url();
         long deadline = System.nanoTime() + OVERALL_TIMEOUT.toNanos();
         ReleaseTransport.Response response = null;
         Throwable failure = null;
         try {
             context.phase(OperationPhase.DOWNLOAD, "Connecting to the verified package source");
-            for (int redirects = 0; ; redirects++) {
-                context.checkpoint();
-                ReleaseCatalog.validateDownloadUri(uri, redirects == 0);
-                response = transport.get(uri, "application/octet-stream");
-                if (response.status() >= 300 && response.status() <= 399) {
-                    if (redirects >= MAX_REDIRECTS) throw new IOException("too many download redirects");
-                    String location = response.firstHeader("location");
-                    response.close();
-                    response = null;
-                    if (location == null) throw new IOException("download redirect has no Location");
-                    try {
-                        uri = uri.resolve(URI.create(location));
-                    } catch (IllegalArgumentException e) {
-                        throw new IOException("download redirect has invalid Location", e);
-                    }
-                    ReleaseCatalog.validateDownloadUri(uri, false);
-                    continue;
-                }
-                if (response.status() != 200) {
-                    throw new IOException("release asset download returned HTTP " + response.status());
-                }
-                break;
-            }
-            String length = response.firstHeader("content-length");
-            if (length != null) {
-                try {
-                    if (Long.parseLong(length) != asset.size()) {
-                        throw new IOException("download Content-Length differs from release metadata");
-                    }
-                } catch (NumberFormatException e) {
-                    throw new IOException("download Content-Length is invalid", e);
-                }
-            }
+            response = openDownload(asset.url(), context);
+            requireContentLength(response, asset);
             MessageDigest digest = sha256();
             long count = 0;
             try (OperationContext.ResourceRegistration ignored =
@@ -247,16 +313,7 @@ public final class VerifiedPackageFetcher {
                         + " bytes, received " + count);
             }
             String actual = HexFormat.of().formatHex(digest.digest());
-            PackageDigest.Sha256 resolved;
-            if (asset.publishedDigest().orElse(null)
-                    instanceof PackageDigest.ValidPublished published) {
-                if (!actual.equals(published.value().hex())) {
-                    throw new IOException("download SHA-256 mismatch");
-                }
-                resolved = published.value();
-            } else {
-                resolved = PackageDigest.computed(actual);
-            }
+            PackageDigest.Sha256 resolved = verifyDigest(asset, actual);
             context.progress(OperationPhase.VERIFY, count, count, ProgressUnit.BYTES,
                     "Package size and SHA-256 verified");
             progress.printf("VERIFIED %,d bytes SHA-256 %s%n", count, actual);
@@ -336,11 +393,32 @@ public final class VerifiedPackageFetcher {
         }
     }
 
+    private static ReleaseCatalog.Asset resolveExpectedAsset(ReleaseCatalog.Release release,
+                                                              ReleaseCatalog.Asset asset,
+                                                              ExpectedAsset expected) throws IOException {
+        if (expected != null && expected.suiteRecord()) {
+            if (!release.id().equals(expected.releaseId()) || !asset.id().equals(expected.assetId())
+                    || !asset.state().orElse("").equals("uploaded")) {
+                throw new IOException("suite release or asset ID/state changed since consent");
+            }
+            // The suite record publishes a mandatory digest even if GitHub's digest field is absent.
+            if (asset.publishedDigest().isEmpty()) {
+                asset = new ReleaseCatalog.Asset(asset.name(), asset.size(),
+                        java.util.Optional.of(expected.publishedDigest().orElseThrow()),
+                        asset.url(), asset.id(), asset.state());
+            }
+        }
+        requireExpected(asset, expected);
+        return asset;
+    }
+
     private static boolean sameTransferMetadata(ReleaseCatalog.Asset first,
                                                 ReleaseCatalog.Asset second) {
         return first.name().equals(second.name())
                 && first.size() == second.size()
                 && first.url().equals(second.url())
+                && first.id().equals(second.id())
+                && first.state().equals(second.state())
                 && first.publishedDigest().equals(second.publishedDigest());
     }
 
@@ -440,10 +518,39 @@ public final class VerifiedPackageFetcher {
 
     public record ExpectedAsset(String name, long size,
                                 java.util.Optional<PackageDigest.ValidPublished> publishedDigest,
-                                URI url) {
+                                URI url, java.util.OptionalLong releaseId,
+                                java.util.OptionalLong assetId) {
         public ExpectedAsset {
             publishedDigest = publishedDigest == null
                     ? java.util.Optional.empty() : publishedDigest;
+            Objects.requireNonNull(releaseId, "releaseId");
+            Objects.requireNonNull(assetId, "assetId");
+            if (releaseId.isPresent() != assetId.isPresent()
+                    || releaseId.isPresent() && (releaseId.getAsLong() <= 0
+                    || assetId.getAsLong() <= 0 || publishedDigest.isEmpty())) {
+                throw new IllegalArgumentException("suite asset requires positive IDs and a SHA-256");
+            }
+        }
+
+        public ExpectedAsset(String name, long size,
+                             java.util.Optional<PackageDigest.ValidPublished> publishedDigest,
+                             URI url) {
+            this(name, size, publishedDigest, url, java.util.OptionalLong.empty(),
+                    java.util.OptionalLong.empty());
+        }
+
+        public boolean suiteRecord() {
+            return releaseId.isPresent();
+        }
+
+        public static ExpectedAsset fromSuite(ReleaseCatalog.Release release,
+                                               ReleaseCatalog.Asset asset) throws IOException {
+            if (release.id().isEmpty() || asset.id().isEmpty()
+                    || !(asset.publishedDigest().orElse(null) instanceof PackageDigest.ValidPublished digest)) {
+                throw new IOException("complete suite release IDs and published digest are required");
+            }
+            return new ExpectedAsset(asset.name(), asset.size(), java.util.Optional.of(digest),
+                    asset.url(), release.id(), asset.id());
         }
 
         public String digest() {

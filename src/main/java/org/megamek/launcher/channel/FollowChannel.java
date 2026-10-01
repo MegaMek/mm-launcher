@@ -35,27 +35,22 @@ package org.megamek.launcher.channel;
 
 import java.util.Locale;
 
-/** The two release labels intentionally published by the official website. */
+/** Explicit membership in a published complete suite record; Nightly is not a game channel. */
 public enum FollowChannel {
-    MILESTONE("milestone", "stable", "Milestone"),
-    DEVELOPMENT("development", "dev", "Development");
+    MILESTONE("milestone", "Milestone"),
+    DEVELOPMENT("development", "Development"),
+    WEEKLY("weekly", "Weekly");
 
     private final String cliName;
-    private final String feedKey;
     private final String displayName;
 
-    FollowChannel(String cliName, String feedKey, String displayName) {
+    FollowChannel(String cliName, String displayName) {
         this.cliName = cliName;
-        this.feedKey = feedKey;
         this.displayName = displayName;
     }
 
     public String cliName() {
         return cliName;
-    }
-
-    public String feedKey() {
-        return feedKey;
     }
 
     @Override
@@ -71,6 +66,6 @@ public enum FollowChannel {
             }
         }
         throw new IllegalArgumentException(
-                "channel must be milestone or development (nightly is not supported)");
+                "channel must be milestone, development, or weekly (nightly is not supported)");
     }
 }

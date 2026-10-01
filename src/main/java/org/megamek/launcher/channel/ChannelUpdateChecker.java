@@ -56,7 +56,7 @@ public final class ChannelUpdateChecker {
 
     public ChannelUpdateChecker(Path registry, ReleaseTransport transport) {
         this(registry, transport, new RegistryStore(), new ChannelPreferenceStore(),
-                new OfficialYamlChannelCatalog(transport));
+                new OfficialSuiteChannelCatalog(transport));
     }
 
     public ChannelUpdateChecker(Path registry, ReleaseTransport transport,
@@ -110,7 +110,8 @@ public final class ChannelUpdateChecker {
         Recommendation recommendation = new Recommendation(record.id(), record.canonicalRoot(),
                 record.registeredAt(), preference, repository, target.source(),
                 target.release().tag(), target.asset().name(), target.asset().size(),
-                target.asset().digest(), target.release().notesUrl());
+                target.asset().digest(), target.release().notesUrl(),
+                target.release().id(), target.asset().id());
 
         String currentTag = snapshot.current().tag();
         if (currentTag.equals(target.release().tag())) {
@@ -204,7 +205,36 @@ public final class ChannelUpdateChecker {
             String assetName,
             long assetSize,
             String assetDigest,
-            URI notesUrl) {
+            URI notesUrl,
+            java.util.OptionalLong releaseId,
+            java.util.OptionalLong assetId) {
+        public Recommendation(String installationId, String canonicalRoot, String registeredAt,
+                              ChannelPreference preference, OfficialRepository repository,
+                              String source, String targetTag, String assetName, long assetSize,
+                              String assetDigest, URI notesUrl) {
+            this(installationId, canonicalRoot, registeredAt, preference, repository, source,
+                    targetTag, assetName, assetSize, assetDigest, notesUrl,
+                    java.util.OptionalLong.empty(), java.util.OptionalLong.empty());
+        }
+
+        public org.megamek.launcher.release.VerifiedPackageFetcher.ExpectedAsset expectedAsset()
+                throws IOException {
+            if (!OfficialSuiteChannelCatalog.isSource(source)) {
+                return new org.megamek.launcher.release.VerifiedPackageFetcher.ExpectedAsset(
+                        assetName, assetSize, assetDigest);
+            }
+            if (releaseId.isEmpty() || assetId.isEmpty() || assetDigest == null) {
+                throw new IOException("suite recommendation lacks immutable IDs or SHA-256");
+            }
+            try {
+                return new org.megamek.launcher.release.VerifiedPackageFetcher.ExpectedAsset(
+                        assetName, assetSize,
+                        org.megamek.launcher.release.PackageDigest.expectedPublished(assetDigest),
+                        null, releaseId, assetId);
+            } catch (IllegalArgumentException error) {
+                throw new IOException("suite recommendation digest or IDs are invalid", error);
+            }
+        }
     }
 
     public record Result(Status status, InstallationRecord record,

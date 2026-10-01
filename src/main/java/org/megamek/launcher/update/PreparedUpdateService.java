@@ -113,8 +113,7 @@ public final class PreparedUpdateService {
                 requireCurrentRecommendation(registry, record, expected);
         return previewService().prepare(registry, record, receipt, current,
                 recommendation.targetTag(),
-                new VerifiedPackageFetcher.ExpectedAsset(recommendation.assetName(),
-                        recommendation.assetSize(), recommendation.assetDigest()),
+                recommendation.expectedAsset(),
                 recommendation, owner, progress);
     }
 
@@ -135,8 +134,7 @@ public final class PreparedUpdateService {
                 requireCurrentRecommendation(registry, record, expected);
         return previewService().prepare(registry, record, receipt, current,
                 recommendation.targetTag(),
-                new VerifiedPackageFetcher.ExpectedAsset(recommendation.assetName(),
-                        recommendation.assetSize(), recommendation.assetDigest()),
+                recommendation.expectedAsset(),
                 recommendation, owner, progress, context);
     }
 
@@ -199,6 +197,8 @@ public final class PreparedUpdateService {
                 && quoted.registeredAt().equals(refreshed.registeredAt())
                 && quoted.preference().equals(refreshed.preference())
                 && quoted.repository() == refreshed.repository()
+                && quoted.releaseId().equals(refreshed.releaseId())
+                && quoted.assetId().equals(refreshed.assetId())
                 && quoted.source().equals(refreshed.source())
                 && quoted.targetTag().equals(refreshed.targetTag())
                 && quoted.assetName().equals(refreshed.assetName())

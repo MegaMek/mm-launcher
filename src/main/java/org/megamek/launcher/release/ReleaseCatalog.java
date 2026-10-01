@@ -96,6 +96,17 @@ public final class ReleaseCatalog {
         return release;
     }
 
+    public Release byId(OfficialRepository repository, long id)
+            throws IOException, InterruptedException {
+        if (repository == null || id <= 0) throw new IOException("positive official release ID required");
+        Release release = parseRelease(repository,
+                requestJson(API.resolve("/repos/" + repository.slug() + "/releases/" + id)), true);
+        if (release.id().isEmpty() || release.id().getAsLong() != id) {
+            throw new IOException("GitHub returned a different release ID than requested");
+        }
+        return release;
+    }
+
     /**
      * Returns the one fixed official API location used to revalidate an exact historical choice.
      * This is metadata identity only; package URLs remain separately constrained and verified.
@@ -202,13 +213,15 @@ public final class ReleaseCatalog {
             String digest = optionalText(item, "digest");
             String url = requiredText(item, "browser_download_url");
             Asset asset = new Asset(name, size, PackageDigest.published(digest),
-                    checkedUri(url, "asset URL"));
+                    checkedUri(url, "asset URL"), optionalId(item),
+                    java.util.Optional.ofNullable(optionalText(item, "state")));
             if (installing && name.startsWith(repository.assetPrefix()) && name.endsWith(".tar.gz")) {
                 validateInitialAssetUri(repository, tag, asset);
             }
             assets.add(asset);
         }
-        return new Release(tag, title, draft, prerelease, notesUri, List.copyOf(assets));
+        return new Release(tag, title, draft, prerelease, notesUri, List.copyOf(assets),
+                optionalId(node));
     }
 
     static void validateInitialAssetUri(OfficialRepository repository, String tag, Asset asset)
@@ -295,6 +308,15 @@ public final class ReleaseCatalog {
         return value.booleanValue();
     }
 
+    private static java.util.OptionalLong optionalId(JsonNode node) throws IOException {
+        JsonNode value = node.get("id");
+        if (value == null) return java.util.OptionalLong.empty();
+        if (!value.isIntegralNumber() || !value.canConvertToLong() || value.longValue() <= 0) {
+            throw new IOException("GitHub ID must be a positive signed 64-bit integer");
+        }
+        return java.util.OptionalLong.of(value.longValue());
+    }
+
     private static void requireTag(String tag) throws IOException {
         if (tag == null || !TAG.matcher(tag).matches()) {
             throw new IOException("tag must be an explicit 1-100 character GitHub tag");
@@ -306,11 +328,30 @@ public final class ReleaseCatalog {
         catch (IllegalArgumentException e) { throw new IOException("invalid " + label, e); }
     }
 
+    public static Release withAsset(Release release, Asset original, Asset replacement) throws IOException {
+        int index = release.assets().indexOf(original);
+        if (index < 0) throw new IOException("selected asset does not belong to its release");
+        if (original.equals(replacement)) return release;
+        List<Asset> assets = new ArrayList<>(release.assets());
+        assets.set(index, replacement);
+        return new Release(release.tag(), release.title(), release.draft(), release.prerelease(),
+                release.notesUrl(), List.copyOf(assets), release.id());
+    }
+
     public record Asset(String name, long size,
-                        java.util.Optional<PackageDigest.Published> publishedDigest, URI url) {
+                        java.util.Optional<PackageDigest.Published> publishedDigest, URI url,
+                        java.util.OptionalLong id, java.util.Optional<String> state) {
         public Asset {
             publishedDigest = publishedDigest == null
                     ? java.util.Optional.empty() : publishedDigest;
+            java.util.Objects.requireNonNull(id, "id");
+            java.util.Objects.requireNonNull(state, "state");
+        }
+
+        public Asset(String name, long size,
+                     java.util.Optional<PackageDigest.Published> publishedDigest, URI url) {
+            this(name, size, publishedDigest, url, java.util.OptionalLong.empty(),
+                    java.util.Optional.empty());
         }
 
         /** Compatibility view for diagnostics and older callers; trust code uses publishedDigest. */
@@ -324,6 +365,11 @@ public final class ReleaseCatalog {
     }
     public record Assessment(boolean eligible, Asset asset, String reason) {}
     public record Release(String tag, String title, boolean draft, boolean prerelease,
-                          URI notesUrl, List<Asset> assets) {}
+                          URI notesUrl, List<Asset> assets, java.util.OptionalLong id) {
+        public Release(String tag, String title, boolean draft, boolean prerelease,
+                       URI notesUrl, List<Asset> assets) {
+            this(tag, title, draft, prerelease, notesUrl, assets, java.util.OptionalLong.empty());
+        }
+    }
     public record Page(int page, int perPage, List<Release> releases, boolean mayHaveNextPage) {}
 }

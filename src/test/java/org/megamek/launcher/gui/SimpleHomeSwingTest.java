@@ -41,6 +41,7 @@ import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.channel.QuickInstallSnapshot;
+import org.megamek.launcher.channel.SuiteTestData;
 import org.megamek.launcher.onboarding.Inspection;
 import org.megamek.launcher.onboarding.NormalInstallService;
 import org.megamek.launcher.onboarding.Product;
@@ -246,7 +247,7 @@ class SimpleHomeSwingTest {
             waitUntil(() -> split.popupMenu().isVisible());
             JPopupMenu popup = split.popupMenu();
             waitUntil(() -> popup.getComponent(0).isEnabled());
-            assertEquals(5, popup.getComponentCount());
+            assertEquals(8, popup.getComponentCount());
             List<String> menuLabels = java.util.Arrays.stream(popup.getComponents())
                     .map(JMenuItem.class::cast).map(JMenuItem::getText).toList();
             assertEquals(List.of(
@@ -254,7 +255,10 @@ class SimpleHomeSwingTest {
                             "Install latest MegaMekLab Milestone (1.2.3)",
                             "Install latest MekHQ Development (1.2.4)",
                             "Install latest MegaMek Development (1.2.4)",
-                            "Install latest MegaMekLab Development (1.2.4)"),
+                            "Install latest MegaMekLab Development (1.2.4)",
+                            "Install latest MekHQ Weekly (1.2.4)",
+                            "Install latest MegaMek Weekly (1.2.4)",
+                            "Install latest MegaMekLab Weekly (1.2.4)"),
                     menuLabels);
             assertFalse(menuLabels.contains("Choose another version or application…"));
             assertTrue(menuLabels.stream().noneMatch(label -> label.contains("Advanced")));
@@ -328,7 +332,7 @@ class SimpleHomeSwingTest {
                     waitDialog(frame, "Install latest MekHQ Milestone (1.2.3)");
             assertEquals(FollowChannel.MILESTONE, services.lastPlannedChannel);
             assertEquals(OfficialRepository.MEKHQ, services.lastPlannedRepository);
-            assertEquals(6, services.plans.get());
+            assertEquals(9, services.plans.get());
             assertTrue(onEdt(primary::isEnabled));
             assertTrue(onEdt(options::isEnabled));
             assertNull(find(confirmation, "downloadProductCombo"));
@@ -510,6 +514,38 @@ class SimpleHomeSwingTest {
             waitUntil(home::isEnabled);
             SwingUtilities.invokeAndWait(home::doClick);
             assertNull(find(frame, "installationReadyNotice"));
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    void browsedChangeLocationRetainsCapturedRecordWhenANewerRecordReusesTheTag() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        FakeServices services = new FakeServices(temp.resolve("browsed-location.json"));
+        services.capturedTargetKind = NormalInstallService.TargetKind.BROWSED_EXACT;
+        Path changed = temp.resolve("browsed-new-location").toAbsolutePath().normalize();
+        String capturedSource = services.quickInstallSnapshot.option(QuickInstallSnapshot.DEFAULT_KEY)
+                .target().source();
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, (parent, plan) -> changed));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            JButton primary = waitButton(frame, "downloadAndInstallButton");
+            waitUntil(primary::isEnabled);
+            SwingUtilities.invokeAndWait(primary::doClick);
+            JDialog firstQuote = waitDialog(frame, "Install MekHQ Milestone (1.2.3)");
+            services.currentBrowsedSource = SuiteTestData.recordUri("1.02.04").toString();
+            assertFalse(capturedSource.equals(services.currentBrowsedSource));
+            JButton change = find(firstQuote, "changeNormalLocationButton");
+            SwingUtilities.invokeAndWait(change::doClick);
+            waitUntil(() -> !firstQuote.isDisplayable());
+            JDialog changedQuote = waitDialog(frame, "Install MekHQ Milestone (1.2.3)");
+            assertEquals(List.of(capturedSource, capturedSource), services.plannedSources);
+            assertEquals(List.of(services.destination, changed), services.plannedDestinations);
+            assertEquals(0, services.installs.get());
+            JButton cancel = find(changedQuote, "cancelNormalInstallButton");
+            SwingUtilities.invokeAndWait(cancel::doClick);
         } finally {
             dispose(frame);
         }
@@ -1495,6 +1531,11 @@ class SimpleHomeSwingTest {
                 new java.util.concurrent.CopyOnWriteArrayList<>();
         private final List<Path> plannedDestinations =
                 new java.util.concurrent.CopyOnWriteArrayList<>();
+        private final List<String> plannedSources =
+                new java.util.concurrent.CopyOnWriteArrayList<>();
+        private NormalInstallService.TargetKind capturedTargetKind =
+                NormalInstallService.TargetKind.CAPTURED_CURRENT;
+        private volatile String currentBrowsedSource;
         private final QuickInstallSnapshot quickInstallSnapshot =
                 QuickInstallTestData.snapshot("1.2.3", "1.2.4");
         private volatile boolean installed;
@@ -1636,11 +1677,31 @@ class SimpleHomeSwingTest {
                                                                       Path target)
                 throws InterruptedException {
             return plan(option.key(), target,
-                    NormalInstallService.TargetKind.CAPTURED_CURRENT);
+                    capturedTargetKind);
+        }
+
+        @Override
+        public NormalInstallService.Plan prepareExactNormalInstall(OfficialRepository repository,
+                FollowChannel channel, String tag, Path target) throws InterruptedException {
+            return plan(new QuickInstallOption.Key(repository, channel), target,
+                    NormalInstallService.TargetKind.BROWSED_EXACT, currentBrowsedSource);
+        }
+
+        @Override
+        public NormalInstallService.Plan prepareExactNormalInstall(OfficialRepository repository,
+                FollowChannel channel, String tag, String source, Path target) throws InterruptedException {
+            return plan(new QuickInstallOption.Key(repository, channel), target,
+                    NormalInstallService.TargetKind.BROWSED_EXACT, source);
         }
 
         private NormalInstallService.Plan plan(QuickInstallOption.Key key, Path target,
                                                NormalInstallService.TargetKind targetKind)
+                throws InterruptedException {
+            return plan(key, target, targetKind, null);
+        }
+
+        private NormalInstallService.Plan plan(QuickInstallOption.Key key, Path target,
+                                               NormalInstallService.TargetKind targetKind, String source)
                 throws InterruptedException {
             plans.incrementAndGet();
             OfficialRepository repository = key.repository();
@@ -1655,6 +1716,8 @@ class SimpleHomeSwingTest {
             if (releasePlanning != null) releasePlanning.await();
             RegistryData empty = new RegistryData(RegistryStore.SCHEMA, null, List.of());
             QuickInstallOption option = quickInstallSnapshot.option(key);
+            String capturedSource = source == null ? option.target().source() : source;
+            plannedSources.add(capturedSource);
             java.util.Set<String> expectedProducts = switch (repository) {
                 case MEKHQ -> NormalInstallService.SUITE_PRODUCTS;
                 case MEGAMEK -> java.util.Set.of("megamek");
@@ -1664,7 +1727,7 @@ class SimpleHomeSwingTest {
                     registry, new NormalInstallService.RegistrySnapshot(false, empty), target,
                     List.of(), channel, repository, option.version(), expectedProducts,
                     option.release(), option.asset(),
-                    option.target().source(),
+                    capturedSource,
                     targetKind);
         }
 

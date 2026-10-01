@@ -1,10 +1,9 @@
 # Fixed-channel and update-check contract
 
-Each official managed installation receives exactly one immutable **Milestone** or
-**Development** channel when its verified fresh-install or adoption transaction publishes it.
-Milestone maps
-only to the official website's `stable` scalar and Development maps only to `dev`. A future
-Nightly channel will likewise require a separate managed installation. Core Rules, extras, GitHub
+Each official managed installation receives exactly one immutable **Milestone**, **Development**,
+or **Weekly** channel when its verified fresh-install or adoption transaction publishes it.
+All three follow the explicit membership in published complete suite records. Milestone remains
+the new-install default; Weekly is not Nightly. Core Rules, extras, GitHub
 titles, prerelease flags, “latest” ordering, tag parity, and a manually selected install tag never
 infer a channel. To use another channel, the user chooses **Install another version** and creates a
 separate root; an existing installation is never retargeted or cross-channel downgraded.
@@ -29,37 +28,49 @@ and installed bytes are unchanged by the check toggle. Apply/recovery preserve t
 
 ## Fixed official source
 
-The replaceable production adapter reads only:
+The production adapter discovers JSON record assets through the official release inventory:
 
-`https://raw.githubusercontent.com/MegaMek/megamek.github.io/main/_data/current_releases.yml`
+`https://api.github.com/repos/MegaMek/megamek/releases`
 
-The bounded safe YAML parser requires one scalar mapping, exactly one valid three- or
-four-component numeric `stable` value and one `dev` value, rejects duplicates, aliases, anchors,
-custom objects, excessive nesting/size, and structured fields, and tolerates unrelated scalar
-fields. It constructs the exact `v` + version tag and asks the existing `ReleaseCatalog` for that
-tag in the installation's already verified repository. Existing assessment rules require one
-correctly named full-bundle asset with a positive bounded size, an optional valid SHA-256, and exact official
-URL. A MekHQ receipt therefore checks only the MekHQ bundle; Core Rules never becomes a channel or
-a mixed bundle.
+Schema-1 `suite-record-<canonical-version>.json` assets are parsed strictly: duplicate, unknown,
+missing, invalid, or trailing fields/documents are rejected. Discovery is bounded to 100 pages of
+50 releases, 1 MiB per record, and 32 MiB of aggregate record bodies; reaching a pagination bound
+is an error, never a partial success. Drafts and unrelated assets are not records. Release tag,
+filename, content identity, positive immutable IDs, and uploaded asset state must agree.
+The numerically greatest suite version with the selected membership is authoritative.
+There is no website YAML, GitHub latest-release, prerelease, or inferred-membership fallback.
+
+Before exposing any product, all three product references are resolved by exact release ID and
+checked for the recorded tag and unique eligible archive's ID, name, size, state, and SHA-256.
+The record's SHA-256 is mandatory; an absent GitHub digest does not discard that authority, and
+a conflicting or malformed GitHub digest fails. Optional minimum launcher requirements are
+checked against the running launcher's generated version resource. Missing or incompatible
+channels are explicitly unavailable, without hiding independently available channels.
+The programs are independently versioned (`MegaMek <= MegaMekLab <= MekHQ <= suite`); the offered
+tag/version belongs to the selected product, not necessarily to the suite record. Reused product
+artifacts keep their exact identity. A MekHQ installation still downloads only its complete
+MekHQ bundle, not three independently selected packages.
 
 A check makes metadata requests only. It never requests package bytes or writes installed files,
-registry, receipts, or current provenance. HTTP errors and redirects from the fixed YAML endpoint,
-malformed/oversized YAML, unavailable exact tags, malformed digests, unsafe URLs, and API
+registry, receipts, or current provenance. JSON record bodies are metadata, not game packages.
+HTTP errors, malformed/oversized records, unavailable references, malformed digests, unsafe URLs, and API
 errors are explicit Unavailable results. Metadata and packages are both obtained from GitHub over
-HTTPS. A published digest remains preferred but is **not independent signing**. For an older
-official asset without one, the launcher computes local identity only from the one exact,
-size-bounded transfer; this does not add independent authenticity.
+HTTPS. A published digest is **not independent signing**. Record-authorized packages require the
+record's SHA-256 even when GitHub omits its digest. Only advanced exact-release or legacy-ancestor
+adoption routes may compute local identity for an older official asset without a published digest,
+from the one exact size-bounded transfer; this does not add independent authenticity.
 
-Successful imported-copy adoption chooses Milestone (default) or Development exactly once and
+Successful imported-copy adoption chooses Milestone (default), Development, or Weekly exactly once and
 publishes that fixed preference only after the local copy has matched one exact official
-ancestor. Automatic adoption first compares the normalized observed identity with both canonical
-current pointers. A selected-current match is allowed, a shared stable/dev identity is valid for
-either selection, and a distinct opposite-current-only match is rejected as a typed channel
-mismatch before package download. An identity matching neither current pointer remains
+ancestor. Static inspection recognizes independent per-program versions and reports the primary
+bundle's version (MekHQ, otherwise Lab, otherwise MegaMek); this is not proof of official ownership.
+Automatic adoption compares that normalized observed identity with each available channel's current
+product version. A selected-current match is allowed, a shared identity is valid for its matching
+channels, and a distinct opposite-current-only match is rejected as a typed channel
+mismatch before package download. An identity matching no current product target remains
 historical/unknown and may be adopted into the user-selected fixed channel. Title, prerelease flag,
 and ordering never classify that historical identity. Failed or cancelled adoption publishes no
-channel. Nightly adoption remains disabled until the durable Nightly identity/history contract
-exists, and there is no adoption-based channel switching.
+channel. Nightly remains unsupported, and there is no adoption-based channel switching.
 
 The source hierarchy is one-directional: the canonical release index is authoritative for release
 identity and historical/current channel membership; a build-produced embedded manifest is an
@@ -78,7 +89,7 @@ Non-comparable rather than silently current or downgraded. Unconfigured and chec
 never “up to date.”
 
 Recommended Update captures installation binding, fixed channel provenance, fixed source,
-repository, target tag, asset name, size, digest, and notes URL. Preparation
+repository, release/asset IDs, target tag, asset name, size, mandatory record digest, and notes URL. Preparation
 and Apply revalidate the captured source and metadata; a change requires a new attempt and consent.
 The route first shows a simple styled update consent with the application, current and new
 versions, and rounded MiB download size. Its copy and **Update** action authorize download,
@@ -93,17 +104,14 @@ available without changing the fixed channel. Clean success silently reloads Ins
 preserved decisions do not create a completion dialog, while a cleanup warning remains visible in
 the styled progress surface.
 
-For a new installation, one **Fetch releases** action reads both fixed YAML pointers and one
-bounded GitHub history page for the selected product. It includes the selected current identity
-and unknown history, excludes a distinct identity known only as the other current channel target,
-and includes a shared stable/dev identity for either selection. Title and `prerelease` remain
-mutable and do not record later promotion (including the known 0.51.0 promotion case), so most
-history is intentionally unknown and appears under both channel selections. The selected Channel
-becomes only the created installation's fixed update channel; it is not evidence that an unknown
-release belonged to that channel. Every chosen row re-enters the normal planner through its exact
-repository/tag for metadata, destination, registry, asset URL/name/size/digest validation before
-consent and again before package transfer. See [the CI update proposal](../ci_update.md)
-for the complete-suite release metadata target state.
+For a new installation, **Fetch releases** performs bounded record discovery and shows one page
+of product targets referenced by records of the selected membership. Reused tags are deduplicated
+by their newest referencing record. Page one contains the current product exactly once; older
+rows are known channel history, not guessed membership. The current record and displayed records'
+three-product references must validate. Browsed choices retain their exact record asset source
+through planning and transfer revalidation, so a newer record cannot silently retarget them.
+Explicit advanced CLI exact-release and legacy-ancestor adoption routes remain available, but are
+not channel discovery or a fallback that assembles a suite. See [the CI update proposal](../ci_update.md).
 
 Channel metadata checks remain outside the package-operation gate and retain their existing
 startup/manual behavior. A package download started from a recommendation uses the shared typed
@@ -119,12 +127,13 @@ An unsafe/corrupt registry prevents log creation and reports that logging failur
 the original **Unable to check** result.
 
 The main first-run **Install latest MekHQ Milestone** action explicitly persists Milestone for the MekHQ
-repository. Its five split-menu routes cover MegaMek/MegaMekLab Milestone and
-MekHQ/MegaMek/MegaMekLab Development; each persists exactly its displayed channel while sharing
+repository. Its eight split-menu routes cover MegaMek/MegaMekLab Milestone and
+MekHQ/MegaMek/MegaMekLab Development and Weekly; each persists exactly its displayed channel while sharing
 the same verified normal installer. The menu has no redundant MekHQ Milestone or exact-picker row.
 Opening the styled menu while versions are loading or available starts no request and changes no
-channel, Main selection, or setting. Closing and reopening after unavailable rows have been
-viewed is the explicit snapshot retry and still changes no installation state. The deferred
+channel, Main selection, or setting. Unavailable rows are disabled with explicit reasons; only
+the Retry command refreshes an unavailable/partially available snapshot. A Weekly-only bootstrap
+enables Weekly rows while leaving the Milestone primary disabled. The deferred
 current-or-history picker remains on Installations after a copy exists or in relevant problem
 navigation. Normal, exact historical, CLI, and successfully adopted managed installations always
 initialize their per-installation check-on-open value to true. There is no configurable global or

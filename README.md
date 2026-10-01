@@ -8,7 +8,8 @@ and manual dispatch. PR branch pushes run once through the pull-request event ra
 than also starting a duplicate push matrix. CI produces **only** five unsigned native installer/checksum
 pairs: Windows x64 `.msi`, Linux x64 `.deb` and `.rpm`, and macOS `.pkg` on both
 Intel and Apple Silicon. It does not build, verify, or upload portable archives,
-install packages on CI runners, create a release, sign, or notarize. Each
+install packages on CI runners, create a release, sign, or notarize. The separate
+manual `Publish launcher release` workflow reuses these same builds and tests before publication. Each
 installer contains a host-native Java 21 image with all JDK modules and `bin/java`
 for games launched by the application; no external Java is required.
 Run `./gradlew test buildDebInstaller buildRpmInstaller` on Linux,
@@ -59,6 +60,34 @@ If no compatible
 official release exists, no upgrade is attempted. Portable archives, macOS
 and Linux do not self-update. MSI upgrades replace installer-owned binaries,
 not the `%LOCALAPPDATA%` launcher registry, logs or installed games.
+
+### Publishing a launcher release
+
+The manually dispatched `Publish launcher release` workflow is independent of the game-suite
+coordinator. Select **main** and enter the numeric launcher version already committed in
+`build.gradle.kts`, for example `0.14.5`. It refuses forks, other branches, existing tags/releases
+(including drafts), version mismatches, and a version not newer than every published stable
+launcher release. It never runs automatically on pushes or pull requests.
+
+The workflow calls the ordinary native-installer CI and waits for all four platforms' builds,
+package inspections, source tests, and release tooling tests to pass. Only then does one write-enabled
+job download this run's five installers and five checksum files, check the exact filenames and
+hashes, create `v<version>` at the tested commit, and upload the complete asset set. GitHub must
+report the expected uploaded asset IDs, sizes, URLs, and SHA-256 digests, including the digest used
+by Windows self-update.
+
+Publication goes straight to a stable release in that same run, with no draft-review approval
+stage. The upload operation briefly uses GitHub's draft flag so an incomplete asset set cannot
+become the update target; it is cleared automatically only after verification. The workflow then
+verifies the official latest-stable endpoint. Installers remain unsigned and macOS packages are
+not notarized.
+
+Writes are not automatically retried, existing assets/tags are never overwritten, and failure
+does not automatically delete a tag, draft, or published release. Inspect any partial state before
+another attempt; a published release cannot be made unpublished by a failed post-publication
+check. Full Windows self-update still requires an older installed MSI and a newer published
+version. Publishing the same version as the installed launcher does not trigger an upgrade.
+See [the distribution contract](docs/archive-distribution-contract.md) for validation commands.
 
 The desktop default registry is `%LOCALAPPDATA%\MegaMek Launcher\launcher-registry.json`
 on Windows, `~/Library/Application Support/MegaMek Launcher/launcher-registry.json`
@@ -159,7 +188,7 @@ for update status. Its single **Installations** button gains a known count such 
 **Installations (2 updates)** when checked installations have updates; unknown and launch-only
 copies never create a false count. Update, retry, recovery, channel, location, removal, and explicit
 **Use as preferred for …** actions live on dark-teal installation cards. A managed card shows its
-read-only **Channel: Milestone/Development** identity and directly shows
+read-only **Channel: Milestone/Development/Weekly** identity and directly shows
 **Check for updates when the launcher opens**. This per-card checkbox is the sole automatic-check
 setting and saves immediately without changing the fixed channel. An imported card says
 **Imported copy · Launch only · Updates unavailable** and has
@@ -212,16 +241,22 @@ styled dark-teal/gold popup containing exactly:
 3. **Install latest MekHQ Development**
 4. **Install latest MegaMek Development**
 5. **Install latest MegaMekLab Development**
+6. **Install latest MekHQ Weekly**
+7. **Install latest MegaMek Weekly**
+8. **Install latest MegaMekLab Weekly**
 
 Each available row includes its independently validated version in parentheses. One background
-snapshot per launcher-window session reads `stable`/`dev` once, validates exact release assets for
-all three official repositories, and shares metadata when both channels name the same
-repository/tag. While it loads, both install segments are visibly disabled and removed from
+snapshot per launcher-window session discovers complete suite records for Milestone, Development,
+and Weekly, validates all three exact product references before offering any product, and caches
+reused release IDs. The record's mandatory SHA-256 remains authoritative when GitHub omits its digest.
+There is no website YAML or independent-latest-release fallback. While it loads, both install segments are visibly disabled and removed from
 keyboard focus, while **Use existing installation** remains available. Failure keeps installation
 unavailable and exposes one explicit **Retry version check** command; concurrent retries are
 deduplicated. The first successful immutable snapshot is retained for the frame lifetime, so Home
 reloads, confirmation cancellation, location changes, and repeated quote opens preserve the same
-labels without another current-channel request. A visible secondary
+labels without another current-channel request. Missing channels are disabled with explicit reasons;
+Weekly-only records remain usable without changing the Milestone default. Explicit Retry can refresh
+partial availability. A visible secondary
 **Use existing installation** action, captioned **MegaMek, MekHQ, or MegaMekLab**, imports a
 portable copy without moving it. After the folder chooser, static inspection and atomic
 registration run in one styled progress window; there is no separate name,
@@ -263,9 +298,9 @@ if ($LASTEXITCODE -ne 0) { throw "Build failed with exit code $LASTEXITCODE." }
 
 Review Home, Installations, Settings, the split **Install latest MekHQ Milestone** control,
 **Use existing installation**, **Install another version**, Update, recovery, Game Java
-selection, and direct launch behavior. The primary normal first install resolves only the fixed website `stable`
-value for the MekHQ repository. Each popup item binds its displayed official repository and
-`stable` or `dev` channel; no selection can substitute a different product, channel, title, or
+selection, and direct launch behavior. The primary normal first install uses the greatest complete
+Milestone suite record's MekHQ target. Each popup item binds its displayed official repository and
+record membership; no selection can substitute a different product, channel, title, or
 bundle.
 Before package transfer it shows a dedicated dark-teal/gold confirmation headed with the selected
 product and channel. Its concise summary gives the validated version, actual included programs,
@@ -278,11 +313,17 @@ asset identity/digest, destination, registry, and Main snapshot; operation logs 
 failures.
 
 Ready first-launch actions plan from the exact cached option, not from another
-`current_releases.yml` lookup. Local planning still freshly captures destination and
+current-record lookup. Local planning still freshly captures destination and
 registry/default state off the EDT. Before package bytes or parent
-creation, install re-fetches the quoted exact repository/tag metadata and requires the same asset
-name, size, SHA-256, and URL. A moved channel pointer cannot silently retarget the quoted install;
+creation, install revalidates the captured record and its exact references, requiring the same release/asset
+IDs, name, size, SHA-256, and URL. A newer record cannot silently retarget the quoted install;
 exact metadata drift requires fresh consent.
+
+Static folder inspection recognizes independent program versions, preferring each root jar's
+`Implementation-Version` and retaining the legacy shared-MegaMek metadata fallback when absent.
+The bundle display uses MekHQ's version, otherwise Lab's, otherwise MegaMek's. This does not prove
+compatibility or ownership: imported copies remain launch-only until exact official archive
+verification succeeds. Conflicting versions of duplicated MegaMek jars remain unsupported.
 
 Routine source and documentation iteration does not rebuild the portable archive. Archive
 creation and verification remain explicit release-validation work.
@@ -304,35 +345,29 @@ three-program suite; standalone MegaMek and MegaMekLab packages must inspect as 
 product, so managed Home never gains launch buttons from a mixed or title-inferred bundle.
 
 The Installations page's dark **Install another version** dialog defaults to MekHQ and Milestone.
-Its one Product/Channel/**Fetch releases** row reads both current pointers from the fixed website
-YAML once and requests one page from only the selected product's GitHub history. Page one contains
-the selected channel's authoritative current target exactly once plus rows whose historical
-channel membership is unknown. A distinct current target known only to the other channel is
-excluded; if both pointers name the same identity, that release is valid for either selection.
-Titles, versions, ordering, and `prerelease` flags never supply classification. Most historical
-rows therefore appear for both channels today. The selected Channel becomes the new
-installation's immutable update track; it is not a claim about an unknown row's historical
-origin. No picker metadata action fetches package bytes.
+Its Product/Channel/**Fetch releases** row discovers bounded complete records and shows one page
+of product targets with the selected record membership. Page one contains the current product
+exactly once; reused tags retain their newest referencing record as the captured source.
+All three product references must validate for each displayed target. Titles, publication dates,
+and `prerelease` flags never supply classification, and unclassified repository history is not
+a fallback. The selected Channel becomes the new installation's immutable update track.
+No picker metadata action fetches package bytes.
 
-Previous/next use the exact loaded product/channel snapshot and a bounded GitHub page. Changing
+Previous/next use the exact loaded product/channel snapshot and a bounded record-history page. Changing
 either combo clears the rows, selection, and page controls and invalidates late results. Eligible
 rows use **Program Channel (Version) — human size**; unavailable rows contain only
 **— Unavailable** after the identity. A separate **Page N** indicator remains in the footer, while
 the reserved status line is blank after success. The controls use the same styled combo/button
 treatment and high-contrast fallback as the rest of the launcher.
 
-Before consent, the picker sends the exact choice through the normal-install planner. Current
-and unknown choices both re-fetch the selected exact repository/tag rather than retargeting from a
-current pointer. Before transfer the planner repeats registry/destination checks and revalidates
-the same source, tag, asset URL, name, size, and published-digest state. A digest quoted by the
-plan may not disappear or change. If the plan quoted no digest, a valid digest newly present at
-that exact refresh is adopted; otherwise the one bounded official body is hashed while streaming
-and that computed SHA-256 becomes the installed copy's local package identity. Unknown
-classification is accepted only
-because successful installation creates a new fixed local track. Every successfully published graphical managed installation
+Before consent, the picker sends the exact choice and captured record source through the
+normal-install planner. Current and historical choices revalidate that record and its exact
+references, never a newer current record. Before transfer the planner repeats registry/destination
+checks and requires the same source, release/asset IDs, tag, asset URL, name, size, and mandatory
+record SHA-256. The package must match that digest even when GitHub publishes none.
+Every successfully published graphical managed installation
 starts with its per-install check-on-open value enabled. See
-[`ci_update.md`](ci_update.md) for the proposed complete-suite records needed to
-classify releases by channel.
+[`ci_update.md`](ci_update.md) for the complete-suite record and producer release contract.
 Preview asks to fetch official releases and shows the exact package and full size before download.
 Preview itself remains read-only and has no Apply control. **Update…** is a separate workflow:
 it previews first, requires a second confirmation that names the destructive intent and exact
@@ -475,7 +510,7 @@ record with no receipt, current provenance, fixed channel, or pending transactio
 **Enable managed updates…** action. Incomplete or corrupt managed metadata never gets that action.
 
 The opt-in flow shows the statically detected applications/version and a fixed future channel
-(Milestone by default, or Development). It treats that information only as a candidate. Before
+(Milestone by default, or Development or Weekly). It treats that information only as a candidate. Before
 offering Enable, the launcher resolves one exact release in the matching fixed official
 repository, requires its bounded asset name/size and validated official URL, downloads that
 package once, verifies a valid published SHA-256 when present (or records the SHA-256 computed
@@ -487,7 +522,7 @@ titles and GitHub prerelease flags do not establish identity or channel history.
 
 All official application executables, application JARs, dependency JARs, and launch metadata must
 match byte-for-byte. Missing managed files, case/Unicode aliases, links, structural conflicts, a
-mixed product/version, or a linked/special runtime path fail closed. Ordinary Update replaces
+product/build identity mismatch with the selected archive, or a linked/special runtime path fail closed. Ordinary Update replaces
 damaged or missing official runtime files and removes obsolete official runtime, retaining a
 verified rollback backup until commit. Extra unowned JARs under lib are preserved (they may affect
 the game). Modified non-runtime official files

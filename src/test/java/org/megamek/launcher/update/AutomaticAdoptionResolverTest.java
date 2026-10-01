@@ -35,6 +35,7 @@ package org.megamek.launcher.update;
 
 import org.junit.jupiter.api.Test;
 import org.megamek.launcher.channel.FollowChannel;
+import org.megamek.launcher.channel.SuiteTestData;
 import org.megamek.launcher.onboarding.Product;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationType;
@@ -67,12 +68,11 @@ class AutomaticAdoptionResolverTest {
 
         assertEquals(AutomaticAdoptionResolver.Status.MATCHED, result.status());
         assertEquals("v0.50.07", result.release().tag());
-        assertEquals(2, transport.uris.size());
-        assertEquals(org.megamek.launcher.channel.OfficialYamlChannelCatalog.SOURCE,
-                transport.uris.getFirst());
-        assertTrue(transport.uris.get(1).toString().contains("/releases?per_page=50&page=1"));
-        assertFalse(transport.uris.get(1).toString().contains("/releases/tags/"));
-        assertFalse(transport.accepts.contains("application/octet-stream"));
+        assertEquals(10, transport.uris.size());
+        assertTrue(transport.uris.getFirst().toString().startsWith(
+                org.megamek.launcher.channel.OfficialSuiteChannelCatalog.SOURCE.toString()));
+        assertTrue(transport.uris.getLast().toString().contains("/releases?per_page=50&page=1"));
+        assertFalse(transport.uris.stream().anyMatch(uri -> uri.getPath().endsWith(".tar.gz")));
 
         AutomaticAdoptionResolver.Resolution displayMatch = resolve(new QueueTransport(200,
                 channels("0.50.7", "0.51.0"),
@@ -125,10 +125,10 @@ class AutomaticAdoptionResolverTest {
                 result.channelMismatch().selectedChannel());
         assertEquals(FollowChannel.MILESTONE,
                 result.channelMismatch().requiredChannel());
-        assertEquals("0.51.0", result.channelMismatch().currentVersion());
-        assertEquals(1, transport.uris.size(),
+        assertEquals("0.51.00", result.channelMismatch().currentVersion());
+        assertEquals(9, transport.uris.size(),
                 "known mismatch must stop before the release scan");
-        assertFalse(transport.accepts.contains("application/octet-stream"));
+        assertFalse(transport.uris.stream().anyMatch(uri -> uri.getPath().endsWith(".tar.gz")));
     }
 
     @Test
@@ -154,8 +154,8 @@ class AutomaticAdoptionResolverTest {
                         new PrintStream(new ByteArrayOutputStream()),
                         OperationContext.none(OperationType.ADOPT_EXISTING));
         assertEquals(AutomaticAdoptionResolver.Status.MATCHED, historicalResult.status());
-        assertEquals(2, shared.uris.size());
-        assertEquals(2, historical.uris.size());
+        assertEquals(7, shared.uris.size());
+        assertEquals(10, historical.uris.size());
     }
 
     @Test
@@ -176,7 +176,7 @@ class AutomaticAdoptionResolverTest {
 
     @Test
     void fullPaginationBoundNeverTreatsPartialHistoryAsUnique() throws Exception {
-        List<String> responses = new ArrayList<>();
+        List<Object> responses = new ArrayList<>();
         responses.add(channels("0.51.0", "0.52.0"));
         for (int page = 0; page < AutomaticAdoptionResolver.MAX_PAGES; page++) {
             List<String> releases = new ArrayList<>();
@@ -187,11 +187,11 @@ class AutomaticAdoptionResolverTest {
             responses.add("[" + String.join(",", releases) + "]");
         }
         QueueTransport transport = new QueueTransport(
-                200, responses.toArray(String[]::new));
+                200, responses.toArray(Object[]::new));
 
         assertEquals(AutomaticAdoptionResolver.Status.SEARCH_INCOMPLETE,
                 resolve(transport, "0.50.7").status());
-        assertEquals(AutomaticAdoptionResolver.MAX_PAGES + 1, transport.uris.size());
+        assertEquals(AutomaticAdoptionResolver.MAX_PAGES + 9, transport.uris.size());
     }
 
     @Test
@@ -217,8 +217,8 @@ class AutomaticAdoptionResolverTest {
                 OperationContext.none(OperationType.ADOPT_EXISTING));
     }
 
-    private static String channels(String milestone, String development) {
-        return "stable: " + milestone + "\ndev: " + development + "\n";
+    private static ReleaseTransport.Response channels(String milestone, String development) {
+        return SuiteTestData.channels(milestone, development);
     }
 
     private static Product product(String key) {
@@ -241,23 +241,30 @@ class AutomaticAdoptionResolverTest {
 
     private static final class QueueTransport implements ReleaseTransport {
         private final int status;
-        private final ArrayDeque<String> responses;
+        private final ArrayDeque<Response> responses = new ArrayDeque<>();
+        private final SuiteTestData.MetadataRouter metadata = new SuiteTestData.MetadataRouter();
         private final List<URI> uris = new ArrayList<>();
         private final List<String> accepts = new ArrayList<>();
 
-        private QueueTransport(int status, String... responses) {
+        private QueueTransport(int status, Object... responses) {
             this.status = status;
-            this.responses = new ArrayDeque<>(List.of(responses));
+            for (Object response : responses) {
+                if (response instanceof Response value) this.responses.add(value);
+                else if (response instanceof String text) this.responses.add(new Response(status, Map.of(),
+                        new ByteArrayInputStream(text.getBytes(StandardCharsets.UTF_8))));
+                else throw new IllegalArgumentException("unsupported fixture response");
+            }
         }
 
         @Override
         public Response get(URI uri, String accept) throws IOException {
             uris.add(uri);
             accepts.add(accept);
-            String response = responses.poll();
+            Response generated = metadata.response(uri, accept, responses.peekFirst());
+            if (generated != null) return generated;
+            Response response = responses.poll();
             if (response == null) throw new IOException("unexpected request");
-            return new Response(status, Map.of(), new ByteArrayInputStream(
-                    response.getBytes(StandardCharsets.UTF_8)));
+            return response;
         }
     }
 }

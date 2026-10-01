@@ -35,24 +35,21 @@ that root. It performs one package download per prepared attempt. Historical arc
 published digest use the same computed local identity; archives that otherwise fail this contract
 remain unsupported and launch-only.
 
-The GUI's single **Fetch releases** action reads both bounded website
-`current_releases.yml` pointers once and calls one bounded history page for only the selected
-product repository. It combines the selected channel's known current target with releases whose
-historical membership is unknown, excludes a distinct current target known only to the other
-channel, and treats a shared stable/dev identity as current in either selection. Page one contains
-the selected target exactly once; an exact lookup is added only when needed to obtain its
-canonical eligible metadata. Identity is deduplicated by fixed repository/tag, and titles,
-versions, ordering, and `prerelease` never infer a channel. Most historical rows currently remain
-unknown and therefore appear for either channel. The selected channel becomes the created
-installation's fixed update track and does not classify an unknown historical release. No picker
-metadata action downloads package bytes.
+The GUI's **Fetch releases** action uses bounded complete-record discovery and pages product
+targets with the selected Milestone, Development, or Weekly membership. Page one contains the
+current product exactly once; reused tags are deduplicated by their newest referencing record.
+Every displayed target requires all three product references to validate. Its source is the
+exact record asset, retained through planning and revalidation rather than re-resolving latest.
+There is no website pointer, unclassified repository-history, or inferred-membership fallback.
+No picker metadata action downloads package bytes.
 
 Empty Home has a separate frame-scoped current snapshot contract. One background attempt resolves
-all six fixed quick-install choices while both install segments are disabled and **Use existing
-installation** remains enabled. Failure leaves installation disabled until an explicit,
-deduplicated Retry. The first successful immutable snapshot is reused for the frame lifetime
+all nine fixed quick-install choices while both install segments are disabled and **Use existing
+installation** remains enabled. Unavailable channels have disabled entries and explicit reasons.
+Weekly can remain installable when the default Milestone has no record. Failure or partial
+availability exposes an explicit, deduplicated Retry. A successful immutable snapshot is reused
 across re-render, cancel/close, Change location, and repeated planning; those paths do not reread
-`current_releases.yml`.
+the current record inventory, unless the user explicitly retries unavailable choices.
 
 ## Archive and installation boundary
 
@@ -106,10 +103,10 @@ selection is preserved by registration; the first record supplies that compatibi
 empty registry. Independently, registration initializes only still-unset per-application
 preferences for products actually in the new static record and never overwrites an explicit
 preference. The normal GUI setup does not inspect Java. It initializes the exact
-planned Milestone or Development channel once with check-on-open enabled, rechecks that no
+planned Milestone, Development, or Weekly channel once with check-on-open enabled, rechecks that no
 unrelated registry/default drift occurred, and updates the compatibility default only for the
 still-empty registry captured by the quote. The primary first-run route defaults to
-`(MEKHQ, MILESTONE)`; the five popup routes bind their displayed fixed repository/channel pairs and
+`(MEKHQ, MILESTONE)`; the eight popup routes bind their displayed fixed repository/channel pairs and
 cannot silently alter the primary default or an existing installation's track. The same installer
 requires exact product matching for
 normal quotes: MekHQ is the three-program suite, while MegaMek and MegaMekLab are standalone.
@@ -156,15 +153,18 @@ in `<registry-name>.metadata/<uuid>.json`. The fixed-channel sidecar is then ini
 that exact receipt and registry binding revalidate. Same-channel transaction retries are
 idempotent; another channel is rejected. Archives are not retained.
 
-The first-launch display snapshot is separate from planning. It reads stable/dev once and resolves
-the six validated repository/channel choices, deduplicating exact release metadata for identical
-repository/tag pairs. It performs no package transfer, Java validation, destination/state write,
+The first-launch display snapshot is separate from planning. It discovers complete records and resolves
+the nine repository/channel choices, caching repeated product release IDs during that attempt.
+It performs no package transfer, Java validation, destination/state write,
 or state write. Its two install segments are disabled while loading; direct existing-copy import
 remains active. Opening its styled menu when READY performs no request. A failed attempt exposes
 an explicit Retry command, while a successful snapshot and its labels remain cached for the frame
 session. Selecting an available choice starts a fresh local quote from that exact cached option.
-Before binary transfer, the exact release/asset is revalidated without rereading or following the
-current channel pointer.
+Before binary transfer, the captured record and all three references are revalidated without
+following a newer current record. Mandatory record SHA-256 and immutable release/asset IDs remain
+bound through transfer even when GitHub has no digest. Static inspection preserves per-program
+versions and uses the primary product's build as the bundle display; ownership still requires
+verified official bytes. Record-authorized archives must also report the expected primary version.
 
 ## Failure and recovery
 

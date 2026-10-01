@@ -43,11 +43,19 @@ import java.util.Objects;
  * The key and target are deliberately inseparable so a UI label cannot be paired with metadata
  * from another product or channel.
  */
-public record QuickInstallOption(Key key, ChannelCatalog.Target target) {
+public record QuickInstallOption(Key key, ChannelCatalog.Target target, String unavailableReason) {
+    public QuickInstallOption(Key key, ChannelCatalog.Target target) {
+        this(key, target, null);
+    }
+
     public QuickInstallOption {
         Objects.requireNonNull(key, "key");
-        Objects.requireNonNull(target, "target");
-        if (target.repository() != key.repository() || target.channel() != key.channel()
+        if (target == null) {
+            if (unavailableReason == null || unavailableReason.isBlank()) {
+                throw new IllegalArgumentException("unavailable choice requires an explicit reason");
+            }
+        } else if (unavailableReason != null
+                || target.repository() != key.repository() || target.channel() != key.channel()
                 || target.version() == null || target.version().isBlank()
                 || target.release() == null || target.asset() == null
                 || !target.release().tag().equals("v" + target.version())
@@ -58,15 +66,26 @@ public record QuickInstallOption(Key key, ChannelCatalog.Target target) {
         }
     }
 
+    public boolean available() {
+        return target != null;
+    }
+
+    private void requireAvailable() {
+        if (!available()) throw new IllegalStateException(unavailableReason);
+    }
+
     public String version() {
+        requireAvailable();
         return target.version();
     }
 
     public ReleaseCatalog.Release release() {
+        requireAvailable();
         return target.release();
     }
 
     public ReleaseCatalog.Asset asset() {
+        requireAvailable();
         return target.asset();
     }
 

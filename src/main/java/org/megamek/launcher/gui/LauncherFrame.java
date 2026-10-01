@@ -251,10 +251,10 @@ public final class LauncherFrame extends JFrame {
 
     private void prepareExactNormalInstall(OfficialRepository repository,
                                            FollowChannel futureChannel, String tag,
-                                           Path destination) {
+                                           String source, Path destination) {
         run("Checking exact " + displayProduct(repository.key()) + " " + tag,
                 () -> services.prepareExactNormalInstall(repository, futureChannel, tag,
-                        destination),
+                        source, destination),
                 this::showNormalInstallConfirmation);
     }
 
@@ -567,10 +567,8 @@ public final class LauncherFrame extends JFrame {
                 try {
                     QuickInstallSnapshot loaded = get();
                     if (loaded == null) {
-                        firstLaunchSnapshot = null;
-                        firstLaunchMetadataState = FirstLaunchMetadataState.FAILED;
-                        firstLaunchMetadataFailure =
-                                "Install versions unavailable. Choose Retry version check.";
+                        firstLaunchOptionsFailed(
+                                "Install versions unavailable: no catalog returned. Choose Retry version check.");
                     } else {
                         firstLaunchSnapshot = loaded;
                         firstLaunchMetadataFailure = null;
@@ -579,16 +577,14 @@ public final class LauncherFrame extends JFrame {
                 } catch (java.util.concurrent.CancellationException ignored) {
                     return;
                 } catch (java.util.concurrent.ExecutionException error) {
-                    firstLaunchSnapshot = null;
-                    firstLaunchMetadataState = FirstLaunchMetadataState.FAILED;
-                    firstLaunchMetadataFailure =
-                            "Install versions unavailable. Choose Retry version check.";
+                    firstLaunchOptionsFailed(
+                            "Install versions unavailable: "
+                                    + SanitizedErrors.display(error.getCause())
+                                    + ". Choose Retry version check.");
                 } catch (InterruptedException error) {
                     Thread.currentThread().interrupt();
-                    firstLaunchSnapshot = null;
-                    firstLaunchMetadataState = FirstLaunchMetadataState.FAILED;
-                    firstLaunchMetadataFailure =
-                            "Version check interrupted. Choose Retry version check.";
+                    firstLaunchOptionsFailed(
+                            "Version check interrupted. Choose Retry version check.");
                 }
                 applyFirstLaunchMetadata(false);
             }
@@ -597,24 +593,34 @@ public final class LauncherFrame extends JFrame {
             firstLaunchOptionsWorker.execute();
         } catch (RuntimeException error) {
             firstLaunchOptionsWorker = null;
-            firstLaunchMetadataState = FirstLaunchMetadataState.FAILED;
-            firstLaunchMetadataFailure =
-                    "Version check could not start. Choose Retry version check.";
+            firstLaunchOptionsFailed(
+                    "Version check could not start: " + SanitizedErrors.display(error)
+                            + ". Choose Retry version check.");
             applyFirstLaunchMetadata(false);
         }
+    }
+
+    private void firstLaunchOptionsFailed(String message) {
+        firstLaunchMetadataFailure = message;
+        firstLaunchMetadataState = firstLaunchSnapshot == null
+                ? FirstLaunchMetadataState.FAILED : FirstLaunchMetadataState.READY;
     }
 
     private void retryFirstLaunchOptions() {
         if (!isCurrentEmptyFirstLaunch()
                 || firstLaunchMetadataState != FirstLaunchMetadataState.FAILED
+                && !(firstLaunchMetadataState == FirstLaunchMetadataState.READY
+                && firstLaunchSnapshot.options().stream().anyMatch(option -> !option.available()))
                 || firstLaunchOptionsWorker != null) {
             return;
         }
+        firstLaunchMetadataState = FirstLaunchMetadataState.NOT_STARTED;
         startFirstLaunchOptionsCheck();
     }
 
     private void applyFirstLaunchMetadata(boolean startInitial) {
         if (!isCurrentEmptyFirstLaunch()) return;
+        status.setToolTipText(null);
         switch (firstLaunchMetadataState) {
             case NOT_STARTED -> {
                 firstLaunchSplitButton.setOptionsLoading();
@@ -648,6 +654,13 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void setStableFirstLaunchStatus() {
+        if (isCurrentEmptyFirstLaunch() && firstLaunchMetadataFailure != null
+                && firstLaunchSnapshot != null) {
+            status.setText("Version refresh failed — using previous versions. Choose Retry.");
+            status.setToolTipText(firstLaunchMetadataFailure);
+            return;
+        }
+        status.setToolTipText(null);
         status.setText(isCurrentEmptyFirstLaunch() && firstLaunchArtworkError != null
                 ? "Artwork unavailable; diagnostics are available in Settings."
                 : "");
@@ -1728,7 +1741,7 @@ public final class LauncherFrame extends JFrame {
         JLabel channelLabel = new JLabel("Update channel:");
         channelLabel.setForeground(FirstLaunchPanel.TEXT);
         StyledComboBox<FollowChannel> channel = new StyledComboBox<>(
-                new FollowChannel[]{FollowChannel.MILESTONE, FollowChannel.DEVELOPMENT},
+                FollowChannel.values(),
                 guiScale);
         channel.setName("adoptionChannelCombo");
         channel.setPreferredSize(new Dimension(
@@ -1736,7 +1749,7 @@ public final class LauncherFrame extends JFrame {
         channel.setSelectedItem(FollowChannel.MILESTONE);
         channel.getAccessibleContext().setAccessibleName("Future update channel");
         channel.getAccessibleContext().setAccessibleDescription(
-                "Choose Milestone or Development once. This choice is fixed after enabling.");
+                "Choose Milestone, Development, or Weekly once. This choice is fixed after enabling.");
         channelLabel.setLabelFor(channel);
         channelRow.add(channelLabel);
         channelRow.add(Box.createHorizontalStrut(detailGap));
@@ -2977,7 +2990,7 @@ public final class LauncherFrame extends JFrame {
                         prepareNormalInstall(plan.repository(), plan.channel(), changed);
                     } else {
                         prepareExactNormalInstall(plan.repository(), plan.channel(),
-                                plan.release().tag(), changed);
+                                plan.release().tag(), plan.source(), changed);
                     }
                     return true;
                 }, source -> {
@@ -3396,7 +3409,7 @@ public final class LauncherFrame extends JFrame {
             String tag = choice.release().tag();
             startTask("Revalidating exact install plan",
                     () -> services.prepareExactNormalInstall(
-                            repository, selectedChannel, tag, destination),
+                            repository, selectedChannel, tag, choice.source(), destination),
                     plan -> {
                         if (!dialog.isDisplayable() || choice != releases.getSelectedValue()
                                 || product.getSelectedItem() != repository
@@ -4448,6 +4461,7 @@ public final class LauncherFrame extends JFrame {
                                        SelectedChannelReleaseCatalog.Classification classification,
                                        ReleaseCatalog.Release release,
                                        ReleaseCatalog.Assessment assessment,
+                                       String source,
                                        String label) {
         private static PickerReleaseChoice from(
                 SelectedChannelReleaseCatalog.Entry entry, FollowChannel channel) {
@@ -4456,7 +4470,7 @@ public final class LauncherFrame extends JFrame {
                     && (tag.charAt(0) == 'v' || tag.charAt(0) == 'V')
                     ? tag.substring(1) : tag;
             return new PickerReleaseChoice(entry.identity().repository(), channel,
-                    entry.classification(), entry.release(), entry.assessment(),
+                    entry.classification(), entry.release(), entry.assessment(), entry.source(),
                     VersionDisplay.programChannelVersion(
                             displayProduct(entry.identity().repository().key()),
                             channel.toString(), version));

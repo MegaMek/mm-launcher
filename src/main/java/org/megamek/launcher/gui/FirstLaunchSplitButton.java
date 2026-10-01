@@ -33,7 +33,6 @@
 
 package org.megamek.launcher.gui;
 
-import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.channel.QuickInstallSnapshot;
 import org.megamek.launcher.release.OfficialRepository;
@@ -119,7 +118,7 @@ final class FirstLaunchSplitButton extends JPanel {
         setAlignmentX(Component.LEFT_ALIGNMENT);
         getAccessibleContext().setAccessibleName("Install latest official applications");
         getAccessibleContext().setAccessibleDescription(
-                "Install the latest MekHQ Milestone, or open the adjacent five-choice menu.");
+                "Install the latest MekHQ Milestone, or open the adjacent eight-choice menu.");
 
         primaryButton = new SegmentButton(PRIMARY_LABEL, PRIMARY_NAME, false);
         primaryButton.setMnemonic(KeyEvent.VK_D);
@@ -135,18 +134,18 @@ final class FirstLaunchSplitButton extends JPanel {
         optionsButton.setIcon(new DownArrowIcon(scale));
         optionsButton.setHorizontalAlignment(SwingConstants.CENTER);
         optionsButton.setToolTipText(
-                "Choose another official application and Milestone or Development channel.");
+                "Choose another official application and Milestone, Development, or Weekly channel.");
         optionsButton.getAccessibleContext().setAccessibleName(
                 "Choose another application and channel");
         optionsButton.getAccessibleContext().setAccessibleDescription(
-                "Open the five-choice quick-install menu. Opening it performs no network request.");
+                "Open the eight-choice quick-install menu. Opening it performs no network request.");
         optionsButton.addActionListener(event -> openPopup());
 
         popupMenu = new StyledPopupMenu(palette(), scale);
         popupMenu.setName("downloadOptionsPopup");
         popupMenu.getAccessibleContext().setAccessibleName("Latest application choices");
         popupMenu.getAccessibleContext().setAccessibleDescription(
-                "Five validated official Milestone or Development choices. "
+                "Eight official Milestone, Development, or Weekly choices. "
                         + "Opening this menu performs no network request.");
         for (QuickInstallOption.Key key : QuickInstallSnapshot.MENU_KEYS) {
             JMenuItem item = menuItem(menuLabel(key, "Loading…"), menuItemName(key),
@@ -157,10 +156,11 @@ final class FirstLaunchSplitButton extends JPanel {
             popupMenu.add(item);
         }
         retryItem = menuItem("Retry version check", "retryQuickInstallMetadataMenuItem",
-                "Retry loading the six official current install choices.", palette());
+                "Retry loading the nine official current install choices.", palette());
         retryItem.addActionListener(event -> {
             closePopup();
-            if (!disposed && isEnabled() && optionState == OptionState.FAILED) {
+            if (!disposed && isEnabled() && (optionState == OptionState.FAILED
+                    || availableOptions.size() < QuickInstallSnapshot.ALL_KEYS.size())) {
                 unavailableRetryAction.run();
             }
         });
@@ -224,31 +224,36 @@ final class FirstLaunchSplitButton extends JPanel {
 
     void setOptions(QuickInstallSnapshot snapshot) {
         if (disposed) return;
+        QuickInstallOption primary = snapshot.option(QuickInstallSnapshot.DEFAULT_KEY);
         setPrimaryLabel(menuLabel(QuickInstallSnapshot.DEFAULT_KEY,
-                snapshot.option(QuickInstallSnapshot.DEFAULT_KEY).version()));
+                primary.available() ? primary.version() : "Unavailable"));
         optionState = OptionState.READY;
         popupMenu.remove(retryItem);
         primaryButton.getAccessibleContext().setAccessibleDescription(
-                "Review and install this captured official Milestone MekHQ bundle containing "
-                        + "MegaMek, MekHQ, and MegaMekLab.");
+                primary.available()
+                        ? "Review and install this captured official Milestone MekHQ bundle containing "
+                        + "MegaMek, MekHQ, and MegaMekLab."
+                        : primary.unavailableReason());
+        primaryButton.setToolTipText(primary.available() ? null : primary.unavailableReason());
         getAccessibleContext().setAccessibleDescription(
-                "Install one of the six ready, validated official application choices.");
+                "Install an available complete suite; unavailable channels are disabled.");
         setNormalOptionsDescription();
-        Map<QuickInstallOption.Key, String> labels = new LinkedHashMap<>();
-        for (QuickInstallOption.Key key : QuickInstallSnapshot.MENU_KEYS) {
-            labels.put(key, menuLabel(key, snapshot.option(key).version()));
-        }
-        availableOptions = Set.copyOf(labels.keySet());
-        for (Map.Entry<QuickInstallOption.Key, String> entry : labels.entrySet()) {
-            JMenuItem item = optionItems.get(entry.getKey());
-            item.setText(entry.getValue());
-            item.setToolTipText(null);
-            item.getAccessibleContext().setAccessibleName(entry.getValue());
+        availableOptions = snapshot.options().stream().filter(QuickInstallOption::available)
+                .map(QuickInstallOption::key).collect(java.util.stream.Collectors.toUnmodifiableSet());
+        for (Map.Entry<QuickInstallOption.Key, JMenuItem> entry : optionItems.entrySet()) {
+            QuickInstallOption option = snapshot.option(entry.getKey());
+            String label = menuLabel(entry.getKey(), option.available() ? option.version() : "Unavailable");
+            JMenuItem item = entry.getValue();
+            item.setText(label);
+            item.setToolTipText(option.available() ? null : option.unavailableReason());
+            item.getAccessibleContext().setAccessibleName(label);
             item.getAccessibleContext().setAccessibleDescription(
-                    entry.getValue() + ". Review this exact normal-install choice.");
+                    label + ". " + (option.available() ? "Review this exact normal-install choice."
+                            : option.unavailableReason()));
         }
+        if (availableOptions.size() < QuickInstallSnapshot.ALL_KEYS.size()) popupMenu.add(retryItem);
         popupMenu.getAccessibleContext().setAccessibleDescription(
-                "Five validated official choices with versions. "
+                "Eight official choices with versions or explicit unavailable reasons. "
                         + "Opening this menu performs no network request.");
         applyEnabledState();
         popupMenu.revalidate();
@@ -281,7 +286,7 @@ final class FirstLaunchSplitButton extends JPanel {
             item.setEnabled(false);
         }
         popupMenu.getAccessibleContext().setAccessibleDescription(
-                "Five official choices are loading. Opening this menu performs no "
+                "Eight official choices are loading. Opening this menu performs no "
                         + "network request.");
         applyEnabledState();
         popupMenu.revalidate();
@@ -312,7 +317,7 @@ final class FirstLaunchSplitButton extends JPanel {
             item.setEnabled(false);
         }
         popupMenu.getAccessibleContext().setAccessibleDescription(
-                "Five official choices are unavailable. Retry version check is the only "
+                "Eight official choices are unavailable. Retry version check is the only "
                         + "available menu command.");
         if (retryItem.getParent() != popupMenu) popupMenu.add(retryItem);
         retryItem.setToolTipText(explanation);
@@ -365,9 +370,9 @@ final class FirstLaunchSplitButton extends JPanel {
         optionsButton.getAccessibleContext().setAccessibleName(
                 "Choose another application and channel");
         optionsButton.setToolTipText(
-                "Choose another official application and Milestone or Development channel.");
+                "Choose another official application and Milestone, Development, or Weekly channel.");
         optionsButton.getAccessibleContext().setAccessibleDescription(
-                "Open the five-choice quick-install menu. Opening it performs no "
+                "Open the eight-choice quick-install menu. Opening it performs no "
                         + "network request while metadata is loading or available.");
     }
 
@@ -407,13 +412,15 @@ final class FirstLaunchSplitButton extends JPanel {
         if (primaryButton == null || optionsButton == null || optionItems == null) return;
         boolean ready = isEnabled() && optionState == OptionState.READY;
         boolean retry = isEnabled() && optionState == OptionState.FAILED;
-        primaryButton.setEnabled(ready);
-        primaryButton.setFocusable(ready);
+        boolean primaryReady = ready && availableOptions.contains(QuickInstallSnapshot.DEFAULT_KEY);
+        primaryButton.setEnabled(primaryReady);
+        primaryButton.setFocusable(primaryReady);
         optionsButton.setEnabled(ready || retry);
         optionsButton.setFocusable(ready || retry);
         optionItems.forEach((key, item) ->
                 item.setEnabled(ready && availableOptions.contains(key)));
-        if (retryItem != null) retryItem.setEnabled(retry);
+        if (retryItem != null) retryItem.setEnabled(retry
+                || ready && availableOptions.size() < QuickInstallSnapshot.ALL_KEYS.size());
         if (!ready && !retry && popupMenu != null) closePopup();
     }
 
@@ -432,29 +439,11 @@ final class FirstLaunchSplitButton extends JPanel {
     }
 
     private static String productName(QuickInstallOption.Key key) {
-        return switch (key.repository()) {
-            case MEKHQ -> "MekHQ";
-            case MEGAMEK -> "MegaMek";
-            case LAB -> "MegaMekLab";
-        };
+        return key.repository().productName();
     }
 
     private static String menuItemName(QuickInstallOption.Key key) {
-        if (key.repository() == OfficialRepository.MEGAMEK
-                && key.channel() == FollowChannel.MILESTONE) {
-            return "latestMegaMekMilestoneMenuItem";
-        }
-        if (key.repository() == OfficialRepository.LAB
-                && key.channel() == FollowChannel.MILESTONE) {
-            return "latestMegaMekLabMilestoneMenuItem";
-        }
-        if (key.repository() == OfficialRepository.MEKHQ) {
-            return "latestMekHQDevelopmentMenuItem";
-        }
-        if (key.repository() == OfficialRepository.MEGAMEK) {
-            return "latestMegaMekDevelopmentMenuItem";
-        }
-        return "latestMegaMekLabDevelopmentMenuItem";
+        return "latest" + productName(key) + key.channel() + "MenuItem";
     }
 
     private static Palette palette() {

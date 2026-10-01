@@ -122,6 +122,26 @@ class ImportedCopyAdoptionServiceTest {
     }
 
     @Test
+    void explicitWeeklyAdoptionPublishesImmutableWeeklyPreferenceWithoutChangingFiles() throws Exception {
+        byte[] jar = jar(null);
+        byte[] archive = archive(jar, "official-data", "official-setting");
+        Fixture fixture = fixture(jar, "official-data", "local-setting", transport(archive), point -> {});
+        Map<String, Evidence> before = rootEvidence(fixture.root());
+        try (PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
+                org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
+                FollowChannel.WEEKLY, new PrintStream(new ByteArrayOutputStream()),
+                OperationContext.none(OperationType.ADOPT_EXISTING))) {
+            assertTrue(prepared.report().eligible());
+            assertEquals(FollowChannel.WEEKLY, fixture.service().commit(prepared).channel());
+        }
+        RegistryData data = fixture.registries().read(fixture.registry());
+        var record = fixture.registries().resolve(data, fixture.record().id());
+        assertEquals(FollowChannel.WEEKLY, new ChannelPreferenceStore()
+                .read(fixture.registry(), data, record).preference().channel());
+        assertEquals(before, rootEvidence(fixture.root()));
+    }
+
+    @Test
     void pristineImportPublishesExactAncestorWithoutChangingRootOrDownloadingTwice()
             throws Exception {
         byte[] jar = jar(null);
@@ -452,7 +472,7 @@ class ImportedCopyAdoptionServiceTest {
         byte[] archive = archive(jar, "official-data", "official-setting");
         String metadata = releaseJson(archive, "v0.50.07", "0.50.07");
         QueueTransport transport = new QueueTransport(
-                response("stable: 0.51.0\ndev: 0.52.0\n"),
+                () -> org.megamek.launcher.channel.SuiteTestData.channels("0.51.0", "0.52.0"),
                 response("[" + metadata + "]"), response(metadata),
                 response(metadata), binary(archive));
         Fixture fixture = fixture(jar, "official-data", "local-setting",
@@ -470,16 +490,17 @@ class ImportedCopyAdoptionServiceTest {
         }
 
         assertEquals(1, transport.packageRequests);
-        assertEquals(5, transport.requests.size());
-        assertEquals(org.megamek.launcher.channel.OfficialYamlChannelCatalog.SOURCE,
+        assertEquals(13, transport.requests.size());
+        assertEquals(org.megamek.launcher.channel.OfficialSuiteChannelCatalog.SOURCE
+                        .resolve("releases?per_page=50&page=1"),
                 transport.requests.get(0));
-        assertTrue(transport.requests.get(1).toString().contains(
+        assertTrue(transport.requests.get(9).toString().contains(
                 "/releases?per_page=50&page=1"));
-        assertTrue(transport.requests.get(2).toString().endsWith(
+        assertTrue(transport.requests.get(10).toString().endsWith(
                 "/releases/tags/v0.50.07"));
-        assertTrue(transport.requests.get(3).toString().endsWith(
+        assertTrue(transport.requests.get(11).toString().endsWith(
                 "/releases/tags/v0.50.07"));
-        assertFalse(transport.requests.get(1).toString().contains("/tags/"),
+        assertFalse(transport.requests.get(9).toString().contains("/tags/"),
                 "automatic matching must not probe a guessed exact tag");
     }
 
@@ -1013,6 +1034,8 @@ class ImportedCopyAdoptionServiceTest {
         private final ArrayDeque<Supplier<Response>> responses;
         private final List<URI> requests = new ArrayList<>();
         private int packageRequests;
+        private final org.megamek.launcher.channel.SuiteTestData.MetadataRouter metadata =
+                new org.megamek.launcher.channel.SuiteTestData.MetadataRouter();
 
         @SafeVarargs
         private QueueTransport(Supplier<Response>... responses) {
@@ -1022,7 +1045,9 @@ class ImportedCopyAdoptionServiceTest {
         @Override
         public Response get(URI uri, String accept) throws IOException {
             requests.add(uri);
-            if ("application/octet-stream".equals(accept)) packageRequests++;
+            Response generated = metadata.response(uri, accept, responses.peekFirst());
+            if (generated != null) return generated;
+            if (uri.getPath().endsWith(".tar.gz")) packageRequests++;
             Supplier<Response> response = responses.poll();
             if (response == null) throw new IOException("unexpected request: " + uri);
             return response.get();

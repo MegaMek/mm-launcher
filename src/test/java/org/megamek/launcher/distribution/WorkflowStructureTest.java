@@ -59,6 +59,7 @@ class WorkflowStructureTest {
         JsonNode root = new ObjectMapper(new YAMLFactory()).readTree(text);
 
         assertTrue(root.path("on").has("workflow_dispatch"));
+        assertTrue(root.path("on").has("workflow_call"));
         assertTrue(root.path("on").has("push"));
         assertTrue(root.path("on").has("pull_request"));
         JsonNode pushBranches = root.path("on").path("push").path("branches");
@@ -68,7 +69,17 @@ class WorkflowStructureTest {
         assertEquals("read", root.path("permissions").path("contents").asText());
 
         JsonNode jobs = root.path("jobs");
-        assertEquals(1, jobs.size(), "only the native installer matrix should run");
+        assertEquals(2, jobs.size(), "installer matrix and offline release tooling contracts should run");
+        JsonNode tooling = jobs.path("release-tooling");
+        assertEquals("ubuntu-24.04", tooling.path("runs-on").asText());
+        assertEquals(List.of("actions/checkout@v4"), actions(tooling));
+        assertTrue(step(tooling, "Test launcher release tooling without network or publication")
+                .path("run").asText().contains("unittest discover -s scripts -p test_launcher_release.py"));
+        for (String event : List.of("push", "pull_request")) {
+            String paths = root.path("on").path(event).path("paths").toString();
+            assertTrue(paths.contains("scripts/**"));
+            assertTrue(paths.contains(".github/workflows/launcher-release.yml"));
+        }
         JsonNode installers = jobs.path("installers");
         assertEquals("${{ matrix.os }}", installers.path("runs-on").asText());
         List<String> ids = new ArrayList<>();
@@ -170,6 +181,57 @@ class WorkflowStructureTest {
         assertFalse(text.contains("secrets."));
         assertFalse(text.contains("gh release"));
         assertFalse(text.contains("actions/create-release"));
+    }
+
+    @Test
+    void releaseWorkflowIsManualAndReusesTheEntireReadOnlyInstallerWorkflow()
+            throws Exception {
+        Path path = Path.of(".github", "workflows", "launcher-release.yml");
+        String text = Files.readString(path, StandardCharsets.UTF_8);
+        JsonNode root = new ObjectMapper(new YAMLFactory()).readTree(text);
+        assertEquals(1, root.path("on").size(), "publication must never run on push or PR");
+        JsonNode dispatch = root.path("on").path("workflow_dispatch");
+        assertEquals("string", dispatch.path("inputs").path("version").path("type").asText());
+        assertTrue(dispatch.path("inputs").path("version").path("required").asBoolean());
+        assertEquals("read", root.path("permissions").path("contents").asText());
+        assertEquals("launcher-stable-release", root.path("concurrency").path("group").asText());
+        assertFalse(root.path("concurrency").path("cancel-in-progress").asBoolean());
+        JsonNode jobs = root.path("jobs");
+        assertEquals(3, jobs.size());
+        JsonNode prepare = jobs.path("prepare");
+        assertEquals("${{ steps.prepare.outputs.version }}", prepare.path("outputs").path("version").asText());
+        assertEquals("${{ steps.prepare.outputs.commit }}", prepare.path("outputs").path("commit").asText());
+        JsonNode validation = step(prepare, "Validate official main source and unused release version");
+        assertEquals("${{ inputs.version }}", validation.path("env").path("RELEASE_VERSION").asText());
+        assertTrue(validation.path("run").asText().contains("launcher_release.py prepare"));
+        JsonNode installers = jobs.path("installers");
+        assertEquals("prepare", installers.path("needs").asText());
+        assertEquals("./.github/workflows/launcher-archives.yml", installers.path("uses").asText());
+        assertEquals("read", installers.path("permissions").path("contents").asText());
+        assertFalse(installers.has("secrets"), "installer jobs must not receive publisher secrets");
+        JsonNode publish = jobs.path("publish");
+        List<String> prerequisites = new ArrayList<>();
+        publish.path("needs").forEach(dependency -> prerequisites.add(dependency.asText()));
+        assertEquals(List.of("prepare", "installers"), prerequisites);
+        assertFalse(publish.has("if"), "default success dependency guard must not be bypassed");
+        assertEquals("write", publish.path("permissions").path("contents").asText());
+        assertEquals(List.of("actions/checkout@v4", "actions/download-artifact@v4"), actions(publish));
+        JsonNode download = publish.path("steps").get(1);
+        assertEquals("MegaMek-Launcher-*-installers", download.path("with").path("pattern").asText());
+        assertEquals("build/release", download.path("with").path("path").asText());
+        assertTrue(download.path("with").path("merge-multiple").asBoolean());
+        assertFalse(download.path("with").has("run-id"), "artifacts must come from this exact run");
+        JsonNode publication = step(publish, "Validate and publish the complete stable launcher release");
+        assertEquals("${{ needs.prepare.outputs.commit }}",
+                publication.path("env").path("RELEASE_COMMIT").asText());
+        assertEquals("${{ needs.prepare.outputs.version }}",
+                publication.path("env").path("RELEASE_VERSION").asText());
+        assertTrue(publication.path("run").asText().contains("launcher_release.py publish"));
+        assertTrue(publication.path("run").asText().contains("--assets build/release"));
+        assertFalse(text.contains("${{ inputs.version }}\""), "input must pass through environment, not shell expansion");
+        assertFalse(text.contains("buildWindowsInstaller"), "reuse packaging instead of duplicating it");
+        assertFalse(text.contains("msiexec"));
+        assertFalse(text.contains("secrets: inherit"));
     }
 
     private static JsonNode step(JsonNode job, String name) {

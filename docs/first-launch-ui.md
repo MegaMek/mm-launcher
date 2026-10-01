@@ -5,9 +5,11 @@ inspection error. An unreadable registry is still an error, not a new-user reset
 
 There is one joined, accessible split **Install latest MekHQ Milestone** control. Its large primary segment
 is the plain-language Milestone/all-three-program action. The distinct arrow segment opens exactly
-five fixed rows, in this order: **Install latest MegaMek Milestone**,
+eight fixed rows, in this order: **Install latest MegaMek Milestone**,
 **Install latest MegaMekLab Milestone**, **Install latest MekHQ Development**,
-**Install latest MegaMek Development**, and **Install latest MegaMekLab Development**.
+**Install latest MegaMek Development**, **Install latest MegaMekLab Development**,
+**Install latest MekHQ Weekly**, **Install latest MegaMek Weekly**, and
+**Install latest MegaMekLab Weekly**.
 There is no redundant MekHQ Milestone row and no exact-picker
 row. Each available row includes its validated version in parentheses.
 
@@ -18,7 +20,7 @@ fallbacks, accessible names/descriptions, and visible focus/selection while reta
 `JMenuItem` action and keyboard behavior. It is not an OS-default white popup.
 
 The validated MekHQ Milestone version is added directly to the primary label, for example
-**Install latest MekHQ Milestone (0.51.0)**. During validation the primary and arrow are labeled
+**Install latest MekHQ Milestone (0.51.00)**. During validation the primary and arrow are labeled
 truthfully, disabled, and removed from keyboard focus; **Use existing installation** remains
 enabled and independent. Failure never invents a version or leaves the primary actionable. It
 enables only the arrow needed to expose a clear **Retry version check** menu command.
@@ -26,16 +28,19 @@ The disabled button already communicates loading, so Home does not repeat a `Che
 Its fixed-height message row remains reserved even when empty, preventing metadata completion or
 later failure text from moving the action controls.
 
-One display-only worker reads the bounded official YAML and resolves eligible assets for all six
-choices, deduplicating exact release metadata when stable and development point to the same
-repository/tag. Concurrent retry activation is deduplicated. The first successful immutable
+One display-only worker discovers bounded complete suite records and resolves all nine choices,
+with explicit unavailability per channel and repeated release-ID caching. A Weekly-only bootstrap
+enables the three Weekly rows while the Milestone default remains disabled; it never changes the
+default or invents a fallback. Concurrent retry activation is deduplicated. A successful immutable
 snapshot is cached only in the `LauncherFrame` session. It updates the current Home controls
 together; a late result may populate that cache but cannot mutate disposed, replaced, non-empty,
 or non-Home components. Home re-render/reload, page transitions, confirmation cancellation/close,
 Change location, and repeated quote opens reuse it and preserve every version label without
-loading flicker or another YAML/current-target request. Opening the ready menu performs no
-request. After failure, only explicit Retry starts another snapshot attempt; failed attempts are
-not successful cache entries. Per-installation
+loading flicker or another current-target request. Opening the ready menu performs no
+request. After failure or partial availability, only explicit Retry starts another snapshot attempt; failed attempts are
+not successful cache entries. A failed refresh preserves the previous usable snapshot and exposes
+the refresh failure with Retry still available; only a successful refresh replaces that snapshot.
+Per-installation
 channels and check status appear on Installations rather than recreating a global default block on
 managed Home. Installer explanations remain in the actual confirmation, not repeated on Home.
 
@@ -76,7 +81,7 @@ no Java prerequisite/download copy or control and no separate advanced action. I
 the product/exact-release/channel picker after a copy exists and on relevant repair/recovery
 navigation; that picker still performs no request until **Fetch releases**. Local logs remain in
 Settings, and there is no simple/advanced mode toggle. Merely displaying empty Home starts only
-the six-choice metadata snapshot; it performs no package request, registration, Java validation,
+the nine-choice metadata snapshot; it performs no package request, registration, Java validation,
 channel choice, or filesystem write. It disables only the two install segments while loading,
 never the direct import action. Disposing the frame cancels and discards an in-flight result.
 Re-rendering or leaving Home retains an in-flight or successful session snapshot without binding
@@ -94,15 +99,15 @@ it is never part of import and never appears for corrupt/incomplete provenance. 
 starts with a compact **Program (Version)** and update-channel dialog. Cancel/Escape performs no
 network work; Continue automatically searches bounded official release-list metadata and, only
 for one safe match, verifies one exact official package without changing root files before it can
-publish a fixed Milestone or Development channel. A simple launch-only result offers the bounded
+publish a fixed Milestone, Development, or Weekly channel. A simple launch-only result offers the bounded
 manual version chooser only after automatic matching is inconclusive or unavailable.
 
 Selecting the main segment passes the cached `(MEKHQ, MILESTONE)` option to the normal planner.
 Selecting an available row passes that exact cached `QuickInstallOption`; neither action performs
-a current-channel/YAML lookup. The planner still freshly captures destination and registry/default state off the EDT. A local
+a current-record lookup. The planner still freshly captures destination and registry/default state off the EDT. A local
 planning failure/retry keeps
 the cached target. The planner, confirmation, verified transfer, cancellation, atomic registration, current-runtime
-reuse, destination, and Main-if-empty selection are shared by all six.
+reuse, destination, and Main-if-empty selection are shared by all nine.
 Each immutable quote uses the first-launch dark-teal/gold visual language without restyling other
 dialogs. The normal summary names the selected application/channel, validated version, actual
 program set, human-readable binary download size, and full selectable destination.
@@ -139,18 +144,18 @@ Explicit `gui --registry` overrides and custom `LauncherServices` registries ins
 isolated `<registry parent>/installations/<product channel>` layout.
 
 On managed Installations, one Product/Channel/**Fetch releases** row defaults to MekHQ/Milestone.
-It combines that channel's authoritative current target with the selected product's paged history
-whose membership is unknown, excluding only a distinct target known to be current solely for the
-other channel. Most history appears for both selections because titles and prerelease flags are
-not channel evidence. Channel becomes only the created installation's fixed update track and does
-not classify an unknown historical release. Product or channel changes clear results and
+It shows the channel's current product plus paged history with explicit complete-record membership.
+Reused tags are deduplicated by their newest referencing record. All three product references
+must validate for each displayed target; titles and prerelease flags never infer membership.
+Channel becomes the created installation's fixed update track. Product or channel changes clear results and
 invalidate in-flight work; Previous/Next retain their exact selection snapshot. Every row returns
-through exact repository/tag normal-planner revalidation before consent. Product/channel and Java
+through captured-record normal-planner revalidation before consent. Change location preserves
+the chosen record source, even if a newer record reuses the same product tag. Product/channel and Java
 selectors share the dark vector-arrow combo treatment rather than an operating-system white arrow
 segment.
 
-Cancelling a quote returns to the unchanged default Home presentation and starts a fresh background
-snapshot. The main label/caption never adopts a popup selection, and popup planning never changes a
+Cancelling a quote returns to the unchanged default Home presentation and reuses the cached
+snapshot. Only explicit Retry refreshes unavailable choices. The main label/caption never adopts a popup selection, and popup planning never changes a
 preference or Main. A successful MekHQ package must inspect as exactly the three-program suite;
 standalone MegaMek and MegaMekLab packages must inspect as exactly their selected product, so Home
 shows only actual products.

@@ -114,7 +114,7 @@ class LauncherSwingSmokeTest {
             waitFor(() -> options.isEnabled() && split.isShowing());
             SwingUtilities.invokeAndWait(options::doClick);
             waitFor(() -> split.popupMenu().isVisible());
-            assertEquals(5, split.popupMenu().getComponentCount());
+            assertEquals(8, split.popupMenu().getComponentCount());
             SwingUtilities.invokeAndWait(split::closePopup);
         } finally {
             SwingUtilities.invokeAndWait(() -> {

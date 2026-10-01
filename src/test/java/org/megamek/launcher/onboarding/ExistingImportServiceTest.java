@@ -100,6 +100,30 @@ class ExistingImportServiceTest {
     }
 
     @Test
+    void importsIndependentProgramVersionsWithoutGrantingManagedOwnership() throws Exception {
+        Path registry = temp.resolve("independent-registry.json");
+        RecordingRunner runner = goodRunner();
+        ExistingImportService service = service(registry, runner);
+        Path root = suite("independent-bundle", List.of("megamek", "lab", "mekhq"), true);
+        Map<String, String> builds = Map.of(
+                "megamek", "0.51.01", "lab", "0.51.02", "mekhq", "0.51.03");
+        jar(root.resolve("MegaMek.jar"), "megamek.MegaMek", true, builds.get("megamek"));
+        jar(root.resolve("MegaMekLab.jar"), "megameklab.MegaMekLab", true, builds.get("lab"));
+        jar(root.resolve("MekHQ.jar"), "mekhq.MekHQ", true, builds.get("mekhq"));
+
+        service.register(service.prepare(root, context()), "Independent MekHQ", context());
+        InstallationRecord persisted = new RegistryStore().read(registry).installations().getFirst();
+        assertEquals("0.51.03", persisted.observedBuild());
+        assertEquals(3, persisted.products().size());
+        for (Product product : persisted.products()) {
+            assertEquals(builds.get(product.key()), product.build());
+        }
+        assertFalse(persisted.updateEligible());
+        assertFalse(Files.exists(new ReceiptStore().metadataDirectory(registry)));
+        assertTrue(runner.commands.isEmpty(), "import must never execute Java");
+    }
+
+    @Test
     void preservesExistingRecordAndConcurrentMainWins() throws Exception {
         Path registry = temp.resolve("preserve.json");
         RegistryStore store = new RegistryStore();
@@ -230,9 +254,17 @@ class ExistingImportServiceTest {
     }
 
     private static void jar(Path path, String mainClass, boolean maliciousClass) throws Exception {
+        jar(path, mainClass, maliciousClass, null);
+    }
+
+    private static void jar(Path path, String mainClass, boolean maliciousClass, String build)
+            throws Exception {
         Manifest manifest = new Manifest();
         manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
         manifest.getMainAttributes().put(Attributes.Name.MAIN_CLASS, mainClass);
+        if (build != null) {
+            manifest.getMainAttributes().put(Attributes.Name.IMPLEMENTATION_VERSION, build);
+        }
         try (JarOutputStream output = new JarOutputStream(Files.newOutputStream(path), manifest)) {
             if (maliciousClass) {
                 output.putNextEntry(new JarEntry(mainClass.replace('.', '/') + ".class"));

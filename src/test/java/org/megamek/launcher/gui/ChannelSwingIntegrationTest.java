@@ -253,12 +253,35 @@ class ChannelSwingIntegrationTest {
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             assertTrue(services.started.await(30, TimeUnit.SECONDS));
-            services.release.countDown();
             JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
-            assertEquals("Installations", installations.getText());
+            assertEquals("Installations", onEdt(installations::getText));
             SwingUtilities.invokeAndWait(installations::doClick);
-            JButton retry = waitFor(() -> find(frame, "checkUpdatesButton"));
-            assertEquals("Retry check", retry.getText());
+            JButton initial = waitFor(() -> find(frame, "checkUpdatesButton"));
+            assertEquals("Check", onEdt(initial::getText));
+            services.release.countDown();
+            JButton retry = waitFor(() -> {
+                JButton button = find(frame, "checkUpdatesButton");
+                return button != null && "Retry check".equals(button.getText())
+                        ? button : null;
+            });
+            assertTrue(onEdt(retry::isEnabled));
+            JLabel failed = waitFor(() -> {
+                Component component = findNamed(frame, "installationStatus-" + services.record.id());
+                return component instanceof JLabel label && "Could not check".equals(label.getText())
+                        ? label : null;
+            });
+            assertEquals("Could not check", onEdt(failed::getText));
+
+            services.checkFailure = null;
+            SwingUtilities.invokeAndWait(retry::doClick);
+            JLabel recovered = waitFor(() -> {
+                Component component = findNamed(frame, "installationStatus-" + services.record.id());
+                return component instanceof JLabel label && "Up to date".equals(label.getText())
+                        ? label : null;
+            });
+            assertEquals("Up to date", onEdt(recovered::getText));
+            assertEquals(2, services.checks.get());
+            assertNull(onEdt(() -> find(frame, "checkUpdatesButton")));
         } finally {
             services.release.countDown();
             SwingUtilities.invokeAndWait(frame::dispose);

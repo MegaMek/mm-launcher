@@ -36,7 +36,7 @@ package org.megamek.launcher.onboarding;
 import org.megamek.launcher.channel.ChannelCatalog;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.FollowChannel;
-import org.megamek.launcher.channel.OfficialYamlChannelCatalog;
+import org.megamek.launcher.channel.OfficialSuiteChannelCatalog;
 import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.diagnostics.OperationLogStore;
 import org.megamek.launcher.operation.OperationContext;
@@ -87,14 +87,14 @@ public final class NormalInstallService {
 
     public NormalInstallService(Path registry, ReleaseTransport transport) {
         this(registry, transport, new RegistryStore(),
-                new OfficialYamlChannelCatalog(transport), new ChannelPreferenceStore(),
+                new OfficialSuiteChannelCatalog(transport), new ChannelPreferenceStore(),
                 PlatformInstallLocations.customRegistry());
     }
 
     public NormalInstallService(Path registry, ReleaseTransport transport,
                                 PlatformInstallLocations installLocations) {
         this(registry, transport, new RegistryStore(),
-                new OfficialYamlChannelCatalog(transport), new ChannelPreferenceStore(),
+                new OfficialSuiteChannelCatalog(transport), new ChannelPreferenceStore(),
                 installLocations);
     }
 
@@ -156,7 +156,7 @@ public final class NormalInstallService {
                 requestedDestination);
     }
 
-    /** Compatibility overload for one of the two explicit official MekHQ channels. */
+    /** Compatibility overload for a supported official MekHQ channel. */
     public Plan prepare(FollowChannel requestedChannel, Path requestedDestination)
             throws IOException, InterruptedException {
         return prepare(OfficialRepository.MEKHQ, requestedChannel,
@@ -187,11 +187,12 @@ public final class NormalInstallService {
         if (requestedOption == null) {
             throw new IOException("a captured quick-install option is required");
         }
+        if (!requestedOption.available()) throw new IOException(requestedOption.unavailableReason());
         QuickInstallOption.Key key = requestedOption.key();
         OfficialRepository repository = requireAllowedRepository(key.repository());
         FollowChannel channel = requireAllowedChannel(key.channel());
         ChannelCatalog.Target target = requestedOption.target();
-        if (!OfficialYamlChannelCatalog.SOURCE.toString().equals(target.source())) {
+        if (!OfficialSuiteChannelCatalog.isSource(target.source())) {
             throw new IOException("captured quick-install target must come from the official "
                     + "current-channel snapshot");
         }
@@ -201,7 +202,7 @@ public final class NormalInstallService {
 
     /**
      * Plans one exact release selected from the unified release browser. The channel is the new
-     * installation's immutable update track; it does not classify an otherwise unknown release.
+     * installation's immutable update track and must match the authorizing suite record.
      */
     public Plan prepareExact(OfficialRepository requestedRepository,
                              FollowChannel requestedFutureChannel, String requestedTag,
@@ -210,18 +211,27 @@ public final class NormalInstallService {
         OfficialRepository repository = requireAllowedRepository(requestedRepository);
         FollowChannel futureChannel = requireAllowedChannel(requestedFutureChannel);
         return prepareTarget(repository, futureChannel, requestedDestination,
+                TargetKind.BROWSED_EXACT,
+                () -> channels.targetByTag(futureChannel, repository, requestedTag));
+    }
+
+    public Plan prepareExact(OfficialRepository requestedRepository,
+                             FollowChannel requestedChannel, String requestedTag,
+                             String capturedSource, Path requestedDestination)
+            throws IOException, InterruptedException {
+        OfficialRepository repository = requireAllowedRepository(requestedRepository);
+        FollowChannel channel = requireAllowedChannel(requestedChannel);
+        if (!OfficialSuiteChannelCatalog.isSource(capturedSource)) {
+            throw new IOException("browsed install requires its captured complete suite record");
+        }
+        return prepareTarget(repository, channel, requestedDestination,
                 TargetKind.BROWSED_EXACT, () -> {
-            ReleaseCatalog catalog = new ReleaseCatalog(transport);
-            ReleaseCatalog.Release release = catalog.exact(repository, requestedTag);
-            ReleaseCatalog.Assessment assessment = catalog.assess(repository, release);
-            if (!assessment.eligible()) {
-                throw new IOException("official exact " + repository.key()
-                        + " release is unavailable: " + assessment.reason());
-            }
-            return new ChannelCatalog.Target(futureChannel, displayVersion(release.tag()),
-                    repository, release, assessment.asset(),
-                    ReleaseCatalog.exactMetadataUri(repository, release.tag()).toString());
-        });
+                    ChannelCatalog.Target target = channels.targetBySource(channel, repository, capturedSource);
+                    if (!target.release().tag().equals(requestedTag)) {
+                        throw new IOException("captured suite record product differs from browsed release");
+                    }
+                    return target;
+                });
     }
 
     private Plan prepareTarget(OfficialRepository repository, FollowChannel channel,
@@ -286,7 +296,9 @@ public final class NormalInstallService {
         context.checkpoint();
         createPlannedParents(plan);
         VerifiedPackageFetcher.ExpectedAsset expected =
-                new VerifiedPackageFetcher.ExpectedAsset(fresh.asset().name(),
+                OfficialSuiteChannelCatalog.isSource(fresh.source())
+                        ? VerifiedPackageFetcher.ExpectedAsset.fromSuite(fresh.release(), fresh.asset())
+                        : new VerifiedPackageFetcher.ExpectedAsset(fresh.asset().name(),
                         fresh.asset().size(), fresh.asset().digest(), fresh.asset().url());
         final FreshInstaller.Result installed;
         try {
@@ -454,8 +466,8 @@ public final class NormalInstallService {
 
     private static FollowChannel requireAllowedChannel(FollowChannel channel)
             throws IOException {
-        if (channel != FollowChannel.MILESTONE && channel != FollowChannel.DEVELOPMENT) {
-            throw new IOException("normal install channel must be Milestone or Development");
+        if (channel == null) {
+            throw new IOException("normal install channel must be Milestone, Development, or Weekly");
         }
         return channel;
     }
@@ -488,7 +500,7 @@ public final class NormalInstallService {
                 || target.release() == null || target.asset() == null
                 || target.version() == null || target.version().isBlank()
                 || !target.version().equals(displayVersion(target.release().tag()))
-                || OfficialYamlChannelCatalog.SOURCE.toString().equals(target.source())
+                || OfficialSuiteChannelCatalog.isSource(target.source())
                 && !target.release().tag().equals("v" + target.version())
                 || !target.release().assets().contains(target.asset())
                 || target.source() == null || target.source().isBlank()) {
@@ -509,6 +521,8 @@ public final class NormalInstallService {
                 && plan.repository() == target.repository()
                 && plan.version().equals(target.version())
                 && plan.release().tag().equals(target.release().tag())
+                && plan.release().id().equals(target.release().id())
+                && plan.asset().id().equals(target.asset().id())
                 && plan.asset().name().equals(target.asset().name())
                 && plan.asset().size() == target.asset().size()
                 && plan.asset().url().equals(target.asset().url())
@@ -535,6 +549,9 @@ public final class NormalInstallService {
         if (plan.targetKind() == TargetKind.CURRENT_CHANNEL) {
             return channels.target(plan.channel(), plan.repository());
         }
+        if (OfficialSuiteChannelCatalog.isSource(plan.source())) {
+            return channels.targetBySource(plan.channel(), plan.repository(), plan.source());
+        }
         String exactSource = ReleaseCatalog.exactMetadataUri(
                 plan.repository(), plan.release().tag()).toString();
         if (plan.targetKind() == TargetKind.BROWSED_EXACT
@@ -543,7 +560,7 @@ public final class NormalInstallService {
                     + "official release endpoint");
         }
         if (plan.targetKind() == TargetKind.CAPTURED_CURRENT
-                && !OfficialYamlChannelCatalog.SOURCE.toString().equals(plan.source())) {
+                && !OfficialSuiteChannelCatalog.isSource(plan.source())) {
             throw new IOException("captured current install metadata source is not the "
                     + "official channel snapshot");
         }
@@ -628,7 +645,7 @@ public final class NormalInstallService {
             this(registry, registrySnapshot, destination, missingParents,
                     channel, repository, version, requiredProducts, release, asset,
                     source,
-                    OfficialYamlChannelCatalog.SOURCE.toString().equals(source)
+                    OfficialSuiteChannelCatalog.isSource(source)
                             ? TargetKind.CURRENT_CHANNEL : TargetKind.BROWSED_EXACT);
         }
 
@@ -640,10 +657,9 @@ public final class NormalInstallService {
             destination = destination.toAbsolutePath().normalize();
             missingParents = List.copyOf(missingParents);
             requiredProducts = Set.copyOf(requiredProducts);
-            if (channel != FollowChannel.MILESTONE
-                    && channel != FollowChannel.DEVELOPMENT) {
+            if (channel == null) {
                 throw new IllegalArgumentException(
-                        "normal install channel must be Milestone or Development");
+                        "normal install channel must be Milestone, Development, or Weekly");
             }
             if (repository != OfficialRepository.MEKHQ
                     && repository != OfficialRepository.MEGAMEK
@@ -661,7 +677,7 @@ public final class NormalInstallService {
             }
             if (version == null || version.isBlank() || release == null || asset == null
                     || !version.equals(displayVersion(release.tag()))
-                    || OfficialYamlChannelCatalog.SOURCE.toString().equals(source)
+                    || OfficialSuiteChannelCatalog.isSource(source)
                     && !release.tag().equals("v" + version)
                     || !release.assets().contains(asset)
                     || source == null || source.isBlank()) {
@@ -669,14 +685,14 @@ public final class NormalInstallService {
                         "normal install release target is incomplete or mismatched");
             }
             boolean currentSource =
-                    OfficialYamlChannelCatalog.SOURCE.toString().equals(source);
+                    OfficialSuiteChannelCatalog.isSource(source);
             if ((targetKind == TargetKind.CURRENT_CHANNEL
                     || targetKind == TargetKind.CAPTURED_CURRENT) && !currentSource) {
                 throw new IllegalArgumentException(
                         "current normal install must use the official channel source");
             }
             if (targetKind == TargetKind.BROWSED_EXACT
-                    && !isExactSource(repository, release.tag(), source)) {
+                    && !currentSource && !isExactSource(repository, release.tag(), source)) {
                 throw new IllegalArgumentException(
                         "browsed normal install must use its exact release source");
             }

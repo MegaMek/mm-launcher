@@ -34,7 +34,7 @@
 package org.megamek.launcher.update;
 
 import org.megamek.launcher.channel.FollowChannel;
-import org.megamek.launcher.channel.OfficialYamlChannelCatalog;
+import org.megamek.launcher.channel.OfficialSuiteChannelCatalog;
 import org.megamek.launcher.diagnostics.SanitizedErrors;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationPhase;
@@ -86,12 +86,12 @@ public final class AutomaticAdoptionResolver {
         int scanned = 0;
         int pages = 0;
         try {
-            OfficialYamlChannelCatalog.CurrentPointers pointers =
-                    new OfficialYamlChannelCatalog(transport).currentPointers();
-            OfficialYamlChannelCatalog.CurrentIdentity current =
+            OfficialSuiteChannelCatalog.CurrentPointers pointers =
+                    new OfficialSuiteChannelCatalog(transport).currentPointers(repository);
+            OfficialSuiteChannelCatalog.CurrentIdentity current =
                     pointers.classify(selectedChannel, observed.get());
-            if (current == OfficialYamlChannelCatalog.CurrentIdentity.OPPOSITE_CURRENT) {
-                FollowChannel requiredChannel = pointers.opposite(selectedChannel);
+            if (current == OfficialSuiteChannelCatalog.CurrentIdentity.OPPOSITE_CURRENT) {
+                FollowChannel requiredChannel = pointers.opposite(selectedChannel, observed.get());
                 String currentVersion = pointers.version(requiredChannel);
                 String detail = "observed version " + currentVersion + " is currently "
                         + requiredChannel + ", not " + selectedChannel;

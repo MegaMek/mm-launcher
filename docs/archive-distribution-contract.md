@@ -14,7 +14,8 @@ full-module runtime and WiX 3.14; Linux and macOS use a host-native
 `ALL-MODULE-PATH` jlink image passed to jpackage via `--runtime-image`.
 These images retain `bin/java` for games, `lib/modules`, and upstream
 `legal/` notices. CI only inspects installer contents and checksums;
-it never installs them or publishes a release. Signing and notarization
+the native-installer workflow never installs them or publishes a release. A separate manual
+release workflow reuses that complete build/test workflow before publication. Signing and notarization
 remain pending.
 
 Linux's stable package name is `megamek-launcher` under `/opt`; the macOS
@@ -57,6 +58,46 @@ installation; this build never runs `msiexec`. These icons
 do not change Windows Explorer's `.msi` file association. The internal
 `mm-launcher` CLI name remains compatible.
 The macOS app bundle includes a MegaMek.png-derived ICNS in `Contents/Resources`.
+
+## Manual stable launcher releases
+
+`Publish launcher release` is a separate, manual-only entry point in
+[launcher-release.yml](../.github/workflows/launcher-release.yml). Dispatch it from official
+`MegaMek/mm-launcher` **main** with a version already committed in `build.gradle.kts`.
+The version is canonical `major.minor.patch` within Windows Installer's numeric limits.
+It must be unused (with or without a `v` tag prefix) and newer than every published stable
+launcher version. Existing tags and releases, including drafts left by failed runs, are not reused.
+The workflow serializes publication attempts without cancelling an in-flight attempt.
+
+Preparation is read-only and captures the exact workflow source commit. The workflow then calls
+the existing native-installer workflow, including all four platforms' source tests and offline
+release tooling tests. Publication requires that entire called workflow to succeed. Only the
+publication job receives `contents: write`; ordinary CI and preparation keep read-only access.
+Artifacts come from the current workflow run, not a previous build or independently selected
+latest artifact.
+
+Before any remote write, [launcher_release.py](../scripts/launcher_release.py) requires exactly
+the five expected installer/checksum pairs, nonempty regular files, matching SHA-256 values, and
+an MSI no larger than the updater's 300 MiB limit. It creates a new lightweight `v<version>` tag
+at the tested commit, uploads all ten files, and requires GitHub's uploaded state, immutable IDs,
+sizes, exact download URLs, and SHA-256 digests to match. A temporary GitHub draft is only an
+upload implementation detail: no human draft-review gate is added. After all checks, that same
+job publishes a normal stable release and verifies the latest-stable endpoint consumed by the
+Windows updater.
+
+No write is retried automatically, no existing asset/tag is replaced, and no automatic rollback
+deletes release evidence. A failed run can leave a tag or upload draft; a post-publication check
+failure can leave a public release. Inspect remote state before taking any recovery action.
+The workflow never installs packages, signs/notarizes, assembles a game suite, or updates an
+installed launcher on a runner. A real self-update test requires separate explicit authorization
+to publish and to upgrade an older Windows MSI installation.
+
+Focused local checks (no native installer builds or network publication):
+
+```powershell
+python -B -m unittest discover -s scripts -p test_launcher_release.py
+.\gradlew.bat test --tests org.megamek.launcher.distribution.WorkflowStructureTest --tests org.megamek.launcher.update.WindowsMsiUpdateTest --no-daemon
+```
 
 ## Scope
 
@@ -186,7 +227,7 @@ and inspects checksums, metadata and runtime payload without installing anything
 | `macos-15-intel` | macOS Intel |
 | `macos-15` | macOS Apple Silicon |
 
-Runner labels describe build coverage, not a minimum supported OS promise. The workflow does not create a Release, write
+Runner labels describe build coverage, not a minimum supported OS promise. The native-installer workflow does not create a Release, write
 repository contents, use secrets, sign, notarize, or publish anything. The hosted CI run has
 built, inspected, and uploaded all five installers on Windows, Linux, macOS Intel, and macOS
 Apple Silicon; source tests also pass on all four runners. This does not certify installation,

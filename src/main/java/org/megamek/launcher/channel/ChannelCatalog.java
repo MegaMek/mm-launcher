@@ -43,6 +43,20 @@ public interface ChannelCatalog {
     Target target(FollowChannel channel, OfficialRepository repository)
             throws IOException, InterruptedException;
 
+    default Target targetBySource(FollowChannel channel, OfficialRepository repository, String source)
+            throws IOException, InterruptedException {
+        Target target = target(channel, repository);
+        if (!target.source().equals(source)) throw new IOException("captured suite record source changed");
+        return target;
+    }
+
+    default Target targetByTag(FollowChannel channel, OfficialRepository repository, String tag)
+            throws IOException, InterruptedException {
+        Target target = target(channel, repository);
+        if (!target.release().tag().equals(tag)) throw new IOException("exact suite product target unavailable");
+        return target;
+    }
+
     record Target(FollowChannel channel, String version, OfficialRepository repository,
                   ReleaseCatalog.Release release, ReleaseCatalog.Asset asset, String source) {
     }

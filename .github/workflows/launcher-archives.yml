@@ -3,30 +3,44 @@
 name: Launcher native installers
 
 on:
+  workflow_call:
   workflow_dispatch:
   push:
     branches:
       - main
     paths:
       - ".github/workflows/launcher-archives.yml"
+      - ".github/workflows/launcher-release.yml"
       - "build.gradle.kts"
       - "gradle/**"
       - "gradlew"
       - "gradlew.bat"
       - "src/**"
+      - "scripts/**"
   pull_request:
     paths:
       - ".github/workflows/launcher-archives.yml"
+      - ".github/workflows/launcher-release.yml"
       - "build.gradle.kts"
       - "gradle/**"
       - "gradlew"
       - "gradlew.bat"
       - "src/**"
+      - "scripts/**"
 
 permissions:
   contents: read
 
 jobs:
+  release-tooling:
+    name: Release tooling contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test launcher release tooling without network or publication
+        run: python3 -B -m unittest discover -s scripts -p test_launcher_release.py
+
   installers:
     name: Native installers - ${{ matrix.id }}
     strategy:

@@ -82,7 +82,6 @@ public final class InstallationInspector {
         }
 
         List<Product> products = new ArrayList<>();
-        Set<String> observedBuilds = new HashSet<>();
         Set<String> ignoredMissingTransitive = new HashSet<>();
         for (Map.Entry<String, Spec> candidate : SPECS.entrySet()) {
             Optional<Path> candidateJar = SafePath.existingOrMissing(root,
@@ -97,9 +96,6 @@ public final class InstallationInspector {
                         + " Main-Class: expected " + candidate.getValue().mainClass());
             }
             String build = version(root, candidate.getKey(), candidate.getValue().jar());
-            if (build != null) {
-                observedBuilds.add(build);
-            }
             products.add(new Product(candidate.getKey(), candidate.getValue().jar(),
                     candidate.getValue().mainClass(), build == null ? "unknown" : build,
                     info.classPath()));
@@ -107,11 +103,19 @@ public final class InstallationInspector {
         if (products.isEmpty()) {
             throw new IOException("unsupported layout: no recognized MegaMek suite root jar");
         }
-        if (observedBuilds.size() > 1) {
-            throw new IOException("inconsistent build metadata across recognized products: "
-                    + observedBuilds);
+        if (Files.isRegularFile(root.resolve("MegaMek.jar"), LinkOption.NOFOLLOW_LINKS)
+                && Files.isRegularFile(root.resolve("lib").resolve("MegaMek.jar"), LinkOption.NOFOLLOW_LINKS)) {
+            String primary = version(root, "megamek", "MegaMek.jar");
+            String dependency = version(root, "megamek", "lib/MegaMek.jar");
+            if (primary != null && dependency != null && !primary.equals(dependency)) {
+                throw new IOException("inconsistent build metadata between copies of MegaMek.jar");
+            }
         }
-        String build = observedBuilds.isEmpty() ? "unknown" : observedBuilds.iterator().next();
+        String primaryKey = products.stream().anyMatch(product -> product.key().equals("mekhq"))
+                ? "mekhq" : products.stream().anyMatch(product -> product.key().equals("lab"))
+                ? "lab" : "megamek";
+        String build = products.stream().filter(product -> product.key().equals(primaryKey))
+                .findFirst().orElseThrow(() -> new IOException("bundle primary product is unavailable")).build();
         String confidence = ignoredMissingTransitive.isEmpty()
                 ? "recognized-packaging"
                 : "recognized-packaging-optional-transitive-missing";
@@ -194,6 +198,17 @@ public final class InstallationInspector {
     }
 
     private String version(Path root, String product, String primaryJar) throws IOException {
+        try (ZipFile zip = new ZipFile(SafePath.existing(root, primaryJar, "product version jar").toFile())) {
+            ZipEntry entry = zip.getEntry("META-INF/MANIFEST.MF");
+            if (entry != null) {
+                Manifest manifest = new Manifest(new java.io.ByteArrayInputStream(readBounded(zip, entry)));
+                String own = manifest.getMainAttributes().getValue(Attributes.Name.IMPLEMENTATION_VERSION);
+                if (own != null) {
+                    if (own.isBlank()) throw new IOException("empty product Implementation-Version: " + primaryJar);
+                    return own.trim();
+                }
+            }
+        }
         List<String> candidates = new ArrayList<>();
         if (product.equals("megamek")) candidates.add(primaryJar);
         if (product.equals("mekhq")) candidates.add("MegaMek.jar");
