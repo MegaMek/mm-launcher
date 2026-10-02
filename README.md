@@ -71,14 +71,17 @@ installers do not self-update.
 Only the Windows MSI installation checks the official MegaMek/mm-launcher
 GitHub latest stable release for a newer numeric MSI version. One themed
 **Update now** confirmation authorizes download, verification, closing the launcher,
-and installation. A cancellable progress dialog shows download and verification;
+and installation. Its text states the available version and asks users to close running games.
+A cancellable progress dialog shows download and verification;
 cancellation stops being available when installer handoff begins. It requires an exact release
 MSI asset with a published SHA-256, checks the staged MSI's upgrade code,
 product name and product version using Windows Installer, then exits before
 the per-user upgrade begins with visible Windows Installer progress (`/passive`,
 no extra wizard and no forced computer restart). After successful completion,
 the helper records its result before reopening the launcher; the next launch confirms
-the installed version and reports the update result. Settings offers a manual check.
+the installed version and quietly saves clean success in local diagnostics, without a
+success popup. Failures, restart-required notices and staged MSI cleanup warnings remain
+visible. Settings offers a manual check.
 Active updates are shown as still finishing, not as failed release lookups. Completed
 failures are acknowledged so a later manual check can retry. Incomplete reports are
 retained as diagnostic evidence: identified targets are confirmed as updated only

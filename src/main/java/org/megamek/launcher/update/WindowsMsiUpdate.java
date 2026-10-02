@@ -369,14 +369,15 @@ public final class WindowsMsiUpdate {
                 + "'/l*v',('\"'+$installerLog+'\"'))";
     }
 
-    public enum ReportState { INSTALLED, FAILED, PENDING, RECOVERED, INSTALLED_RECOVERED }
+    public enum ReportState { INSTALLED, INSTALLED_WARNING, FAILED, PENDING, RECOVERED, INSTALLED_RECOVERED }
 
     public record ReportResult(ReportState state, String message) {
         public ReportResult(boolean installed, String message) {
             this(installed ? ReportState.INSTALLED : ReportState.FAILED, message);
         }
         public boolean installed() {
-            return state == ReportState.INSTALLED || state == ReportState.INSTALLED_RECOVERED;
+            return state == ReportState.INSTALLED || state == ReportState.INSTALLED_WARNING
+                    || state == ReportState.INSTALLED_RECOVERED;
         }
         public boolean pending() { return state == ReportState.PENDING; }
         public boolean recovered() {
@@ -499,7 +500,9 @@ public final class WindowsMsiUpdate {
             } else {
                 try {
                     installedVersionCheck.verify();
-                    result = new ReportResult(true, "Launcher updated to " + runningVersion + "."
+                    result = new ReportResult("installed".equals(completed[0])
+                            ? ReportState.INSTALLED : ReportState.INSTALLED_WARNING,
+                            "Launcher updated to " + runningVersion + "."
                             + (completed[0].endsWith("-cleanup-warning")
                             ? " Staged MSI cleanup failed; review the leftover temporary files when safe. Diagnostics: "
                             + helperLog(report) : "")
@@ -515,7 +518,8 @@ public final class WindowsMsiUpdate {
                 || "installation succeeded; staged MSI cleanup failed; restart required".equals(outcome)) {
             try {
                 installedVersionCheck.verify();
-                result = new ReportResult(true, "Launcher MSI installation succeeded, but staged MSI "
+                result = new ReportResult(ReportState.INSTALLED_WARNING,
+                        "Launcher MSI installation succeeded, but staged MSI "
                         + "cleanup failed. Remove the leftover mm-launcher-msi- directory from "
                         + "your temporary files when safe."
                         + (outcome.endsWith("; restart required") ? " Windows also requires a computer restart." : ""));

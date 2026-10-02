@@ -40,7 +40,7 @@ class LauncherUpdateDialogTest {
         });
     }
 
-    private void confirmation(boolean accept) throws Exception {
+    private void confirmation(boolean accept, String notice) throws Exception {
         JFrame owner = owner();
         CompletableFuture<Boolean> answer = new CompletableFuture<>();
         WindowsMsiUpdate.Candidate candidate = new WindowsMsiUpdate.Candidate("v0.1.1", "0.1.1",
@@ -49,7 +49,7 @@ class LauncherUpdateDialogTest {
                         + "MegaMek-Launcher-0.1.1-windows-x64.msi"), 42, "a".repeat(64));
         SwingUtilities.invokeLater(() -> {
             try {
-                answer.complete(LauncherFrame.confirmLauncherUpdate(owner, GuiScale.DEFAULT, candidate, null));
+                answer.complete(LauncherFrame.confirmLauncherUpdate(owner, GuiScale.DEFAULT, candidate, notice));
             } catch (Throwable error) {
                 answer.completeExceptionally(error);
             }
@@ -63,9 +63,11 @@ class LauncherUpdateDialogTest {
             SwingTestSupport.onEdt(() -> {
                 assertEquals(FirstLaunchPanel.BACKGROUND, dialog.getContentPane().getBackground());
                 JLabel body = SwingTestSupport.find(dialog, "launcherAlertMessage", JLabel.class);
-                assertTrue(body.getText().contains("0.1.1"));
-                assertTrue(body.getText().contains("close the launcher"));
-                assertTrue(body.getText().contains("reopen"));
+                String expected = "Version 0.1.1 is available.\n\nClose any running games before updating.";
+                if (notice != null) expected = notice + "\n\n" + expected;
+                assertEquals(expected, dialog.getAccessibleContext().getAccessibleDescription());
+                assertEquals(expected.replaceAll("\\s+", " "),
+                        body.getText().replaceAll("<[^>]*>", " ").replaceAll("\\s+", " ").trim());
                 return null;
             });
             SwingTestSupport.click(dialog, accept ? "launcherAlertButton1" : "launcherAlertButton0");
@@ -77,8 +79,11 @@ class LauncherUpdateDialogTest {
         }
     }
 
-    @Test void oneThemedConfirmationAuthorizesTheWholeUpdate() throws Exception { confirmation(true); }
-    @Test void cancellingDoesNotAuthorizeTheUpdate() throws Exception { confirmation(false); }
+    @Test void oneThemedConfirmationAuthorizesTheWholeUpdate() throws Exception { confirmation(true, null); }
+    @Test void cancellingDoesNotAuthorizeTheUpdate() throws Exception { confirmation(false, null); }
+    @Test void actionableWarningPrecedesTheConciseUpdatePrompt() throws Exception {
+        confirmation(true, "Windows requires a computer restart.");
+    }
 
     @Test void progressShowsDownloadedBytesAndDisablesCancellationAtInstallerHandoff(@TempDir Path temp)
             throws Exception {

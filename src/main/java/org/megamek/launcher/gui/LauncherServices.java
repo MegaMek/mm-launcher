@@ -208,11 +208,14 @@ public class LauncherServices {
     private String launcherUpdateNotice(WindowsMsiUpdate.ReportResult report)
             throws IOException, InterruptedException {
         if (report == null) return null;
-        if (!report.recovered()) return report.message();
-        LoggedOperation recovery = beginOperation(OperationType.RECOVERY, ignored -> {}, List.of());
-        recovery.context().phase(OperationPhase.METADATA, report.message());
-        String warning = recovery.finish(OperationOutcome.SUCCEEDED,
-                "Stale launcher update report reconciled; previous installer completion result is unknown.", null);
+        boolean recovered = report.recovered();
+        if (!recovered && report.state() != WindowsMsiUpdate.ReportState.INSTALLED) return report.message();
+        LoggedOperation operation = beginOperation(
+                recovered ? OperationType.RECOVERY : OperationType.LAUNCHER_UPDATE, ignored -> {}, List.of());
+        operation.context().phase(OperationPhase.METADATA, report.message());
+        String warning = operation.finish(OperationOutcome.SUCCEEDED, recovered
+                ? "Stale launcher update report reconciled; previous installer completion result is unknown."
+                : "Launcher update confirmed successfully.", null);
         if (warning != null) throw new IOException(warning);
         return null;
     }

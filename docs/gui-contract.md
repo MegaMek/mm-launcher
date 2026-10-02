@@ -96,7 +96,16 @@ includes Game Java, Diagnostics, Launcher update on Windows MSI, Community, and 
 there is no global automatic-check control. Latest news loads up to three dated headlines from
 MegaMek's official Atom feed in the background once per window, links to the full posts, and
 always offers the blog archive when offline. Remote article HTML is not rendered in the launcher
-and news loading never delays navigation. The effective game Java
+and news loading never delays navigation.
+
+The Windows launcher-update confirmation says **Version \<version\> is available.** and
+**Close any running games before updating.**, with **Cancel** and **Update now** actions.
+Clean, confirmed update completion is diagnostic-only: no success popup, confirmation
+preamble, or extra detail in a release-lookup error. The title bar identifies the current version.
+Failures, required computer restarts, staged MSI cleanup warnings and unresolved pending
+updates retain their existing presentation. Diagnostic-write failures are surfaced explicitly.
+
+The effective game Java
 section shows the feature and canonical selectable/tooltipped executable without exposing
 persistence implementation details. Its heading and contents are left aligned, the path uses the
 regular UI font, and the change action sits below the path on the left. A successful **Change default Java** validates Java 21+ off the EDT

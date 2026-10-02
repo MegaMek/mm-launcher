@@ -136,6 +136,7 @@ class WindowsMsiUpdateTest {
         Path path = report("installed-reboot-required:0.1.1");
         var result = WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {});
         assertTrue(result.installed());
+        assertEquals(WindowsMsiUpdate.ReportState.INSTALLED_WARNING, result.state());
         assertFalse(result.recovered(), "a required restart must remain visible");
         assertTrue(result.message().contains("no restart was forced"));
         assertFalse(Files.exists(path));
@@ -176,7 +177,10 @@ class WindowsMsiUpdateTest {
         assertTrue(unconfirmed.message().contains("MSI version mismatch"));
         assertFalse(Files.exists(path));
         report("installed:0.1.1");
-        assertTrue(WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {}).installed());
+        var installed = WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {});
+        assertTrue(installed.installed());
+        assertEquals(WindowsMsiUpdate.ReportState.INSTALLED, installed.state());
+        assertEquals("Launcher updated to 0.1.1.", installed.message());
         assertFalse(Files.exists(path));
     }
 
@@ -184,8 +188,16 @@ class WindowsMsiUpdateTest {
         Path path = report("installation succeeded; staged MSI cleanup failed");
         var warning = WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {});
         assertTrue(warning.installed());
+        assertEquals(WindowsMsiUpdate.ReportState.INSTALLED_WARNING, warning.state());
         assertFalse(warning.recovered(), "a cleanup warning must remain visible");
         assertTrue(warning.message().contains("cleanup failed"));
+        assertFalse(Files.exists(path));
+        report("installation succeeded; staged MSI cleanup failed; restart required");
+        var restartWarning = WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {});
+        assertEquals(WindowsMsiUpdate.ReportState.INSTALLED_WARNING, restartWarning.state());
+        assertTrue(restartWarning.installed());
+        assertTrue(restartWarning.message().contains("cleanup failed"));
+        assertTrue(restartWarning.message().contains("computer restart"));
         assertFalse(Files.exists(path));
         report("installed:0.1.1");
         assertThrows(IOException.class, () -> WindowsMsiUpdate.consumeReport(path, "0.1.1",
@@ -254,6 +266,14 @@ class WindowsMsiUpdateTest {
                     () -> fail("wrong running version cannot confirm a completed update"));
             assertFalse(result.installed());
             assertTrue(result.message().contains("reported version 0.1.1"));
+            assertFalse(Files.exists(path));
+            report(completion + ":0.1.1");
+            var warning = WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {});
+            assertTrue(warning.installed());
+            assertEquals(WindowsMsiUpdate.ReportState.INSTALLED_WARNING, warning.state());
+            assertFalse(warning.recovered());
+            assertEquals(completion.contains("cleanup-warning"), warning.message().contains("cleanup failed"));
+            assertEquals(completion.contains("reboot-required"), warning.message().contains("computer restart"));
             assertFalse(Files.exists(path));
         }
     }
