@@ -1355,17 +1355,11 @@ public final class LauncherFrame extends JFrame {
         installationMenuButtons.put(record.id(), more);
         more.getAccessibleContext().setAccessibleDescription(
                 "More actions for " + record.name());
-        more.addActionListener(event -> {
-            if (local != null && local.missing()) {
-                removeMissingInstallation(record);
-            } else {
-                run("Checking installation folder", () -> {
-                    services.requireInstallationPresent(record);
-                    return null;
-                }, ignored -> showInstallationMenu(record), ignored -> {},
-                        () -> {}, true, false);
-            }
-        });
+        more.addActionListener(event -> run("Checking installation folder", () -> {
+            services.requireInstallationPresent(record);
+            return null;
+        }, ignored -> showInstallationMenu(record), ignored -> {},
+                () -> {}, true, false));
         actions.add(more);
         card.add(actions, BorderLayout.EAST);
         return card;
@@ -1379,10 +1373,6 @@ public final class LauncherFrame extends JFrame {
             return;
         }
         LauncherServices.InstallationStatus local = installationLocalStatus(record);
-        if (local != null && local.missing()) {
-            removeMissingInstallation(record);
-            return;
-        }
         installationMenu(record, local, managedUpdatesAvailable(local), hasOwnershipProvenance(local))
                 .show(currentButton, 0, currentButton.getHeight());
     }

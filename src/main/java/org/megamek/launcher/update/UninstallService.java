@@ -89,6 +89,7 @@ public final class UninstallService {
     public static final int JOURNAL_SCHEMA = 1;
     public static final String CONFIRMATION = "UNINSTALL-OFFICIAL-FILES";
     private static final String JOURNAL_ROOT = "uninstall-v1";
+    private static final String REMOVAL_ROOT = "registration-removal-v1";
     private static final int MAX_JOURNAL_BYTES = 32 * 1024 * 1024;
     private static final Pattern HASH = Pattern.compile("[0-9a-f]{64}");
     private static final Set<String> COMMITTED_PHASES =
@@ -192,46 +193,64 @@ public final class UninstallService {
         try (RootCoordinator.Lease lease = missing
                 ? coordinator.acquireForRecovery(root, false) : coordinator.acquire(root, false)) {
             lease.requireNoPendingUpdate();
-            if (hasPending(expected.id()) && !missing) {
-                throw new IOException("Uninstall recovery required before removing this copy");
-            }
             RegistryData data = registries.read(registry);
             InstallationRecord current = registries.resolve(data, expected.id());
             requireExact(current, expected);
+            recoverRemoval(current);
+            if (hasUninstallPending(expected.id()) && !missing) {
+                throw new IOException("Uninstall recovery required before removing this copy");
+            }
             if (missing) {
                 requireMissing(root);
             } else {
                 requireCurrentLayout(current);
             }
-            UninstallJournal pendingJournal = missing && hasPending(current.id())
+            UninstallJournal pendingJournal = missing && hasUninstallPending(current.id())
                     ? readJournal(current.id()) : null;
             if (pendingJournal != null) requireJournalBinding(pendingJournal, current);
 
             Path metadata = receipts.metadataDirectory(registry);
-            List<Path> sidecars = existingSidecars(metadata, current.id());
-            Path staging = metadata.resolve(".remove-" + UUID.randomUUID());
-            List<Path> moved = new ArrayList<>();
+            List<UninstallJournal.MetadataMove> moves = new ArrayList<>();
+            for (Path sidecar : existingSidecars(metadata, current.id())) {
+                moves.add(new UninstallJournal.MetadataMove(
+                        sidecar.getFileName().toString(), hash(sidecar), Files.size(sidecar),
+                        "PLANNED"));
+            }
+            ensureMetadataDirectory(metadata, data);
+            Path removals = removalRoot();
+            if (!Files.exists(removals, LinkOption.NOFOLLOW_LINKS)) Files.createDirectory(removals);
+            StrictPathSafety.requireDirectory(removals, "registration-removal recovery directory");
+            Path transaction = removalDirectory(current.id());
+            Files.createDirectory(transaction);
+            RegistrationRemovalJournal removal = new RegistrationRemovalJournal(
+                    JOURNAL_SCHEMA, registry.toString(), current, "PREPARED", List.copyOf(moves));
+            writeRemovalJournal(removal);
+            Path staging = transaction.resolve("metadata");
             try {
-                if (!sidecars.isEmpty()) {
-                    ensureMetadataDirectory(metadata, data);
+                if (!moves.isEmpty()) {
                     Files.createDirectory(staging);
                     StrictPathSafety.requireDirectory(staging, "registration-removal staging");
-                    for (Path source : sidecars) {
-                        Path destination = staging.resolve(source.getFileName().toString());
-                        atomicMove(source, destination);
-                        moved.add(source);
+                    for (UninstallJournal.MetadataMove move : moves) {
+                        Path source = metadata.resolve(move.fileName());
+                        requireExactFile(source, move.sha256(), move.size());
+                        failureHook.at("remove-metadata-verified");
+                        atomicMove(source, staging.resolve(move.fileName()));
+                        failureHook.at("remove-metadata-moved");
                     }
                 }
                 if (missing) requireMissing(root);
                 if (pendingJournal != null) {
                     writeJournal(withPhase(pendingJournal, "COMMIT_AUTHORIZED"));
                 }
+                removal = new RegistrationRemovalJournal(removal.schemaVersion(),
+                        removal.canonicalRegistry(), current, "COMMIT_AUTHORIZED", removal.metadata());
+                writeRemovalJournal(removal);
                 failureHook.at("remove-before-registry");
                 if (missing) requireMissing(root);
                 registries.remove(registry, current);
             } catch (IOException | RuntimeException failure) {
-                if (registrationIsAbsent(current)) {
-                    String warning = cleanupOwned(staging);
+                if (COMMITTED_PHASES.contains(removal.phase()) && registrationIsAbsent(current)) {
+                    String warning = cleanupRemoval(removal);
                     if (pendingJournal != null) {
                         String recoveryWarning = cleanupMissingJournal(pendingJournal);
                         if (warning == null) warning = recoveryWarning;
@@ -241,8 +260,11 @@ public final class UninstallService {
                             ? "Removal completed after a registry close warning."
                             : warning);
                 }
-                IOException rollback = restoreMetadata(staging, moved);
-                if (rollback != null) failure.addSuppressed(rollback);
+                try {
+                    restoreRemovalMetadata(removal);
+                } catch (IOException rollback) {
+                    failure.addSuppressed(rollback);
+                }
                 if (pendingJournal != null) {
                     try {
                         writeJournal(pendingJournal);
@@ -252,7 +274,14 @@ public final class UninstallService {
                 }
                 throw failure;
             }
-            String warning = cleanupOwned(staging);
+            String warning;
+            try {
+                failureHook.at("remove-after-registry");
+                warning = cleanupRemoval(removal);
+            } catch (IOException | RuntimeException failure) {
+                warning = "Registration removed, but launcher metadata cleanup is still required: "
+                        + detail(failure);
+            }
             if (pendingJournal != null) {
                 String recoveryWarning = cleanupMissingJournal(pendingJournal);
                 if (warning == null) warning = recoveryWarning;
@@ -263,7 +292,19 @@ public final class UninstallService {
     }
 
     public boolean hasPending(String installationId) throws IOException {
-        Path journal = pendingJournalPath(registry, installationId);
+        return hasPending(registry, installationId);
+    }
+
+    public static boolean hasPending(Path registry, String installationId) throws IOException {
+        return journalExists(pendingJournalPath(registry, installationId))
+                || journalExists(pendingRemovalJournalPath(registry, installationId));
+    }
+
+    private boolean hasUninstallPending(String id) throws IOException {
+        return journalExists(pendingJournalPath(registry, id));
+    }
+
+    private static boolean journalExists(Path journal) throws IOException {
         try {
             BasicFileAttributes attributes = Files.readAttributes(
                     journal, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
@@ -285,6 +326,13 @@ public final class UninstallService {
                 .resolve(installationId).resolve("journal.json");
     }
 
+    public static Path pendingRemovalJournalPath(Path registry, String installationId)
+            throws IOException {
+        requireTransactionId(installationId);
+        return new ReceiptStore().metadataDirectory(registry.toAbsolutePath().normalize())
+                .resolve(REMOVAL_ROOT).resolve(installationId).resolve("journal.json");
+    }
+
     /**
      * Conservatively rolls back a registered transaction. If registration is already absent,
      * only a durable COMMIT_AUTHORIZED/COMMITTED journal permits bounded cleanup.
@@ -294,6 +342,32 @@ public final class UninstallService {
         requireWorker();
         Objects.requireNonNull(context, "context");
         context.enterFinalization("Uninstall recovery must complete before the launcher closes.");
+        if (journalExists(pendingRemovalJournalPath(registry, expected.id()))) {
+            RegistrationRemovalJournal removal = readRemovalJournal(expected.id());
+            requireExact(removal.record(), expected);
+            InstallationRecord current = registries.read(registry).installations().stream()
+                    .filter(record -> record.id().equals(expected.id())).findFirst().orElse(null);
+            if (current == null) {
+                if (!COMMITTED_PHASES.contains(removal.phase())) {
+                    throw new IOException("orphan registration-removal journal lacks commit authority");
+                }
+                String warning = cleanupRemoval(removal);
+                if (warning != null || !hasUninstallPending(expected.id())) {
+                    return new RecoveryResult(true, "Registration removal cleanup completed.", warning);
+                }
+            } else {
+                requireExact(current, expected);
+                try (RootCoordinator.Lease ignored =
+                             coordinator.acquireForRecovery(rootOf(expected), false)) {
+                    requireExact(registries.resolve(registries.read(registry), expected.id()), expected);
+                    restoreRemovalMetadata(removal);
+                }
+                if (!hasUninstallPending(expected.id())) {
+                    return new RecoveryResult(false,
+                            "Registration removal was rolled back; the copy remains registered.", null);
+                }
+            }
+        }
         UninstallJournal journal = readJournal(expected.id());
         requireJournalBinding(journal, expected);
         Path root = rootOf(expected);
@@ -327,13 +401,14 @@ public final class UninstallService {
      */
     public List<String> recoverCommitted() throws IOException {
         requireWorker();
+        List<String> warnings = new ArrayList<>();
+        recoverRemovals(warnings);
         Path directory = journalRoot();
-        if (!Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) return List.of();
+        if (!Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) return List.copyOf(warnings);
         StrictPathSafety.requireDirectory(directory, "uninstall recovery directory");
         RegistryData data = registries.read(registry);
         Set<String> registered = new HashSet<>();
         data.installations().forEach(record -> registered.add(record.id()));
-        List<String> warnings = new ArrayList<>();
         List<Path> transactions;
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {
             transactions = new ArrayList<>();
@@ -343,6 +418,7 @@ public final class UninstallService {
             StrictPathSafety.requireDirectory(entry, "uninstall transaction");
             String id = entry.getFileName().toString();
             if (registered.contains(id)) continue;
+            if (removeEmptyTransaction(entry, id)) continue;
             UninstallJournal journal = readJournal(id);
             if (!COMMITTED_PHASES.contains(journal.phase())) {
                 throw new IOException("orphan uninstall journal lacks commit authority");
@@ -643,6 +719,7 @@ public final class UninstallService {
             return first != null ? first : second;
         }
         Files.deleteIfExists(journalPath(journal.record().id()));
+        failureHook.at("cleanup-journal-deleted");
         Files.deleteIfExists(transaction);
         cleanupEmptyMetadataParents();
         return null;
@@ -672,7 +749,11 @@ public final class UninstallService {
 
     private void writeJournal(UninstallJournal journal) throws IOException {
         validateJournal(journal, journal.record().id());
-        Path file = journalPath(journal.record().id());
+        publishJournal(journalPath(journal.record().id()), journal);
+        failureHook.at("journal-published");
+    }
+
+    private void publishJournal(Path file, Object journal) throws IOException {
         Path staging = file.resolveSibling(file.getFileName() + ".new");
         byte[] bytes = mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(journal);
         if (bytes.length <= 0 || bytes.length > MAX_JOURNAL_BYTES) {
@@ -692,7 +773,153 @@ public final class UninstallService {
             Files.deleteIfExists(staging);
             throw new IOException("atomic uninstall journal publication is unsupported", error);
         }
-        failureHook.at("journal-published");
+    }
+
+    private Path removalRoot() {
+        return receipts.metadataDirectory(registry).resolve(REMOVAL_ROOT);
+    }
+
+    private Path removalDirectory(String id) throws IOException {
+        requireTransactionId(id);
+        return removalRoot().resolve(id);
+    }
+
+    private void writeRemovalJournal(RegistrationRemovalJournal journal) throws IOException {
+        validateRemovalJournal(journal, journal.record().id());
+        publishJournal(removalDirectory(journal.record().id()).resolve("journal.json"), journal);
+        failureHook.at("remove-journal-published");
+    }
+
+    private RegistrationRemovalJournal readRemovalJournal(String id) throws IOException {
+        Path file = removalDirectory(id).resolve("journal.json");
+        StrictPathSafety.requireFile(file, "registration-removal journal");
+        long size = Files.size(file);
+        if (size <= 0 || size > MAX_JOURNAL_BYTES) {
+            throw new IOException("registration-removal journal size is invalid");
+        }
+        RegistrationRemovalJournal journal = mapper.readValue(
+                Files.readAllBytes(file), RegistrationRemovalJournal.class);
+        validateRemovalJournal(journal, id);
+        return journal;
+    }
+
+    private void validateRemovalJournal(RegistrationRemovalJournal journal, String id)
+            throws IOException {
+        requireTransactionId(id);
+        if (journal == null || journal.schemaVersion() != JOURNAL_SCHEMA
+                || !registry.toString().equals(journal.canonicalRegistry())
+                || journal.record() == null || !id.equals(journal.record().id())
+                || journal.phase() == null
+                || !Set.of("PREPARED", "COMMIT_AUTHORIZED").contains(journal.phase())
+                || journal.metadata() == null) {
+            throw new IOException("registration-removal journal schema or binding is invalid");
+        }
+        rootOf(journal.record());
+        Set<String> names = new HashSet<>();
+        for (UninstallJournal.MetadataMove move : journal.metadata()) {
+            if (move == null || !ownedSidecarName(move.fileName(), id)
+                    || !names.add(move.fileName()) || move.size() < 0
+                    || move.sha256() == null || !HASH.matcher(move.sha256()).matches()
+                    || !"PLANNED".equals(move.state())) {
+                throw new IOException("registration-removal metadata intent is invalid");
+            }
+        }
+    }
+
+    private void recoverRemovals(List<String> warnings) throws IOException {
+        Path directory = removalRoot();
+        if (!Files.exists(directory, LinkOption.NOFOLLOW_LINKS)) return;
+        StrictPathSafety.requireDirectory(directory, "registration-removal recovery directory");
+        List<Path> transactions = new ArrayList<>();
+        try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {
+            for (Path entry : stream) transactions.add(entry);
+        }
+        for (Path entry : transactions) {
+            String id = entry.getFileName().toString();
+            requireTransactionId(id);
+            InstallationRecord current = registries.read(registry).installations().stream()
+                    .filter(record -> record.id().equals(id)).findFirst().orElse(null);
+            if (current == null) {
+                if (removeEmptyTransaction(entry, id)) continue;
+                RegistrationRemovalJournal journal = readRemovalJournal(id);
+                if (!COMMITTED_PHASES.contains(journal.phase())) {
+                    throw new IOException("orphan registration-removal journal lacks commit authority");
+                }
+                String warning = cleanupRemoval(journal);
+                if (warning != null) warnings.add(warning);
+            } else {
+                try (RootCoordinator.Lease ignored =
+                             coordinator.acquireForRecovery(rootOf(current), false)) {
+                    requireExact(registries.resolve(registries.read(registry), id), current);
+                    recoverRemoval(current);
+                }
+            }
+        }
+        cleanupEmptyMetadataParents();
+    }
+
+    private void recoverRemoval(InstallationRecord record) throws IOException {
+        Path transaction = removalDirectory(record.id());
+        if (!Files.exists(transaction, LinkOption.NOFOLLOW_LINKS)
+                || removeEmptyTransaction(transaction, record.id())) return;
+        RegistrationRemovalJournal journal = readRemovalJournal(record.id());
+        requireExact(journal.record(), record);
+        restoreRemovalMetadata(journal);
+    }
+
+    private void restoreRemovalMetadata(RegistrationRemovalJournal journal) throws IOException {
+        Path metadata = receipts.metadataDirectory(registry);
+        StrictPathSafety.requireDirectory(metadata, "launcher metadata");
+        Path backup = removalDirectory(journal.record().id()).resolve("metadata");
+        for (UninstallJournal.MetadataMove move : journal.metadata()) {
+            restoreOne(backup.resolve(move.fileName()), metadata.resolve(move.fileName()),
+                    move.sha256(), move.size());
+        }
+        String warning = cleanupRemoval(journal);
+        if (warning != null) throw new IOException(warning);
+    }
+
+    private String cleanupRemoval(RegistrationRemovalJournal journal) {
+        try {
+            Path transaction = removalDirectory(journal.record().id());
+            String warning = cleanupOwned(transaction.resolve("metadata"));
+            if (warning != null) return warning;
+            Files.deleteIfExists(transaction.resolve("journal.json"));
+            failureHook.at("remove-cleanup-journal-deleted");
+            Files.delete(transaction);
+            cleanupEmptyMetadataParents();
+            return null;
+        } catch (IOException | RuntimeException failure) {
+            return "Registration removed, but launcher metadata cleanup is still required: "
+                    + detail(failure);
+        }
+    }
+
+    private static boolean removeEmptyTransaction(Path directory, String id) throws IOException {
+        requireTransactionId(id);
+        StrictPathSafety.requireDirectory(directory, "launcher recovery transaction");
+        if (!RealUpdateFiles.emptyDirectory(directory)) return false;
+        // No backups or journal remain, so this can only remove the empty namespace.
+        Files.delete(directory);
+        return true;
+    }
+
+    private static void requireTransactionId(String id) throws IOException {
+        try {
+            if (!UUID.fromString(id).toString().equals(id)) {
+                throw new IllegalArgumentException("noncanonical UUID");
+            }
+        } catch (RuntimeException failure) {
+            throw new IOException("launcher recovery transaction id is invalid", failure);
+        }
+    }
+
+    private record RegistrationRemovalJournal(int schemaVersion, String canonicalRegistry,
+                                             InstallationRecord record, String phase,
+                                             List<UninstallJournal.MetadataMove> metadata) {
+        private RegistrationRemovalJournal {
+            metadata = metadata == null ? null : List.copyOf(metadata);
+        }
     }
 
     private void validateJournal(UninstallJournal journal, String id) throws IOException {
@@ -790,13 +1017,8 @@ public final class UninstallService {
         try (DirectoryStream<Path> stream =
                      Files.newDirectoryStream(directory, id + ".json.new-*")) {
             for (Path candidate : stream) {
-                String suffix = candidate.getFileName().toString()
-                        .substring((id + ".json.new-").length());
-                try {
-                    UUID.fromString(suffix);
+                if (ownedSidecarName(candidate.getFileName().toString(), id)) {
                     names.add(candidate.getFileName().toString());
-                } catch (RuntimeException ignored) {
-                    // Not an owned receipt staging name.
                 }
             }
         }
@@ -809,6 +1031,21 @@ public final class UninstallService {
             result.add(file);
         }
         return List.copyOf(result);
+    }
+
+    private static boolean ownedSidecarName(String name, String id) {
+        if (name == null) return false;
+        if (Set.of(id + ".json", id + ".json.lock", id + ".current.json",
+                id + ".current.json.new", id + ".adoption.json", id + ".adoption.json.new",
+                id + ".channel.json", id + ".channel.json.new", id + ".channel.json.lock")
+                .contains(name)) return true;
+        if (!name.startsWith(id + ".json.new-")) return false;
+        try {
+            UUID.fromString(name.substring((id + ".json.new-").length()));
+            return true;
+        } catch (IllegalArgumentException ignored) {
+            return false; // Not an owned receipt staging name.
+        }
     }
 
     private void requireCurrentLayout(InstallationRecord record) throws IOException {
@@ -946,23 +1183,6 @@ public final class UninstallService {
         }
     }
 
-    private static IOException restoreMetadata(Path staging, List<Path> moved) {
-        try {
-            for (int i = moved.size() - 1; i >= 0; i--) {
-                Path destination = moved.get(i);
-                Path source = staging.resolve(destination.getFileName().toString());
-                if (Files.exists(destination, LinkOption.NOFOLLOW_LINKS)) {
-                    throw new IOException("unexpected metadata edit blocks rollback");
-                }
-                atomicMove(source, destination);
-            }
-            cleanupOwned(staging);
-            return null;
-        } catch (IOException error) {
-            return new IOException("launcher metadata rollback failed", error);
-        }
-    }
-
     private static String cleanupOwned(Path path) {
         try {
             if (!Files.exists(path, LinkOption.NOFOLLOW_LINKS)) return null;
@@ -984,6 +1204,11 @@ public final class UninstallService {
 
     private void cleanupEmptyMetadataParents() {
         try {
+            Path removals = removalRoot();
+            if (Files.exists(removals, LinkOption.NOFOLLOW_LINKS)
+                    && RealUpdateFiles.emptyDirectory(removals)) {
+                Files.delete(removals);
+            }
             Path journals = journalRoot();
             if (Files.exists(journals, LinkOption.NOFOLLOW_LINKS)
                     && RealUpdateFiles.emptyDirectory(journals)) {

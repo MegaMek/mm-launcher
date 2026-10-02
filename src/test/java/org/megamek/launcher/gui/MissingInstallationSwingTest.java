@@ -118,6 +118,30 @@ class MissingInstallationSwingTest {
         staleAction(false);
     }
 
+    @Test
+    void folderRestoredAfterMissingCardWasRenderedOpensMoreInsteadOfRemovalDialog() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "actual menus require a display");
+        Fixture fixture = fixture();
+        Path original = fixture.root.resolveSibling("temporarily-moved");
+        Files.move(fixture.root, original);
+        LauncherFrame frame = SwingTestSupport.onEdt(() -> new LauncherFrame(fixture.services));
+        try {
+            SwingTestSupport.onEdt(() -> { frame.showWindow(); return null; });
+            SwingTestSupport.click(frame, "manageInstallationsButton");
+            SwingTestSupport.awaitCondition("missing card rendered", () -> {
+                JLabel status = SwingTestSupport.find(frame,
+                        "installationStatus-" + fixture.removed.id(), JLabel.class);
+                return status != null && "Installation folder no longer exists".equals(status.getText());
+            });
+            Files.move(original, fixture.root);
+            SwingTestSupport.installationMenu(frame, fixture.removed.id());
+            assertEquals(2, fixture.services.readRegistry().installations().size());
+            assertTrue(Files.exists(fixture.root.resolve("MegaMek.jar")));
+        } finally {
+            SwingTestSupport.dispose(frame);
+        }
+    }
+
     private void staleAction(boolean launch) throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless(), "actual dialogs require a display");
         Fixture fixture = fixture();

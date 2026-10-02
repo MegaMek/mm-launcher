@@ -340,6 +340,166 @@ class UninstallServiceTest {
     }
 
     @Test
+    void registrationRemovalIntentRestoresMetadataAfterEveryPreCommitCrash() throws Exception {
+        for (boolean missing : List.of(false, true)) {
+            for (String checkpoint : List.of("remove-journal-published", "remove-metadata-verified",
+                    "remove-metadata-moved", "remove-before-registry")) {
+                Fixture fixture = managed("remove-crash-" + missing + "-" + checkpoint);
+                Path receipt = new ReceiptStore().receiptPath(fixture.registry, fixture.record.id());
+                byte[] before = Files.readAllBytes(receipt);
+                if (missing) deleteFixture(fixture.root);
+                UninstallService crashing = fixture.service(point -> {
+                    if (point.equals(checkpoint)) throw new SimulatedCrash();
+                });
+                assertThrows(SimulatedCrash.class, () -> {
+                    if (missing) crashing.removeMissingFromLauncher(fixture.record);
+                    else crashing.removeFromLauncher(fixture.record);
+                });
+                assertEquals(List.of(fixture.record), fixture.store.read(fixture.registry).installations());
+                assertTrue(crashing.hasPending(fixture.record.id()));
+                assertThrows(IOException.class, () ->
+                        new RealUpdateService(new NoNetwork()).snapshot(fixture.registry, fixture.record.id()));
+                assertFalse(new UpdatePreviewService(new NoNetwork())
+                        .eligibility(fixture.registry, fixture.record.id()).available());
+                assertTrue(fixture.service(point -> {}).recoverCommitted().isEmpty());
+                assertArrayEquals(before, Files.readAllBytes(receipt));
+                assertEquals(!missing, Files.exists(fixture.root));
+                assertFalse(Files.exists(removalTransaction(fixture)));
+                var retry = missing
+                        ? fixture.service(point -> {}).removeMissingFromLauncher(fixture.record)
+                        : fixture.service(point -> {}).removeFromLauncher(fixture.record);
+                assertNull(retry.warning());
+                assertTrue(fixture.store.read(fixture.registry).installations().isEmpty());
+            }
+        }
+    }
+
+    @Test
+    void explicitRegistrationRemovalRecoveryRestoresSidecarsWithoutRecreatingMissingRoot() throws Exception {
+        Fixture fixture = managed("remove-explicit-recovery");
+        Path receipt = new ReceiptStore().receiptPath(fixture.registry, fixture.record.id());
+        byte[] before = Files.readAllBytes(receipt);
+        deleteFixture(fixture.root);
+        UninstallService crashing = fixture.service(point -> {
+            if (point.equals("remove-metadata-moved")) throw new SimulatedCrash();
+        });
+        assertThrows(SimulatedCrash.class, () -> crashing.removeMissingFromLauncher(fixture.record));
+        var result = fixture.service(point -> {}).recover(fixture.record, context());
+        assertFalse(result.committed());
+        assertNull(result.warning());
+        assertArrayEquals(before, Files.readAllBytes(receipt));
+        assertFalse(Files.exists(fixture.root));
+        assertFalse(crashing.hasPending(fixture.record.id()));
+        assertEquals(List.of(fixture.record), fixture.store.read(fixture.registry).installations());
+    }
+
+    @Test
+    void interruptedMissingRemovalCanBeRetriedWithoutRestartAndNeverRecreatesRoot() throws Exception {
+        Fixture fixture = managed("remove-retry-with-pending-uninstall");
+        UninstallService uninstall = fixture.service(point -> {
+            if (point.equals("file-moved")) throw new SimulatedCrash();
+        });
+        assertThrows(SimulatedCrash.class, () -> uninstall.uninstall(
+                uninstall.plan(fixture.record, context()), UninstallService.CONFIRMATION, context()));
+        deleteFixture(fixture.root);
+        UninstallService removal = fixture.service(point -> {
+            if (point.equals("remove-before-registry")) throw new SimulatedCrash();
+        });
+        assertThrows(SimulatedCrash.class, () -> removal.removeMissingFromLauncher(fixture.record));
+        assertNull(fixture.service(point -> {}).removeMissingFromLauncher(fixture.record).warning());
+        assertFalse(Files.exists(fixture.root));
+        assertFalse(Files.exists(removalTransaction(fixture)));
+        assertFalse(fixture.service(point -> {}).hasPending(fixture.record.id()));
+        assertTrue(fixture.service(point -> {}).recoverCommitted().isEmpty());
+    }
+
+    @Test
+    void registrationRemovalRecoveryRefusesUnexpectedMetadataEditsAndCorruptIntent() throws Exception {
+        Fixture fixture = managed("remove-unexpected-edit");
+        Path receipt = new ReceiptStore().receiptPath(fixture.registry, fixture.record.id());
+        byte[] before = Files.readAllBytes(receipt);
+        UninstallService crashing = fixture.service(point -> {
+            if (point.equals("remove-metadata-moved")) throw new SimulatedCrash();
+        });
+        assertThrows(SimulatedCrash.class, () -> crashing.removeFromLauncher(fixture.record));
+        Files.writeString(receipt, "unexpected edit");
+        assertThrows(IOException.class, () -> fixture.service(point -> {}).recoverCommitted());
+        assertEquals("unexpected edit", Files.readString(receipt));
+        assertTrue(Files.exists(removalTransaction(fixture).resolve("journal.json")));
+        Files.delete(receipt);
+        assertTrue(fixture.service(point -> {}).recoverCommitted().isEmpty());
+        assertArrayEquals(before, Files.readAllBytes(receipt));
+
+        Fixture corrupt = managed("remove-corrupt-intent");
+        UninstallService removal = corrupt.service(point -> {
+            if (point.equals("remove-metadata-moved")) throw new SimulatedCrash();
+        });
+        assertThrows(SimulatedCrash.class, () -> removal.removeFromLauncher(corrupt.record));
+        Path journal = removalTransaction(corrupt).resolve("journal.json");
+        String valid = Files.readString(journal);
+        Files.writeString(journal, valid.replace(corrupt.record.id() + ".json", "../unexpected.json"));
+        assertThrows(IOException.class, () -> corrupt.service(point -> {}).recoverCommitted());
+        assertEquals(List.of(corrupt.record), corrupt.store.read(corrupt.registry).installations());
+    }
+
+    @Test
+    void committedRegistrationRemovalCleansOnStartupWithOrWithoutRemainingJournal() throws Exception {
+        for (String checkpoint : List.of("remove-after-registry", "remove-cleanup-journal-deleted")) {
+            Fixture fixture = managed(checkpoint);
+            deleteFixture(fixture.root);
+            UninstallService crashing = fixture.service(point -> {
+                if (point.equals(checkpoint)) throw new SimulatedCrash();
+            });
+            assertThrows(SimulatedCrash.class, () -> crashing.removeMissingFromLauncher(fixture.record));
+            assertTrue(fixture.store.read(fixture.registry).installations().isEmpty());
+            assertTrue(Files.exists(removalTransaction(fixture)));
+            assertTrue(fixture.service(point -> {}).recoverCommitted().isEmpty());
+            assertFalse(Files.exists(removalTransaction(fixture)));
+            assertFalse(Files.exists(fixture.root));
+        }
+    }
+
+    @Test
+    void cleanupInterruptedAfterJournalDeletionIsSafelyFinalizedOnlyForAnEmptyTransaction()
+            throws Exception {
+        for (boolean abrupt : List.of(false, true)) {
+            Fixture fixture = managed("journal-deleted-" + abrupt);
+            UninstallService failing = fixture.service(point -> {
+                if (point.equals("cleanup-journal-deleted")) {
+                    if (abrupt) throw new SimulatedCrash();
+                    throw new IOException("interrupted final namespace removal");
+                }
+            });
+            if (abrupt) {
+                assertThrows(SimulatedCrash.class, () -> failing.uninstall(
+                        failing.plan(fixture.record, context()), UninstallService.CONFIRMATION, context()));
+            } else {
+                var result = failing.uninstall(failing.plan(fixture.record, context()),
+                        UninstallService.CONFIRMATION, context());
+                assertTrue(result.committed());
+                assertTrue(result.warning().contains("could not be cleaned"));
+            }
+            Path transaction = UninstallService.pendingJournalPath(
+                    fixture.registry, fixture.record.id()).getParent();
+            assertFalse(Files.exists(transaction.resolve("journal.json")));
+            assertTrue(Files.isDirectory(transaction));
+            assertTrue(fixture.store.read(fixture.registry).installations().isEmpty());
+            Path unexpected = Files.writeString(transaction.resolve("unexpected.txt"), "keep");
+            assertThrows(IOException.class, () -> fixture.service(point -> {}).recoverCommitted());
+            assertEquals("keep", Files.readString(unexpected));
+            Files.delete(unexpected);
+            assertTrue(fixture.service(point -> {}).recoverCommitted().isEmpty());
+            assertFalse(Files.exists(transaction));
+            assertTrue(fixture.service(point -> {}).recoverCommitted().isEmpty());
+        }
+    }
+
+    private Path removalTransaction(Fixture fixture) {
+        return new ReceiptStore().metadataDirectory(fixture.registry)
+                .resolve("registration-removal-v1").resolve(fixture.record.id());
+    }
+
+    @Test
     void filesystemRootIsRejectedBeforeBackupPathConstruction() throws Exception {
         Fixture fixture = managed("root-rejection");
         InstallationRecord rootRecord = new InstallationRecord(

@@ -10,6 +10,14 @@ pending uninstall, or a live child, removes all launcher-owned sidecars for the 
 then removes the registration under the registry lock. Application-root bytes and timestamps are
 never touched. Preferred application references fall back deterministically to the first remaining
 compatible installation.
+Before any sidecar move, a strict registration-bound intent journal is flushed and atomically
+published under `<registry>.metadata/registration-removal-v1/<id>/journal.json`. Sidecars are
+moved to that transaction's `metadata` backup, with their expected size and SHA-256 recorded.
+Startup or a removal retry restores an interrupted pre-commit move without overwriting unexpected
+metadata edits and without recreating an absent application root. Durable `COMMIT_AUTHORIZED`
+intent plus an absent registration authorizes post-commit metadata cleanup.
+An unfinished registration-removal intent blocks launch, preview, repair, update, and a new
+uninstall until startup, explicit recovery, or a removal retry restores or finalizes it.
 
 If the installation folder was manually deleted, its registration remains until the user
 confirms **Remove from launcher** in a styled **Installation not found** dialog. This separate
@@ -52,6 +60,9 @@ the copy under the same root gate. A durable `COMMIT_AUTHORIZED` journal plus an
 registration is explicit post-commit authority; startup performs only a bounded scan of the
 uninstall journal namespace and finishes backup cleanup. Backup cleanup failure after commit is
 reported as a warning and does not turn success into a retryable uninstall.
+If cleanup stops after deleting the journal but before removing its transaction directory,
+startup may remove only that strictly validated, empty UUID directory. A journal-less transaction
+containing any files is not considered committed and fails explicitly without deleting its contents.
 
 The confirmation is:
 

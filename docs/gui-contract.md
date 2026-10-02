@@ -46,7 +46,9 @@ Top-level actions are **Install another version** and **Import existing installa
 **Uninstall…** at the destructive bottom; imported cards do not. A pending uninstall exposes only
 **Recover uninstall** instead of a new remove/uninstall action while its folder exists.
 When the folder is positively confirmed missing, **More…** instead opens a styled
-**Installation not found** dialog with **Cancel** and **Remove from launcher**. Cancellation
+**Installation not found** dialog with **Cancel** and **Remove from launcher**. The dialog
+is offered only after a fresh worker-thread folder check on every **More…** click, not from cached
+card status; a folder restored since rendering opens the ordinary menu instead. Cancellation
 keeps the registration; confirmation removes that exact registration and its owned metadata,
 including validated interrupted-uninstall cleanup. It never reinstalls or recreates deleted
 application files. A folder deleted after rendering also routes an affected launch or operation
