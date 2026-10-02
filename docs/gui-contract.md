@@ -529,7 +529,12 @@ opt-in, eligibility, bounded selection, deduplication, cancellation, binding and
 Tests that need actual windows are tagged `native-gui` at method level in mixed classes and
 run with `nativeGuiTest` in the independent advisory desktop workflow, not the release gate.
 Missing display/all-skipped execution is not a successful advisory run.
-Native smoke tests must dispose their own windows on the EDT. `SwingTestSupport.createWindow`
+Native smoke tests must dispose their own windows on the EDT.
+Tests that trigger background diagnostics must release and join their fixture's writer
+before JUnit deletes the disposable registry directory. The preference-save failure
+regression deliberately holds the real logger, checks that UI recovery remains responsive,
+then verifies saved diagnostics and the terminal logging status before disposing its windows.
+`SwingTestSupport.createWindow`
 also disposes a fixture that finishes construction after its caller times out; ordinary EDT
 read probes must never acquire that disposal behavior. Timeout failures retain thread stacks,
 including the event-dispatch thread, for diagnosis instead of relying on larger time budgets.

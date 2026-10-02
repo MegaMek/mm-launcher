@@ -195,6 +195,7 @@ class ChannelSwingIntegrationTest {
             FakeServices services = new FakeServices(temp.resolve("save-failure.json"));
             services.saveFailure = new IOException("fixture preference write failed");
             LauncherFrame frame = SwingTestSupport.createWindow(() -> new LauncherFrame(services));
+            boolean diagnosticsRequested = false;
             try {
                 SwingUtilities.invokeAndWait(frame::showWindow);
                 JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
@@ -204,16 +205,37 @@ class ChannelSwingIntegrationTest {
                 assertFalse(checkbox.isSelected());
 
                 SwingTestSupport.startClick(frame, "checkOnOpenCheckbox-" + services.record.id());
+                diagnosticsRequested = true;
                 JDialog error = waitForDialog(frame, "Update check setting was not saved");
+                assertTrue(services.diagnosticsStarted.await(30, TimeUnit.SECONDS),
+                        "the real diagnostic writer must start off the EDT");
+                JLabel logging = waitFor(() -> (JLabel) findNamed(error, "errorLoggingStatus"));
+                assertEquals("Saving local diagnostics...", onEdt(logging::getText));
+                assertEquals(1L, services.diagnosticsFinished.getCount(),
+                        "diagnostics remain deliberately blocked while preference recovery completes");
                 JCheckBox restored = waitFor(() -> (JCheckBox) findNamed(
                         frame, "checkOnOpenCheckbox-" + services.record.id()));
                 assertFalse(restored.isSelected());
                 assertTrue(restored.isEnabled());
                 assertEquals(0, services.checks.get());
+                services.diagnosticsRelease.countDown();
+                waitUntil(() -> services.diagnosticsFinished.getCount() == 0);
+                waitUntil(() -> !"Saving local diagnostics...".equals(logging.getText()));
+                assertTrue(onEdt(logging::getText).startsWith("Saved local diagnostics to "),
+                        "the real diagnostic save must succeed before disposing its dialog");
+                assertTrue(services.operationLogsForViewer().contains("fixture preference write failed"));
                 SwingUtilities.invokeAndWait(error::dispose);
             } finally {
+                services.diagnosticsRelease.countDown();
                 services.release.countDown();
-                SwingUtilities.invokeAndWait(frame::dispose);
+                try {
+                    if (diagnosticsRequested) {
+                        SwingTestSupport.awaitCondition("preference error diagnostics finished before teardown",
+                                () -> services.diagnosticsFinished.getCount() == 0);
+                    }
+                } finally {
+                    SwingUtilities.invokeAndWait(frame::dispose);
+                }
             }
         }
 
@@ -366,6 +388,9 @@ class ChannelSwingIntegrationTest {
         private final AtomicInteger checks = new AtomicInteger();
         private final CountDownLatch started = new CountDownLatch(1);
         private final CountDownLatch release = new CountDownLatch(1);
+        private final CountDownLatch diagnosticsStarted = new CountDownLatch(1);
+        private final CountDownLatch diagnosticsRelease = new CountDownLatch(1);
+        private final CountDownLatch diagnosticsFinished = new CountDownLatch(1);
         private volatile IOException checkFailure;
         private volatile IOException saveFailure;
 
@@ -417,6 +442,24 @@ class ChannelSwingIntegrationTest {
                     ChannelPreferenceStore.Status.CONFIGURED, selected, "Configured");
             saved.incrementAndGet();
             return selected;
+        }
+
+        @Override
+        public String recordGuiError(String title, Throwable error) {
+            if (error != saveFailure) return super.recordGuiError(title, error);
+            assertFalse(SwingUtilities.isEventDispatchThread());
+            diagnosticsStarted.countDown();
+            try {
+                if (!diagnosticsRelease.await(30, TimeUnit.SECONDS)) {
+                    throw new AssertionError("Preference diagnostic writer was not released");
+                }
+                return super.recordGuiError(title, error);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Preference diagnostic writer was interrupted", interrupted);
+            } finally {
+                diagnosticsFinished.countDown();
+            }
         }
 
         @Override
