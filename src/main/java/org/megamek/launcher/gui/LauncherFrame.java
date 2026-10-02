@@ -2643,10 +2643,8 @@ public final class LauncherFrame extends JFrame {
 
     static boolean confirmLauncherUpdate(Window owner, GuiScale scale,
                                           WindowsMsiUpdate.Candidate candidate, String notice) {
-        String message = "MegaMek Launcher " + candidate.version() + " is available.\n\n"
-                + "Update now will download and verify the installer, close the launcher, and "
-                + "show Windows installation progress. The launcher will reopen after a successful update.\n"
-                + "Your settings and registered games will be kept. Close running games before updating.";
+        String message = "Version " + candidate.version() + " is available.\n\n"
+                + "Close any running games before updating.";
         if (notice != null) message = notice + "\n\n" + message;
         return LauncherAlertDialog.showConfirm(owner, scale, "Update MegaMek Launcher", message, "Update now");
     }

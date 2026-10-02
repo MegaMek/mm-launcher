@@ -219,6 +219,10 @@ old running version is still installed, archive the incomplete failed attempt
 and allow a later check to retry, without claiming an upgrade. Reservations
 without a recorded helper identity remain for review. New completed reports
 retain the exact target even when cleanup warnings or reboot notices apply.
+An exact, Windows-confirmed clean completion is recorded as a successful launcher-update
+operation in local diagnostics, without a result popup or a notice attached to a newer update
+confirmation or release-lookup error. Completed reports distinguish clean success from
+successful installation with an actionable warning; reboot and cleanup warnings stay visible.
 
 Legacy plain `pending` reports contain no target. Their helper is identified
 by the encoded script's exact report path. Only when that helper is absent and
@@ -227,7 +231,7 @@ resume. The unknown previous result is recorded in local operation diagnostics, 
 shown as a popup or claimed successful upgrade. These safely reconciled details are
 also omitted from update confirmations and release-lookup errors; genuine failures,
 reboot-required success, cleanup warnings and unresolved pending states keep their
-existing presentation. Failure to save recovery diagnostics is surfaced explicitly.
+existing presentation. Failure to save completion or recovery diagnostics is surfaced explicitly.
 Changed, oversized, linked, malformed, or unverifiable reports remain
 for review.
 
