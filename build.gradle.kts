@@ -521,7 +521,7 @@ plugins {
 }
 
 group = "org.megamek.launcher"
-version = "0.14.11"
+version = "0.14.12"
 
 repositories {
     mavenCentral()
