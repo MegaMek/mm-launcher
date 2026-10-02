@@ -330,8 +330,7 @@ public final class UpdatePreviewService {
 
     private Path validateLocalBoundary(InstallationRecord record, Path registry, RegistryData data)
             throws IOException {
-        if (Files.exists(UninstallService.pendingJournalPath(registry, record.id()),
-                LinkOption.NOFOLLOW_LINKS)) {
+        if (UninstallService.hasPending(registry, record.id())) {
             throw new IOException("Uninstall recovery required");
         }
         Path root = Path.of(record.canonicalRoot()).toAbsolutePath().normalize();

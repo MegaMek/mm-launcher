@@ -151,6 +151,7 @@ public final class LauncherFrame extends JFrame {
     private SwingWorker<Map<String, InstallationCheck>, Void> automaticChecksWorker;
     private SwingWorker<InstallationCheck, Void> installationCheckWorker;
     private final Map<String, InstallationCheck> installationChecks = new HashMap<>();
+    private final Map<String, JButton> installationMenuButtons = new HashMap<>();
     private final AtomicReference<OperationContext> activeOperation = new AtomicReference<>();
     private final GuiScale guiScale = GuiScale.DEFAULT;
     private java.awt.image.BufferedImage firstLaunchArtwork;
@@ -1135,6 +1136,7 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void renderInstallationsPage() {
+        installationMenuButtons.clear();
         content.removeAll();
         content.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(18),
                 guiScale.scaleForGUI(22), guiScale.scaleForGUI(14),
@@ -1350,14 +1352,29 @@ public final class LauncherFrame extends JFrame {
             actions.add(adopt);
         }
         JButton more = homeButton("More…", "installationMenuButton-" + record.id());
-        JPopupMenu menu = installationMenu(record, local, updateManaged,
-                ownershipProvenance);
+        installationMenuButtons.put(record.id(), more);
         more.getAccessibleContext().setAccessibleDescription(
                 "More actions for " + record.name());
-        more.addActionListener(event -> menu.show(more, 0, more.getHeight()));
+        more.addActionListener(event -> run("Checking installation folder", () -> {
+            services.requireInstallationPresent(record);
+            return null;
+        }, ignored -> showInstallationMenu(record), ignored -> {},
+                () -> {}, true, false));
         actions.add(more);
         card.add(actions, BorderLayout.EAST);
         return card;
+    }
+
+    private void showInstallationMenu(InstallationRecord record) {
+        JButton currentButton = installationMenuButtons.get(record.id());
+        if (page != Page.INSTALLATIONS || currentButton == null || !currentButton.isShowing()) return;
+        if (state.registry().installations().stream().noneMatch(record::equals)) {
+            showError("Installation changed", new IOException("Reopen Installations and try again."));
+            return;
+        }
+        LauncherServices.InstallationStatus local = installationLocalStatus(record);
+        installationMenu(record, local, managedUpdatesAvailable(local), hasOwnershipProvenance(local))
+                .show(currentButton, 0, currentButton.getHeight());
     }
 
     private void saveCheckOnOpen(InstallationRecord record,
@@ -1461,7 +1478,7 @@ public final class LauncherFrame extends JFrame {
             statuses.put(record.id(), new LauncherServices.InstallationStatus(
                     preference, current.previewEligibility(), current.pendingUpdate(),
                     current.pendingUninstall(), current.error(), current.adoption(),
-                    current.adopted()));
+                    current.adopted(), current.missing()));
         }
         ChannelPreferenceStore.ReadResult preferredPreference =
                 record.equals(state.preferred()) ? preference : state.channelPreference();
@@ -1627,6 +1644,9 @@ public final class LauncherFrame extends JFrame {
 
     private String installationUpdateStatus(InstallationRecord record,
                                             LauncherServices.InstallationStatus local) {
+        if (local != null && local.missing()) {
+            return "Installation folder no longer exists";
+        }
         if (local != null && local.pendingUninstall()) {
             return "Uninstall recovery required";
         }
@@ -2217,6 +2237,23 @@ public final class LauncherFrame extends JFrame {
         });
     }
 
+    private void removeMissingInstallation(InstallationRecord record) {
+        boolean confirmed = LauncherAlertDialog.showConfirm(this, guiScale,
+                "Installation not found",
+                "The folder for \"" + record.name() + "\" no longer exists on disk.\n\n"
+                        + "Remove this installation from the launcher?",
+                "Remove from launcher");
+        if (!confirmed) return;
+        run("Removing missing installation",
+                () -> services.removeMissingFromLauncher(record), result -> {
+                    selectedInstallationId = null;
+                    transientHomeMessage = "Removed missing installation from launcher."
+                            + (result.warning() == null ? "" : " " + result.warning());
+                    page = Page.HOME;
+                    reload();
+                });
+    }
+
     private void resetPreferences(InstallationRecord record) {
         run("Preparing preferences reset", () -> services.planPreferencesReset(record), plan -> {
             boolean confirmed = LauncherAlertDialog.showConfirm(this, guiScale,
@@ -2773,6 +2810,11 @@ public final class LauncherFrame extends JFrame {
                 setExtendedState(restoreState);
                 setVisible(true);
                 toFront();
+                if (problem instanceof UninstallService.MissingInstallationException missing) {
+                    status.setText("Installation folder not found.");
+                    removeMissingInstallation(missing.record());
+                    return;
+                }
                 if (problem != null) {
                     showError("Launching " + displayProduct(capturedProduct) + " failed",
                             problem);
@@ -3980,6 +4022,11 @@ public final class LauncherFrame extends JFrame {
                     return;
                 }
                 if (result.problem() != null) {
+                    if (result.problem() instanceof UninstallService.MissingInstallationException missing) {
+                        progress.dispose();
+                        removeMissingInstallation(missing.record());
+                        return;
+                    }
                     failure.accept(result.problem());
                     // Some failures (notably a known adoption channel mismatch) close
                     // progress and present their own styled result instead.
@@ -4051,6 +4098,11 @@ public final class LauncherFrame extends JFrame {
                 if (problem == null) {
                     success.accept(value);
                 } else {
+                    if (problem instanceof UninstallService.MissingInstallationException missing) {
+                        status.setText("Installation folder not found.");
+                        removeMissingInstallation(missing.record());
+                        return;
+                    }
                     failure.accept(problem);
                     if (showAutomaticError) {
                         showError(description + (problem instanceof InterruptedException
@@ -4110,6 +4162,10 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void showError(String title, Throwable error, boolean record) {
+        if (error instanceof UninstallService.MissingInstallationException missing) {
+            removeMissingInstallation(missing.record());
+            return;
+        }
         String details = SanitizedErrors.display(error);
         String loggingStatus = record ? "Saving local diagnostics..."
                 : "Local operation diagnostics are available when recording succeeded.";

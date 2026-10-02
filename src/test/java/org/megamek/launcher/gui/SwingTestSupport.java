@@ -143,14 +143,18 @@ final class SwingTestSupport {
     }
 
     static JPopupMenu installationMenu(Container root, String recordId) throws Exception {
-        AbstractButton invoker = click(root, "installationMenuButton-" + recordId);
-        return await("installation menu for " + recordId, () -> {
-            for (var element : MenuSelectionManager.defaultManager().getSelectedPath()) {
-                if (element instanceof JPopupMenu menu && menu.isShowing()
-                        && menu.getInvoker() == invoker) return menu;
-            }
-            return null;
-        });
+        click(root, "installationMenuButton-" + recordId);
+        return await("installation menu for " + recordId, () -> showingInstallationMenu(root, recordId));
+    }
+
+    static JPopupMenu showingInstallationMenu(Container root, String recordId) {
+        AbstractButton invoker = find(root, "installationMenuButton-" + recordId, AbstractButton.class);
+        if (invoker == null || !invoker.isShowing()) return null;
+        for (var element : MenuSelectionManager.defaultManager().getSelectedPath()) {
+            if (element instanceof JPopupMenu menu && menu.isShowing()
+                    && menu.getInvoker() == invoker) return menu;
+        }
+        return null;
     }
 
     static JDialog dialog(Window owner, String title) throws Exception {

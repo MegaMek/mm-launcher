@@ -138,8 +138,7 @@ public final class RealUpdateService {
 
     public Snapshot snapshot(Path registry, String id) throws IOException {
         Path registryPath = registry.toAbsolutePath().normalize();
-        if (Files.exists(UninstallService.pendingJournalPath(registryPath, id),
-                LinkOption.NOFOLLOW_LINKS)) {
+        if (UninstallService.hasPending(registryPath, id)) {
             throw new IOException("Uninstall recovery required");
         }
         RegistryData data = registries.read(registryPath);
@@ -188,8 +187,7 @@ public final class RealUpdateService {
                     expected.record().id()), LinkOption.NOFOLLOW_LINKS)) {
                 throw new IOException("imported copies are not eligible for exact-release repair");
             }
-            if (Files.exists(UninstallService.pendingJournalPath(expected.registry(),
-                    expected.record().id()), LinkOption.NOFOLLOW_LINKS)) {
+            if (UninstallService.hasPending(expected.registry(), expected.record().id())) {
                 throw new IOException("uninstall recovery required before repair");
             }
             Snapshot current = snapshot(expected.registry(), expected.record().id());
