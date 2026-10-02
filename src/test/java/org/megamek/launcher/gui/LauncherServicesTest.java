@@ -46,6 +46,7 @@ import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
 import org.megamek.launcher.release.ReleaseTransport;
 import org.megamek.launcher.update.WindowsMsiUpdate;
+import org.megamek.launcher.update.UninstallService;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -298,6 +299,59 @@ class LauncherServicesTest {
         services.removeFromLauncher(second);
         assertEquals(first.id(), services.readRegistry().defaultInstallationId());
         assertTrue(Files.isRegularFile(secondRoot.resolve("MegaMek.jar")));
+    }
+
+    @Test
+    void deletedInstallationsStayRegisteredUntilConfirmedAndCanThenBeForgotten() throws Exception {
+        RecordingRunner runner = new RecordingRunner();
+        LauncherServices services = services(temp.resolve("deleted.json"), runner);
+        Path deletedRoot = suite("deleted");
+        InstallationRecord deleted = services.register("Deleted", deletedRoot);
+        InstallationRecord retained = services.register("Retained", suite("retained"));
+        try (var paths = Files.walk(deletedRoot)) {
+            for (Path path : paths.sorted(java.util.Comparator.reverseOrder()).toList()) Files.delete(path);
+        }
+
+        var home = services.loadHome();
+        assertTrue(home.installationStatuses().get(deleted.id()).missing());
+        assertFalse(home.installationStatuses().get(retained.id()).missing());
+        assertEquals(2, services.readRegistry().installations().size());
+        var launchFailure = assertThrows(UninstallService.MissingInstallationException.class,
+                () -> services.launch(deleted, "megamek"));
+        assertEquals(deleted, launchFailure.record());
+        assertTrue(runner.commands.isEmpty(), "missing-folder handling must not resolve or start Java");
+        assertThrows(UninstallService.MissingInstallationException.class,
+                () -> services.openLocation(deleted));
+        assertThrows(UninstallService.MissingInstallationException.class,
+                () -> services.requireInstallationPresent(deleted));
+        assertThrows(UninstallService.MissingInstallationException.class,
+                () -> services.renameInstallation(deleted, "Renamed"));
+        assertThrows(UninstallService.MissingInstallationException.class,
+                () -> services.selectPreferred("megamek", deleted));
+        assertThrows(UninstallService.MissingInstallationException.class,
+                () -> services.planPreferencesReset(deleted));
+        assertThrows(UninstallService.MissingInstallationException.class,
+                () -> services.adoptionSuggestion(deleted));
+
+        services.removeMissingFromLauncher(deleted);
+        assertEquals(List.of(retained), services.readRegistry().installations());
+        assertEquals(retained.id(), services.readRegistry().preferredInstallationIds().get("megamek"));
+        assertFalse(Files.exists(deletedRoot));
+    }
+
+    @Test
+    void unavailableInstallationParentIsNotClassifiedAsADeletedFolder() throws Exception {
+        LauncherServices services = services(temp.resolve("unavailable.json"), new RecordingRunner());
+        Path parent = Files.createDirectory(temp.resolve("drive"));
+        Path root = suite("unavailable-source");
+        Path moved = parent.resolve("installation");
+        Files.move(root, moved);
+        InstallationRecord record = services.register("Unavailable", moved);
+        Files.move(parent, temp.resolve("disconnected"));
+
+        assertFalse(services.loadHome().installationStatuses().get(record.id()).missing());
+        assertThrows(IOException.class, () -> services.removeMissingFromLauncher(record));
+        assertEquals(List.of(record), services.readRegistry().installations());
     }
 
     @Test

@@ -331,11 +331,13 @@ public class LauncherServices {
 
     public InstallationRecord renameInstallation(InstallationRecord record, String name)
             throws IOException {
+        UninstallService.requirePresent(record);
         return store.rename(registry, record, name);
     }
 
     public PreferencesResetService.Plan planPreferencesReset(InstallationRecord record)
             throws IOException {
+        UninstallService.requirePresent(record);
         return new PreferencesResetService(registry, store, inspector, updateCoordinator)
                 .plan(record);
     }
@@ -376,6 +378,7 @@ public class LauncherServices {
                     .metadataDirectory(registry).resolve(record.id() + ".adoption.json"),
                     LinkOption.NOFOLLOW_LINKS);
             try {
+                UninstallService.requirePresent(record);
                 channel = new ChannelPreferenceStore().read(registry, data, record);
                 eligibility = new UpdatePreviewService(transport)
                         .eligibility(registry, record.id());
@@ -390,7 +393,7 @@ public class LauncherServices {
             } catch (IOException | RuntimeException error) {
                 statuses.put(record.id(), new InstallationStatus(
                         channel, eligibility, pending, pendingUninstall, detail(error), adoption,
-                        adopted));
+                        adopted, error instanceof UninstallService.MissingInstallationException));
             }
         }
         return new HomeState(data, legacy.preferred(), legacy.currentInspection(),
@@ -412,6 +415,7 @@ public class LauncherServices {
         ChannelPreferenceStore.ReadResult channel =
                 new ChannelPreferenceStore().read(registry, data, record);
         try {
+            UninstallService.requirePresent(record);
             Inspection current = inspector.inspect(Path.of(record.canonicalRoot()));
             if (!current.canonicalRoot().equals(record.canonicalRoot())
                     || !current.observedBuild().equals(record.observedBuild())
@@ -455,6 +459,7 @@ public class LauncherServices {
 
     public ImportedCopyAdoptionService.Suggestion adoptionSuggestion(
             InstallationRecord record) throws IOException {
+        UninstallService.requirePresent(record);
         RegistryData data = readRegistry();
         InstallationRecord current = store.resolve(data, record.id());
         if (!current.equals(record)) {
@@ -492,6 +497,7 @@ public class LauncherServices {
 
     public void selectPreferred(String productKey, InstallationRecord record)
             throws IOException {
+        UninstallService.requirePresent(record);
         store.selectPreferred(registry, productKey, record);
     }
 
@@ -544,6 +550,7 @@ public class LauncherServices {
             throw new IOException(
                     "the selected installation changed; return Home and try again");
         }
+        UninstallService.requirePresent(registered);
         if (uninstalls.hasPending(registered.id())) {
             throw new IOException("Uninstall recovery required");
         }
@@ -551,12 +558,22 @@ public class LauncherServices {
     }
 
     public void openLocation(InstallationRecord record) throws IOException {
+        UninstallService.requirePresent(record);
         locations.open(record);
+    }
+
+    public void requireInstallationPresent(InstallationRecord record) throws IOException {
+        UninstallService.requirePresent(record);
     }
 
     public UninstallService.Result removeFromLauncher(InstallationRecord record)
             throws IOException {
         return uninstalls.removeFromLauncher(record);
+    }
+
+    public UninstallService.Result removeMissingFromLauncher(InstallationRecord record)
+            throws IOException {
+        return uninstalls.removeMissingFromLauncher(record);
     }
 
     public UninstallService.Plan planUninstall(InstallationRecord record,
@@ -873,6 +890,7 @@ public class LauncherServices {
     public RealUpdateService.RecoveryResult recoverUpdate(InstallationRecord record,
                                                            String confirmation)
             throws IOException, org.megamek.launcher.manifest.ManifestException {
+        UninstallService.requirePresent(record);
         return new RealUpdateService(transport, updateCoordinator)
                 .recover(registry, record.id(), confirmation);
     }
@@ -925,6 +943,7 @@ public class LauncherServices {
                                                            OperationContext context)
             throws IOException, InterruptedException,
             org.megamek.launcher.manifest.ManifestException {
+        UninstallService.requirePresent(record);
         return new RealUpdateService(transport, updateCoordinator)
                 .recover(registry, record.id(), confirmation, context);
     }
@@ -939,6 +958,7 @@ public class LauncherServices {
     }
 
     private void requireNoPendingUninstall(InstallationRecord record) throws IOException {
+        if (record != null) UninstallService.requirePresent(record);
         if (record == null || uninstalls.hasPending(record.id())) {
             throw new IOException("Uninstall recovery required");
         }
@@ -1021,7 +1041,15 @@ public class LauncherServices {
                                      UpdatePreviewService.Eligibility previewEligibility,
                                      boolean pendingUpdate, boolean pendingUninstall, String error,
                                      ImportedCopyAdoptionService.Availability adoption,
-                                     boolean adopted) {
+                                     boolean adopted, boolean missing) {
+        public InstallationStatus(ChannelPreferenceStore.ReadResult channelPreference,
+                                  UpdatePreviewService.Eligibility previewEligibility,
+                                  boolean pendingUpdate, boolean pendingUninstall, String error,
+                                  ImportedCopyAdoptionService.Availability adoption,
+                                  boolean adopted) {
+            this(channelPreference, previewEligibility, pendingUpdate, pendingUninstall,
+                    error, adoption, adopted, false);
+        }
         public InstallationStatus(ChannelPreferenceStore.ReadResult channelPreference,
                                   UpdatePreviewService.Eligibility previewEligibility,
                                   boolean pendingUpdate, boolean pendingUninstall, String error,

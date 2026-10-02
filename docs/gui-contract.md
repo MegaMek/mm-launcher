@@ -44,8 +44,14 @@ must be unique. Imported records show
 Top-level actions are **Install another version** and **Import existing installation**. Exact actions include **Use as preferred for …**, Check/Retry, Update, update recovery,
 **Open location**, and **Remove from launcher…** when applicable. Managed/adopted cards also place
 **Uninstall…** at the destructive bottom; imported cards do not. A pending uninstall exposes only
-**Recover uninstall** instead of a new remove/uninstall action. There is no standalone GUI Preview
-action. Update is primary only when known available.
+**Recover uninstall** instead of a new remove/uninstall action while its folder exists.
+When the folder is positively confirmed missing, **More…** instead opens a styled
+**Installation not found** dialog with **Cancel** and **Remove from launcher**. Cancellation
+keeps the registration; confirmation removes that exact registration and its owned metadata,
+including validated interrupted-uninstall cleanup. It never reinstalls or recreates deleted
+application files. A folder deleted after rendering also routes an affected launch or operation
+to this dialog. Unavailable drives/parents, access errors, and unsafe paths are not treated as
+deleted folders. There is no standalone GUI Preview action. Update is primary only when known available.
 **Reset preferences…** appears in the More menu for ordinary registered copies, including
 imports. The confirmation explains the program scope, asks users to close the suite, and says
 that saves, campaigns, and custom files stay. It omits the file list and backup path; the

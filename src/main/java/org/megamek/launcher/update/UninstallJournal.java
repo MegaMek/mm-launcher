@@ -41,6 +41,8 @@ import java.util.List;
  * Durable authority for one uninstall.  The registry removal is the commit barrier: a
  * COMMIT_AUTHORIZED journal plus an absent bound registration is committed, while every journal
  * whose registration still exists is rolled back.
+ * The complete intent precedes atomic moves; recovery uses the original/backup locations.
+ * Per-file states remain readable for journals produced by older launcher versions.
  */
 record UninstallJournal(
         int schemaVersion,

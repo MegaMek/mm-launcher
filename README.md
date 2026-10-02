@@ -518,7 +518,16 @@ Managed/adopted copies with complete current provenance and a fixed channel addi
 same-filesystem recovery area, preserves modified/custom/protected files, removes only empty known
 package directories, and removes registration/metadata last. A durable strict journal makes every
 pre-commit failure recoverable; post-commit cleanup failures are successful uninstalls with a
-cleanup warning. Pending work blocks launch/update and exposes **Recover uninstall**.
+cleanup warning. The complete move intent is recorded before changes, with phase checkpoints
+instead of rewriting the whole journal for every file. Pending work blocks launch/update and
+exposes **Recover uninstall** while the folder exists.
+
+If a user manually deletes an installation folder, **More…** offers a styled
+**Installation not found** confirmation to remove its launcher registration, including a
+validated interrupted-uninstall record. This does not recreate the folder or touch other
+installations. Inaccessible locations and unavailable drives are not mistaken for deleted
+folders. Reinstalling the launcher intentionally preserves the per-user registry and settings;
+use this registration-removal flow rather than reinstalling to clear a missing game copy.
 
 Fresh download, standalone Preview, prepared Update, and recovery use one functional operation
 dialog with a compact dark-teal/gold presentation and typed phases: metadata, download,

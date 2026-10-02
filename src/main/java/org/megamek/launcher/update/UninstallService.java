@@ -134,6 +134,7 @@ public final class UninstallService {
             throws IOException, InterruptedException, ManifestException {
         requireWorker();
         Objects.requireNonNull(context, "context");
+        requirePresent(expected);
         try (OperationContext.WorkerRegistration ignored = context.activate();
              RootCoordinator.Lease lease = coordinator.acquire(rootOf(expected), false)) {
             lease.requireNoPendingUpdate();
@@ -151,6 +152,7 @@ public final class UninstallService {
         Objects.requireNonNull(expectedPlan, "plan");
         Objects.requireNonNull(context, "context");
         Path root = rootOf(expectedPlan.record());
+        requirePresent(expectedPlan.record());
         try (OperationContext.WorkerRegistration ignored = context.activate();
              RootCoordinator.Lease lease = coordinator.acquire(root, false)) {
             lease.requireNoPendingUpdate();
@@ -171,17 +173,39 @@ public final class UninstallService {
      * uses the root gate and an exact registration snapshot.
      */
     public Result removeFromLauncher(InstallationRecord expected) throws IOException {
+        return removeFromLauncher(expected, false);
+    }
+
+    public Result removeMissingFromLauncher(InstallationRecord expected) throws IOException {
+        return removeFromLauncher(expected, true);
+    }
+
+    private Result removeFromLauncher(InstallationRecord expected, boolean missingOnly)
+            throws IOException {
         requireWorker();
         Path root = rootOf(expected);
-        try (RootCoordinator.Lease lease = coordinator.acquire(root, false)) {
+        boolean missing = InstallationDirectory.missing(root);
+        if (!missingOnly && missing) throw new MissingInstallationException(expected);
+        if (missingOnly && !missing) {
+            throw new IOException("The installation folder exists again; nothing was removed.");
+        }
+        try (RootCoordinator.Lease lease = missing
+                ? coordinator.acquireForRecovery(root, false) : coordinator.acquire(root, false)) {
             lease.requireNoPendingUpdate();
-            if (hasPending(expected.id())) {
+            if (hasPending(expected.id()) && !missing) {
                 throw new IOException("Uninstall recovery required before removing this copy");
             }
             RegistryData data = registries.read(registry);
             InstallationRecord current = registries.resolve(data, expected.id());
             requireExact(current, expected);
-            requireCurrentLayout(current);
+            if (missing) {
+                requireMissing(root);
+            } else {
+                requireCurrentLayout(current);
+            }
+            UninstallJournal pendingJournal = missing && hasPending(current.id())
+                    ? readJournal(current.id()) : null;
+            if (pendingJournal != null) requireJournalBinding(pendingJournal, current);
 
             Path metadata = receipts.metadataDirectory(registry);
             List<Path> sidecars = existingSidecars(metadata, current.id());
@@ -198,11 +222,20 @@ public final class UninstallService {
                         moved.add(source);
                     }
                 }
+                if (missing) requireMissing(root);
+                if (pendingJournal != null) {
+                    writeJournal(withPhase(pendingJournal, "COMMIT_AUTHORIZED"));
+                }
                 failureHook.at("remove-before-registry");
+                if (missing) requireMissing(root);
                 registries.remove(registry, current);
             } catch (IOException | RuntimeException failure) {
                 if (registrationIsAbsent(current)) {
                     String warning = cleanupOwned(staging);
+                    if (pendingJournal != null) {
+                        String recoveryWarning = cleanupMissingJournal(pendingJournal);
+                        if (warning == null) warning = recoveryWarning;
+                    }
                     cleanupEmptyMetadataParents();
                     return new Result(false, false, warning == null
                             ? "Removal completed after a registry close warning."
@@ -210,9 +243,20 @@ public final class UninstallService {
                 }
                 IOException rollback = restoreMetadata(staging, moved);
                 if (rollback != null) failure.addSuppressed(rollback);
+                if (pendingJournal != null) {
+                    try {
+                        writeJournal(pendingJournal);
+                    } catch (IOException restoreFailure) {
+                        failure.addSuppressed(restoreFailure);
+                    }
+                }
                 throw failure;
             }
             String warning = cleanupOwned(staging);
+            if (pendingJournal != null) {
+                String recoveryWarning = cleanupMissingJournal(pendingJournal);
+                if (warning == null) warning = recoveryWarning;
+            }
             cleanupEmptyMetadataParents();
             return new Result(false, false, warning);
         }
@@ -267,6 +311,7 @@ public final class UninstallService {
         try (OperationContext.WorkerRegistration ignoredOperation = context.activate();
              RootCoordinator.Lease ignored = coordinator.acquireForRecovery(root, false)) {
             context.phase(OperationPhase.RECOVER, "Restoring interrupted uninstall");
+            if (!journal.rootRemovalStarted()) requirePresent(expected);
             ensureRootForRecovery(root, journal);
             requireExact(current, expected);
             IOException failure = rollback(journal);
@@ -422,22 +467,21 @@ public final class UninstallService {
             Files.createDirectory(rootBackup);
             StrictPathSafety.requireDirectory(rootBackup, "uninstall backup");
             Path fileBackup = Files.createDirectory(rootBackup.resolve("files"));
+            journal = withPhase(journal, "MOVING_FILES");
+            writeJournal(journal);
             context.phase(OperationPhase.UNINSTALL,
                     "Moving verified official files to recovery");
             int moved = 0;
             for (int i = 0; i < journal.files().size(); i++) {
                 UninstallJournal.FileMove move = journal.files().get(i);
-                journal = withFileState(journal, i, "MOVING");
-                writeJournal(journal);
                 Path source = RealUpdateFiles.resolve(root, move.relativePath(), false);
                 requireExactFile(source, move.expectedSha256(), move.expectedSize());
                 Path destination = safeBackupPath(fileBackup, move.relativePath());
                 Files.createDirectories(destination.getParent());
                 StrictPathSafety.requireDirectory(destination.getParent(),
                         "uninstall backup parent");
+                failureHook.at("file-verified");
                 atomicMove(source, destination);
-                journal = withFileState(journal, i, "MOVED");
-                writeJournal(journal);
                 failureHook.at("file-moved");
                 context.progress(OperationPhase.UNINSTALL, ++moved, journal.files().size(),
                         ProgressUnit.FILES, "Secured official application files");
@@ -468,17 +512,16 @@ public final class UninstallService {
 
             Path metadataBackup = Files.createDirectory(transaction.resolve("metadata"));
             StrictPathSafety.requireDirectory(metadataBackup, "uninstall metadata backup");
+            journal = withPhase(journal, "MOVING_METADATA");
+            writeJournal(journal);
             for (int i = 0; i < journal.metadata().size(); i++) {
                 UninstallJournal.MetadataMove move = journal.metadata().get(i);
-                journal = withMetadataState(journal, i, "MOVING");
-                writeJournal(journal);
                 Path source = metadataDirectory.resolve(move.fileName());
                 requireExactFile(source, move.sha256(), move.size());
                 StrictPathSafety.requireDirectory(metadataBackup,
                         "uninstall metadata backup");
+                failureHook.at("metadata-verified");
                 atomicMove(source, metadataBackup.resolve(move.fileName()));
-                journal = withMetadataState(journal, i, "MOVED");
-                writeJournal(journal);
                 failureHook.at("metadata-moved");
             }
 
@@ -605,6 +648,15 @@ public final class UninstallService {
         return null;
     }
 
+    private String cleanupMissingJournal(UninstallJournal journal) {
+        try {
+            return cleanupCommitted(journal);
+        } catch (IOException | RuntimeException failure) {
+            return "Registration removed, but uninstall recovery cleanup is still required: "
+                    + detail(failure);
+        }
+    }
+
     private UninstallJournal readJournal(String id) throws IOException {
         Path file = journalPath(id);
         StrictPathSafety.requireFile(file, "uninstall journal");
@@ -629,7 +681,8 @@ public final class UninstallService {
         Files.deleteIfExists(staging);
         try (FileChannel output = FileChannel.open(staging, StandardOpenOption.CREATE_NEW,
                 StandardOpenOption.WRITE)) {
-            output.write(ByteBuffer.wrap(bytes));
+            ByteBuffer buffer = ByteBuffer.wrap(bytes);
+            while (buffer.hasRemaining()) output.write(buffer);
             output.force(true);
         }
         try {
@@ -639,6 +692,7 @@ public final class UninstallService {
             Files.deleteIfExists(staging);
             throw new IOException("atomic uninstall journal publication is unsupported", error);
         }
+        failureHook.at("journal-published");
     }
 
     private void validateJournal(UninstallJournal journal, String id) throws IOException {
@@ -667,8 +721,9 @@ public final class UninstallService {
             throw new IOException("uninstall root binding is not canonical");
         }
         Path backup = Path.of(journal.rootBackup()).toAbsolutePath().normalize();
-        if (!backup.getParent().equals(root.getParent())
-                || !backup.getFileName().toString().endsWith(journal.transactionId())) {
+        Path expectedBackup = root.resolveSibling("." + root.getFileName()
+                + ".mm-launcher-uninstall-" + journal.transactionId());
+        if (!backup.equals(expectedBackup)) {
             throw new IOException("uninstall backup binding is invalid");
         }
         Set<String> paths = new HashSet<>();
@@ -757,11 +812,24 @@ public final class UninstallService {
     }
 
     private void requireCurrentLayout(InstallationRecord record) throws IOException {
+        requirePresent(record);
         Inspection current = inspector.inspect(rootOf(record));
         if (!current.canonicalRoot().equals(record.canonicalRoot())
                 || !current.observedBuild().equals(record.observedBuild())
                 || !current.products().equals(record.products())) {
             throw new IOException("selected installation changed; reopen Installations");
+        }
+    }
+
+    public static void requirePresent(InstallationRecord record) throws IOException {
+        if (InstallationDirectory.missing(rootOf(record))) {
+            throw new MissingInstallationException(record);
+        }
+    }
+
+    private static void requireMissing(Path root) throws IOException {
+        if (!InstallationDirectory.missing(root)) {
+            throw new IOException("The installation folder exists again; nothing was removed.");
         }
     }
 
@@ -994,30 +1062,6 @@ public final class UninstallService {
                 journal.removedDirectories(), journal.rootRemovalStarted());
     }
 
-    private static UninstallJournal withFileState(
-            UninstallJournal journal, int index, String state) {
-        List<UninstallJournal.FileMove> files = new ArrayList<>(journal.files());
-        UninstallJournal.FileMove old = files.get(index);
-        files.set(index, new UninstallJournal.FileMove(old.relativePath(),
-                old.expectedSha256(), old.expectedSize(), state));
-        return new UninstallJournal(journal.schemaVersion(), journal.transactionId(),
-                "MOVING_FILES", journal.canonicalRegistry(), journal.record(), journal.current(),
-                journal.rootBackup(), files, journal.metadata(), journal.removedDirectories(),
-                journal.rootRemovalStarted());
-    }
-
-    private static UninstallJournal withMetadataState(
-            UninstallJournal journal, int index, String state) {
-        List<UninstallJournal.MetadataMove> metadata = new ArrayList<>(journal.metadata());
-        UninstallJournal.MetadataMove old = metadata.get(index);
-        metadata.set(index, new UninstallJournal.MetadataMove(old.fileName(), old.sha256(),
-                old.size(), state));
-        return new UninstallJournal(journal.schemaVersion(), journal.transactionId(),
-                "MOVING_METADATA", journal.canonicalRegistry(), journal.record(),
-                journal.current(), journal.rootBackup(), journal.files(), metadata,
-                journal.removedDirectories(), journal.rootRemovalStarted());
-    }
-
     private static UninstallJournal withRootRemoval(UninstallJournal journal) {
         return new UninstallJournal(journal.schemaVersion(), journal.transactionId(),
                 "REMOVING_ROOT", journal.canonicalRegistry(), journal.record(), journal.current(),
@@ -1046,6 +1090,19 @@ public final class UninstallService {
     }
 
     public record RecoveryResult(boolean committed, String message, String warning) {
+    }
+
+    public static final class MissingInstallationException extends IOException {
+        private final InstallationRecord record;
+
+        private MissingInstallationException(InstallationRecord record) {
+            super("The installation folder no longer exists: " + record.canonicalRoot());
+            this.record = record;
+        }
+
+        public InstallationRecord record() {
+            return record;
+        }
     }
 
     @FunctionalInterface

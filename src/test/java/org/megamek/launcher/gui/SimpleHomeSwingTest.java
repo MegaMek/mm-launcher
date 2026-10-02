@@ -1551,6 +1551,10 @@ class SimpleHomeSwingTest {
             main = first;
         }
 
+        @Override public void requireInstallationPresent(InstallationRecord record) {
+            assertTrue(records.stream().anyMatch(candidate -> candidate.id().equals(record.id())));
+        }
+
         @Override public PreferencesResetService.Plan planPreferencesReset(
                 InstallationRecord record) {
             resetPlans.incrementAndGet();

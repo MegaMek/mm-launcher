@@ -52,6 +52,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.util.List;
+import java.util.Comparator;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.jar.Attributes;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
@@ -61,9 +63,196 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 class UninstallServiceTest {
     @TempDir Path temp;
+
+    @Test
+    void journalPublicationCountDoesNotGrowWithTheNumberOfOfficialFiles() throws Exception {
+        for (int fileCount : new int[] {16, 2048}) {
+            Fixture fixture = managed("many-files-" + fileCount, fileCount);
+            AtomicInteger publications = new AtomicInteger();
+            UninstallService service = fixture.service(point -> {
+                if (point.equals("journal-published")) publications.incrementAndGet();
+            });
+            UninstallService.Plan plan = service.plan(fixture.record, context());
+            assertEquals(fileCount + 3, plan.entries().size());
+            long started = System.nanoTime();
+            UninstallService.Result result = service.uninstall(
+                    plan, UninstallService.CONFIRMATION, context());
+            System.out.printf("Uninstall %d official files: %.3f seconds, %d durable journal publications%n",
+                    plan.entries().size(), (System.nanoTime() - started) / 1_000_000_000.0,
+                    publications.get());
+            assertTrue(result.committed());
+            assertNull(result.warning());
+            assertEquals(6, publications.get(), "journal writes must be phase-bounded, not per-file");
+            assertEquals("custom", Files.readString(fixture.root.resolve("custom/user.txt")));
+            assertFalse(Files.exists(fixture.root.resolve("docs")));
+        }
+    }
+
+    @Test
+    void intentJournalRecoversBeforeAndAfterFileAndMetadataMovesAndRegistryCommit() throws Exception {
+        for (String checkpoint : List.of("file-verified", "file-moved", "metadata-verified",
+                "metadata-moved", "before-registration-commit")) {
+            Fixture fixture = managed(checkpoint);
+            byte[] jar = Files.readAllBytes(fixture.root.resolve("MegaMek.jar"));
+            Path receipt = new ReceiptStore().receiptPath(fixture.registry, fixture.record.id());
+            byte[] metadata = Files.readAllBytes(receipt);
+            UninstallService crashing = fixture.service(point -> {
+                if (point.equals(checkpoint)) throw new SimulatedCrash();
+            });
+            assertThrows(SimulatedCrash.class, () -> crashing.uninstall(
+                    crashing.plan(fixture.record, context()), UninstallService.CONFIRMATION, context()));
+            assertTrue(crashing.hasPending(fixture.record.id()));
+            var recovered = fixture.service(point -> {}).recover(fixture.record, context());
+            assertFalse(recovered.committed());
+            assertArrayEquals(jar, Files.readAllBytes(fixture.root.resolve("MegaMek.jar")));
+            assertArrayEquals(metadata, Files.readAllBytes(receipt));
+            assertFalse(crashing.hasPending(fixture.record.id()));
+        }
+    }
+
+    @Test
+    void legacyPerFileMoveStatesStillRecoverAndUnexpectedDestinationEditsAreNeverOverwritten()
+            throws Exception {
+        Fixture fixture = managed("legacy-recovery");
+        UninstallService crashing = fixture.service(point -> {
+            if (point.equals("metadata-moved")) throw new SimulatedCrash();
+        });
+        assertThrows(SimulatedCrash.class, () -> crashing.uninstall(
+                crashing.plan(fixture.record, context()), UninstallService.CONFIRMATION, context()));
+        Path journal = UninstallService.pendingJournalPath(fixture.registry, fixture.record.id());
+        String legacy = Files.readString(journal).replaceFirst("\"state\" : \"PLANNED\"", "\"state\" : \"MOVED\"")
+                .replaceFirst("\"state\" : \"PLANNED\"", "\"state\" : \"MOVING\"");
+        Files.writeString(journal, legacy);
+        Path edited = Files.writeString(fixture.root.resolve("MegaMek.jar"), "unexpected edit");
+        assertThrows(IOException.class, () -> fixture.service(point -> {}).recover(fixture.record, context()));
+        assertEquals("unexpected edit", Files.readString(edited));
+        assertTrue(Files.exists(journal));
+        Files.delete(edited);
+        fixture.service(point -> {}).recover(fixture.record, context());
+        assertEquals(fixture.record,
+                fixture.store.resolve(fixture.store.read(fixture.registry), fixture.record.id()));
+        assertTrue(Files.size(fixture.root.resolve("MegaMek.jar")) > 0);
+        assertFalse(Files.exists(journal));
+    }
+
+    @Test
+    void crashAfterTransactionRemovesEmptyRootStillRestoresTheWholeInstallation() throws Exception {
+        Fixture fixture = managed("empty-root-recovery");
+        Files.delete(fixture.root.resolve("custom/user.txt"));
+        Files.delete(fixture.root.resolve("custom"));
+        byte[] jar = Files.readAllBytes(fixture.root.resolve("MegaMek.jar"));
+        UninstallService crashing = fixture.service(point -> {
+            if (point.equals("root-removed")) throw new SimulatedCrash();
+        });
+        assertThrows(SimulatedCrash.class, () -> crashing.uninstall(
+                crashing.plan(fixture.record, context()), UninstallService.CONFIRMATION, context()));
+        assertFalse(Files.exists(fixture.root));
+        assertFalse(fixture.service(point -> {}).recover(fixture.record, context()).committed());
+        assertArrayEquals(jar, Files.readAllBytes(fixture.root.resolve("MegaMek.jar")));
+        assertEquals(List.of(fixture.record), fixture.store.read(fixture.registry).installations());
+    }
+
+    @Test
+    void deletedManagedAndImportedRootsCanBeForgottenWithoutTouchingOtherInstallations() throws Exception {
+        Fixture fixture = managed("deleted-managed");
+        InstallationRecord other = fixture.store.register(
+                fixture.registry, "Other", suite(temp.resolve("other")), null);
+        deleteFixture(fixture.root);
+        assertThrows(UninstallService.MissingInstallationException.class,
+                () -> fixture.service(point -> {}).removeFromLauncher(fixture.record));
+        var result = fixture.service(point -> {}).removeMissingFromLauncher(fixture.record);
+        assertNull(result.warning());
+        var data = fixture.store.read(fixture.registry);
+        assertEquals(List.of(other), data.installations());
+        assertEquals(other.id(), data.defaultInstallationId());
+        assertEquals(other.id(), data.preferredInstallationIds().get("megamek"));
+        assertFalse(Files.exists(fixture.root));
+        assertTrue(Files.exists(Path.of(other.canonicalRoot()).resolve("MegaMek.jar")));
+        assertFalse(Files.exists(new ReceiptStore().receiptPath(fixture.registry, fixture.record.id())));
+
+        deleteFixture(Path.of(other.canonicalRoot()));
+        fixture.service(point -> {}).removeMissingFromLauncher(other);
+        assertTrue(fixture.store.read(fixture.registry).installations().isEmpty());
+    }
+
+    @Test
+    void deletedRootAfterInterruptedUninstallCanBeForgottenAndOwnedBackupsCleaned() throws Exception {
+        Fixture fixture = managed("deleted-mid-uninstall");
+        UninstallService crashing = fixture.service(point -> {
+            if (point.equals("file-moved")) throw new SimulatedCrash();
+        });
+        assertThrows(SimulatedCrash.class, () -> crashing.uninstall(
+                crashing.plan(fixture.record, context()), UninstallService.CONFIRMATION, context()));
+        Path journal = UninstallService.pendingJournalPath(fixture.registry, fixture.record.id());
+        var saved = new com.fasterxml.jackson.databind.ObjectMapper().readTree(Files.readAllBytes(journal));
+        Path backup = Path.of(saved.get("rootBackup").asText());
+        assertTrue(Files.exists(backup));
+        deleteFixture(fixture.root);
+        assertThrows(UninstallService.MissingInstallationException.class,
+                () -> fixture.service(point -> {}).recover(fixture.record, context()));
+        var result = fixture.service(point -> {}).removeMissingFromLauncher(fixture.record);
+        assertNull(result.warning());
+        assertFalse(Files.exists(fixture.root), "forgetting must not recreate the deleted folder");
+        assertFalse(Files.exists(backup));
+        assertFalse(Files.exists(journal));
+        assertTrue(fixture.store.read(fixture.registry).installations().isEmpty());
+        assertTrue(fixture.service(point -> {}).recoverCommitted().isEmpty());
+    }
+
+    @Test
+    void staleRecordReappearingFolderAndActiveRootGateBlockMissingRemoval() throws Exception {
+        Fixture fixture = managed("missing-revalidation");
+        deleteFixture(fixture.root);
+        InstallationRecord renamed = fixture.store.rename(fixture.registry, fixture.record, "Renamed");
+        assertThrows(IOException.class,
+                () -> fixture.service(point -> {}).removeMissingFromLauncher(fixture.record));
+        try (var ignored = new RootCoordinator(fixture.registry.resolveSibling("coordination"))
+                .acquireForRecovery(fixture.root, false)) {
+            assertThrows(IOException.class,
+                    () -> fixture.service(point -> {}).removeMissingFromLauncher(renamed));
+        }
+        Files.createDirectory(fixture.root);
+        Path custom = Files.writeString(fixture.root.resolve("keep.txt"), "keep");
+        assertThrows(IOException.class,
+                () -> fixture.service(point -> {}).removeMissingFromLauncher(renamed));
+        assertEquals("keep", Files.readString(custom));
+        assertEquals(List.of(renamed), fixture.store.read(fixture.registry).installations());
+    }
+
+    @Test
+    void failedMissingRemovalRestoresMetadataAndDoesNotDeleteAReappearingRoot() throws Exception {
+        Fixture fixture = managed("missing-rollback");
+        Path receipt = new ReceiptStore().receiptPath(fixture.registry, fixture.record.id());
+        byte[] before = Files.readAllBytes(receipt);
+        deleteFixture(fixture.root);
+        UninstallService racing = fixture.service(point -> {
+            if (point.equals("remove-before-registry")) {
+                Files.createDirectory(fixture.root);
+                Files.writeString(fixture.root.resolve("new.txt"), "do not delete");
+            }
+        });
+        assertThrows(IOException.class, () -> racing.removeMissingFromLauncher(fixture.record));
+        assertArrayEquals(before, Files.readAllBytes(receipt));
+        assertEquals(List.of(fixture.record), fixture.store.read(fixture.registry).installations());
+        assertEquals("do not delete", Files.readString(fixture.root.resolve("new.txt")));
+    }
+
+    @Test
+    void corruptPendingJournalCannotAuthorizeMissingRegistrationRemoval() throws Exception {
+        Fixture fixture = managed("corrupt-missing-journal");
+        Path journal = UninstallService.pendingJournalPath(fixture.registry, fixture.record.id());
+        Files.createDirectories(journal.getParent());
+        Files.writeString(journal, "{corrupt");
+        deleteFixture(fixture.root);
+        assertThrows(IOException.class,
+                () -> fixture.service(point -> {}).removeMissingFromLauncher(fixture.record));
+        assertEquals(List.of(fixture.record), fixture.store.read(fixture.registry).installations());
+        assertEquals("{corrupt", Files.readString(journal));
+    }
 
     @Test
     void uninstallDeletesOnlyExactCurrentOfficialFilesAndKeepsCustomAndModified()
@@ -284,7 +473,15 @@ class UninstallServiceTest {
     }
 
     private Fixture managed(String name) throws Exception {
+        return managed(name, 0);
+    }
+
+    private Fixture managed(String name, int fileCount) throws Exception {
         Path root = suite(temp.resolve(name));
+        for (int i = 0; i < fileCount; i++) {
+            Path directory = Files.createDirectories(root.resolve("docs/bucket-" + (i % 64)));
+            Files.writeString(directory.resolve("file-" + i + ".txt"), "official file " + i);
+        }
         Files.writeString(root.resolve("lib/runtime.txt"), "runtime");
         Files.writeString(root.resolve("docs/guide.txt"), "official");
         Files.createDirectories(root.resolve("custom"));
@@ -300,6 +497,13 @@ class UninstallServiceTest {
         new ChannelPreferenceStore().initializeManaged(
                 registry, record, receipt, FollowChannel.MILESTONE, false);
         return new Fixture(root, registry, store, record);
+    }
+
+    private void deleteFixture(Path root) throws IOException {
+        assertTrue(root.startsWith(temp) && !root.equals(temp), "only delete this test's installation fixture");
+        try (var paths = Files.walk(root)) {
+            for (Path path : paths.sorted(Comparator.reverseOrder()).toList()) Files.delete(path);
+        }
     }
 
     private static Path suite(Path root) throws Exception {
