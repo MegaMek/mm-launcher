@@ -1,6 +1,7 @@
 # Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
 # SPDX-License-Identifier: GPL-3.0-or-later
 name: Launcher native installers
+run-name: Launcher build checks - ${{ github.event_name }} (${{ github.head_ref || github.ref_name }})
 
 on:
   workflow_call:

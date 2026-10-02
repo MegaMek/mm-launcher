@@ -29,8 +29,18 @@ explicitly. Recording/uploading this optional evidence does not block publicatio
 A release-run trailer is only
 a lookup hint, not permission to skip CI. PRs, ordinary code changes, manual builds and
 the release workflow's pinned candidate builds still build all platforms. The decision
-and original run link appear in the workflow summary. Advisory desktop tests still run
-separately; they do not rebuild installers.
+and original run link appear in the workflow summary. The advisory workflow uses the same
+read-only proof to skip its four desktop jobs only for these verified version-only pushes.
+PRs, ordinary main changes, manual desktop runs and weekly runs still execute desktop tests.
+Missing evidence keeps normal validation; invalid evidence fails visibly. Neither workflow
+publishes anything.
+
+Actions run titles explicitly say **Launcher build checks** or **Desktop UI checks**,
+with the event and branch, rather than reusing the release candidate's commit message.
+After publication, two short workflow entries can still appear: installer verification
+and desktop-check selection. Verified version-only pushes skip both expensive matrices;
+the Actions entries themselves are not hidden. Ordinary PRs add one lightweight desktop
+selection job before their four desktop jobs.
 
 `test` is the required headless gate: backend/file-safety tests, deterministic UI
 components and state, the production automatic-check worker, and safe Windows helper

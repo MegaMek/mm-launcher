@@ -301,6 +301,7 @@ class LauncherReleaseTest(unittest.TestCase):
 
     def test_pr_manual_reusable_and_fork_ci_always_build_without_provenance_requests(self):
         for changes in ({"GITHUB_EVENT_NAME": "pull_request"}, {"GITHUB_EVENT_NAME": "workflow_dispatch"},
+                        {"GITHUB_EVENT_NAME": "schedule"},
                         {"CI_SOURCE_COMMIT": "d" * 40}, {"GITHUB_REPOSITORY": "someone/mm-launcher"},
                         {"GITHUB_REF": "refs/heads/feature"}):
             github = FakeGitHub()
@@ -547,7 +548,9 @@ class LauncherReleaseTest(unittest.TestCase):
                 patch("launcher_release.verify_checkout"), \
                 patch("launcher_release.sys.argv", ["launcher_release.py", "ci-plan"]):
             release.main()
-        self.assertEqual("build_installers=false\n", outputs.read_text())
+        self.assertEqual("build_installers=false\nrun_desktop_tests=false\n", outputs.read_text())
+        self.assertIn("### CI validation decision", summary.read_text())
+        self.assertIn("No application/UI code changed", summary.read_text())
         self.assertIn("actions/runs/123", summary.read_text())
         output.assert_called_once()
         self.assertTrue(output.call_args.args[0].startswith("::notice::"))
@@ -564,8 +567,28 @@ class LauncherReleaseTest(unittest.TestCase):
                 patch("launcher_release.verify_checkout"), \
                 patch("launcher_release.sys.argv", ["launcher_release.py", "ci-plan"]):
             release.main()
-        self.assertEqual("build_installers=true\n", outputs.read_text())
+        self.assertEqual("build_installers=true\nrun_desktop_tests=true\n", outputs.read_text())
         self.assertIn("Ordinary main change", output.call_args.args[0])
+
+    @patch("builtins.print")
+    def test_ci_plan_cli_keeps_desktop_tests_for_pr_manual_scheduled_and_fork_runs(self, output):
+        for changes in ({"GITHUB_EVENT_NAME": "pull_request"},
+                        {"GITHUB_EVENT_NAME": "workflow_dispatch"},
+                        {"GITHUB_EVENT_NAME": "schedule"},
+                        {"GITHUB_REPOSITORY": "someone/mm-launcher"},
+                        {"CI_SOURCE_COMMIT": "d" * 40}):
+            outputs = self.root / "normal-ci-output.txt"
+            github = FakeGitHub()
+            with self.subTest(changes=changes), \
+                    patch.dict(os.environ, {**ENVIRONMENT, "GITHUB_EVENT_NAME": "push",
+                                            "GITHUB_OUTPUT": str(outputs), "GITHUB_STEP_SUMMARY": "", **changes}), \
+                    patch("launcher_release.Path.cwd", return_value=self.root), \
+                    patch("launcher_release.GitHub", return_value=github), \
+                    patch("launcher_release.sys.argv", ["launcher_release.py", "ci-plan"]):
+                release.main()
+                self.assertEqual("build_installers=true\nrun_desktop_tests=true\n", outputs.read_text())
+                self.assertEqual([], github.calls)
+            outputs.unlink()
 
     def test_ci_plan_failure_never_exports_a_skip_decision(self):
         github, environment = self.ci_fixture()

@@ -528,6 +528,10 @@ headless, retaining component/state assertions and the production automatic-chec
 opt-in, eligibility, bounded selection, deduplication, cancellation, binding and EDT behavior.
 Tests that need actual windows are tagged `native-gui` at method level in mixed classes and
 run with `nativeGuiTest` in the independent advisory desktop workflow, not the release gate.
+The advisory workflow uses shared read-only release verification to skip its desktop
+matrix only on proven release-version-only main pushes. PRs, ordinary main changes,
+manual runs and scheduled runs retain desktop tests; missing proof retains normal
+validation and invalid proof fails visibly.
 Missing display/all-skipped execution is not a successful advisory run.
 Native smoke tests must dispose their own windows on the EDT.
 Tests that trigger background diagnostics must release and join their fixture's writer

@@ -1,6 +1,7 @@
 # Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
 # SPDX-License-Identifier: GPL-3.0-or-later
 name: Launcher desktop smoke tests (advisory)
+run-name: Desktop UI checks - ${{ github.event_name }} (${{ github.head_ref || github.ref_name }})
 
 on:
   workflow_dispatch:
@@ -13,6 +14,7 @@ on:
       - "gradlew"
       - "gradlew.bat"
       - "src/**"
+      - "scripts/**"
   pull_request:
     paths:
       - ".github/workflows/launcher-gui-smoke.yml"
@@ -21,6 +23,7 @@ on:
       - "gradlew"
       - "gradlew.bat"
       - "src/**"
+      - "scripts/**"
   schedule:
     - cron: "23 6 * * 1"
 
@@ -32,7 +35,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  release-verification:
+    name: Desktop check selection
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      run_desktop_tests: ${{ steps.ci-plan.outputs.run_desktop_tests }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Determine whether this push only records an already verified release
+        id: ci-plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -B scripts/launcher_release.py ci-plan
+
   desktop:
+    needs: release-verification
+    if: needs.release-verification.outputs.run_desktop_tests == 'true'
     name: Advisory desktop smoke - ${{ matrix.id }}
     strategy:
       fail-fast: false
