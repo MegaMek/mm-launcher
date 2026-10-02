@@ -57,6 +57,8 @@ class WorkflowStructureTest {
             throws Exception {
         String text = Files.readString(WORKFLOW, StandardCharsets.UTF_8);
         JsonNode root = new ObjectMapper(new YAMLFactory()).readTree(text);
+        assertEquals("Launcher build checks - ${{ github.event_name }} (${{ github.head_ref || github.ref_name }})",
+                root.path("run-name").asText());
 
         assertTrue(root.path("on").has("workflow_dispatch"));
         assertTrue(root.path("on").has("workflow_call"));
@@ -332,17 +334,40 @@ class WorkflowStructureTest {
         String text = Files.readString(Path.of(".github", "workflows", "launcher-gui-smoke.yml"));
         JsonNode root = new ObjectMapper(new YAMLFactory()).readTree(text);
         assertTrue(root.path("name").asText().contains("advisory"));
+        assertEquals("Desktop UI checks - ${{ github.event_name }} (${{ github.head_ref || github.ref_name }})",
+                root.path("run-name").asText());
         assertEquals("read", root.path("permissions").path("contents").asText());
         for (String event : List.of("push", "pull_request", "schedule", "workflow_dispatch")) {
             assertTrue(root.path("on").has(event));
         }
         assertFalse(root.path("on").has("workflow_call"));
+        for (String event : List.of("push", "pull_request")) {
+            assertTrue(root.path("on").path(event).path("paths").toString().contains("scripts/**"),
+                    "changes to the shared verification script must exercise its desktop consumer");
+        }
+        assertEquals(2, root.path("jobs").size());
+        JsonNode verification = root.path("jobs").path("release-verification");
+        assertEquals("ubuntu-24.04", verification.path("runs-on").asText());
+        assertEquals(5, verification.path("timeout-minutes").asInt());
+        assertEquals("read", verification.path("permissions").path("contents").asText());
+        assertEquals("read", verification.path("permissions").path("actions").asText());
+        assertEquals(List.of("actions/checkout@v4"), actions(verification));
+        assertFalse(verification.has("continue-on-error"));
+        assertEquals("${{ steps.ci-plan.outputs.run_desktop_tests }}",
+                verification.path("outputs").path("run_desktop_tests").asText());
+        JsonNode selection = step(verification,
+                "Determine whether this push only records an already verified release");
+        assertEquals("ci-plan", selection.path("id").asText());
+        assertEquals("${{ github.token }}", selection.path("env").path("GH_TOKEN").asText());
+        assertEquals("python3 -B scripts/launcher_release.py ci-plan", selection.path("run").asText());
         JsonNode desktop = root.path("jobs").path("desktop");
         List<String> platforms = new ArrayList<>();
         desktop.path("strategy").path("matrix").path("include")
                 .forEach(row -> platforms.add(row.path("id").asText()));
         assertEquals(List.of("windows-x64", "linux-x64", "macos-intel", "macos-apple-silicon"), platforms);
-        assertFalse(desktop.has("needs"));
+        assertEquals("release-verification", desktop.path("needs").asText());
+        assertEquals("needs.release-verification.outputs.run_desktop_tests == 'true'",
+                desktop.path("if").asText());
         assertFalse(desktop.has("continue-on-error"));
         assertEquals("21", desktop.path("steps").get(1).path("with").path("java-version").asText());
         assertEquals(3, count(text, " nativeGuiTest"));
@@ -353,7 +378,6 @@ class WorkflowStructureTest {
         assertTrue(reports.path("with").path("path").asText().contains("test-results/nativeGuiTest"));
         assertFalse(text.contains("secrets."));
         assertFalse(text.contains("continue-on-error"));
-        assertFalse(text.contains("launcher_release.py"));
     }
 
     private static JsonNode step(JsonNode job, String name) {

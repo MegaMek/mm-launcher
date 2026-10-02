@@ -504,7 +504,7 @@ def verified_release_push(github, root, environment):
             or environment.get("GITHUB_REPOSITORY") != REPOSITORY
             or environment.get("GITHUB_REF") != "refs/heads/main"
             or environment.get("CI_SOURCE_COMMIT")):
-        return False, "PRs, manual runs, forks and reusable release builds always build installers."
+        return False, "PRs, manual/scheduled runs, forks and reusable release builds keep normal validation."
     commit = require_sha(environment.get("GITHUB_SHA"))
     verify_checkout(root, commit)
     candidate = github.request("GET", f"{API}/git/commits/{commit}")
@@ -519,7 +519,7 @@ def verified_release_push(github, root, environment):
     numeric_version(version)
     published = github.request("GET", f"{API}/releases/tags/v{version}", missing_ok=True)
     if published is None:
-        return False, "Candidate has not been published; installers must be built."
+        return False, "Candidate has not been published; normal validation is required."
     if (not isinstance(published, dict) or not isinstance(published.get("draft"), bool)
             or not isinstance(published.get("prerelease"), bool)):
         raise ReleaseError("Cannot determine the candidate release's publication state")
@@ -575,13 +575,13 @@ def verified_release_push(github, root, environment):
         raise ReleaseError("Release-job pagination bound reached")
     if not names.issubset(jobs) or any(jobs[name].get("status") != "completed"
                                      or jobs[name].get("conclusion") != "success" for name in names):
-        return False, "Release build/test/publication success is not confirmed; running installers."
+        return False, "Release build/test/publication success is not confirmed; running normal checks."
     attempt = jobs["publish"].get("run_attempt")
     if not positive_id(attempt):
         raise ReleaseError("Cannot identify the successful publication attempt")
     record = retained_publication(github, run_id, attempt, base)
     if record is None:
-        return False, "Original publication provenance is missing or expired; running installers."
+        return False, "Original publication provenance is missing or expired; running normal checks."
     if (not isinstance(record, dict) or type(record.get("schema_version")) is not int
             or record["schema_version"] != 1 or record.get("repository") != REPOSITORY
             or record.get("version") != version or record.get("commit") != commit
@@ -611,7 +611,8 @@ def verified_release_push(github, root, environment):
     if {asset.path.name for asset in assets} != expected_names:
         raise ReleaseError("Published release assets were duplicated or substituted")
     return True, (f"Exact version-only candidate {commit} was built, tested and published by "
-                  f"https://github.com/{REPOSITORY}/actions/runs/{run_id}; no duplicate installer build.")
+                  f"https://github.com/{REPOSITORY}/actions/runs/{run_id}; no duplicate installer build. "
+                  "No application/UI code changed, so post-release desktop checks are unnecessary.")
 
 
 def publish(github, version, commit, assets):
@@ -668,11 +669,12 @@ def main():
         reused, reason = verified_release_push(github, root, os.environ)
         with Path(output).open("a", encoding="utf-8") as file:
             file.write(f"build_installers={'false' if reused else 'true'}\n")
+            file.write(f"run_desktop_tests={'false' if reused else 'true'}\n")
         print(f"::notice::{reason}")
         summary = os.environ.get("GITHUB_STEP_SUMMARY")
         if summary:
             with Path(summary).open("a", encoding="utf-8") as file:
-                file.write(f"### Installer CI decision\n\n{reason}\n")
+                file.write(f"### CI validation decision\n\n{reason}\n")
         return
     if args.command in ("prepare", "candidate"):
         if any(value is not None for value in (args.version, args.commit, args.assets, args.base, args.provenance)):

@@ -91,7 +91,7 @@ and never passed to installer/test jobs or publication.
 Artifacts come from the current workflow run, not a previous build or independently selected
 latest artifact.
 
-### Avoiding duplicate installer builds after publication
+### Avoiding redundant CI after publication
 
 Candidate commits retain a `Launcher-Release-Run` trailer identifying their original
 workflow run. After finalization pushes that commit to main, the ordinary native workflow
@@ -100,7 +100,8 @@ Only an official main push without a pinned source input can reuse release verif
 PRs, forks, manual native builds and reusable candidate builds always run all four platforms.
 
 The check does not trust a bot identity, commit title or trailer by itself. Before emitting
-`build_installers=false`, it verifies the pushed checkout, published stable tag SHA,
+`build_installers=false` and `run_desktop_tests=false`, it verifies the pushed checkout,
+published stable tag SHA,
 exact version-only tree/single base parent, run-specific candidate branch, and official
 manual release workflow at that same base. The original prepare, tooling, four native
 build/test jobs and publication job must all have succeeded. It checks the latest execution
@@ -113,7 +114,8 @@ installer/checksum bytes and writes `launcher-release-provenance.json`. The same
 job retains it using immutable v4 Actions artifacts, named
 `launcher-release-provenance-<run-id>-<publish-attempt>`, without overwrite, for 14 days.
 Recording/upload failures are visible but nonblocking: this evidence enables a CI
-optimization, not publication safety, and its absence must cause normal installer builds.
+optimization, not publication safety, and its absence must cause normal installer builds
+and desktop tests.
 
 The gate uses the successful publication job's attempt, not the overall run's latest
 attempt, so finalization-only reruns can retain valid proof. It checks the artifact's
@@ -124,15 +126,25 @@ IDs, sizes and SHA-256 digests. Current public metadata is checked against that 
 record, including exact official URLs and an updater-compatible MSI size. Deleting and
 re-uploading assets cannot satisfy the gate merely by keeping their names and URLs.
 No installer is downloaded again. Missing/expired provenance, missing publication or
-unconfirmed successful jobs means a normal installer build, with an explicit explanation.
+unconfirmed successful jobs means normal installer builds and desktop tests, with an
+explicit explanation.
 Malformed/mismatched provenance or API failures fail explicitly, never silently skip tests.
 
-Only the tooling job gains repository-scoped `actions: read` alongside `contents: read`
-for provenance lookup; the release caller permits that read-only scope. No App credentials
-or write permissions are introduced. The installer matrix depends on the tooling decision.
+The native tooling job and advisory desktop-selection job use repository-scoped `actions: read`
+alongside `contents: read` for provenance lookup; the release caller permits that read-only
+scope. No App credentials or write permissions are introduced. Both matrices depend on
+their respective outputs from the same shared verification command.
 The workflow summary links to the original verified release run when duplicate builds are
-skipped. The independent advisory desktop workflow is unchanged and still runs actual
-window tests after a main push; it does not package installers.
+skipped. The independent advisory workflow skips actual window tests only for verified
+release-version-only main pushes, not because the publisher ran native desktop tests.
+PRs, ordinary main changes, manual dispatch and weekly runs keep all four desktop jobs.
+Changes to the shared scripts also trigger the advisory workflow. Neither workflow can
+publish a release. Verification errors stay visible; they are not silently accepted.
+
+Explicit Actions run names identify **Launcher build checks** and **Desktop UI checks**,
+including event and branch. They no longer inherit misleading candidate-preparation
+commit titles. Two quick post-publication workflow entries still appear even when both
+matrices are skipped; ordinary PRs gain one lightweight desktop-selection job.
 
 The default `test` task excludes `archive` and `native-gui` tags and forces headless mode.
 It still compiles all tests and runs backend/material safety checks, safe Windows helper
@@ -140,8 +152,8 @@ execution, deterministic UI components/state, and the actual automatic-check wor
 Mixed classes retain their headless-safe methods in this gate. `nativeGuiTest` selects only
 display-dependent methods, requires actual execution rather than an all-skipped success, and
 runs in the independent [advisory desktop workflow](../.github/workflows/launcher-gui-smoke.yml)
-on PRs, main, manual dispatch, and a weekly schedule across all four platforms (Linux uses
-Xvfb). Failures stay visibly red with retained reports; there are no automatic retries,
+on PRs, ordinary main pushes, manual dispatch, and a weekly schedule across all four
+platforms (Linux uses Xvfb). Failures stay visibly red with retained reports; there are no automatic retries,
 `continue-on-error`, or release dependencies on that workflow. Its jobs must not become
 required branch checks.
 
@@ -273,9 +285,9 @@ The bypass grants the App real repository write authority, not a server-enforced
 to one file. The workflow narrows its installation token to this repository and verifies that
 the generated commit changes only the version file. Protect the App key and workflow changes.
 GitHub App-authored main pushes trigger ordinary read-only CI. Proven release-finalization
-pushes skip duplicate installer builds through the guard above; advisory desktop tests
-remain separate. These push runs cannot publish and are never substituted for the release
-run's required installer/test matrix.
+pushes skip duplicate installer builds and post-release desktop tests through the guard
+above; advisory desktop checks remain independent. These push runs cannot publish and
+are never substituted for the release run's required installer/test matrix.
 Missing configuration, denied bypass, or GitHub write failures fail explicitly; there is
 no personal-token fallback.
 
