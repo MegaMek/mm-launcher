@@ -101,7 +101,7 @@ and news loading never delays navigation.
 The Windows launcher-update confirmation says **Version \<version\> is available.** and
 **Close any running games before updating.**, with **Cancel** and **Update now** actions.
 Clean, confirmed update completion is diagnostic-only: no success popup, confirmation
-preamble, or extra detail in a release-lookup error. The title bar identifies the current version.
+preamble, or extra detail in a release-lookup error.
 Failures, required computer restarts, staged MSI cleanup warnings and unresolved pending
 updates retain their existing presentation. Diagnostic-write failures are surfaced explicitly.
 
