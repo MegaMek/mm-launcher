@@ -79,8 +79,18 @@ class WorkflowStructureTest {
         assertEquals(List.of("actions/checkout@v4"), actions(tooling));
         assertEquals("${{ inputs.source_commit || github.sha }}",
                 tooling.path("steps").get(0).path("with").path("ref").asText());
+        assertEquals("read", tooling.path("permissions").path("contents").asText());
+        assertEquals("read", tooling.path("permissions").path("actions").asText());
+        assertEquals("${{ steps.ci-plan.outputs.build_installers }}",
+                tooling.path("outputs").path("build_installers").asText());
         assertTrue(step(tooling, "Test launcher release tooling without network or publication")
                 .path("run").asText().contains("unittest discover -s scripts -p test_launcher_release.py"));
+        JsonNode plan = step(tooling,
+                "Determine whether this exact release candidate already passed installer CI");
+        assertEquals("ci-plan", plan.path("id").asText());
+        assertEquals("${{ github.token }}", plan.path("env").path("GH_TOKEN").asText());
+        assertEquals("${{ inputs.source_commit }}", plan.path("env").path("CI_SOURCE_COMMIT").asText());
+        assertEquals("python3 -B scripts/launcher_release.py ci-plan", plan.path("run").asText());
         for (String event : List.of("push", "pull_request")) {
             String paths = root.path("on").path(event).path("paths").toString();
             assertTrue(paths.contains("scripts/**"));
@@ -88,6 +98,8 @@ class WorkflowStructureTest {
             assertTrue(paths.contains(".github/workflows/launcher-gui-smoke.yml"));
         }
         JsonNode installers = jobs.path("installers");
+        assertEquals("release-tooling", installers.path("needs").asText());
+        assertEquals("needs.release-tooling.outputs.build_installers == 'true'", installers.path("if").asText());
         assertEquals("${{ inputs.source_commit || github.sha }}",
                 installers.path("steps").get(0).path("with").path("ref").asText());
         assertEquals("${{ inputs.source_commit || github.sha }}",
@@ -238,6 +250,8 @@ class WorkflowStructureTest {
         assertEquals("prepare", installers.path("needs").asText());
         assertEquals("./.github/workflows/launcher-archives.yml", installers.path("uses").asText());
         assertEquals("read", installers.path("permissions").path("contents").asText());
+        assertEquals("read", installers.path("permissions").path("actions").asText(),
+                "the reusable tooling job needs read-only release-run provenance access");
         assertEquals("${{ needs.prepare.outputs.commit }}",
                 installers.path("with").path("source_commit").asText());
         assertFalse(installers.has("secrets"), "installer jobs must not receive publisher secrets");
@@ -247,7 +261,8 @@ class WorkflowStructureTest {
         assertEquals(List.of("prepare", "installers"), prerequisites);
         assertFalse(publish.has("if"), "default success dependency guard must not be bypassed");
         assertEquals("write", publish.path("permissions").path("contents").asText());
-        assertEquals(List.of("actions/checkout@v4", "actions/download-artifact@v4"), actions(publish));
+        assertEquals(List.of("actions/checkout@v4", "actions/download-artifact@v4",
+                "actions/upload-artifact@v4"), actions(publish));
         assertEquals("${{ needs.prepare.outputs.commit }}",
                 publish.path("steps").get(0).path("with").path("ref").asText());
         assertFalse(publish.path("steps").get(0).path("with").path("persist-credentials").asBoolean());
@@ -263,6 +278,26 @@ class WorkflowStructureTest {
                 publication.path("env").path("RELEASE_VERSION").asText());
         assertTrue(publication.path("run").asText().contains("launcher_release.py publish"));
         assertTrue(publication.path("run").asText().contains("--assets build/release"));
+        assertFalse(publication.path("continue-on-error").asBoolean(), "publication failures still block main");
+        JsonNode provenance = step(publish, "Record verified publication for later CI reuse");
+        assertEquals("provenance", provenance.path("id").asText());
+        assertTrue(provenance.path("continue-on-error").asBoolean(), "optional CI reuse must not block a release");
+        assertEquals(publication.path("env"), provenance.path("env"));
+        assertTrue(provenance.path("run").asText().contains("launcher_release.py record"));
+        assertTrue(provenance.path("run").asText().contains("--provenance build/launcher-release-provenance.json"));
+        JsonNode retained = step(publish, "Retain immutable publication provenance");
+        assertEquals("steps.provenance.outcome == 'success'", retained.path("if").asText());
+        assertTrue(retained.path("continue-on-error").asBoolean());
+        assertEquals("launcher-release-provenance-${{ github.run_id }}-${{ github.run_attempt }}",
+                retained.path("with").path("name").asText());
+        assertEquals("build/launcher-release-provenance.json", retained.path("with").path("path").asText());
+        assertEquals("error", retained.path("with").path("if-no-files-found").asText());
+        assertEquals(14, retained.path("with").path("retention-days").asInt());
+        assertFalse(retained.path("with").path("overwrite").asBoolean(), "the evidence must not be replaced");
+        assertTrue(text.indexOf("Validate and publish the complete stable launcher release")
+                < text.indexOf("Record verified publication for later CI reuse"));
+        assertTrue(text.indexOf("Record verified publication for later CI reuse")
+                < text.indexOf("Retain immutable publication provenance"));
         JsonNode finalize = jobs.path("finalize");
         List<String> finalPrerequisites = new ArrayList<>();
         finalize.path("needs").forEach(dependency -> finalPrerequisites.add(dependency.asText()));

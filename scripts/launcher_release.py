@@ -1,17 +1,19 @@
 # Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Automatic patch versions for manual official releases; no write retries."""
+"""Official launcher releases and read-only CI reuse checks; no write retries."""
 
 import argparse
 import base64
 from dataclasses import dataclass
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
 import re
 import subprocess
 import sys
+import zipfile
 from urllib.parse import quote
 
 
@@ -22,6 +24,10 @@ VERSION_DECLARATION = re.compile(r'^version[ \t]*=[ \t]*"([^"\r\n]+)"[ \t]*\r?$'
 MSI_LIMIT = 300 * 1024 * 1024
 PAGE_SIZE = 100
 MAX_PAGES = 10
+PROVENANCE_FILE = "launcher-release-provenance.json"
+PROVENANCE_LIMIT = 16 * 1024
+PROVENANCE_ARCHIVE_LIMIT = 64 * 1024
+RELEASE_RUN = re.compile(r"^Launcher-Release-Run: ([1-9][0-9]{0,19})$", re.MULTILINE)
 INSTALLERS = (
     "windows-x64.msi", "linux-x64.deb", "linux-x64.rpm",
     "macos-intel.pkg", "macos-apple-silicon.pkg",
@@ -106,6 +112,15 @@ class GitHub:
             return json.loads(body)
         except json.JSONDecodeError as error:
             raise ReleaseError(f"Invalid GitHub JSON for {method} {endpoint}") from error
+
+    def download(self, endpoint):
+        result = subprocess.run(["gh", "api", "--method", "GET", endpoint],
+                                capture_output=True, check=False)
+        if result.returncode:
+            raise ReleaseError(f"GitHub artifact download failed: {result.stderr.decode('utf-8', errors='replace')}")
+        if len(result.stdout) > PROVENANCE_ARCHIVE_LIMIT:
+            raise ReleaseError("Release provenance archive exceeds limit")
+        return result.stdout
 
 
 def require_unused_version(github, version):
@@ -200,6 +215,7 @@ def prepare_candidate(github, root, environment):
         raise ReleaseError("Version bump must change only the version file in the source tree")
     commit = github.request("POST", f"{API}/git/commits", {
         "message": (f"Prepare launcher release candidate {version}\n\n"
+                    f"Launcher-Release-Run: {run}\n"
                     "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>"),
         "tree": changed_sha, "parents": [base],
     })
@@ -388,6 +404,215 @@ def verify_tag(reference, version, commit):
             or target.get("sha") != commit):
         raise ReleaseError("Release tag does not bind the exact tested source commit")
 
+def release_run_identity(environment):
+    values = [environment.get(key) for key in ("GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT")]
+    if any(not isinstance(value, str) or not re.fullmatch(r"[1-9][0-9]{0,19}", value)
+           for value in values):
+        raise ReleaseError("Release provenance requires an exact run ID and attempt")
+    return tuple(int(value) for value in values)
+
+
+def record_publication(github, version, commit, assets, environment, destination):
+    run_id, attempt = release_run_identity(environment)
+    published = github.request("GET", f"{API}/releases/tags/v{version}")
+    identifier = verify_release(published, assets, version, False)
+    identities = {item["name"]: item["id"] for item in published["assets"]}
+    verify_tag(github.request("GET", f"{API}/git/ref/tags/v{version}"), version, commit)
+    if verify_release(github.request("GET", f"{API}/releases/latest"),
+                      assets, version, False, identities) != identifier:
+        raise ReleaseError("Cannot record provenance for an unconfirmed latest stable release")
+    record = {"schema_version": 1, "repository": REPOSITORY, "version": version,
+              "commit": commit, "run_id": run_id, "run_attempt": attempt,
+              "release_id": identifier,
+              "assets": [{"name": asset.path.name, "id": identities[asset.path.name],
+                          "size": asset.size, "sha256": asset.sha256} for asset in assets]}
+    content = json.dumps(record, sort_keys=True).encode("utf-8")
+    if len(content) > PROVENANCE_LIMIT:
+        raise ReleaseError("Release provenance record exceeds limit")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with destination.open("xb") as output:
+        output.write(content)
+
+
+def unique_json_object(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ReleaseError("Duplicate release provenance JSON field")
+        result[key] = value
+    return result
+
+
+def retained_publication(github, run_id, attempt, base):
+    name = f"launcher-release-provenance-{run_id}-{attempt}"
+    artifacts = {}
+    for page in range(1, MAX_PAGES + 1):
+        result = github.request("GET", f"{API}/actions/runs/{run_id}/artifacts"
+                                f"?per_page={PAGE_SIZE}&page={page}")
+        if (not isinstance(result, dict) or not isinstance(result.get("artifacts"), list)
+                or len(result["artifacts"]) > PAGE_SIZE or type(result.get("total_count")) is not int):
+            raise ReleaseError("Invalid release-artifact inventory")
+        for artifact in result["artifacts"]:
+            if (not isinstance(artifact, dict) or not positive_id(artifact.get("id"))
+                    or artifact["id"] in artifacts or not isinstance(artifact.get("name"), str)):
+                raise ReleaseError("Duplicated or malformed release artifacts")
+            artifacts[artifact["id"]] = artifact
+        if len(artifacts) == result["total_count"]:
+            break
+        if len(result["artifacts"]) < PAGE_SIZE:
+            raise ReleaseError("Incomplete release-artifact inventory")
+    else:
+        raise ReleaseError("Release-artifact pagination bound reached")
+    matches = [artifact for artifact in artifacts.values() if artifact["name"] == name]
+    if not matches:
+        return None
+    if len(matches) != 1:
+        raise ReleaseError("Release provenance artifact name is not unique")
+    artifact = matches[0]
+    workflow = artifact.get("workflow_run")
+    if (type(artifact.get("expired")) is not bool
+            or not isinstance(workflow, dict) or workflow.get("id") != run_id
+            or workflow.get("head_sha") != base or workflow.get("head_branch") != "main"):
+        raise ReleaseError("Release provenance artifact has mismatched run identity")
+    if artifact["expired"]:
+        return None
+    if (type(artifact.get("size_in_bytes")) is not int
+            or not 0 < artifact["size_in_bytes"] <= PROVENANCE_ARCHIVE_LIMIT
+            or not isinstance(artifact.get("digest"), str)
+            or not re.fullmatch(r"sha256:[0-9a-f]{64}", artifact["digest"])):
+        raise ReleaseError("Release provenance artifact size or digest is invalid")
+    content = github.download(f"{API}/actions/artifacts/{artifact['id']}/zip")
+    if (len(content) > PROVENANCE_ARCHIVE_LIMIT
+            or hashlib.sha256(content).hexdigest() != artifact["digest"][7:]):
+        raise ReleaseError("Release provenance artifact digest or size mismatch")
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            entries = archive.infolist()
+            if (len(entries) != 1 or entries[0].filename != PROVENANCE_FILE
+                    or not 0 < entries[0].file_size <= PROVENANCE_LIMIT
+                    or entries[0].flag_bits & 1
+                    or entries[0].compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)):
+                raise ReleaseError("Release provenance archive must contain only the bounded JSON record")
+            return json.loads(archive.read(entries[0]).decode("utf-8"),
+                              object_pairs_hook=unique_json_object)
+    except (zipfile.BadZipFile, UnicodeError, json.JSONDecodeError) as error:
+        raise ReleaseError("Invalid release provenance archive or JSON") from error
+
+
+def verified_release_push(github, root, environment):
+    if (environment.get("GITHUB_EVENT_NAME") != "push"
+            or environment.get("GITHUB_REPOSITORY") != REPOSITORY
+            or environment.get("GITHUB_REF") != "refs/heads/main"
+            or environment.get("CI_SOURCE_COMMIT")):
+        return False, "PRs, manual runs, forks and reusable release builds always build installers."
+    commit = require_sha(environment.get("GITHUB_SHA"))
+    verify_checkout(root, commit)
+    candidate = github.request("GET", f"{API}/git/commits/{commit}")
+    if (not isinstance(candidate, dict) or candidate.get("sha") != commit
+            or not isinstance(candidate.get("message"), str)):
+        raise ReleaseError("Cannot inspect the exact pushed commit")
+    runs = RELEASE_RUN.findall(candidate["message"])
+    if len(runs) != 1:
+        return False, "Ordinary main change; no unique release-run provenance."
+    _, declaration = source_version(root)
+    version = declaration.group(1)
+    numeric_version(version)
+    published = github.request("GET", f"{API}/releases/tags/v{version}", missing_ok=True)
+    if published is None:
+        return False, "Candidate has not been published; installers must be built."
+    if (not isinstance(published, dict) or not isinstance(published.get("draft"), bool)
+            or not isinstance(published.get("prerelease"), bool)):
+        raise ReleaseError("Cannot determine the candidate release's publication state")
+    if published["draft"] or published["prerelease"]:
+        return False, "A draft or prerelease is not a verified stable release."
+    reference = github.request("GET", f"{API}/git/ref/tags/v{version}")
+    target = reference.get("object") if isinstance(reference, dict) else None
+    if not isinstance(target, dict):
+        raise ReleaseError("Cannot inspect the published release tag")
+    if target.get("sha") != commit or target.get("type") != "commit":
+        return False, "This push is not the exact published candidate."
+    verify_tag(reference, version, commit)
+    parents = candidate.get("parents")
+    if not isinstance(parents, list) or len(parents) != 1 or not isinstance(parents[0], dict):
+        raise ReleaseError("Release candidate must have exactly one captured base")
+    base = require_sha(parents[0].get("sha"))
+    verify_candidate(github, version, commit, base)
+    run_id = int(runs[0])
+    branch = f"refs/heads/release-candidates/{version}/{run_id}"
+    reference = github.request("GET", f"{API}/git/ref/heads/release-candidates/{version}/{run_id}")
+    if (not isinstance(reference, dict) or reference.get("ref") != branch
+            or not isinstance(reference.get("object"), dict)
+            or reference["object"].get("type") != "commit" or reference["object"].get("sha") != commit):
+        raise ReleaseError("Release-run branch does not bind this exact candidate")
+    run = github.request("GET", f"{API}/actions/runs/{run_id}")
+    if (not isinstance(run, dict) or not positive_id(run.get("id")) or run.get("id") != run_id
+            or run.get("event") != "workflow_dispatch" or run.get("head_branch") != "main"
+            or run.get("head_sha") != base or run.get("path") != ".github/workflows/launcher-release.yml"
+            or not isinstance(run.get("repository"), dict)
+            or run["repository"].get("full_name") != REPOSITORY):
+        raise ReleaseError("Candidate provenance is not the official release workflow at its captured base")
+    names = {"prepare", "publish", "installers / Release tooling contracts"}
+    names.update(f"installers / Native installers - {platform}"
+                 for platform in ("windows-x64", "linux-x64", "macos-intel", "macos-apple-silicon"))
+    jobs = {}
+    for page in range(1, MAX_PAGES + 1):
+        result = github.request("GET", f"{API}/actions/runs/{run_id}/jobs"
+                                f"?filter=latest&per_page={PAGE_SIZE}&page={page}")
+        if (not isinstance(result, dict) or not isinstance(result.get("jobs"), list)
+                or len(result["jobs"]) > PAGE_SIZE or type(result.get("total_count")) is not int):
+            raise ReleaseError("Invalid release-job inventory")
+        for job in result["jobs"]:
+            if (not isinstance(job, dict) or not isinstance(job.get("name"), str)
+                    or job["name"] in jobs or not positive_id(job.get("run_id"))
+                    or job.get("run_id") != run_id or job.get("head_sha") != base):
+                raise ReleaseError("Release jobs have duplicated or mismatched provenance")
+            jobs[job["name"]] = job
+        if len(jobs) == result["total_count"]:
+            break
+        if len(result["jobs"]) < PAGE_SIZE:
+            raise ReleaseError("Incomplete release-job inventory")
+    else:
+        raise ReleaseError("Release-job pagination bound reached")
+    if not names.issubset(jobs) or any(jobs[name].get("status") != "completed"
+                                     or jobs[name].get("conclusion") != "success" for name in names):
+        return False, "Release build/test/publication success is not confirmed; running installers."
+    attempt = jobs["publish"].get("run_attempt")
+    if not positive_id(attempt):
+        raise ReleaseError("Cannot identify the successful publication attempt")
+    record = retained_publication(github, run_id, attempt, base)
+    if record is None:
+        return False, "Original publication provenance is missing or expired; running installers."
+    if (not isinstance(record, dict) or type(record.get("schema_version")) is not int
+            or record["schema_version"] != 1 or record.get("repository") != REPOSITORY
+            or record.get("version") != version or record.get("commit") != commit
+            or not positive_id(record.get("run_id")) or record["run_id"] != run_id
+            or not positive_id(record.get("run_attempt")) or record["run_attempt"] != attempt
+            or not positive_id(record.get("release_id"))
+            or not isinstance(record.get("assets"), list) or len(record["assets"]) != 10):
+        raise ReleaseError("Retained publication record has mismatched provenance")
+    expected_names = {f"MegaMek-Launcher-{version}-{suffix}{checksum}"
+                      for suffix in INSTALLERS for checksum in ("", ".sha256")}
+    assets = []
+    identities = {}
+    for item in record["assets"]:
+        if (not isinstance(item, dict) or not isinstance(item.get("name"), str)
+                or item["name"] not in expected_names
+                or item["name"] in identities or not positive_id(item.get("id"))
+                or type(item.get("size")) is not int or item["size"] <= 0
+                or not isinstance(item.get("sha256"), str)
+                or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"])):
+            raise ReleaseError("Retained publication asset metadata is incomplete or malformed")
+        if item["name"].endswith(".msi") and item["size"] > MSI_LIMIT:
+            raise ReleaseError("Published MSI exceeds the updater size limit")
+        assets.append(Asset(Path(item["name"]), item["size"], item["sha256"]))
+        identities[item["name"]] = item["id"]
+    if verify_release(published, assets, version, False, identities) != record["release_id"]:
+        raise ReleaseError("Published release ID changed from the original publication")
+    if {asset.path.name for asset in assets} != expected_names:
+        raise ReleaseError("Published release assets were duplicated or substituted")
+    return True, (f"Exact version-only candidate {commit} was built, tested and published by "
+                  f"https://github.com/{REPOSITORY}/actions/runs/{run_id}; no duplicate installer build.")
+
 
 def publish(github, version, commit, assets):
     require_unused_version(github, version)
@@ -425,16 +650,32 @@ def publish(github, version, commit, assets):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "candidate", "publish", "finalize"))
+    parser.add_argument("command", choices=("prepare", "candidate", "publish", "record", "finalize", "ci-plan"))
     parser.add_argument("--version")
     parser.add_argument("--commit")
     parser.add_argument("--assets", type=Path)
     parser.add_argument("--base")
+    parser.add_argument("--provenance", type=Path)
     args = parser.parse_args()
     root = Path.cwd()
     github = GitHub()
+    if args.command == "ci-plan":
+        if any(value is not None for value in (args.version, args.commit, args.assets, args.base, args.provenance)):
+            raise ReleaseError("CI planning derives its identity from the triggering checkout")
+        output = os.environ.get("GITHUB_OUTPUT")
+        if not output:
+            raise ReleaseError("GITHUB_OUTPUT is required for CI planning")
+        reused, reason = verified_release_push(github, root, os.environ)
+        with Path(output).open("a", encoding="utf-8") as file:
+            file.write(f"build_installers={'false' if reused else 'true'}\n")
+        print(f"::notice::{reason}")
+        summary = os.environ.get("GITHUB_STEP_SUMMARY")
+        if summary:
+            with Path(summary).open("a", encoding="utf-8") as file:
+                file.write(f"### Installer CI decision\n\n{reason}\n")
+        return
     if args.command in ("prepare", "candidate"):
-        if args.version is not None or args.commit is not None or args.assets is not None or args.base is not None:
+        if any(value is not None for value in (args.version, args.commit, args.assets, args.base, args.provenance)):
             raise ReleaseError("Candidate preparation derives its version from committed source")
         output = os.environ.get("GITHUB_OUTPUT")
         if not output:
@@ -457,6 +698,13 @@ def main():
         commit = validate_source(args.version, root, os.environ, args.commit)
         verify_checkout(root, commit)
         assets = validate_files(args.assets, args.version)
+        if args.command == "record":
+            if args.base is not None or args.provenance is None:
+                raise ReleaseError("Publication recording requires only the exact source, assets and output")
+            record_publication(github, args.version, commit, assets, os.environ, args.provenance)
+            return
+        if args.provenance is not None:
+            raise ReleaseError("Only publication recording accepts a provenance output")
         if args.command == "publish":
             if args.base is not None:
                 raise ReleaseError("Publication does not update main; use finalize afterward")
@@ -469,5 +717,5 @@ if __name__ == "__main__":
     try:
         main()
     except ReleaseError as error:
-        print(f"Launcher release failed: {error}. No automatic write retry or rollback.", file=sys.stderr)
+        print(f"Launcher release/CI check failed: {error}. No automatic write retry or rollback.", file=sys.stderr)
         sys.exit(1)

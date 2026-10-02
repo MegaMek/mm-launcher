@@ -91,6 +91,49 @@ and never passed to installer/test jobs or publication.
 Artifacts come from the current workflow run, not a previous build or independently selected
 latest artifact.
 
+### Avoiding duplicate installer builds after publication
+
+Candidate commits retain a `Launcher-Release-Run` trailer identifying their original
+workflow run. After finalization pushes that commit to main, the ordinary native workflow
+first runs its offline tooling tests and a read-only `launcher_release.py ci-plan` check.
+Only an official main push without a pinned source input can reuse release verification.
+PRs, forks, manual native builds and reusable candidate builds always run all four platforms.
+
+The check does not trust a bot identity, commit title or trailer by itself. Before emitting
+`build_installers=false`, it verifies the pushed checkout, published stable tag SHA,
+exact version-only tree/single base parent, run-specific candidate branch, and official
+manual release workflow at that same base. The original prepare, tooling, four native
+build/test jobs and publication job must all have succeeded. It checks the latest execution
+of each job, including successful jobs retained when only failed finalization is rerun.
+Finalization/the overall run may still be in progress when the push arrives; publication
+success is the relevant completed prerequisite.
+
+After publication, a read-only step checks the public release against the original local
+installer/checksum bytes and writes `launcher-release-provenance.json`. The same publish
+job retains it using immutable v4 Actions artifacts, named
+`launcher-release-provenance-<run-id>-<publish-attempt>`, without overwrite, for 14 days.
+Recording/upload failures are visible but nonblocking: this evidence enables a CI
+optimization, not publication safety, and its absence must cause normal installer builds.
+
+The gate uses the successful publication job's attempt, not the overall run's latest
+attempt, so finalization-only reruns can retain valid proof. It checks the artifact's
+original run/base identity and archive SHA-256, then reads only one JSON file (16 KiB
+uncompressed, 64 KiB archive maximum) without extraction. The record must bind the
+repository, version, candidate SHA, run/attempt, release ID and all ten original asset
+IDs, sizes and SHA-256 digests. Current public metadata is checked against that independent
+record, including exact official URLs and an updater-compatible MSI size. Deleting and
+re-uploading assets cannot satisfy the gate merely by keeping their names and URLs.
+No installer is downloaded again. Missing/expired provenance, missing publication or
+unconfirmed successful jobs means a normal installer build, with an explicit explanation.
+Malformed/mismatched provenance or API failures fail explicitly, never silently skip tests.
+
+Only the tooling job gains repository-scoped `actions: read` alongside `contents: read`
+for provenance lookup; the release caller permits that read-only scope. No App credentials
+or write permissions are introduced. The installer matrix depends on the tooling decision.
+The workflow summary links to the original verified release run when duplicate builds are
+skipped. The independent advisory desktop workflow is unchanged and still runs actual
+window tests after a main push; it does not package installers.
+
 The default `test` task excludes `archive` and `native-gui` tags and forces headless mode.
 It still compiles all tests and runs backend/material safety checks, safe Windows helper
 execution, deterministic UI components/state, and the actual automatic-check worker.
@@ -170,7 +213,8 @@ registry. New pending reports bind the target version and helper PID/start time.
 An active helper keeps its report and produces an informational finishing state.
 An exited helper with an incomplete report requires Windows to confirm the exact
 target's running and installed version before acknowledgement; the original
-report is archived with a diagnostic warning. If Windows instead confirms the
+report is archived and reconciliation is recorded in local operation logs without
+an interrupting popup. If Windows instead confirms the
 old running version is still installed, archive the incomplete failed attempt
 and allow a later check to retry, without claiming an upgrade. Reservations
 without a recorded helper identity remain for review. New completed reports
@@ -179,8 +223,12 @@ retain the exact target even when cleanup warnings or reboot notices apply.
 Legacy plain `pending` reports contain no target. Their helper is identified
 by the encoded script's exact report path. Only when that helper is absent and
 Windows confirms the current installation may the report be archived and checks
-resume, with an explicit unknown-previous-result notice, not a claimed successful
-upgrade. Changed, oversized, linked, malformed, or unverifiable reports remain
+resume. The unknown previous result is recorded in local operation diagnostics, not
+shown as a popup or claimed successful upgrade. These safely reconciled details are
+also omitted from update confirmations and release-lookup errors; genuine failures,
+reboot-required success, cleanup warnings and unresolved pending states keep their
+existing presentation. Failure to save recovery diagnostics is surfaced explicitly.
+Changed, oversized, linked, malformed, or unverifiable reports remain
 for review.
 
 Material Windows regressions execute the real helper script with harmless
@@ -220,8 +268,10 @@ can commit a version:
 The bypass grants the App real repository write authority, not a server-enforced restriction
 to one file. The workflow narrows its installation token to this repository and verifies that
 the generated commit changes only the version file. Protect the App key and workflow changes.
-GitHub App-authored main pushes may also trigger ordinary read-only CI; that separate run
-cannot publish and is not substituted for this release run's installer/test matrix.
+GitHub App-authored main pushes trigger ordinary read-only CI. Proven release-finalization
+pushes skip duplicate installer builds through the guard above; advisory desktop tests
+remain separate. These push runs cannot publish and are never substituted for the release
+run's required installer/test matrix.
 Missing configuration, denied bypass, or GitHub write failures fail explicitly; there is
 no personal-token fallback.
 

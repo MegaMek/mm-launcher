@@ -45,6 +45,7 @@ import org.megamek.launcher.registry.RegistryStore;
 import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
 import org.megamek.launcher.release.ReleaseTransport;
+import org.megamek.launcher.update.WindowsMsiUpdate;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
@@ -56,17 +57,113 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.jar.Attributes;
 import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 class LauncherServicesTest {
     @TempDir Path temp;
+
+    @Test
+    void recoveredLauncherReportsAreDiagnosticOnlyAndKeepTheirDetails() throws Exception {
+        LauncherServices services = services(temp.resolve("registry.json"), new RecordingRunner());
+        String name = "MegaMek-Launcher-0.14.11-windows-x64.msi";
+        var candidate = new WindowsMsiUpdate.Candidate("v0.14.11", "0.14.11", name,
+                URI.create("https://github.com/MegaMek/mm-launcher/releases/download/v0.14.11/" + name),
+                100, "a".repeat(64));
+        AtomicInteger lookups = new AtomicInteger();
+        for (var state : List.of(WindowsMsiUpdate.ReportState.RECOVERED,
+                                WindowsMsiUpdate.ReportState.INSTALLED_RECOVERED)) {
+            String detail = "Recovery " + state + ": Windows confirms 0.14.10; previous completion unknown; "
+                    + "retained report at " + temp.resolve("msi-update-result.txt.incomplete-fixture");
+            var report = new WindowsMsiUpdate.ReportResult(state, detail);
+            for (boolean newerRelease : List.of(false, true)) {
+                var checked = services.checkLauncherUpdate(report, () -> {
+                    lookups.incrementAndGet();
+                    return newerRelease ? candidate : null;
+                });
+                assertNull(checked.message(),
+                        "recovery must not enter a popup, status message or update-confirmation notice");
+                assertFalse(checked.pending(), "recovery does not block update checks");
+                assertSame(newerRelease ? candidate : null, checked.candidate());
+            }
+            assertEquals(detail, report.message(), "the diagnostic detail must remain available");
+            String logs = services.operationLogsForViewer();
+            assertTrue(logs.contains("Recovery " + state));
+            assertTrue(logs.contains("previous completion unknown"));
+            assertTrue(logs.contains("msi-update-result.txt.incomplete-fixture"));
+            assertTrue(logs.contains("Stale launcher update report reconciled"));
+        }
+        assertEquals(4, lookups.get());
+    }
+
+    @Test
+    void actionableAndCompletedLauncherReportsKeepTheirOriginalNotice() throws Exception {
+        LauncherServices services = services(temp.resolve("registry.json"), new RecordingRunner());
+        IOException failure = assertThrows(IOException.class, () -> services.checkLauncherUpdate(
+                new WindowsMsiUpdate.ReportResult(WindowsMsiUpdate.ReportState.FAILED, "Installer failed"),
+                () -> fail("failed installation must be surfaced before release lookup")));
+        assertEquals("Installer failed", failure.getMessage());
+        var pending = services.checkLauncherUpdate(
+                new WindowsMsiUpdate.ReportResult(WindowsMsiUpdate.ReportState.PENDING, "Still finishing"),
+                () -> fail("active helper must finish before release lookup"));
+        assertTrue(pending.pending());
+        assertEquals("Still finishing", pending.message());
+        for (String notice : List.of("Launcher updated", "A restart is required", "Staged MSI cleanup failed")) {
+            var checked = services.checkLauncherUpdate(
+                    new WindowsMsiUpdate.ReportResult(WindowsMsiUpdate.ReportState.INSTALLED, notice), () -> null);
+            assertEquals(notice, checked.message());
+            assertFalse(checked.pending());
+        }
+        assertNull(services.checkLauncherUpdate(null, () -> null).message());
+        assertFalse(Files.exists(services.operationLogLocation()), "ordinary notices do not create recovery logs");
+    }
+
+    @Test
+    void recoveredReportDetailsDoNotGetAppendedToLookupFailuresOrInterruptions() throws Exception {
+        LauncherServices services = services(temp.resolve("registry.json"), new RecordingRunner());
+        for (var state : List.of(WindowsMsiUpdate.ReportState.RECOVERED,
+                                WindowsMsiUpdate.ReportState.INSTALLED_RECOVERED)) {
+            var report = new WindowsMsiUpdate.ReportResult(state, "Retained old report; no action required");
+            IOException offline = new IOException("Release lookup is offline");
+            assertSame(offline, assertThrows(IOException.class,
+                    () -> services.checkLauncherUpdate(report, () -> { throw offline; })));
+            InterruptedException interrupted = new InterruptedException("Release lookup interrupted");
+            assertSame(interrupted, assertThrows(InterruptedException.class,
+                    () -> services.checkLauncherUpdate(report, () -> { throw interrupted; })));
+        }
+        String notice = "Windows requires a restart";
+        IOException lookupError = new IOException("Release lookup is offline");
+        IOException combined = assertThrows(IOException.class, () -> services.checkLauncherUpdate(
+                new WindowsMsiUpdate.ReportResult(WindowsMsiUpdate.ReportState.INSTALLED, notice),
+                () -> { throw lookupError; }));
+        assertTrue(combined.getMessage().contains(notice));
+        assertTrue(combined.getMessage().contains(lookupError.getMessage()));
+        assertSame(lookupError, combined.getCause());
+    }
+
+    @Test
+    void recoveryDiagnosticWriteFailuresAreExplicitAndDoNotChangeTheRecoveryResult() throws Exception {
+        LauncherServices services = services(temp.resolve("registry.json"), new RecordingRunner());
+        Files.writeString(services.operationLogLocation(), "not a log directory");
+        var report = new WindowsMsiUpdate.ReportResult(WindowsMsiUpdate.ReportState.RECOVERED,
+                "Current installation verified; previous completion unknown.");
+        IOException error = assertThrows(IOException.class, () -> services.checkLauncherUpdate(report,
+                () -> fail("diagnostic write failure must be surfaced explicitly")));
+        assertTrue(error.getMessage().contains("Local operation log could not be saved"));
+        assertTrue(report.recovered());
+        assertFalse(report.installed());
+        assertEquals("not a log directory", Files.readString(services.operationLogLocation()));
+    }
 
     @Test
     void firstRunIsEmptyButExistingCorruptRegistryIsNotReset() throws Exception {

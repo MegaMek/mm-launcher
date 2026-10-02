@@ -2590,25 +2590,9 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void checkLauncherUpdate(boolean explicit) {
-        run("Checking launcher release", () -> {
-            WindowsMsiUpdate.ReportResult result = WindowsMsiUpdate.consumeReport(
-                    launcherUpdateReport(), WindowsMsiUpdate.currentVersion());
-            if (result != null && result.pending()) {
-                return new LauncherCheck(null, result.message(), true);
-            }
-            if (result != null && !result.installed() && !result.recovered()) {
-                throw new IOException(result.message());
-            }
-            try {
-                return new LauncherCheck(launcherUpdater.check(), result == null ? null : result.message(), false);
-            } catch (IOException | InterruptedException error) {
-                if (result != null && result.message() != null) {
-                    throw new IOException(result.message() + "\nLauncher release lookup also failed: "
-                            + error.getMessage(), error);
-                }
-                throw error;
-            }
-        }, checked -> {
+        run("Checking launcher release", () -> services.checkLauncherUpdate(
+                WindowsMsiUpdate.consumeReport(launcherUpdateReport(), WindowsMsiUpdate.currentVersion()),
+                launcherUpdater::check), checked -> {
             if (checked.pending()) {
                 status.setText(checked.message());
                 if (explicit) LauncherAlertDialog.showMessage(this, guiScale,
@@ -2666,8 +2650,6 @@ public final class LauncherFrame extends JFrame {
         if (notice != null) message = notice + "\n\n" + message;
         return LauncherAlertDialog.showConfirm(owner, scale, "Update MegaMek Launcher", message, "Update now");
     }
-
-    private record LauncherCheck(WindowsMsiUpdate.Candidate candidate, String message, boolean pending) {}
 
     private void chooseDefaultJava() {
         run("Finding Java runtimes", services::javaCandidates,
