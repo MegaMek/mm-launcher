@@ -147,8 +147,11 @@ class UpdatePreviewSwingTest {
         LauncherFrame frame = show(fixture);
         try {
             JButton installations = waitForButton(frame, "manageInstallationsButton");
-            assertNotNull(SwingTestSupport.find(frame, "homeActionRequiredMessage"));
-            assertNull(findButton(frame, "resolveHomeBlockerButton"));
+            SwingTestSupport.onEdt(() -> {
+                assertNotNull(SwingTestSupport.find(frame, "homeActionRequiredMessage"));
+                assertNull(findButton(frame, "resolveHomeBlockerButton"));
+                return null;
+            });
             SwingUtilities.invokeAndWait(installations::doClick);
             JButton recover = waitForButton(frame, "recoverUpdateButton");
             assertNotNull(recover);
