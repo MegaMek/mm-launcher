@@ -480,6 +480,10 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
     }
 
     private static String phaseName(OperationProgress event) {
+        if (event.operationType() == OperationType.UNINSTALL
+                && event.phase() == OperationPhase.PLAN) {
+            return "Checking installation files";
+        }
         if (event.operationType() == OperationType.ADOPT_EXISTING) {
             if (event.phase() == OperationPhase.PREPARE_INSTALL) {
                 return "Final local check";

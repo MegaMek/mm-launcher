@@ -590,6 +590,12 @@ public class LauncherServices {
         return uninstalls.uninstall(plan, UninstallService.CONFIRMATION, context);
     }
 
+    public UninstallService.Result uninstall(InstallationRecord record, OperationContext context)
+            throws IOException, InterruptedException,
+            org.megamek.launcher.manifest.ManifestException {
+        return uninstalls.uninstallConfirmed(record, UninstallService.CONFIRMATION, context);
+    }
+
     public UninstallService.RecoveryResult recoverUninstall(
             InstallationRecord record, OperationContext context)
             throws IOException, InterruptedException {

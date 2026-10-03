@@ -41,7 +41,10 @@ import org.megamek.launcher.launch.RootCoordinator;
 import org.megamek.launcher.onboarding.InstallationInspector;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationCancelledException;
+import org.megamek.launcher.operation.OperationPhase;
+import org.megamek.launcher.operation.OperationProgress;
 import org.megamek.launcher.operation.OperationType;
+import org.megamek.launcher.operation.ProgressUnit;
 import org.megamek.launcher.registry.InstallationRecord;
 import org.megamek.launcher.registry.RegistryStore;
 import org.megamek.launcher.release.OfficialRepository;
@@ -52,6 +55,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.FileTime;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.jar.Attributes;
@@ -69,27 +73,144 @@ class UninstallServiceTest {
     @TempDir Path temp;
 
     @Test
-    void journalPublicationCountDoesNotGrowWithTheNumberOfOfficialFiles() throws Exception {
+    void confirmedUninstallScansOnceAndJournalPublicationCountIsPhaseBounded() throws Exception {
         for (int fileCount : new int[] {16, 2048}) {
             Fixture fixture = managed("many-files-" + fileCount, fileCount);
             AtomicInteger publications = new AtomicInteger();
             UninstallService service = fixture.service(point -> {
                 if (point.equals("journal-published")) publications.incrementAndGet();
             });
-            UninstallService.Plan plan = service.plan(fixture.record, context());
-            assertEquals(fileCount + 3, plan.entries().size());
+            List<OperationProgress> progress = new ArrayList<>();
+            OperationContext operation = new OperationContext(OperationType.UNINSTALL, progress::add);
             long started = System.nanoTime();
-            UninstallService.Result result = service.uninstall(
-                    plan, UninstallService.CONFIRMATION, context());
+            UninstallService.Result result = service.uninstallConfirmed(
+                    fixture.record, UninstallService.CONFIRMATION, operation);
             System.out.printf("Uninstall %d official files: %.3f seconds, %d durable journal publications%n",
-                    plan.entries().size(), (System.nanoTime() - started) / 1_000_000_000.0,
+                    fileCount + 3, (System.nanoTime() - started) / 1_000_000_000.0,
                     publications.get());
+            List<OperationProgress> checks = progress.stream().filter(event ->
+                    event.phase() == OperationPhase.PLAN && event.unit() == ProgressUnit.FILES
+                            && event.cancellationAllowed()).toList();
+            assertEquals(fileCount + 3, checks.size(), "each official entry must be compared once");
+            assertEquals(1, progress.stream().filter(event ->
+                    event.phase() == OperationPhase.PLAN && event.unit() == ProgressUnit.NONE).count(),
+                    "there must be exactly one planning pass");
+            for (int i = 0; i < checks.size(); i++) {
+                assertEquals(i + 1, checks.get(i).completed());
+                assertEquals(fileCount + 3, checks.get(i).total());
+            }
             assertTrue(result.committed());
             assertNull(result.warning());
             assertEquals(6, publications.get(), "journal writes must be phase-bounded, not per-file");
             assertEquals("custom", Files.readString(fixture.root.resolve("custom/user.txt")));
             assertFalse(Files.exists(fixture.root.resolve("docs")));
         }
+    }
+
+    @Test
+    void confirmedUninstallKeepsTheRootGateDuringPlanningAndRemoval() throws Exception {
+        Fixture fixture = managed("single-lease");
+        AtomicInteger blocked = new AtomicInteger();
+        OperationContext operation = new OperationContext(OperationType.UNINSTALL, event -> {
+            if (event.unit() == ProgressUnit.NONE
+                    && (event.phase() == OperationPhase.PLAN
+                    || event.phase() == OperationPhase.UNINSTALL)) {
+                assertThrows(IOException.class, () -> new RootCoordinator(
+                        fixture.registry.resolveSibling("coordination")).acquire(fixture.root, false));
+                blocked.incrementAndGet();
+            }
+        });
+        assertTrue(fixture.service(point -> {}).uninstallConfirmed(
+                fixture.record, UninstallService.CONFIRMATION, operation).committed());
+        assertEquals(2, blocked.get());
+    }
+
+    @Test
+    void confirmedUninstallCancellationDuringPlanningDoesNotMoveFiles() throws Exception {
+        Fixture fixture = managed("cancel-single-scan");
+        byte[] before = Files.readAllBytes(fixture.root.resolve("MegaMek.jar"));
+        OperationContext[] holder = new OperationContext[1];
+        holder[0] = new OperationContext(OperationType.UNINSTALL, event -> {
+            if (event.phase() == OperationPhase.PLAN && event.completed() == 1
+                    && event.cancellationAllowed()) {
+                assertTrue(holder[0].requestCancellation().accepted());
+            }
+        });
+        assertThrows(OperationCancelledException.class, () -> fixture.service(point -> {})
+                .uninstallConfirmed(fixture.record, UninstallService.CONFIRMATION, holder[0]));
+        assertArrayEquals(before, Files.readAllBytes(fixture.root.resolve("MegaMek.jar")));
+        assertEquals(List.of(fixture.record), fixture.store.read(fixture.registry).installations());
+        assertFalse(fixture.service(point -> {}).hasPending(fixture.record.id()));
+    }
+
+    @Test
+    void confirmedUninstallStillVerifiesFilesChangedAfterPlanningAndRollsBack() throws Exception {
+        Fixture fixture = managed("changed-after-single-scan");
+        byte[] jar = Files.readAllBytes(fixture.root.resolve("MegaMek.jar"));
+        Path changed = fixture.root.resolve("lib/runtime.txt");
+        OperationContext operation = new OperationContext(OperationType.UNINSTALL, event -> {
+            if (event.phase() == OperationPhase.UNINSTALL && event.unit() == ProgressUnit.NONE) {
+                try {
+                    Files.writeString(changed, "changed after planning");
+                } catch (IOException error) {
+                    throw new java.io.UncheckedIOException(error);
+                }
+            }
+        });
+        assertThrows(IOException.class, () -> fixture.service(point -> {})
+                .uninstallConfirmed(fixture.record, UninstallService.CONFIRMATION, operation));
+        assertEquals("changed after planning", Files.readString(changed));
+        assertArrayEquals(jar, Files.readAllBytes(fixture.root.resolve("MegaMek.jar")));
+        assertEquals(List.of(fixture.record), fixture.store.read(fixture.registry).installations());
+        assertFalse(fixture.service(point -> {}).hasPending(fixture.record.id()));
+    }
+
+    @Test
+    void separatelyPreparedUninstallStillReplansAndRejectsChangedFiles() throws Exception {
+        Fixture fixture = managed("prepared-plan-changed");
+        UninstallService service = fixture.service(point -> {});
+        UninstallService.Plan plan = service.plan(fixture.record, context());
+        Files.writeString(fixture.root.resolve("docs/guide.txt"), "changed since preview");
+        IOException failure = assertThrows(IOException.class, () ->
+                service.uninstall(plan, UninstallService.CONFIRMATION, context()));
+        assertTrue(failure.getMessage().contains("review uninstall again"));
+        assertTrue(Files.exists(fixture.root.resolve("MegaMek.jar")));
+        assertEquals("changed since preview", Files.readString(fixture.root.resolve("docs/guide.txt")));
+        assertEquals(List.of(fixture.record), fixture.store.read(fixture.registry).installations());
+        assertFalse(service.hasPending(fixture.record.id()));
+    }
+
+    @Test
+    void confirmedUninstallRequiresConfirmationAndTheExactRegistration() throws Exception {
+        Fixture fixture = managed("single-scan-authorization");
+        UninstallService service = fixture.service(point -> {});
+        assertThrows(IOException.class, () ->
+                service.uninstallConfirmed(fixture.record, "", context()));
+        InstallationRecord renamed = fixture.store.rename(fixture.registry, fixture.record, "Renamed");
+        assertThrows(IOException.class, () ->
+                service.uninstallConfirmed(fixture.record, UninstallService.CONFIRMATION, context()));
+        assertEquals(List.of(renamed), fixture.store.read(fixture.registry).installations());
+        assertTrue(Files.exists(fixture.root.resolve("MegaMek.jar")));
+        assertFalse(service.hasPending(fixture.record.id()));
+    }
+
+    @Test
+    void confirmedUninstallCrashKeepsTheJournalAndRecoversExactly() throws Exception {
+        Fixture fixture = managed("single-scan-crash");
+        byte[] jar = Files.readAllBytes(fixture.root.resolve("MegaMek.jar"));
+        Path receipt = new ReceiptStore().receiptPath(fixture.registry, fixture.record.id());
+        byte[] metadata = Files.readAllBytes(receipt);
+        UninstallService crashing = fixture.service(point -> {
+            if (point.equals("file-moved")) throw new SimulatedCrash();
+        });
+        assertThrows(SimulatedCrash.class, () -> crashing.uninstallConfirmed(
+                fixture.record, UninstallService.CONFIRMATION, context()));
+        assertTrue(crashing.hasPending(fixture.record.id()));
+        assertFalse(fixture.service(point -> {}).recover(fixture.record, context()).committed());
+        assertArrayEquals(jar, Files.readAllBytes(fixture.root.resolve("MegaMek.jar")));
+        assertArrayEquals(metadata, Files.readAllBytes(receipt));
+        assertEquals(List.of(fixture.record), fixture.store.read(fixture.registry).installations());
+        assertFalse(crashing.hasPending(fixture.record.id()));
     }
 
     @Test
@@ -268,8 +389,8 @@ class UninstallServiceTest {
                 entry.relativePath().equals("docs/guide.txt")
                         && entry.action() == UninstallService.Action.RETAIN));
 
-        UninstallService.Result result = service.uninstall(
-                plan, UninstallService.CONFIRMATION, context());
+        UninstallService.Result result = service.uninstallConfirmed(
+                fixture.record, UninstallService.CONFIRMATION, context());
 
         assertTrue(result.committed());
         assertTrue(result.retainedFiles());
@@ -300,6 +421,8 @@ class UninstallServiceTest {
         UninstallService importedService = new UninstallService(
                 registry, new RootCoordinator(temp.resolve("imported-coordination")));
         assertThrows(IOException.class, () -> importedService.plan(imported, context()));
+        assertThrows(IOException.class, () -> importedService.uninstallConfirmed(
+                imported, UninstallService.CONFIRMATION, context()));
         assertTrue(Files.exists(root.resolve("MegaMek.jar")));
     }
 
@@ -595,18 +718,24 @@ class UninstallServiceTest {
         Files.createDirectory(fixture.root.resolve(RootCoordinator.UPDATE_NAMESPACE));
         assertThrows(IOException.class,
                 () -> fixture.service(point -> { }).plan(fixture.record, context()));
+        assertThrows(IOException.class, () -> fixture.service(point -> {}).uninstallConfirmed(
+                fixture.record, UninstallService.CONFIRMATION, context()));
         Files.delete(fixture.root.resolve(RootCoordinator.UPDATE_NAMESPACE));
 
         OperationContext cancelled = new OperationContext(OperationType.UNINSTALL);
         cancelled.requestCancellation();
         assertThrows(OperationCancelledException.class,
                 () -> fixture.service(point -> { }).plan(fixture.record, cancelled));
+        assertThrows(OperationCancelledException.class, () -> fixture.service(point -> {}).uninstallConfirmed(
+                fixture.record, UninstallService.CONFIRMATION, cancelled));
 
         try (RootCoordinator.Lease ignored = new RootCoordinator(
                 fixture.registry.resolveSibling("coordination"))
                 .acquire(fixture.root, false)) {
             assertThrows(IOException.class,
                     () -> fixture.service(point -> { }).plan(fixture.record, context()));
+            assertThrows(IOException.class, () -> fixture.service(point -> {}).uninstallConfirmed(
+                    fixture.record, UninstallService.CONFIRMATION, context()));
         }
         assertArrayEquals(before, Files.readAllBytes(fixture.root.resolve("MegaMek.jar")));
         assertEquals(fixture.record,

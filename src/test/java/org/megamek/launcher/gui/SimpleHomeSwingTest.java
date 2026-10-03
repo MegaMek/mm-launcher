@@ -1078,7 +1078,11 @@ class SimpleHomeSwingTest {
             JPanel actions = find(frame, "homeLaunchActions");
             int preferred = actions.getComponent(0).getPreferredSize().height;
             return java.util.Arrays.stream(actions.getComponents())
-                    .allMatch(button -> button.getHeight() <= preferred + 2);
+                    .allMatch(button -> button.getHeight() <= preferred + 2)
+                    && (threeColumns
+                    ? actions.getComponent(0).getY() == actions.getComponent(2).getY()
+                    : actions.getComponent(2).getY() > actions.getComponent(0).getY())
+                    && homeActionsVisible(frame);
         });
         onEdt(() -> {
             assertCompactLaunches(frame, threeColumns);
@@ -1087,10 +1091,21 @@ class SimpleHomeSwingTest {
         });
     }
 
+    private static boolean homeActionsVisible(LauncherFrame frame) {
+        javax.swing.JScrollPane scroller = find(frame, "managedHomeDeckScroller");
+        return homeActions(frame).stream().allMatch(action ->
+                scroller.getViewport().getViewRect().contains(
+                        SwingUtilities.convertRectangle(action.getParent(),
+                                action.getBounds(), scroller.getViewport().getView())));
+    }
+
+    private static List<Component> homeActions(LauncherFrame frame) {
+        return List.of(find(frame, "managedHomeNavigation"), find(frame, "launch-lab-button"));
+    }
+
     private static void assertHomeActionsVisible(LauncherFrame frame) {
         javax.swing.JScrollPane scroller = find(frame, "managedHomeDeckScroller");
-        for (Component action : List.<Component>of(find(frame, "managedHomeNavigation"),
-                find(frame, "launch-lab-button"))) {
+        for (Component action : homeActions(frame)) {
             Rectangle bounds = SwingUtilities.convertRectangle(action.getParent(),
                     action.getBounds(), scroller.getViewport().getView());
             assertTrue(scroller.getViewport().getViewRect().contains(bounds),

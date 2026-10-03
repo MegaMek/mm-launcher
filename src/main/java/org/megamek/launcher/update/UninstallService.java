@@ -147,9 +147,7 @@ public final class UninstallService {
     public Result uninstall(Plan expectedPlan, String confirmation, OperationContext context)
             throws IOException, InterruptedException, ManifestException {
         requireWorker();
-        if (!CONFIRMATION.equals(confirmation)) {
-            throw new IOException("uninstall confirmation is missing");
-        }
+        requireConfirmation(confirmation);
         Objects.requireNonNull(expectedPlan, "plan");
         Objects.requireNonNull(context, "context");
         Path root = rootOf(expectedPlan.record());
@@ -162,10 +160,36 @@ public final class UninstallService {
                 throw new IOException("installation files or ownership changed; review uninstall "
                         + "again");
             }
-            context.checkpoint();
-            context.enterFinalization("Uninstall file moves have begun and must finish or roll "
-                    + "back before the launcher can close.");
-            return executeLocked(currentPlan, context);
+            return executeConfirmedPlan(currentPlan, context);
+        }
+    }
+
+    /** Plans and executes a confirmed removal under one lease, without replanning. */
+    public Result uninstallConfirmed(InstallationRecord expected, String confirmation,
+                                     OperationContext context)
+            throws IOException, InterruptedException, ManifestException {
+        requireWorker();
+        requireConfirmation(confirmation);
+        Objects.requireNonNull(context, "context");
+        requirePresent(expected);
+        try (OperationContext.WorkerRegistration ignored = context.activate();
+             RootCoordinator.Lease lease = coordinator.acquire(rootOf(expected), false)) {
+            lease.requireNoPendingUpdate();
+            return executeConfirmedPlan(planLocked(expected, context), context);
+        }
+    }
+
+    private Result executeConfirmedPlan(Plan plan, OperationContext context)
+            throws IOException, InterruptedException, ManifestException {
+        context.checkpoint();
+        context.enterFinalization("Uninstall file moves have begun and must finish or roll "
+                + "back before the launcher can close.");
+        return executeLocked(plan, context);
+    }
+
+    private static void requireConfirmation(String confirmation) throws IOException {
+        if (!CONFIRMATION.equals(confirmation)) {
+            throw new IOException("uninstall confirmation is missing");
         }
     }
 
