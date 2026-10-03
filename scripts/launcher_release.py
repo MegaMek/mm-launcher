@@ -21,7 +21,7 @@ REPOSITORY = "MegaMek/mm-launcher"
 API = f"repos/{REPOSITORY}"
 VERSION = re.compile(r"(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)")
 VERSION_DECLARATION = re.compile(r'^version[ \t]*=[ \t]*"([^"\r\n]+)"[ \t]*\r?$', re.MULTILINE)
-MSI_LIMIT = 300 * 1024 * 1024
+INSTALLER_LIMIT = 300 * 1024 * 1024
 PAGE_SIZE = 100
 MAX_PAGES = 10
 PROVENANCE_FILE = "launcher-release-provenance.json"
@@ -338,8 +338,8 @@ def validate_files(directory, version):
         for path in (file, checksum):
             if path.is_symlink() or not path.is_file() or path.stat().st_size <= 0:
                 raise ReleaseError(f"Expected a nonempty regular file: {path.name}")
-        if name.endswith(".msi") and file.stat().st_size > MSI_LIMIT:
-            raise ReleaseError("MSI exceeds the launcher's 300 MiB self-update limit")
+        if file.stat().st_size > INSTALLER_LIMIT:
+            raise ReleaseError("Installer exceeds the launcher's 300 MiB self-update limit")
         if checksum.stat().st_size > 512:
             raise ReleaseError(f"Checksum file exceeds limit: {checksum.name}")
         sha = digest(file)
@@ -602,8 +602,8 @@ def verified_release_push(github, root, environment):
                 or not isinstance(item.get("sha256"), str)
                 or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"])):
             raise ReleaseError("Retained publication asset metadata is incomplete or malformed")
-        if item["name"].endswith(".msi") and item["size"] > MSI_LIMIT:
-            raise ReleaseError("Published MSI exceeds the updater size limit")
+        if item["name"].endswith((".msi", ".deb", ".rpm", ".pkg")) and item["size"] > INSTALLER_LIMIT:
+            raise ReleaseError("Published installer exceeds the updater size limit")
         assets.append(Asset(Path(item["name"]), item["size"], item["sha256"]))
         identities[item["name"]] = item["id"]
     if verify_release(published, assets, version, False, identities) != record["release_id"]:
@@ -622,8 +622,9 @@ def publish(github, version, commit, assets):
                                {"ref": "refs/tags/" + tag, "sha": commit})
     verify_tag(reference, version, commit)
     body = (f"Native installers built and tested from [{commit}](https://github.com/{REPOSITORY}/commit/{commit}).\n\n"
-            "Windows x64 MSI supports user-authorized launcher self-update. Linux and macOS installers "
-            "must be updated manually. Installers are unsigned; macOS packages are not notarized. "
+            "Installed launchers support user-authorized self-update on Windows, macOS, and supported "
+            "Linux desktops. Linux requires PolicyKit and apt-get or dnf. "
+            "Installers are unsigned; macOS packages are not notarized. "
             "SHA-256 files provide integrity checks, not independent publisher signing.\n")
     release = github.request("POST", f"{API}/releases", {
         "tag_name": tag, "target_commitish": commit, "name": f"MegaMek Launcher {version}",

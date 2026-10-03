@@ -123,7 +123,7 @@ original run/base identity and archive SHA-256, then reads only one JSON file (1
 uncompressed, 64 KiB archive maximum) without extraction. The record must bind the
 repository, version, candidate SHA, run/attempt, release ID and all ten original asset
 IDs, sizes and SHA-256 digests. Current public metadata is checked against that independent
-record, including exact official URLs and an updater-compatible MSI size. Deleting and
+record, including exact official URLs and updater-compatible installer sizes. Deleting and
 re-uploading assets cannot satisfy the gate merely by keeping their names and URLs.
 No installer is downloaded again. Missing/expired provenance, missing publication or
 unconfirmed successful jobs means normal installer builds and desktop tests, with an
@@ -159,12 +159,12 @@ required branch checks.
 
 Before any release/tag write, [launcher_release.py](../scripts/launcher_release.py) requires exactly
 the five expected installer/checksum pairs, nonempty regular files, matching SHA-256 values, and
-an MSI no larger than the updater's 300 MiB limit. It creates a new lightweight `v<version>` tag
+installers no larger than the updater's 300 MiB limit. It creates a new lightweight `v<version>` tag
 at the tested commit, uploads all ten files, and requires GitHub's uploaded state, immutable IDs,
 sizes, exact download URLs, and SHA-256 digests to match. A temporary GitHub draft is only an
 upload implementation detail: no human draft-review gate is added. After all checks, that same
 job publishes a normal stable release and verifies the latest-stable endpoint consumed by the
-Windows updater.
+native updater.
 
 Only then does a separate finalization job obtain a fresh, repository-scoped App token.
 It re-verifies the candidate's exact parent, base blob and version-only tree; the public
@@ -200,13 +200,16 @@ The workflow never installs packages, signs/notarizes, assembles a game suite, o
 installed launcher on a runner. A real self-update test requires separate explicit authorization
 to publish and to upgrade an older Windows MSI installation.
 
-### Installed Windows self-update
+### Installed launcher self-update
 
 Startup and Settings use the same update check. A single themed **Update now**
-consent covers the exact offered version's download, checksum and MSI identity
+consent covers the exact offered version's download, checksum and native package identity
 verification, launcher shutdown, and installation. Download/verification use the
 shared cancellable operation progress and persistent diagnostics; handoff is
-non-cancellable. No second installation confirmation is shown.
+non-cancellable. No second launcher confirmation is shown; native OS authorization and
+macOS's Installer wizard remain visible. Portable and development entry points are excluded.
+
+#### Windows
 
 The helper waits for the original launcher process to exit, checks the staged
 checksum again, and launches Windows Installer with `/passive /norestart` and a
@@ -260,6 +263,56 @@ Run the self-update regressions on Windows; only the second command needs a disp
 .\gradlew.bat test --tests "*WindowsMsi*Test" --no-daemon --console=plain
 .\gradlew.bat nativeGuiTest --tests "*LauncherUpdateDialogTest" --no-daemon --console=plain
 ```
+
+#### macOS and Linux
+
+The shared updater selects the exact published native asset, performs one streaming
+size/SHA-256 verification, and stages only the owned installer. All five native installers
+must fit the 300 MiB self-update limit before publication.
+Existing native package inspection also checks the updater's exact entry point,
+package version/release and architecture; macOS's receipt, Distribution and app
+versions must agree. It reuses the existing package expansion/listing, without a
+second package build or full-payload scan.
+
+macOS qualifies only `/Applications/MegaMek Launcher.app/Contents/MacOS/MegaMek Launcher`
+with matching `org.megamek.launcher` receipt and app identity. JVM architecture selects
+Intel or Apple Silicon. The package's Distribution must declare exactly that application
+receipt at the mapped version (launcher major plus one). Download quarantine is set,
+never removed. The helper uses `open -W -n -b com.apple.installer`, waits for the native
+wizard to close, and confirms the receipt and app version before reopening the app.
+Opening Installer alone is not success. Cancellation, Gatekeeper refusal, or an unchanged
+version is a failed attempt; no security or permission controls are bypassed.
+
+Linux qualifies the package-owned `/opt/megamek-launcher/bin/MegaMek Launcher` on x64.
+An installed Debian package selects `.deb`; an installed RPM selects `.rpm`.
+Package name, version/release and architecture must match both the running installation
+and the downloaded package. Missing, mismatched or ambiguous ownership fails explicitly.
+PolicyKit (`pkexec`, with a desktop authorization agent) authorizes a bounded installer
+script. It copies the download into a private root-owned directory, checks its SHA-256,
+then uses `apt-get -y install` or `dnf -y upgrade`. It never enables downgrades,
+disables trust checks, or feeds a mutable user-owned package directly to a privileged
+package manager. Other Linux package-manager setups remain manual.
+
+The helper waits for launcher shutdown, checks the installed target, and atomically
+records completion before reopening. Failure or denied authorization does not reopen.
+Owned staging cleanup never recurses; unrelated or changed files are preserved and
+cleanup warnings remain visible. Native reports use `launcher-update-result.txt`,
+`launcher-update-helper.log` and `launcher-update-installer.log` beside the registry.
+PID/start-time tracking, exact-version reconciliation, quiet clean success and explicit
+failure/pending/warning handling use the same report lifecycle as Windows.
+Registry, settings, logs and game installations are outside package ownership.
+
+Existing macOS/Linux installations need one manual upgrade to a version with this support.
+These installers remain unsigned and macOS packages remain unnotarized; normal OS trust
+policy may require user action or refuse installation.
+
+```powershell
+.\gradlew.bat test --tests "*NativeLauncher*Test" --tests "*WindowsMsi*Test" --tests "*LauncherServicesTest" --console=plain
+```
+
+Native helper tests use harmless substitutes; Linux private-copy tests run without
+elevation and never invoke a real package manager. A full native installation/reopen
+smoke test requires a macOS/Linux host and separate explicit installation authorization.
 
 ### Release bot setup
 

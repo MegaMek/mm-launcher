@@ -148,6 +148,9 @@ jobs:
             $matchesForType = @($files | Where-Object Extension -eq ".$type")
             if ($matchesForType.Count -ne 1) { throw "Expected exactly one $type installer." }
             $file = $matchesForType[0]
+            if ($file.Length -gt 300MB) { throw "$type exceeds the self-update size limit." }
+            $version = [regex]::Match($file.Name, '^MegaMek-Launcher-([0-9]+\.[0-9]+\.[0-9]+)-').Groups[1].Value
+            if (!$version) { throw 'Installer filename has no numeric launcher version.' }
             $line = [IO.File]::ReadAllText("$($file.FullName).sha256").Trim()
             $actual = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($line -cne "$actual  $($file.Name)") { throw "$type checksum mismatch." }
@@ -206,22 +209,55 @@ jobs:
               if ($LASTEXITCODE -ne 0) { throw 'Could not expand macOS package.' }
               $info = @(Get-ChildItem $expanded -Recurse -File -Filter PackageInfo |
                 Where-Object { (Get-Content $_.FullName -Raw) -match 'identifier="org\.megamek\.launcher"' })
-              if ($info.Count -lt 1) { throw 'macOS package identity is incorrect.' }
+              if ($info.Count -ne 1) { throw 'macOS package identity is incorrect.' }
+              $parts = $version.Split('.')
+              $macVersion = "$([int]$parts[0] + 1).$($parts[1]).$($parts[2])"
+              [xml]$packageInfo = Get-Content $info[0].FullName -Raw
+              if ($packageInfo.'pkg-info'.version -cne $macVersion) {
+                throw 'macOS package receipt version does not match the launcher.'
+              }
+              [xml]$distribution = Get-Content (Join-Path $expanded 'Distribution') -Raw
+              $declared = @($distribution.SelectNodes('//pkg-ref[@version]'))
+              if ($distribution.DocumentType -or $distribution.DocumentElement.Name -cne 'installer-gui-script' -or
+                  $declared.Count -ne 1 -or $declared[0].id -cne 'org.megamek.launcher' -or
+                  $declared[0].version -cne $macVersion) {
+                throw 'macOS distribution does not match the self-update identity/version.'
+              }
+              $appLauncher = @(Get-ChildItem $expanded -Recurse -File -Filter 'MegaMek Launcher' |
+                Where-Object { $_.FullName -match '/MegaMek Launcher\.app/Contents/MacOS/MegaMek Launcher$' })
+              if ($appLauncher.Count -ne 1) { throw 'macOS self-update entry point is missing.' }
+              $plist = Join-Path $appLauncher[0].Directory.Parent.FullName 'Info.plist'
+              $bundleVersion = & /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' $plist
+              if ($LASTEXITCODE -ne 0 -or $bundleVersion -cne $macVersion) {
+                throw 'macOS bundle version does not match its package.'
+              }
+              $bundleId = & /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' $plist
+              if ($LASTEXITCODE -ne 0 -or $bundleId -cne 'org.megamek.launcher') {
+                throw 'macOS bundle identity does not match its package.'
+              }
               if (@(Get-ChildItem $expanded -Recurse -File -Filter java |
                 Where-Object { $_.FullName -match 'runtime[/\\]Contents[/\\]Home[/\\]bin[/\\]java$' }).Count -lt 1) {
                 throw 'macOS package runtime is missing bin/java.'
               }
             } else {
-              $packageName = if ($type -eq 'deb') {
-                & dpkg-deb --field $file.FullName Package
+              $packageIdentity = if ($type -eq 'deb') {
+                & dpkg-deb --show '--showformat=${Package}\t${Version}\t${Architecture}\n' $file.FullName
               } else {
-                & rpm -qp --qf '%{NAME}' $file.FullName
+                & rpm -qp --qf '%{NAME}\t%{VERSION}\t%{RELEASE}\t%{ARCH}\n' $file.FullName
               }
-              if ($LASTEXITCODE -ne 0 -or $packageName.Trim() -cne 'megamek-launcher') {
-                throw "$type package identity is incorrect."
+              $expectedIdentity = if ($type -eq 'deb') {
+                "megamek-launcher`t${version}-1`tamd64"
+              } else {
+                "megamek-launcher`t$version`t1`tx86_64"
+              }
+              if ($LASTEXITCODE -ne 0 -or $packageIdentity.Trim() -cne $expectedIdentity) {
+                throw "$type package identity/version/architecture is incorrect."
               }
               $listing = if ($type -eq 'deb') { & dpkg-deb --contents $file.FullName } else { & rpm -qpl $file.FullName }
               if ($LASTEXITCODE -ne 0) { throw "Could not inspect $type package." }
+              if (@($listing | Where-Object { $_ -match '/opt/megamek-launcher/bin/MegaMek Launcher$' }).Count -ne 1) {
+                throw "$type self-update entry point is missing."
+              }
               if (@($listing | Where-Object { $_ -match '/opt/[^/]+/.*/runtime/bin/java$' }).Count -lt 1) {
                 throw "$type runtime is missing bin/java under /opt."
               }

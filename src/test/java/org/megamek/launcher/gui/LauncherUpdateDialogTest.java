@@ -11,7 +11,7 @@ import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationPhase;
 import org.megamek.launcher.operation.OperationType;
 import org.megamek.launcher.operation.ProgressUnit;
-import org.megamek.launcher.update.WindowsMsiUpdate;
+import org.megamek.launcher.update.LauncherSelfUpdate;
 
 import javax.swing.JButton;
 import javax.swing.JFrame;
@@ -43,7 +43,7 @@ class LauncherUpdateDialogTest {
     private void confirmation(boolean accept, String notice) throws Exception {
         JFrame owner = owner();
         CompletableFuture<Boolean> answer = new CompletableFuture<>();
-        WindowsMsiUpdate.Candidate candidate = new WindowsMsiUpdate.Candidate("v0.1.1", "0.1.1",
+        LauncherSelfUpdate.Candidate candidate = new LauncherSelfUpdate.Candidate("v0.1.1", "0.1.1",
                 "MegaMek-Launcher-0.1.1-windows-x64.msi",
                 URI.create("https://github.com/MegaMek/mm-launcher/releases/download/v0.1.1/"
                         + "MegaMek-Launcher-0.1.1-windows-x64.msi"), 42, "a".repeat(64));

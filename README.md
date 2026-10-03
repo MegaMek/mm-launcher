@@ -75,23 +75,30 @@ by one (for example, launcher 0.14.5 uses package version 1.14.5) because
 Apple does not accept a zero major; the downloadable filename retains the
 launcher version. They contain only program files. Neither installer owns the
 per-user registry, logs, settings, or any registered game installation;
-upgrades must leave those separate locations untouched. macOS and Linux
-installers do not self-update.
+upgrades must leave those separate locations untouched.
 
-Only the Windows MSI installation checks the official MegaMek/mm-launcher
-GitHub latest stable release for a newer numeric MSI version. One themed
+Supported native installations check the official MegaMek/mm-launcher
+GitHub latest stable release for a newer numeric version. One themed
 **Update now** confirmation authorizes download, verification, closing the launcher,
 and installation. Its text states the available version and asks users to close running games.
 A cancellable progress dialog shows download and verification;
 cancellation stops being available when installer handoff begins. It requires an exact release
-MSI asset with a published SHA-256, checks the staged MSI's upgrade code,
+installer asset with a published SHA-256. On Windows it checks the staged MSI's upgrade code,
 product name and product version using Windows Installer, then exits before
 the per-user upgrade begins with visible Windows Installer progress (`/passive`,
 no extra wizard and no forced computer restart). After successful completion,
 the helper records its result before reopening the launcher; the next launch confirms
 the installed version and quietly saves clean success in local diagnostics, without a
-success popup. Failures, restart-required notices and staged MSI cleanup warnings remain
+success popup. Failures, restart-required notices and staged installer cleanup warnings remain
 visible. Settings offers a manual check.
+macOS uses the matching Intel or Apple Silicon package and opens Apple's Installer,
+including its normal authorization and security checks. The helper waits for Installer to
+close and confirms the package receipt and app version before reopening.
+Linux selects `.deb` or `.rpm` from the installed package, not whichever tool happens to
+be present. PolicyKit supplies the administrator prompt; `apt-get` or `dnf` performs the
+upgrade using a verified private copy. Linux requires a desktop authorization agent.
+Portable copies and unsupported package-manager setups remain manual.
+Existing macOS/Linux launchers need one manual upgrade to a release containing this support.
 Active updates are shown as still finishing, not as failed release lookups. Completed
 failures are acknowledged so a later manual check can retry. Incomplete reports are
 retained as diagnostic evidence: identified targets are confirmed as updated only
@@ -101,18 +108,20 @@ Safely reconciled incomplete reports do not show a popup or get appended to an u
 confirmation or release-lookup error. Their original evidence is archived and recovery
 details are saved in local operation logs. Old reports without a target remain an unknown
 previous result, not a claimed successful update, after checking that the old
-helper is absent and Windows confirms the current installation. A successful installation
-with staged MSI cleanup failure is reported as a cleanup warning, not as an
+helper is absent and the system confirms the current installation. A successful installation
+with staged installer cleanup failure is reported as a cleanup warning, not as an
 installation failure. Pending or unrecognized results remain for review; a
 completed result is acknowledged before the release lookup, even when offline.
-Helper output and Windows Installer diagnostics are retained beside the registry
-as `msi-update-helper.log` and `msi-update-installer.log`; update operation logs include
+Helper output and installer diagnostics are retained beside the registry
+as `msi-update-helper.log` and `msi-update-installer.log` on Windows, or
+`launcher-update-helper.log` and `launcher-update-installer.log` on macOS/Linux; update operation logs include
 both locations. Windows PowerShell's atomic completion write uses `[NullString]::Value`,
 not `$null`, which is converted to an invalid empty backup path by its .NET method binding.
 If no compatible
-official release exists, no upgrade is attempted. Portable archives, macOS
-and Linux do not self-update. MSI upgrades replace installer-owned binaries,
-not the `%LOCALAPPDATA%` launcher registry, logs or installed games.
+official release exists, no upgrade is attempted. Portable archives do not self-update.
+Native upgrades replace installer-owned binaries, not launcher registrations, settings,
+logs or installed games. Downloads retain macOS quarantine; self-update does not bypass
+Gatekeeper, package-manager trust policy, or administrator authorization.
 
 ### Publishing a launcher release
 
@@ -131,7 +140,7 @@ tests to pass. Only then does one write-enabled
 job download this run's five installers and five checksum files, check the exact filenames and
 hashes, create `v<version>` at the tested commit, and upload the complete asset set. GitHub must
 report the expected uploaded asset IDs, sizes, URLs, and SHA-256 digests, including the digest used
-by Windows self-update.
+by native self-update. All installers must fit the updater's 300 MiB limit.
 
 Publication goes straight to a stable release in that same run, with no draft-review approval
 stage. The upload operation briefly uses GitHub's draft flag so an incomplete asset set cannot
@@ -276,7 +285,7 @@ Managed Home has one top-left information area for useful aggregate update state
 repeat an obvious post-install “ready” message or place status text above navigation.
 
 The title bar shows the packaged MegaMek Launcher version (or "development build" outside a
-packaged release). Settings also includes **Launcher update** on Windows MSI, **Community**,
+packaged release). Settings also includes **Launcher update** on supported native installations, **Community**,
 and **Latest news**. Latest news reads the official MegaMek Atom feed once per launcher window,
 independently of installation checks, and shows up to three dated headlines linking to official
 posts. **All news** opens the blog archive even if the feed cannot be loaded; news never blocks

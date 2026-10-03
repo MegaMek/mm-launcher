@@ -31,15 +31,15 @@ import static org.junit.jupiter.api.Assertions.*;
 class WindowsMsiDownloadTest {
     private final byte[] content = "synthetic MSI fixture".getBytes(java.nio.charset.StandardCharsets.UTF_8);
 
-    private WindowsMsiUpdate.Candidate candidate() throws Exception {
+    private LauncherSelfUpdate.Candidate candidate() throws Exception {
         String name = "MegaMek-Launcher-0.1.1-windows-x64.msi";
-        return new WindowsMsiUpdate.Candidate("v0.1.1", "0.1.1", name,
+        return new LauncherSelfUpdate.Candidate("v0.1.1", "0.1.1", name,
                 URI.create("https://github.com/MegaMek/mm-launcher/releases/download/v0.1.1/" + name),
                 content.length, HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content)));
     }
 
-    private WindowsMsiUpdate updater(byte[] bytes, AtomicBoolean closed) {
-        return new WindowsMsiUpdate((uri, accept) -> new ReleaseTransport.Response(200, Map.of(),
+    private LauncherSelfUpdate updater(byte[] bytes, AtomicBoolean closed) {
+        return new LauncherSelfUpdate((uri, accept) -> new ReleaseTransport.Response(200, Map.of(),
                 new ByteArrayInputStream(bytes) {
                     @Override public void close() throws IOException {
                         closed.set(true);
@@ -52,7 +52,7 @@ class WindowsMsiDownloadTest {
         AtomicBoolean closed = new AtomicBoolean();
         List<OperationProgress> events = new ArrayList<>();
         OperationContext context = new OperationContext(OperationType.LAUNCHER_UPDATE, events::add);
-        WindowsMsiUpdate updater = updater(content, closed);
+        LauncherSelfUpdate updater = updater(content, closed);
         AtomicBoolean identityChecked = new AtomicBoolean();
         Path msi = updater.stage(candidate(), "0.1.0", context, (file, version) -> {
             assertEquals("0.1.1", version);

@@ -404,7 +404,7 @@ class LauncherReleaseTest(unittest.TestCase):
             elif failure == "size":
                 asset["size"] = 0
             elif failure == "msi-limit":
-                asset["size"] = release.MSI_LIMIT + 1
+                asset["size"] = release.INSTALLER_LIMIT + 1
             elif failure == "url":
                 asset["browser_download_url"] = "https://unofficial.invalid/file.msi"
             else:
@@ -953,17 +953,17 @@ class LauncherReleaseTest(unittest.TestCase):
             self.assets()
 
     def test_msi_limit_matches_the_updater_and_rejects_one_extra_byte(self):
-        self.assertEqual(300 * 1024 * 1024, release.MSI_LIMIT)
+        self.assertEqual(300 * 1024 * 1024, release.INSTALLER_LIMIT)
         file = self.directory / f"MegaMek-Launcher-{VERSION}-windows-x64.msi"
         with file.open("wb") as output:
-            output.truncate(release.MSI_LIMIT + 1)
+            output.truncate(release.INSTALLER_LIMIT + 1)
         with self.assertRaisesRegex(release.ReleaseError, "300 MiB"):
             self.assets()
         with file.open("wb") as output:
-            output.truncate(release.MSI_LIMIT)
+            output.truncate(release.INSTALLER_LIMIT)
         checksum = file.with_name(file.name + ".sha256")
         checksum.write_text(f"{release.digest(file)}  {file.name}\n", encoding="ascii")
-        self.assertEqual(release.MSI_LIMIT, self.assets()[0].size)
+        self.assertEqual(release.INSTALLER_LIMIT, self.assets()[0].size)
 
     def test_links_are_not_installer_inputs(self):
         file = self.directory / f"MegaMek-Launcher-{VERSION}-windows-x64.msi"
@@ -977,12 +977,32 @@ class LauncherReleaseTest(unittest.TestCase):
         with self.assertRaisesRegex(release.ReleaseError, "regular file"):
             self.assets()
 
+    def test_native_installer_limits_match_the_shared_updater(self):
+        for suffix in release.INSTALLERS:
+            if suffix.endswith(".msi"):
+                continue
+            with self.subTest(suffix=suffix):
+                file = self.directory / f"MegaMek-Launcher-{VERSION}-{suffix}"
+                original = file.read_bytes()
+                try:
+                    with file.open("wb") as output:
+                        output.truncate(release.INSTALLER_LIMIT + 1)
+                    with self.assertRaisesRegex(release.ReleaseError, "300 MiB"):
+                        self.assets()
+                finally:
+                    file.write_bytes(original)
+
     @patch("builtins.print")
     def test_publication_binds_tested_commit_and_becomes_stable_only_after_all_uploads(self, output):
         github = FakeGitHub()
         assets = self.assets()
         release.publish(github, VERSION, COMMIT, assets)
         writes = [(method, endpoint, data) for method, endpoint, data in github.calls if method != "GET"]
+        published = next(data for method, endpoint, data in writes
+                         if method == "POST" and endpoint == f"{release.API}/releases")
+        self.assertIn("self-update on Windows, macOS", published["body"])
+        self.assertIn("PolicyKit", published["body"])
+        self.assertNotIn("must be updated manually", published["body"])
         self.assertEqual("refs/tags/v" + VERSION, writes[0][2]["ref"])
         self.assertEqual(COMMIT, writes[0][2]["sha"])
         self.assertTrue(writes[1][2]["draft"], "upload staging is not a draft-review step")
