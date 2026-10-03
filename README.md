@@ -521,6 +521,9 @@ pre-commit failure recoverable; post-commit cleanup failures are successful unin
 cleanup warning. The complete move intent is recorded before changes, with phase checkpoints
 instead of rewriting the whole journal for every file. Pending work blocks launch/update and
 exposes **Recover uninstall** while the folder exists.
+After confirmation, the GUI scans once under the same root/process gate used for removal,
+showing **Checking installation files** followed by **Removing official files**. Every targeted
+file is still verified immediately before its move to recovery.
 
 If a user manually deletes an installation folder, **More…** offers a styled
 **Installation not found** confirmation to remove its launcher registration, including a

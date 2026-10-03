@@ -34,6 +34,12 @@ Cleanup failures remain visible warnings, with durable commit authority retained
 latest current provenance, valid adoption marker when applicable, and fixed channel. Imported,
 corrupt, incomplete, running, pending-update, and pending-uninstall copies are ineligible.
 
+After GUI confirmation, planning and execution share one root/process lease and worker context.
+The launcher scans the official manifest once, then verifies each targeted file immediately
+before its atomic move; it does not rebuild the complete plan between these stages.
+The separately prepared-plan API still replans under its execution lease and rejects any change
+to the reviewed plan. Cancellation remains available during the single planning scan.
+
 The uninstall plan is derived from the latest verified official manifest, not the original
 receipt. Only a regular file whose stable size and SHA-256 match that current official entry is
 targeted. Missing files are already absent. Modified files, links, non-regular objects, protected

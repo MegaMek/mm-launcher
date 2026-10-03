@@ -2287,10 +2287,7 @@ public final class LauncherFrame extends JFrame {
         progress.setVisible(true);
         runOperation("Uninstalling " + record.name(), OperationType.UNINSTALL,
                 List.of(Path.of(record.canonicalRoot())), progress,
-                context -> {
-                    UninstallService.Plan plan = services.planUninstall(record, context);
-                    return services.uninstall(plan, context);
-                }, result -> {
+                context -> services.uninstall(record, context), result -> {
                     progress.dispose();
                     selectedInstallationId = null;
                     transientHomeMessage = result.retainedFiles()
