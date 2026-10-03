@@ -37,6 +37,7 @@ import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import org.megamek.launcher.update.InstallationDirectory;
 import org.megamek.launcher.update.StrictPathSafety;
 
 import java.io.IOException;
@@ -119,22 +120,13 @@ public final class RootCoordinator {
     }
 
     /**
-     * Recovery-only gate for a transaction which may have removed an empty root. The exact
-     * canonical path is derived from its real parent; the directory is not created here.
+     * Recovery-only gate for a present root or a missing directory below an accessible,
+     * canonical ancestor. Installation directories are never created here.
      */
     public Lease acquireForRecovery(Path root, boolean closeAllAcknowledged) throws IOException {
         Path absolute = root.toAbsolutePath().normalize();
-        if (Files.exists(absolute, LinkOption.NOFOLLOW_LINKS)) {
-            return acquireCanonical(StrictPathSafety.requireDirectory(
-                    absolute, "coordinated recovery root"), closeAllAcknowledged, false);
-        }
-        Path parent = StrictPathSafety.requireDirectory(absolute.getParent(),
-                "coordinated application parent");
-        Path canonical = parent.resolve(absolute.getFileName());
-        if (!canonical.equals(absolute)) {
-            throw new IOException("recovery root is not canonical");
-        }
-        return acquireCanonical(canonical, closeAllAcknowledged, false);
+        InstallationDirectory.missing(absolute);
+        return acquireCanonical(absolute, closeAllAcknowledged, false);
     }
 
     private Lease acquireCanonical(Path canonical, boolean closeAllAcknowledged, boolean launch)
@@ -169,7 +161,8 @@ public final class RootCoordinator {
     }
 
     public boolean pending(Path root) throws IOException {
-        Path canonical = StrictPathSafety.requireDirectory(root, "application root");
+        Path canonical = root.toAbsolutePath().normalize();
+        if (InstallationDirectory.missing(canonical)) return false;
         Path namespace = canonical.resolve(UPDATE_NAMESPACE);
         if (!existsNoFollow(namespace)) return false;
         StrictPathSafety.requireDirectory(namespace, "real update namespace");

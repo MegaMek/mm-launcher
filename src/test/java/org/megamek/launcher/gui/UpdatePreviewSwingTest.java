@@ -146,9 +146,10 @@ class UpdatePreviewSwingTest {
         Files.delete(fixture.root.resolve("MegaMek.jar"));
         LauncherFrame frame = show(fixture);
         try {
-            JButton blocker = waitForButton(frame, "resolveHomeBlockerButton");
-            assertNotNull(blocker);
-            SwingUtilities.invokeAndWait(blocker::doClick);
+            JButton installations = waitForButton(frame, "manageInstallationsButton");
+            assertNotNull(SwingTestSupport.find(frame, "homeActionRequiredMessage"));
+            assertNull(findButton(frame, "resolveHomeBlockerButton"));
+            SwingUtilities.invokeAndWait(installations::doClick);
             JButton recover = waitForButton(frame, "recoverUpdateButton");
             assertNotNull(recover);
             assertTrue(recover.isEnabled());

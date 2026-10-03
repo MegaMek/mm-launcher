@@ -314,6 +314,7 @@ class LauncherServicesTest {
 
         var home = services.loadHome();
         assertTrue(home.installationStatuses().get(deleted.id()).missing());
+        assertFalse(home.installationStatuses().get(deleted.id()).pendingUpdate());
         assertFalse(home.installationStatuses().get(retained.id()).missing());
         assertEquals(2, services.readRegistry().installations().size());
         var launchFailure = assertThrows(UninstallService.MissingInstallationException.class,
@@ -340,18 +341,26 @@ class LauncherServicesTest {
     }
 
     @Test
-    void unavailableInstallationParentIsNotClassifiedAsADeletedFolder() throws Exception {
-        LauncherServices services = services(temp.resolve("unavailable.json"), new RecordingRunner());
-        Path parent = Files.createDirectory(temp.resolve("drive"));
-        Path root = suite("unavailable-source");
+    void movedInstallationParentIsMissingAndCanBeForgottenWithoutDeletingItsFiles() throws Exception {
+        LauncherServices services = services(temp.resolve("moved-parent.json"), new RecordingRunner());
+        Path parent = Files.createDirectory(temp.resolve("release"));
+        Path root = suite("moved-source");
         Path moved = parent.resolve("installation");
         Files.move(root, moved);
-        InstallationRecord record = services.register("Unavailable", moved);
-        Files.move(parent, temp.resolve("disconnected"));
+        InstallationRecord record = services.register("Moved", moved);
+        Path relocated = temp.resolve("relocated");
+        Files.move(parent, relocated);
 
-        assertFalse(services.loadHome().installationStatuses().get(record.id()).missing());
-        assertThrows(IOException.class, () -> services.removeMissingFromLauncher(record));
+        var status = services.loadHome().installationStatuses().get(record.id());
+        assertTrue(status.missing());
+        assertFalse(status.pendingUpdate());
         assertEquals(List.of(record), services.readRegistry().installations());
+        assertThrows(UninstallService.MissingInstallationException.class,
+                () -> services.requireInstallationPresent(record));
+        services.removeMissingFromLauncher(record);
+        assertTrue(services.readRegistry().installations().isEmpty());
+        assertTrue(Files.isRegularFile(relocated.resolve("installation").resolve("MegaMek.jar")));
+        assertFalse(Files.exists(parent));
     }
 
     @Test

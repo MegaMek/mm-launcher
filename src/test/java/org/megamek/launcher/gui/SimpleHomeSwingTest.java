@@ -751,8 +751,9 @@ class SimpleHomeSwingTest {
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
-            assertNotNull(waitButton(frame, "resolveHomeBlockerButton"));
             JButton installations = waitButton(frame, "manageInstallationsButton");
+            assertNull(find(frame, "resolveHomeBlockerButton"));
+            assertNotNull(find(frame, "homeActionRequiredMessage"));
             SwingUtilities.invokeAndWait(installations::doClick);
             assertNotNull(waitButton(frame,
                     "installationMenuButton-" + services.firstWithoutJava.id()));

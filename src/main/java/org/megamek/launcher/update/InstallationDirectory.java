@@ -26,11 +26,20 @@ public final class InstallationDirectory {
         if (!root.equals(absolute) || absolute.getParent() == null) {
             throw new IOException("installation root must be a canonical non-root path");
         }
-        StrictPathSafety.requireDirectory(absolute.getParent(), "installation folder parent");
-        try {
-            probe.read(absolute);
-        } catch (NoSuchFileException missing) {
-            return true;
+        Path ancestor = absolute.getRoot();
+        BasicFileAttributes attributes = probe.read(ancestor);
+        for (Path part : absolute) {
+            if (!attributes.isDirectory() || attributes.isSymbolicLink() || attributes.isOther()) {
+                throw new IOException("installation folder has an unsafe ancestor: " + ancestor);
+            }
+            Path next = ancestor.resolve(part);
+            try {
+                attributes = probe.read(next);
+            } catch (NoSuchFileException missing) {
+                StrictPathSafety.requireDirectory(ancestor, "installation folder ancestor");
+                return true;
+            }
+            ancestor = next;
         }
         StrictPathSafety.requireDirectory(absolute, "installation folder");
         return false;

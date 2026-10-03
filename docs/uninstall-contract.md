@@ -22,8 +22,10 @@ uninstall until startup, explicit recovery, or a removal retry restores or final
 If the installation folder was manually deleted, its registration remains until the user
 confirms **Remove from launcher** in a styled **Installation not found** dialog. This separate
 path does not inspect absent product files, recreate the installation, or delete application-root
-content. It verifies a canonical accessible parent and positively identifies the missing entry;
-an unavailable parent/drive, access error, link, special object, or indeterminate location remains
+content. It verifies the existing canonical ancestors on an accessible filesystem and positively
+identifies the first absent directory, including when the containing release folder was deleted
+or moved. It uses the original registered root's coordination key without recreating any parent.
+An unavailable filesystem, access error, link, special object, or indeterminate location remains
 registered and produces an explicit error. The root/process gate, exact registration snapshot,
 and missing-folder check are repeated before committing. A reappearing folder blocks removal.
 An interrupted uninstall's valid bound journal can authorize completion of registration removal

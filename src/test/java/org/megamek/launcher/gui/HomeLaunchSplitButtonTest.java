@@ -123,6 +123,43 @@ class HomeLaunchSplitButtonTest {
     }
 
     @Test
+    void unavailablePreferredAndAlternateCopiesDoNotBlockUsableAlternates() throws Exception {
+        AtomicReference<String> launched = new AtomicReference<>();
+        SwingUtilities.invokeAndWait(() -> {
+            HomeLaunchSplitButton split = new HomeLaunchSplitButton(GuiScale.DEFAULT,
+                    "megamek", "MegaMek", () -> launched.set("preferred"), List.of(
+                    new HomeLaunchSplitButton.Option("Missing · Not found",
+                            () -> launched.set("missing"), false),
+                    new HomeLaunchSplitButton.Option("Available",
+                            () -> launched.set("available"))));
+            split.setPrimaryAvailable(false);
+            JMenuItem missing = (JMenuItem) split.popupMenu().getComponent(0);
+            JMenuItem available = (JMenuItem) split.popupMenu().getComponent(1);
+            assertFalse(split.primaryButton().isEnabled());
+            assertTrue(split.optionsButton().isEnabled());
+            assertFalse(missing.isEnabled());
+            assertTrue(available.isEnabled());
+            split.primaryButton().doClick();
+            missing.doClick();
+            assertEquals(null, launched.get());
+            available.doClick();
+            assertEquals("available", launched.get());
+            split.setEnabled(false);
+            assertFalse(split.optionsButton().isEnabled());
+            assertFalse(available.isEnabled());
+            split.setEnabled(true);
+            assertFalse(split.primaryButton().isEnabled());
+            assertTrue(split.optionsButton().isEnabled());
+            assertFalse(missing.isEnabled());
+            assertTrue(available.isEnabled());
+            split.setPrimaryAvailable(true);
+            split.primaryButton().doClick();
+            assertEquals("preferred", launched.get());
+            split.disposePopup();
+        });
+    }
+
+    @Test
     void noAlternatesLeavesOneStyledFocusableLaunchSegment() throws Exception {
         HomeLaunchSplitButton split = new HomeLaunchSplitButton(GuiScale.DEFAULT,
                 "lab", "MegaMekLab", () -> {

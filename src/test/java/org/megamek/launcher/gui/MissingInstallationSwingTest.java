@@ -25,6 +25,8 @@ import org.megamek.launcher.update.UninstallService;
 
 import javax.swing.JDialog;
 import javax.swing.JLabel;
+import javax.swing.JButton;
+import javax.swing.JMenuItem;
 import java.awt.GraphicsEnvironment;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -45,7 +47,7 @@ class MissingInstallationSwingTest {
     @TempDir Path temp;
 
     @Test
-    void missingCardOffersStyledConfirmationAndCancelKeepsRegistration() throws Exception {
+    void missingCardWithDeletedParentsOffersStyledConfirmationAndCancelKeepsRegistration() throws Exception {
         missingCard(false);
     }
 
@@ -73,19 +75,47 @@ class MissingInstallationSwingTest {
             assertThrows(SimulatedCrash.class, () -> service.uninstall(
                     plan, UninstallService.CONFIRMATION, interruptedContext));
         }
-        deleteRoot(fixture.root);
+        deleteRoot(fixture.root.getParent().getParent());
         LauncherFrame frame = SwingTestSupport.onEdt(() -> new LauncherFrame(fixture.services));
         try {
             SwingTestSupport.onEdt(() -> { frame.showWindow(); return null; });
+            SwingTestSupport.awaitCondition("missing version marked on Home", () -> {
+                JButton launch = SwingTestSupport.find(frame, "launch-megamek-button", JButton.class);
+                return launch != null && launch.getText().endsWith(" · Not found");
+            });
+            SwingTestSupport.onEdt(() -> {
+                HomeLaunchSplitButton launch = SwingTestSupport.find(
+                        frame, "launch-megamek-split-button", HomeLaunchSplitButton.class);
+                assertEquals("MegaMek (1.0.0) · Not found", launch.primaryButton().getText());
+                assertEquals(launch.primaryButton().getText(),
+                        launch.primaryButton().getAccessibleContext().getAccessibleName());
+                assertFalse(launch.primaryButton().isEnabled());
+                assertTrue(launch.optionsButton().isEnabled());
+                assertTrue(((JMenuItem) launch.popupMenu().getComponent(0)).isEnabled());
+                assertNull(SwingTestSupport.find(frame, "homeActionRequiredMessage"));
+                assertNull(SwingTestSupport.find(frame, "resolveHomeBlockerButton"));
+                return null;
+            });
             SwingTestSupport.click(frame, "manageInstallationsButton");
             SwingTestSupport.await("missing installation card", () ->
                     SwingTestSupport.find(frame, "installationStatus-" + fixture.removed.id(), JLabel.class));
+            SwingTestSupport.onEdt(() -> {
+                assertEquals("Folder not found", SwingTestSupport.find(frame,
+                        "installationStatus-" + fixture.removed.id(), JLabel.class).getText());
+                assertEquals("MegaMek", SwingTestSupport.find(frame,
+                        "installationProvenance-" + fixture.removed.id(), JLabel.class).getText());
+                assertEquals("Remove…", SwingTestSupport.find(frame,
+                        "installationMenuButton-" + fixture.removed.id(), JButton.class).getText());
+                assertNull(SwingTestSupport.find(frame, "recoverUpdateButton"));
+                assertNull(SwingTestSupport.find(frame, "checkOnOpenCheckbox-" + fixture.removed.id()));
+                return null;
+            });
             SwingTestSupport.startClick(frame, "installationMenuButton-" + fixture.removed.id());
             JDialog notice = SwingTestSupport.dialog(frame, "Installation not found");
             SwingTestSupport.onEdt(() -> {
                 assertEquals(FirstLaunchPanel.BACKGROUND, notice.getContentPane().getBackground());
-                assertEquals("The folder for \"Old installation\" no longer exists on disk.\n\n"
-                                + "Remove this installation from the launcher?",
+                assertEquals("The folder for \"Old installation\" could not be found.\n\n"
+                                + "Remove this installation from the launcher? No game files will be deleted.",
                         notice.getAccessibleContext().getAccessibleDescription());
                 assertEquals(1, SwingTestSupport.countButtonText(notice, "Cancel"));
                 assertEquals(1, SwingTestSupport.countButtonText(notice, "Remove from launcher"));
@@ -98,8 +128,10 @@ class MissingInstallationSwingTest {
             SwingTestSupport.click(retryNotice, "launcherAlertButton1");
             SwingTestSupport.awaitCondition("registration removal and refreshed Home", () ->
                     fixture.services.readRegistry().installations().equals(List.of(fixture.retained))
-                            && SwingTestSupport.find(frame, "launch-megamek-button") != null);
+                            && SwingTestSupport.find(frame, "launch-megamek-button", JButton.class) != null
+                            && SwingTestSupport.find(frame, "launch-megamek-button", JButton.class).isEnabled());
             assertFalse(Files.exists(fixture.root));
+            assertFalse(Files.exists(fixture.root.getParent().getParent()));
             assertTrue(Files.exists(Path.of(fixture.retained.canonicalRoot()).resolve("MegaMek.jar")));
             assertFalse(Files.exists(UninstallService.pendingJournalPath(
                     fixture.services.registry(), fixture.removed.id())));
@@ -131,7 +163,7 @@ class MissingInstallationSwingTest {
             SwingTestSupport.awaitCondition("missing card rendered", () -> {
                 JLabel status = SwingTestSupport.find(frame,
                         "installationStatus-" + fixture.removed.id(), JLabel.class);
-                return status != null && "Installation folder no longer exists".equals(status.getText());
+                return status != null && "Folder not found".equals(status.getText());
             });
             Files.move(original, fixture.root);
             SwingTestSupport.installationMenu(frame, fixture.removed.id());
@@ -155,7 +187,7 @@ class MissingInstallationSwingTest {
                 SwingTestSupport.await("initial installation card", () -> SwingTestSupport.find(
                         frame, "installationMenuButton-" + fixture.removed.id(), javax.swing.JButton.class));
             }
-            deleteRoot(fixture.root);
+            deleteRoot(fixture.root.getParent().getParent());
             SwingTestSupport.startClick(frame, launch
                     ? "launch-megamek-button" : "installationMenuButton-" + fixture.removed.id());
             JDialog notice = SwingTestSupport.dialog(frame, "Installation not found");
@@ -241,14 +273,14 @@ class MissingInstallationSwingTest {
                 }
             }
         };
-        Path root = suite("old");
+        Path root = suite(temp.resolve("old-release").resolve("payload").resolve("old"));
         InstallationRecord removed = services.register("Old installation", root);
-        InstallationRecord retained = services.register("Retained installation", suite("retained"));
+        InstallationRecord retained = services.register("Retained installation", suite(temp.resolve("retained")));
         return new Fixture(services, coordinator, root, removed, retained);
     }
 
-    private Path suite(String name) throws Exception {
-        Path root = Files.createDirectory(temp.resolve(name));
+    private Path suite(Path root) throws Exception {
+        Files.createDirectories(root);
         Files.createDirectory(root.resolve("data"));
         Files.createDirectory(root.resolve("mmconf"));
         Files.createDirectory(root.resolve("lib"));

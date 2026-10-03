@@ -293,6 +293,25 @@ class RootCoordinatorTest {
     }
 
     @Test
+    void deletingAncestorsPreservesTheRootGateWithoutRecreatingFolders() throws Exception {
+        Path parent = temp.resolve("deleted-parent").resolve("release");
+        Path root = Files.createDirectories(parent.resolve("installation"));
+        Path coordination = temp.resolve("deleted-coordination");
+        RootCoordinator coordinator = new RootCoordinator(coordination);
+        try (RootCoordinator.Lease ignored = coordinator.acquire(root, false)) {
+            Files.delete(root);
+            Files.delete(parent);
+            Files.delete(parent.getParent());
+            assertFalse(coordinator.pending(root));
+            assertThrows(IOException.class, () -> coordinator.acquireForRecovery(root, false));
+        }
+        try (RootCoordinator.Lease lease = coordinator.acquireForRecovery(root, false)) {
+            lease.requireNoPendingUpdate();
+        }
+        assertFalse(Files.exists(parent.getParent()));
+    }
+
+    @Test
     void genuineAbsenceIsAllowedButUnexpectedPendingAndMarkerTypesFailClosed()
             throws Exception {
         Path root = Files.createDirectory(temp.resolve("types-app"));

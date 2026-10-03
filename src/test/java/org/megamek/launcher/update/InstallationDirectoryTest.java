@@ -11,7 +11,10 @@ import java.io.IOException;
 import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.FileSystemException;
+import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -31,17 +34,38 @@ class InstallationDirectoryTest {
     }
 
     @Test
-    void unavailableParentAndIndeterminateAccessAreNotReportedAsDeleted() throws Exception {
-        Path root = temp.resolve("unavailable").resolve("installation");
-        assertThrows(IOException.class, () -> InstallationDirectory.missing(root));
+    void missingParentDirectoriesAreMissingWithoutRecreatingThem() throws Exception {
+        Path parent = temp.resolve("deleted").resolve("release");
+        Path root = Files.createDirectories(parent.resolve("installation"));
+        Files.delete(root);
+        Files.delete(parent);
+        Files.delete(parent.getParent());
+        assertTrue(InstallationDirectory.missing(root));
+        assertFalse(Files.exists(parent.getParent()));
+    }
+
+    @Test
+    void unavailableFilesystemAndIndeterminateAccessAreNotReportedAsDeleted() throws Exception {
         Path accessibleParentRoot = temp.resolve("installation");
         for (IOException failure : new IOException[] {
                 new AccessDeniedException(accessibleParentRoot.toString()),
                 new FileSystemException(accessibleParentRoot.toString(), null, "device unavailable")
         }) {
             assertSame(failure, assertThrows(IOException.class,
-                    () -> InstallationDirectory.missing(accessibleParentRoot, path -> { throw failure; })));
+                    () -> InstallationDirectory.missing(accessibleParentRoot, path -> {
+                        if (path.equals(accessibleParentRoot)) throw failure;
+                        return Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+                    })));
         }
+        NoSuchFileException unavailable = new NoSuchFileException(temp.getRoot().toString());
+        assertSame(unavailable, assertThrows(IOException.class,
+                () -> InstallationDirectory.missing(accessibleParentRoot, path -> {
+                    if (path.equals(temp.getRoot())) throw unavailable;
+                    return Files.readAttributes(path, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+                })));
+        Path parent = Files.writeString(temp.resolve("not-a-directory"), "keep");
+        assertThrows(IOException.class,
+                () -> InstallationDirectory.missing(parent.resolve("installation")));
     }
 
     @Test
@@ -59,5 +83,7 @@ class InstallationDirectoryTest {
         assumeTrue(supported, "directory symlinks are unavailable");
         assertThrows(IOException.class, () -> InstallationDirectory.missing(link));
         assertThrows(IOException.class, () -> InstallationDirectory.missing(link.resolve("absent")));
+        assertThrows(IOException.class,
+                () -> InstallationDirectory.missing(link.resolve("absent").resolve("installation")));
     }
 }
