@@ -525,7 +525,7 @@ public final class LauncherSelfUpdate {
         String[] completed = outcome.split(":", -1);
         if (completed.length == 2 && java.util.Set.of("installed", "installed-reboot-required",
                 "installed-cleanup-warning", "installed-reboot-required-cleanup-warning",
-                "installed-reopen-warning").contains(completed[0])
+                "installed-reopen-warning", "installed-cleanup-reopen-warning").contains(completed[0])
                 && VERSION.matcher(completed[1]).matches()) {
             if (!completed[1].equals(runningVersion)) {
                 result = new ReportResult(false, "Previous launcher update reported version "
@@ -537,12 +537,12 @@ public final class LauncherSelfUpdate {
                     result = new ReportResult("installed".equals(completed[0])
                             ? ReportState.INSTALLED : ReportState.INSTALLED_WARNING,
                             "Launcher updated to " + runningVersion + "."
-                            + (completed[0].endsWith("-cleanup-warning")
+                            + (completed[0].contains("-cleanup")
                             ? " Staged installer cleanup failed; review the leftover temporary files when safe. Diagnostics: "
                             + helperLog(report) : "")
                             + (completed[0].contains("-reboot-required")
                             ? " Windows reports that a computer restart is required; no restart was forced." : "")
-                            + (completed[0].equals("installed-reopen-warning")
+                            + (completed[0].contains("-reopen")
                             ? " Reopen the launcher manually. Diagnostics: " + helperLog(report) : ""));
                 } catch (IOException error) {
                     result = new ReportResult(false, "The updater reported success, but the "

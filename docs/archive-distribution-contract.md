@@ -271,20 +271,23 @@ size/SHA-256 verification, and stages only the owned installer. All five native 
 must fit the 300 MiB self-update limit before publication.
 Existing native package inspection also checks the updater's exact entry point,
 package version/release and architecture; macOS's receipt, Distribution and app
-versions must agree. It reuses the existing package expansion/listing, without a
-second package build or full-payload scan.
+identities must agree, and its Distribution and app versions must agree.
+The jpackage receipt version is `0`, not the app version. It reuses the existing package
+expansion/listing, without a second package build or full-payload scan.
 
 macOS qualifies only `/Applications/MegaMek Launcher.app/Contents/MacOS/MegaMek Launcher`
 with matching `org.megamek.launcher` receipt and app identity. JVM architecture selects
 Intel or Apple Silicon. The package's Distribution must declare exactly that application
-receipt at the mapped version (launcher major plus one). Download quarantine is set,
-never removed. The helper uses `open -W -n -b com.apple.installer`, waits for the native
+identity at the mapped app version (launcher major plus one). The installed receipt
+proves package identity; the app bundle proves the installed version. Download quarantine
+is set, never removed. The helper uses `open -W -n -b com.apple.installer`, waits for the native
 wizard to close, and confirms the receipt and app version before reopening the app.
 Opening Installer alone is not success. Cancellation, Gatekeeper refusal, or an unchanged
 version is a failed attempt; no security or permission controls are bypassed.
 
 Linux qualifies the package-owned `/opt/megamek-launcher/bin/MegaMek Launcher` on x64.
 An installed Debian package selects `.deb`; an installed RPM selects `.rpm`.
+Debian uses the numeric launcher version without a revision suffix; RPM uses release `1`.
 Package name, version/release and architecture must match both the running installation
 and the downloaded package. Missing, mismatched or ambiguous ownership fails explicitly.
 PolicyKit (`pkexec`, with a desktop authorization agent) authorizes a bounded installer
@@ -296,7 +299,9 @@ package manager. Other Linux package-manager setups remain manual.
 The helper waits for launcher shutdown, checks the installed target, and atomically
 records completion before reopening. Failure or denied authorization does not reopen.
 Owned staging cleanup never recurses; unrelated or changed files are preserved and
-cleanup warnings remain visible. Native reports use `launcher-update-result.txt`,
+cleanup warnings remain visible, including when reopening also fails. Interrupted
+package inspections terminate and reap their process and finish output collectors before
+staging cleanup. Native reports use `launcher-update-result.txt`,
 `launcher-update-helper.log` and `launcher-update-installer.log` beside the registry.
 PID/start-time tracking, exact-version reconciliation, quiet clean success and explicit
 failure/pending/warning handling use the same report lifecycle as Windows.

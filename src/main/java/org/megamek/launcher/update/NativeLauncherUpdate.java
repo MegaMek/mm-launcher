@@ -140,10 +140,8 @@ final class NativeLauncherUpdate {
             throw new IOException("The installed launcher path is missing or was replaced");
         if (platform != Platform.LINUX) {
             String receipt = output(List.of("/usr/sbin/pkgutil", "--pkg-info", MAC_ID));
-            String expected = "version: " + macVersion(version);
-            if (receipt.lines().filter(expected::equals).count() != 1
-                    || receipt.lines().filter(("package-id: " + MAC_ID)::equals).count() != 1)
-                throw new IOException("Running launcher version does not match its macOS package receipt");
+            if (receipt.lines().filter(("package-id: " + MAC_ID)::equals).count() != 1)
+                throw new IOException("Installed macOS launcher package identity could not be confirmed");
             Path plist = launcher.getParent().getParent().resolve("Info.plist");
             if (!macVersion(version).equals(output(List.of("/usr/libexec/PlistBuddy", "-c",
                     "Print :CFBundleShortVersionString", plist.toString())))
@@ -157,7 +155,7 @@ final class NativeLauncherUpdate {
         if (executable.test(Path.of("/usr/bin/dpkg-query"))) {
             ProcessRunner.Result owner = run(List.of("/usr/bin/dpkg-query", "--search", launcher.toString()));
             deb = owner.exitCode() == 0 && owner.output().strip().equals(PACKAGE + ": " + launcher);
-            if (deb && !("install ok installed\t" + version + "-1\tamd64").equals(output(
+            if (deb && !("install ok installed\t" + version + "\tamd64").equals(output(
                     List.of("/usr/bin/dpkg-query", "--show", "--showformat=" + DEB_FORMAT, PACKAGE))))
                 throw new IOException("Running launcher version does not match its installed Debian package");
         }
@@ -188,7 +186,7 @@ final class NativeLauncherUpdate {
         if (kind == Kind.DEB) {
             String metadata = output(List.of("/usr/bin/dpkg-deb", "--show",
                     "--showformat=${Package}\\t${Version}\\t${Architecture}\\n", file.toString()));
-            if (!(PACKAGE + "\t" + version + "-1\tamd64").equals(metadata))
+            if (!(PACKAGE + "\t" + version + "\tamd64").equals(metadata))
                 throw new IOException("Debian launcher package name, version or architecture does not match release");
         } else if (kind == Kind.RPM) {
             String metadata = output(List.of("/usr/bin/rpm", "-qp", "--queryformat", RPM_FORMAT, file.toString()));
@@ -291,12 +289,13 @@ final class NativeLauncherUpdate {
             Path bundle = launcher.getParent().getParent().getParent();
             String verify = "test -x " + quote(launcher) + " && test ! -L "
                     + quote(launcher) + " && receipt=$(/usr/sbin/pkgutil --pkg-info "
-                    + MAC_ID + " | /usr/bin/sed -n 's/^version: //p') && [ \"$receipt\" = "
-                    + "\"$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "
-                    + quote(bundle.resolve("Contents/Info.plist")) + ")\" ] && [ "
-                    + "\"$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "
-                    + quote(bundle.resolve("Contents/Info.plist")) + ")\" = "
-                    + quote(MAC_ID) + " ] && printf '%s' \"$receipt\"";
+                    + MAC_ID + ") && [ \"$(printf '%s\\n' \"$receipt\" | "
+                    + "/usr/bin/sed -n 's/^package-id: //p')\" = " + quote(MAC_ID)
+                    + " ] && version=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "
+                    + quote(bundle.resolve("Contents/Info.plist"))
+                    + ") && identity=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "
+                    + quote(bundle.resolve("Contents/Info.plist")) + ") && [ \"$identity\" = "
+                    + quote(MAC_ID) + " ] && printf '%s' \"$version\"";
             return new Commands("/usr/bin/shasum -a 256",
                     "/usr/bin/open -W -n -b com.apple.installer \"$pkg\"",
                     verify,
@@ -336,7 +335,7 @@ final class NativeLauncherUpdate {
     static String handoffScript(Path file, String version, String sha256, Path report, long parent,
                                 Commands commands) throws IOException {
         String nativeVersion = commands.rootCopy()
-                ? file.toString().endsWith(".deb") ? "install ok installed\t" + version + "-1\tamd64"
+                ? file.toString().endsWith(".deb") ? "install ok installed\t" + version + "\tamd64"
                     : PACKAGE + "\t" + version + "\t1\tx86_64"
                 : macVersion(version);
         return """
@@ -405,7 +404,11 @@ final class NativeLauncherUpdate {
                 + """
                         ); then
                             echo 'Launcher could not be reopened' >&2
-                """ + "            outcome=" + quote("installed-reopen-warning:" + version) + "\n"
+                """ + "            case \"$outcome\" in\n"
+                + "                installed-cleanup-warning:*) outcome="
+                    + quote("installed-cleanup-reopen-warning:" + version) + ";;\n"
+                + "                *) outcome=" + quote("installed-reopen-warning:" + version) + ";;\n"
+                + "            esac\n"
                 + """
                             publish
                         fi

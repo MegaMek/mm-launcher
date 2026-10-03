@@ -213,8 +213,10 @@ jobs:
               $parts = $version.Split('.')
               $macVersion = "$([int]$parts[0] + 1).$($parts[1]).$($parts[2])"
               [xml]$packageInfo = Get-Content $info[0].FullName -Raw
-              if ($packageInfo.'pkg-info'.version -cne $macVersion) {
-                throw 'macOS package receipt version does not match the launcher.'
+              # jpackage receipts use version 0; the Distribution and app carry the app version.
+              if ($packageInfo.DocumentElement.Name -cne 'pkg-info' -or
+                  $packageInfo.DocumentElement.GetAttribute('identifier') -cne 'org.megamek.launcher') {
+                throw 'macOS package receipt identity does not match the launcher.'
               }
               [xml]$distribution = Get-Content (Join-Path $expanded 'Distribution') -Raw
               $declared = @($distribution.SelectNodes('//pkg-ref[@version]'))
@@ -246,7 +248,7 @@ jobs:
                 & rpm -qp --qf '%{NAME}\t%{VERSION}\t%{RELEASE}\t%{ARCH}\n' $file.FullName
               }
               $expectedIdentity = if ($type -eq 'deb') {
-                "megamek-launcher`t${version}-1`tamd64"
+                "megamek-launcher`t${version}`tamd64"
               } else {
                 "megamek-launcher`t$version`t1`tx86_64"
               }

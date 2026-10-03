@@ -81,7 +81,7 @@ class NativeLauncherHandoffTest {
         verification = Files.writeString(temp.resolve("installed.txt"), "1.1.1");
         installer = temp.resolve("safe installer ' &.sh");
         launcher = Files.writeString(temp.resolve("safe launcher ' &.sh"),
-                "cat " + quote(report) + " > " + quote(reopened) + "\n");
+                "#!/bin/sh\ncat " + quote(report) + " > " + quote(reopened) + "\n");
         installerExit(0);
     }
 
@@ -181,13 +181,67 @@ class NativeLauncherHandoffTest {
         assertTrue(Files.readString(LauncherSelfUpdate.helperLog(report)).contains("could not be reopened"));
     }
 
+    @Test void cleanupAndReopenFailureRetainBothWarningsAndUnrelatedFiles() throws Exception {
+        Path unrelated = Files.writeString(pkg.getParent().resolve("unrelated.txt"), "do not remove");
+        var good = commands();
+        var failing = new NativeLauncherUpdate.Commands(good.hash(), good.install(), good.verify(), "exit 1", false);
+        execute(failing);
+        assertEquals("installed-cleanup-reopen-warning:0.1.1", Files.readString(report));
+        String log = Files.readString(LauncherSelfUpdate.helperLog(report));
+        assertTrue(log.contains("cleanup failed"));
+        assertTrue(log.contains("could not be reopened"));
+        assertEquals("do not remove", Files.readString(unrelated));
+        assertFalse(Files.exists(pkg));
+        assertFalse(Files.exists(reopened));
+    }
+
+    @Test void macCompletionUsesBundleVersionAndReceiptIdentityNotReceiptVersion() throws Exception {
+        assertTrue(launcher.toFile().setExecutable(true));
+        Path receipt = Files.writeString(temp.resolve("receipt.txt"),
+                "package-id: org.megamek.launcher\nversion: 0\n");
+        Path bundleId = Files.writeString(temp.resolve("bundle-id.txt"), "org.megamek.launcher");
+        Path receiptStatus = Files.writeString(temp.resolve("receipt-status.txt"), "0");
+        Path bundleStatus = Files.writeString(temp.resolve("bundle-status.txt"), "0");
+        Path pkgutil = Files.writeString(temp.resolve("pkgutil.sh"),
+                "cat " + quote(receipt) + "\nexit \"$(cat " + quote(receiptStatus) + ")\"\n");
+        Path plistBuddy = Files.writeString(temp.resolve("plist-buddy.sh"), """
+                case "$2" in
+                """ + "    'Print :CFBundleIdentifier') cat " + quote(bundleId)
+                + "; exit \"$(cat " + quote(bundleStatus) + ")\";;\n"
+                + "    'Print :CFBundleShortVersionString') cat " + quote(verification) + ";;\n"
+                + "    *) exit 2;;\nesac\n");
+        String verify = NativeLauncherUpdate.commands(NativeLauncherUpdate.Kind.MAC_INTEL, launcher, "").verify()
+                .replace("/usr/sbin/pkgutil", "sh " + quote(pkgutil))
+                .replace("/usr/libexec/PlistBuddy", "sh " + quote(plistBuddy));
+        var stub = commands();
+        var mac = new NativeLauncherUpdate.Commands(stub.hash(), stub.install(), verify, stub.reopen(), false);
+        assertEquals(0, execute(mac));
+        assertEquals("installed:0.1.1", Files.readString(report),
+                Files.readString(LauncherSelfUpdate.helperLog(report)));
+        for (String mismatch : List.of("receipt", "bundle", "version", "receipt-query", "bundle-query")) {
+            Files.deleteIfExists(reopened);
+            Files.createDirectories(pkg.getParent());
+            Files.writeString(pkg, "safe fixture");
+            Files.writeString(receipt, "package-id: " + (mismatch.equals("receipt")
+                    ? "org.other" : "org.megamek.launcher") + "\nversion: 0\n");
+            Files.writeString(bundleId, mismatch.equals("bundle") ? "org.other" : "org.megamek.launcher");
+            Files.writeString(verification, mismatch.equals("version") ? "1.1.0" : "1.1.1");
+            Files.writeString(receiptStatus, mismatch.equals("receipt-query") ? "1" : "0");
+            Files.writeString(bundleStatus, mismatch.equals("bundle-query") ? "1" : "0");
+            execute(mac);
+            assertEquals("handoff failed: requested installed version could not be confirmed",
+                    Files.readString(report), mismatch);
+            assertFalse(Files.exists(reopened), mismatch);
+        }
+    }
+
     @Test void linuxCompletionRequiresPackageStatusVersionReleaseAndArchitecture() throws Exception {
         for (String suffix : List.of("linux-x64.deb", "linux-x64.rpm")) {
             Files.deleteIfExists(pkg);
             Files.createDirectories(pkg.getParent());
             pkg = Files.writeString(pkg.getParent().resolve("MegaMek-Launcher-0.1.1-" + suffix), "safe fixture");
             Files.writeString(verification, suffix.endsWith(".deb")
-                    ? "install ok installed\t0.1.1-1\tamd64" : "megamek-launcher\t0.1.1\t1\tx86_64");
+                    ? "install ok installed\t0.1.1\tamd64" : "megamek-launcher\t0.1.1\t1\tx86_64");
             var stub = commands();
             var linux = new NativeLauncherUpdate.Commands(stub.hash(), stub.install(), stub.verify(),
                     stub.reopen(), true);
@@ -197,7 +251,7 @@ class NativeLauncherHandoffTest {
             Files.delete(reopened);
             Files.createDirectories(pkg.getParent());
             Files.writeString(pkg, "safe fixture");
-            Files.writeString(verification, "install ok installed\t0.1.1-1\tarm64");
+            Files.writeString(verification, "install ok installed\t0.1.1\tarm64");
             execute(linux);
             assertTrue(Files.readString(report).startsWith("handoff failed:"));
             assertFalse(Files.exists(reopened));

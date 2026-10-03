@@ -70,11 +70,12 @@ keeps the fixed upgrade UUID and install location and leaves user data intact.
 
 The Linux installers use the stable `megamek-launcher` package identity under
 `/opt`, while macOS uses bundle identifier `org.megamek.launcher` under
-`/Applications`. macOS's internal package version offsets the numeric major
-by one (for example, launcher 0.14.5 uses package version 1.14.5) because
+`/Applications`. macOS's app and Distribution versions offset the numeric major
+by one (for example, launcher 0.14.5 uses app version 1.14.5) because
 Apple does not accept a zero major; the downloadable filename retains the
-launcher version. They contain only program files. Neither installer owns the
-per-user registry, logs, settings, or any registered game installation;
+launcher version. The macOS receipt establishes package identity, not app version;
+jpackage writes receipt version `0`. They contain only program files. Neither installer
+owns the per-user registry, logs, settings, or any registered game installation;
 upgrades must leave those separate locations untouched.
 
 Supported native installations check the official MegaMek/mm-launcher

@@ -162,7 +162,7 @@ class NativeLauncherUpdateTest {
                 return new ProcessRunner.Result(rpmMetadata == null ? 1 : 0,
                         rpmMetadata == null ? "" : rpmMetadata, false);
             if (command.getFirst().endsWith("dpkg-deb"))
-                return new ProcessRunner.Result(0, "megamek-launcher\t0.1.1-1\tamd64\n", false);
+                return new ProcessRunner.Result(0, "megamek-launcher\t0.1.1\tamd64\n", false);
             throw new IOException("Unexpected fixture command: " + command);
         };
         return new NativeLauncherUpdate(NativeLauncherUpdate.Platform.LINUX, launcher, runner, path -> true);
@@ -172,7 +172,7 @@ class NativeLauncherUpdateTest {
             throws Exception {
         Path entry = launcher();
         List<List<String>> debCalls = new ArrayList<>();
-        var deb = linux(entry, "0.1.0-1", null, debCalls);
+        var deb = linux(entry, "0.1.0", null, debCalls);
         deb.verifyInstalledVersion("0.1.0");
         int calls = debCalls.size();
         assertEquals("linux-x64.deb", deb.suffix("0.1.0"));
@@ -187,8 +187,9 @@ class NativeLauncherUpdateTest {
     @Test void conflictingMissingAndMismatchedPackageRegistrationsCannotUpdate() throws Exception {
         Path entry = launcher();
         for (var updater : List.of(linux(entry, null, null, new ArrayList<>()),
-                linux(entry, "0.1.0-1", "megamek-launcher\t0.1.0\t1\tx86_64", new ArrayList<>()),
-                linux(entry, "0.1.2-1", null, new ArrayList<>()),
+                linux(entry, "0.1.0", "megamek-launcher\t0.1.0\t1\tx86_64", new ArrayList<>()),
+                linux(entry, "0.1.0-1", null, new ArrayList<>()),
+                linux(entry, "0.1.2", null, new ArrayList<>()),
                 linux(entry, null, "megamek-launcher\t0.1.0\t1\taarch64", new ArrayList<>()))) {
             assertThrows(IOException.class, () -> updater.verifyInstalledVersion("0.1.0"));
         }
@@ -255,7 +256,7 @@ class NativeLauncherUpdateTest {
                 .resolve("MegaMek Launcher"), "fixture").toRealPath();
         ProcessRunner runner = (command, directory, timeout, inheritIo) -> {
             if (command.getFirst().endsWith("pkgutil"))
-                return new ProcessRunner.Result(0, "package-id: org.megamek.launcher\nversion: 1.14.14\n", false);
+                return new ProcessRunner.Result(0, "package-id: org.megamek.launcher\nversion: 0\n", false);
             assertEquals(bundle.resolve("Contents/Info.plist"), Path.of(command.getLast()));
             String value = command.contains("Print :CFBundleIdentifier") ? "org.megamek.launcher" : "1.14.14";
             return new ProcessRunner.Result(0, value + "\n", false);
@@ -268,17 +269,35 @@ class NativeLauncherUpdateTest {
 
     @Test void missingLinuxAuthorizationToolsFailBeforeAnUpdateCanBeOffered() throws Exception {
         Path entry = launcher();
-        var prepared = linux(entry, "0.1.0-1", null, new ArrayList<>());
+        var prepared = linux(entry, "0.1.0", null, new ArrayList<>());
         prepared.verifyInstalledVersion("0.1.0");
         prepared.verifyInstallerTools();
         ProcessRunner runner = (command, directory, timeout, inheritIo) ->
                 new ProcessRunner.Result(0, command.contains("--search") ? "megamek-launcher: " + entry
-                        : "install ok installed\t0.1.0-1\tamd64", false);
+                        : "install ok installed\t0.1.0\tamd64", false);
         var missing = new NativeLauncherUpdate(NativeLauncherUpdate.Platform.LINUX, entry, runner,
                 path -> path.getFileName().toString().equals("dpkg-query"));
         missing.verifyInstalledVersion("0.1.0");
         assertTrue(assertThrows(IOException.class, missing::verifyInstallerTools)
                 .getMessage().contains("PolicyKit"));
+    }
+
+    @Test void downloadedDebIdentityMustMatchTheUnrevisionedVersionAndArchitecture() throws Exception {
+        Path entry = launcher();
+        for (String metadata : List.of("megamek-launcher\t0.1.1\tamd64",
+                "other-package\t0.1.1\tamd64", "megamek-launcher\t0.1.0\tamd64",
+                "megamek-launcher\t0.1.1-1\tamd64", "megamek-launcher\t0.1.1\tarm64")) {
+            ProcessRunner runner = (command, directory, timeout, inheritIo) ->
+                    new ProcessRunner.Result(0, command.getFirst().endsWith("dpkg-deb") ? metadata
+                            : command.contains("--search") ? "megamek-launcher: " + entry
+                            : "install ok installed\t0.1.0\tamd64", false);
+            var deb = new NativeLauncherUpdate(NativeLauncherUpdate.Platform.LINUX, entry, runner,
+                    path -> !path.getFileName().toString().equals("rpm"));
+            deb.verifyInstalledVersion("0.1.0");
+            if (metadata.equals("megamek-launcher\t0.1.1\tamd64"))
+                deb.verifyPackage(temp.resolve("new.deb"), "0.1.1");
+            else assertThrows(IOException.class, () -> deb.verifyPackage(temp.resolve("new.deb"), "0.1.1"));
+        }
     }
 
     @Test void downloadedRpmIdentityMustMatchTheNewVersionReleaseAndArchitecture() throws Exception {
@@ -308,6 +327,15 @@ class NativeLauncherUpdateTest {
         var warning = LauncherSelfUpdate.consumeReport(report, "0.1.1", () -> {});
         assertEquals(LauncherSelfUpdate.ReportState.INSTALLED_WARNING, warning.state());
         assertTrue(warning.message().contains("Reopen"));
+        Files.writeString(report, "installed-cleanup-reopen-warning:0.1.1");
+        var combined = LauncherSelfUpdate.consumeReport(report, "0.1.1", () -> {});
+        assertEquals(LauncherSelfUpdate.ReportState.INSTALLED_WARNING, combined.state());
+        assertTrue(combined.message().contains("cleanup failed"));
+        assertTrue(combined.message().contains("Reopen"));
+        assertFalse(Files.exists(report));
+        Files.writeString(report, "installed-cleanup-reopen-warning:0.1.1");
+        assertFalse(LauncherSelfUpdate.consumeReport(report, "0.1.0",
+                () -> fail("a different version cannot confirm installation")).installed());
         Files.writeString(report, "handoff failed: installer exited with 126");
         assertFalse(LauncherSelfUpdate.consumeReport(report, "0.1.0",
                 () -> fail("permission denial cannot confirm installation")).installed());
