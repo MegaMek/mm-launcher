@@ -73,7 +73,7 @@ import org.megamek.launcher.update.PreparedUpdate;
 import org.megamek.launcher.update.PreparedUpdateService;
 import org.megamek.launcher.update.RealUpdateService;
 import org.megamek.launcher.update.UninstallService;
-import org.megamek.launcher.update.WindowsMsiUpdate;
+import org.megamek.launcher.update.LauncherSelfUpdate;
 
 import java.io.IOException;
 import java.io.PrintStream;
@@ -184,7 +184,7 @@ public class LauncherServices {
         return operationLogs.defaultDirectory();
     }
 
-    public LauncherUpdateCheck checkLauncherUpdate(WindowsMsiUpdate.ReportResult report,
+    public LauncherUpdateCheck checkLauncherUpdate(LauncherSelfUpdate.ReportResult report,
                                                    LauncherReleaseLookup lookup)
             throws IOException, InterruptedException {
         String notice = launcherUpdateNotice(report);
@@ -205,11 +205,11 @@ public class LauncherServices {
         }
     }
 
-    private String launcherUpdateNotice(WindowsMsiUpdate.ReportResult report)
+    private String launcherUpdateNotice(LauncherSelfUpdate.ReportResult report)
             throws IOException, InterruptedException {
         if (report == null) return null;
         boolean recovered = report.recovered();
-        if (!recovered && report.state() != WindowsMsiUpdate.ReportState.INSTALLED) return report.message();
+        if (!recovered && report.state() != LauncherSelfUpdate.ReportState.INSTALLED) return report.message();
         LoggedOperation operation = beginOperation(
                 recovered ? OperationType.RECOVERY : OperationType.LAUNCHER_UPDATE, ignored -> {}, List.of());
         operation.context().phase(OperationPhase.METADATA, report.message());
@@ -1083,11 +1083,11 @@ public class LauncherServices {
                                boolean persisted) {
     }
 
-    public record LauncherUpdateCheck(WindowsMsiUpdate.Candidate candidate, String message, boolean pending) {}
+    public record LauncherUpdateCheck(LauncherSelfUpdate.Candidate candidate, String message, boolean pending) {}
 
     @FunctionalInterface
     public interface LauncherReleaseLookup {
-        WindowsMsiUpdate.Candidate check() throws IOException, InterruptedException;
+        LauncherSelfUpdate.Candidate check() throws IOException, InterruptedException;
     }
 
     public static final class LoggedOperation {

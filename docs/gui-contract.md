@@ -99,23 +99,26 @@ ineligible records show no checkbox. The action menu has no update-check editor.
 
 The title bar shows the packaged launcher version (0.14.5) or identifies a development build. Settings
 uses equal-width, top-aligned columns at wide window sizes: Game Java, Diagnostics, and
-Launcher update (Windows MSI) on the left; Community and Latest news on the right.
+Launcher update (supported native installations) on the left; Community and Latest news on the right.
 At narrow sizes these groups stack in that reading order, with the bottom navigation
 remaining visible and the sections scrolling vertically as needed. News headline buttons
 use the right column's available width with left-aligned text rather than a fixed character limit; at narrow
 widths their full titles remain available through tooltips and accessible names. Loading and error
 states keep the same layout. Settings
-includes Game Java, Diagnostics, Launcher update on Windows MSI, Community, and Latest news;
+includes Game Java, Diagnostics, Launcher update on supported native installations, Community, and Latest news;
 there is no global automatic-check control. Latest news loads up to three dated headlines from
 MegaMek's official Atom feed in the background once per window, links to the full posts, and
 always offers the blog archive when offline. Remote article HTML is not rendered in the launcher
 and news loading never delays navigation.
 
-The Windows launcher-update confirmation says **Version \<version\> is available.** and
+The launcher-update confirmation on every supported platform says **Version \<version\> is available.** and
 **Close any running games before updating.**, with **Cancel** and **Update now** actions.
 Clean, confirmed update completion is diagnostic-only: no success popup, confirmation
 preamble, or extra detail in a release-lookup error.
-Failures, required computer restarts, staged MSI cleanup warnings and unresolved pending
+The same cancellable download/verification dialog hands off to the native installer after consent:
+Windows Installer, Apple's Installer, or PolicyKit and the installed Linux package manager.
+The launcher closes before installation and reopens only after verified installation success.
+Failures, required computer restarts, staged installer cleanup/reopen warnings and unresolved pending
 updates retain their existing presentation. Diagnostic-write failures are surfaced explicitly.
 
 The effective game Java
@@ -556,6 +559,11 @@ manual runs and scheduled runs retain desktop tests; missing proof retains norma
 validation and invalid proof fails visibly.
 Missing display/all-skipped execution is not a successful advisory run.
 Native smoke tests must dispose their own windows on the EDT.
+Repeated native minimize/restore sequences, restoration after nonzero exit or start failure,
+and overlapping game launches require manual desktop checks. Their combined multi-launch
+test was removed after inconsistent macOS window-manager state assertions on unchanged code;
+it must not be reinstated with retries or longer timeouts. Direct-launch routing,
+alternate-copy selection and saved-preference preservation remain automated.
 Tests that trigger background diagnostics must release and join their fixture's writer
 before JUnit deletes the disposable registry directory. The preference-save failure
 regression deliberately holds the real logger, checks that UI recovery remains responsive,

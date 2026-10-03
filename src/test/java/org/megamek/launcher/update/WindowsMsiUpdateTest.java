@@ -54,11 +54,11 @@ class WindowsMsiUpdateTest {
 
     @Test void activePendingAndUnknownResultsRemainForReview() throws Exception {
         Path path = report("pending");
-        assertTrue(WindowsMsiUpdate.consumeReport(path, "0.1.1",
+        assertTrue(LauncherSelfUpdate.consumeReport(path, "0.1.1",
                 () -> fail("active helper must not verify MSI"), (file, pid, started) -> true).pending());
         assertEquals("pending", Files.readString(path));
         Files.writeString(path, "installed:0.1.1garbage");
-        assertThrows(IOException.class, () -> WindowsMsiUpdate.consumeReport(path, "0.1.1",
+        assertThrows(IOException.class, () -> LauncherSelfUpdate.consumeReport(path, "0.1.1",
                 () -> fail("corrupt result must not verify MSI")));
         assertTrue(Files.exists(path));
         Files.delete(path);
@@ -68,14 +68,14 @@ class WindowsMsiUpdateTest {
         } catch (UnsupportedOperationException | IOException | SecurityException unavailable) {
             return; // symlinks can require Windows developer mode / elevated privilege
         }
-        assertThrows(IOException.class, () -> WindowsMsiUpdate.consumeReport(link, "0.1.1",
+        assertThrows(IOException.class, () -> LauncherSelfUpdate.consumeReport(link, "0.1.1",
                 () -> fail("link must not verify MSI")));
         assertTrue(Files.isSymbolicLink(link));
     }
 
     @Test void legacyIncompleteReportIsRetainedAndNeverClaimedAsConfirmedUpdate() throws Exception {
         Path path = report("pending");
-        var result = WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {},
+        var result = LauncherSelfUpdate.consumeReport(path, "0.1.1", () -> {},
                 (file, pid, started) -> false);
         assertTrue(result.recovered());
         assertFalse(result.installed(), "the previous target and result are unknown");
@@ -87,7 +87,7 @@ class WindowsMsiUpdateTest {
             assertEquals("pending", Files.readString(retained));
         }
         report("pending");
-        assertThrows(IOException.class, () -> WindowsMsiUpdate.consumeReport(path, "0.1.1",
+        assertThrows(IOException.class, () -> LauncherSelfUpdate.consumeReport(path, "0.1.1",
                 () -> { throw new IOException("installed version could not be confirmed"); },
                 (file, pid, started) -> false));
         assertEquals("pending", Files.readString(path));
@@ -95,21 +95,21 @@ class WindowsMsiUpdateTest {
 
     @Test void identifiedHelperMustFinishBeforeInstalledVersionCanReconcileItsReport() throws Exception {
         Path path = report("pending:0.1.1:12345:123456789");
-        assertTrue(WindowsMsiUpdate.consumeReport(path, "0.1.1",
+        assertTrue(LauncherSelfUpdate.consumeReport(path, "0.1.1",
                 () -> fail("active helper cannot be acknowledged"), (file, pid, started) -> {
                     assertEquals(12345, pid);
                     assertEquals(123456789, started);
                     return true;
                 }).pending());
         assertEquals("pending:0.1.1:12345:123456789", Files.readString(path));
-        var incomplete = WindowsMsiUpdate.consumeReport(path, "0.1.0", () -> {},
+        var incomplete = LauncherSelfUpdate.consumeReport(path, "0.1.0", () -> {},
                 (file, pid, started) -> false);
         assertFalse(incomplete.installed());
         assertFalse(incomplete.recovered(), "a failed attempt still needs user attention");
         assertTrue(incomplete.message().contains("still 0.1.0"));
         assertFalse(Files.exists(path));
         report("pending:0.1.1:12345:123456789");
-        var result = WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {},
+        var result = LauncherSelfUpdate.consumeReport(path, "0.1.1", () -> {},
                 (file, pid, started) -> false);
         assertTrue(result.installed());
         assertTrue(result.recovered(), "a verified target with an exited helper is safely reconciled");
@@ -121,12 +121,12 @@ class WindowsMsiUpdateTest {
         for (String invalid : new String[]{"pending:0.1.1:no-pid:123", "pending:0.1.1:0:123",
                 "pending:0.1.1:123:0", "pending:0.1.1:123:123:extra"}) {
             Path path = report(invalid);
-            assertThrows(IOException.class, () -> WindowsMsiUpdate.consumeReport(path, "0.1.1",
+            assertThrows(IOException.class, () -> LauncherSelfUpdate.consumeReport(path, "0.1.1",
                     () -> fail("malformed input cannot verify MSI"), (file, pid, started) -> false));
             assertEquals(invalid, Files.readString(path));
         }
         Path path = report("pending");
-        assertThrows(IOException.class, () -> WindowsMsiUpdate.consumeReport(path, "0.1.1",
+        assertThrows(IOException.class, () -> LauncherSelfUpdate.consumeReport(path, "0.1.1",
                 () -> Files.writeString(path, "pending:0.1.2:123:123"),
                 (file, pid, started) -> false));
         assertEquals("pending:0.1.2:123:123", Files.readString(path));
@@ -134,9 +134,9 @@ class WindowsMsiUpdateTest {
 
     @Test void restartRequiredResultIsConfirmedWithoutForcingAComputerRestart() throws Exception {
         Path path = report("installed-reboot-required:0.1.1");
-        var result = WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {});
+        var result = LauncherSelfUpdate.consumeReport(path, "0.1.1", () -> {});
         assertTrue(result.installed());
-        assertEquals(WindowsMsiUpdate.ReportState.INSTALLED_WARNING, result.state());
+        assertEquals(LauncherSelfUpdate.ReportState.INSTALLED_WARNING, result.state());
         assertFalse(result.recovered(), "a required restart must remain visible");
         assertTrue(result.message().contains("no restart was forced"));
         assertFalse(Files.exists(path));
@@ -150,14 +150,14 @@ class WindowsMsiUpdateTest {
 
     @Test void completedFailureIsShownOnceAndDoesNotBlockRetry() throws Exception {
         Path path = report("1603");
-        var result = WindowsMsiUpdate.consumeReport(path, "0.1.0",
+        var result = LauncherSelfUpdate.consumeReport(path, "0.1.0",
                 () -> fail("failure must not verify MSI"));
         assertFalse(result.installed());
         assertTrue(result.message().contains("1603"));
         assertFalse(Files.exists(path));
-        assertNull(WindowsMsiUpdate.consumeReport(path, "0.1.0", () -> {}));
+        assertNull(LauncherSelfUpdate.consumeReport(path, "0.1.0", () -> {}));
         report("handoff failed: staged MSI digest changed");
-        var handoff = WindowsMsiUpdate.consumeReport(path, "0.1.0",
+        var handoff = LauncherSelfUpdate.consumeReport(path, "0.1.0",
                 () -> fail("handoff failure must not verify MSI"));
         assertFalse(handoff.installed());
         assertTrue(handoff.message().contains("staged MSI digest changed"));
@@ -166,45 +166,45 @@ class WindowsMsiUpdateTest {
 
     @Test void installedResultRequiresMatchingAndConfirmedVersionEvenOffline() throws Exception {
         Path path = report("installed:0.1.1");
-        var mismatch = WindowsMsiUpdate.consumeReport(path, "0.1.0",
+        var mismatch = LauncherSelfUpdate.consumeReport(path, "0.1.0",
                 () -> fail("mismatch must not verify MSI"));
         assertFalse(mismatch.installed());
         assertFalse(Files.exists(path));
         report("installed:0.1.1");
-        var unconfirmed = WindowsMsiUpdate.consumeReport(path, "0.1.1",
+        var unconfirmed = LauncherSelfUpdate.consumeReport(path, "0.1.1",
                 () -> { throw new IOException("MSI version mismatch"); });
         assertFalse(unconfirmed.installed());
         assertTrue(unconfirmed.message().contains("MSI version mismatch"));
         assertFalse(Files.exists(path));
         report("installed:0.1.1");
-        var installed = WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {});
+        var installed = LauncherSelfUpdate.consumeReport(path, "0.1.1", () -> {});
         assertTrue(installed.installed());
-        assertEquals(WindowsMsiUpdate.ReportState.INSTALLED, installed.state());
+        assertEquals(LauncherSelfUpdate.ReportState.INSTALLED, installed.state());
         assertEquals("Launcher updated to 0.1.1.", installed.message());
         assertFalse(Files.exists(path));
     }
 
     @Test void cleanupWarningIsSuccessAndCannotMaskAReportChange() throws Exception {
         Path path = report("installation succeeded; staged MSI cleanup failed");
-        var warning = WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {});
+        var warning = LauncherSelfUpdate.consumeReport(path, "0.1.1", () -> {});
         assertTrue(warning.installed());
-        assertEquals(WindowsMsiUpdate.ReportState.INSTALLED_WARNING, warning.state());
+        assertEquals(LauncherSelfUpdate.ReportState.INSTALLED_WARNING, warning.state());
         assertFalse(warning.recovered(), "a cleanup warning must remain visible");
         assertTrue(warning.message().contains("cleanup failed"));
         assertFalse(Files.exists(path));
         report("installation succeeded; staged MSI cleanup failed; restart required");
-        var restartWarning = WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {});
-        assertEquals(WindowsMsiUpdate.ReportState.INSTALLED_WARNING, restartWarning.state());
+        var restartWarning = LauncherSelfUpdate.consumeReport(path, "0.1.1", () -> {});
+        assertEquals(LauncherSelfUpdate.ReportState.INSTALLED_WARNING, restartWarning.state());
         assertTrue(restartWarning.installed());
         assertTrue(restartWarning.message().contains("cleanup failed"));
         assertTrue(restartWarning.message().contains("computer restart"));
         assertFalse(Files.exists(path));
         report("installed:0.1.1");
-        assertThrows(IOException.class, () -> WindowsMsiUpdate.consumeReport(path, "0.1.1",
+        assertThrows(IOException.class, () -> LauncherSelfUpdate.consumeReport(path, "0.1.1",
                 () -> Files.writeString(path, "pending")));
         assertEquals("pending", Files.readString(path));
         Files.writeString(path, "installed:0.1.1" + " ".repeat(4096));
-        assertThrows(IOException.class, () -> WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {}));
+        assertThrows(IOException.class, () -> LauncherSelfUpdate.consumeReport(path, "0.1.1", () -> {}));
         assertTrue(Files.exists(path));
     }
 
@@ -217,7 +217,7 @@ class WindowsMsiUpdateTest {
     }
 
     @Test void requiresOfficialMsiAndPublishedChecksum() throws IOException {
-        WindowsMsiUpdate updater = new WindowsMsiUpdate();
+        LauncherSelfUpdate updater = new LauncherSelfUpdate();
         String official = "https://github.com/MegaMek/mm-launcher/releases/download/"
                 + "0.1.1/MegaMek-Launcher-0.1.1-windows-x64.msi";
         String digest = "sha256:" + "a".repeat(64);
@@ -229,16 +229,16 @@ class WindowsMsiUpdateTest {
     }
 
     @Test void comparesAllThreeNumericMsiComponents() throws IOException {
-        assertTrue(WindowsMsiUpdate.compare("0.1.1", "0.1.0") > 0);
-        assertTrue(WindowsMsiUpdate.compare("1.0.0", "0.99.99") > 0);
-        assertTrue(WindowsMsiUpdate.compare("0.1.0", "0.1.1") < 0);
-        assertEquals(0, WindowsMsiUpdate.compare("0.1.1", "0.1.1"));
-        assertThrows(IOException.class, () -> WindowsMsiUpdate.compare("0.1.1-SNAPSHOT", "0.1.0"));
-        assertThrows(IOException.class, () -> WindowsMsiUpdate.compare("v0.1.1", "0.1.0"));
+        assertTrue(LauncherSelfUpdate.compare("0.1.1", "0.1.0") > 0);
+        assertTrue(LauncherSelfUpdate.compare("1.0.0", "0.99.99") > 0);
+        assertTrue(LauncherSelfUpdate.compare("0.1.0", "0.1.1") < 0);
+        assertEquals(0, LauncherSelfUpdate.compare("0.1.1", "0.1.1"));
+        assertThrows(IOException.class, () -> LauncherSelfUpdate.compare("0.1.1-SNAPSHOT", "0.1.0"));
+        assertThrows(IOException.class, () -> LauncherSelfUpdate.compare("v0.1.1", "0.1.0"));
     }
 
     @Test void handoffQuotesSpacedMsiPathWithoutBackslashesAndWaitsForExit() {
-        String script = WindowsMsiUpdate.handoffScript(
+        String script = LauncherSelfUpdate.handoffScript(
                 Path.of("C:\\Users\\Example User\\AppData\\Local\\Temp\\mm-launcher-msi-test",
                         "MegaMek-Launcher-0.1.1-windows-x64.msi"),
                 "0.1.1", "a".repeat(64), Path.of("C:\\Users\\Example User\\result.txt"), 12345);
@@ -262,15 +262,15 @@ class WindowsMsiUpdateTest {
         for (String completion : new String[]{"installed-cleanup-warning", "installed-reboot-required",
                 "installed-reboot-required-cleanup-warning"}) {
             Path path = report(completion + ":0.1.1");
-            var result = WindowsMsiUpdate.consumeReport(path, "0.1.0",
+            var result = LauncherSelfUpdate.consumeReport(path, "0.1.0",
                     () -> fail("wrong running version cannot confirm a completed update"));
             assertFalse(result.installed());
             assertTrue(result.message().contains("reported version 0.1.1"));
             assertFalse(Files.exists(path));
             report(completion + ":0.1.1");
-            var warning = WindowsMsiUpdate.consumeReport(path, "0.1.1", () -> {});
+            var warning = LauncherSelfUpdate.consumeReport(path, "0.1.1", () -> {});
             assertTrue(warning.installed());
-            assertEquals(WindowsMsiUpdate.ReportState.INSTALLED_WARNING, warning.state());
+            assertEquals(LauncherSelfUpdate.ReportState.INSTALLED_WARNING, warning.state());
             assertFalse(warning.recovered());
             assertEquals(completion.contains("cleanup-warning"), warning.message().contains("cleanup failed"));
             assertEquals(completion.contains("reboot-required"), warning.message().contains("computer restart"));
@@ -279,14 +279,14 @@ class WindowsMsiUpdateTest {
     }
 
     @Test void cannotDiscardAnUnownedPath() {
-        assertThrows(IOException.class, () -> new WindowsMsiUpdate().discard(
+        assertThrows(IOException.class, () -> new LauncherSelfUpdate().discard(
                 Path.of("C:\\Users\\Example User\\unrelated.msi")));
     }
 
     @Test void powershellArgumentListPreservesSpacedMsiPath() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeTrue(System.getProperty("os.name", "").startsWith("Windows"));
         String path = "C:\\Users\\Example User\\Temp\\MegaMek Launcher 0.1.1.msi";
-        String script = "$msi='" + path + "'; $arguments=" + WindowsMsiUpdate.installerArguments("$msi")
+        String script = "$msi='" + path + "'; $arguments=" + LauncherSelfUpdate.installerArguments("$msi")
                 + "; [Console]::Out.Write($arguments[1])";
         String encoded = Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
         Process process = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive",

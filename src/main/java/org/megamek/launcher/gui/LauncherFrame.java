@@ -61,7 +61,7 @@ import org.megamek.launcher.update.PreparedUpdate;
 import org.megamek.launcher.update.UpdatePreviewService;
 import org.megamek.launcher.update.RealUpdateService;
 import org.megamek.launcher.update.UninstallService;
-import org.megamek.launcher.update.WindowsMsiUpdate;
+import org.megamek.launcher.update.LauncherSelfUpdate;
 
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
@@ -176,7 +176,7 @@ public final class LauncherFrame extends JFrame {
     private Throwable newsError;
     private String transientHomeMessage;
     private boolean launcherUpdateChecked;
-    private final WindowsMsiUpdate launcherUpdater = new WindowsMsiUpdate();
+    private final LauncherSelfUpdate launcherUpdater = new LauncherSelfUpdate();
 
     public LauncherFrame(LauncherServices services) {
         this(services, new SwingExistingImportPrompts(),
@@ -303,7 +303,7 @@ public final class LauncherFrame extends JFrame {
                             message -> status.setText("Artwork unavailable. " + message));
                 }
                 maybeCheckManagedCopiesOnOpen();
-                if (!launcherUpdateChecked && WindowsMsiUpdate.available()) {
+                if (!launcherUpdateChecked && LauncherSelfUpdate.available()) {
                     launcherUpdateChecked = true;
                     checkLauncherUpdate(false);
                 }
@@ -2421,7 +2421,7 @@ public final class LauncherFrame extends JFrame {
             logs.addActionListener(event -> showOperationLogs());
             diagnostics.add(logs);
             left.add(diagnostics);
-            if (WindowsMsiUpdate.available()) {
+            if (LauncherSelfUpdate.available()) {
                 left.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
                 JPanel updater = settingsSection("Launcher update");
                 JButton check = homeButton("Check for launcher update", "checkLauncherUpdateButton");
@@ -2620,12 +2620,12 @@ public final class LauncherFrame extends JFrame {
             }
 
     private Path launcherUpdateReport() {
-        return services.registry().toAbsolutePath().getParent().resolve("msi-update-result.txt");
+        return services.registry().toAbsolutePath().getParent().resolve(LauncherSelfUpdate.reportFileName());
     }
 
     private void checkLauncherUpdate(boolean explicit) {
         run("Checking launcher release", () -> services.checkLauncherUpdate(
-                WindowsMsiUpdate.consumeReport(launcherUpdateReport(), WindowsMsiUpdate.currentVersion()),
+                LauncherSelfUpdate.consumeReport(launcherUpdateReport(), LauncherSelfUpdate.currentVersion()),
                 launcherUpdater::check), checked -> {
             if (checked.pending()) {
                 status.setText(checked.message());
@@ -2633,7 +2633,7 @@ public final class LauncherFrame extends JFrame {
                         "Launcher update in progress", checked.message());
                 return;
             }
-            WindowsMsiUpdate.Candidate candidate = checked.candidate();
+            LauncherSelfUpdate.Candidate candidate = checked.candidate();
             if (candidate == null) {
                 status.setText(checked.message() == null ? "Launcher is up to date." : checked.message());
                 if (checked.message() != null) LauncherAlertDialog.showMessage(this, guiScale,
@@ -2645,18 +2645,18 @@ public final class LauncherFrame extends JFrame {
                     "Updating launcher", "launcherUpdateProgressLog", this::showOperationLogs);
             progress.setVisible(true);
             runOperation("Updating launcher", OperationType.LAUNCHER_UPDATE, List.of(), progress, context -> {
-                Path msi = launcherUpdater.stage(candidate, context);
+                Path installer = launcherUpdater.stage(candidate, context);
                 try {
                     context.phase(org.megamek.launcher.operation.OperationPhase.APPLY,
-                            "Closing the launcher; Windows Installer will show installation progress. Diagnostics: "
-                                    + WindowsMsiUpdate.helperLog(launcherUpdateReport()) + " and "
-                                    + WindowsMsiUpdate.installerLog(launcherUpdateReport()));
-                    context.enterFinalization("Windows Installer handoff has started.");
-                    launcherUpdater.handoff(msi, candidate.version(), candidate.sha256(), launcherUpdateReport());
+                            "Closing the launcher to start installation. Diagnostics: "
+                                    + LauncherSelfUpdate.helperLog(launcherUpdateReport()) + " and "
+                                    + LauncherSelfUpdate.installerLog(launcherUpdateReport()));
+                    context.enterFinalization("Installer handoff has started.");
+                    launcherUpdater.handoff(installer, candidate.version(), candidate.sha256(), launcherUpdateReport());
                     return null;
                 } catch (Exception error) {
                     try {
-                        launcherUpdater.discard(msi);
+                        launcherUpdater.discard(installer);
                     } catch (IOException cleanup) {
                         error.addSuppressed(cleanup);
                     }
@@ -2676,7 +2676,7 @@ public final class LauncherFrame extends JFrame {
     }
 
     static boolean confirmLauncherUpdate(Window owner, GuiScale scale,
-                                          WindowsMsiUpdate.Candidate candidate, String notice) {
+                                          LauncherSelfUpdate.Candidate candidate, String notice) {
         String message = "Version " + candidate.version() + " is available.\n\n"
                 + "Close any running games before updating.";
         if (notice != null) message = notice + "\n\n" + message;

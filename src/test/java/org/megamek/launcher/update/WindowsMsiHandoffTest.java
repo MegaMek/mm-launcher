@@ -61,9 +61,9 @@ class WindowsMsiHandoffTest {
     }
 
     private int execute() throws Exception {
-        String script = WindowsMsiUpdate.handoffScript(msi, "0.1.1", sha256, report,
+        String script = LauncherSelfUpdate.handoffScript(msi, "0.1.1", sha256, report,
                 Integer.MAX_VALUE, launcher, installer);
-        Process helper = start(script, WindowsMsiUpdate.helperLog(report));
+        Process helper = start(script, LauncherSelfUpdate.helperLog(report));
         try {
             assertTrue(helper.waitFor(30, TimeUnit.SECONDS), "helper exceeded timeout");
             return helper.exitValue();
@@ -90,8 +90,8 @@ class WindowsMsiHandoffTest {
     }
 
     @Test void writesCompletionWithWindowsPowerShellAndReopensOnlyAfterSuccess() throws Exception {
-        assertEquals(0, execute(), Files.readString(WindowsMsiUpdate.helperLog(report)));
-        assertEquals("installed:0.1.1", Files.readString(report), Files.readString(WindowsMsiUpdate.helperLog(report)));
+        assertEquals(0, execute(), Files.readString(LauncherSelfUpdate.helperLog(report)));
+        assertEquals("installed:0.1.1", Files.readString(report), Files.readString(LauncherSelfUpdate.helperLog(report)));
         awaitReopen();
         assertEquals(Files.readString(report), Files.readString(reopened));
         String supplied = Files.readString(arguments);
@@ -100,7 +100,7 @@ class WindowsMsiHandoffTest {
         assertTrue(supplied.contains("/l*v"));
         assertTrue(supplied.contains("\"" + msi + "\""), "spaced MSI argument must remain quoted");
         assertFalse(Files.exists(msi.getParent()));
-        assertTrue(WindowsMsiUpdate.consumeReport(report, "0.1.1", () -> {}).installed());
+        assertTrue(LauncherSelfUpdate.consumeReport(report, "0.1.1", () -> {}).installed());
         assertFalse(Files.exists(report));
     }
 
@@ -109,30 +109,30 @@ class WindowsMsiHandoffTest {
         String literal = releaseParent.toString().replace("'", "''");
         Process parent = start("while(!(Test-Path -LiteralPath '" + literal
                 + "')){Start-Sleep -Milliseconds 50}", temp.resolve("parent.log"));
-        Process helper = start(WindowsMsiUpdate.handoffScript(msi, "0.1.1", sha256, report,
-                parent.pid(), launcher, installer), WindowsMsiUpdate.helperLog(report));
+        Process helper = start(LauncherSelfUpdate.handoffScript(msi, "0.1.1", sha256, report,
+                parent.pid(), launcher, installer), LauncherSelfUpdate.helperLog(report));
         try {
             await(() -> {
                 try {
-                    return Files.readString(WindowsMsiUpdate.helperLog(report)).contains("Waiting for launcher");
+                    return Files.readString(LauncherSelfUpdate.helperLog(report)).contains("Waiting for launcher");
                 } catch (java.io.IOException error) {
                     throw new java.io.UncheckedIOException(error);
                 }
             });
             assertFalse(Files.exists(arguments), "installer must not run while parent is alive");
-            assertTrue(WindowsMsiUpdate.consumeReport(report, "0.1.1",
+            assertTrue(LauncherSelfUpdate.consumeReport(report, "0.1.1",
                     () -> fail("active helper must not verify or acknowledge installation")).pending());
             assertEquals("pending", Files.readString(report));
             String identified = "pending:0.1.1:" + helper.pid() + ":"
                     + helper.info().startInstant().orElseThrow().toEpochMilli();
             Files.writeString(report, identified);
-            assertTrue(WindowsMsiUpdate.consumeReport(report, "0.1.1",
+            assertTrue(LauncherSelfUpdate.consumeReport(report, "0.1.1",
                     () -> fail("identified active helper must retain its report")).pending());
             assertEquals(identified, Files.readString(report));
             Files.writeString(releaseParent, "release");
             assertTrue(parent.waitFor(15, TimeUnit.SECONDS));
             assertTrue(helper.waitFor(30, TimeUnit.SECONDS));
-            assertEquals(0, helper.exitValue(), Files.readString(WindowsMsiUpdate.helperLog(report)));
+            assertEquals(0, helper.exitValue(), Files.readString(LauncherSelfUpdate.helperLog(report)));
             assertEquals("installed:0.1.1", Files.readString(report));
             awaitReopen();
         } finally {
@@ -147,7 +147,7 @@ class WindowsMsiHandoffTest {
             execute();
             assertEquals(Integer.toString(code), Files.readString(report));
             assertFalse(Files.exists(reopened));
-            assertFalse(WindowsMsiUpdate.consumeReport(report, "0.1.0",
+            assertFalse(LauncherSelfUpdate.consumeReport(report, "0.1.0",
                     () -> fail("failed install cannot verify success")).installed());
             Files.createDirectories(msi.getParent());
             Files.writeString(msi, "fixture: not an actual installer");
@@ -161,7 +161,7 @@ class WindowsMsiHandoffTest {
         assertEquals("installed-reboot-required:0.1.1", Files.readString(report));
         awaitReopen();
         assertEquals(Files.readString(report), Files.readString(reopened));
-        var result = WindowsMsiUpdate.consumeReport(report, "0.1.1", () -> {});
+        var result = LauncherSelfUpdate.consumeReport(report, "0.1.1", () -> {});
         assertTrue(result.installed());
         assertTrue(result.message().contains("computer restart"));
     }
@@ -173,7 +173,7 @@ class WindowsMsiHandoffTest {
         assertFalse(Files.exists(arguments));
         assertFalse(Files.exists(reopened));
         assertTrue(Files.exists(msi), "unrecognized replacement bytes must not be deleted");
-        assertTrue(Files.readString(WindowsMsiUpdate.helperLog(report)).contains("Staged MSI digest changed"));
+        assertTrue(Files.readString(LauncherSelfUpdate.helperLog(report)).contains("Staged MSI digest changed"));
     }
 
     @Test void cleanupWarningKeepsUnrelatedFilesAndStillReopensVerifiedUpdate() throws Exception {
@@ -190,7 +190,7 @@ class WindowsMsiHandoffTest {
             assertEquals("not owned by the update", Files.readString(unrelated));
             awaitReopen();
             assertEquals(Files.readString(report), Files.readString(reopened));
-            var result = WindowsMsiUpdate.consumeReport(report, "0.1.1", () -> {});
+            var result = LauncherSelfUpdate.consumeReport(report, "0.1.1", () -> {});
             assertTrue(result.installed());
             assertTrue(result.message().contains("cleanup failed"));
             assertEquals(code == 3010, result.message().contains("computer restart"));
@@ -202,6 +202,6 @@ class WindowsMsiHandoffTest {
         assertNotEquals(0, execute());
         assertTrue(Files.exists(arguments), "the fake installer ran before the completion write failed");
         assertFalse(Files.exists(reopened));
-        assertTrue(Files.readString(WindowsMsiUpdate.helperLog(report)).contains("Replace"));
+        assertTrue(Files.readString(LauncherSelfUpdate.helperLog(report)).contains("Replace"));
     }
 }

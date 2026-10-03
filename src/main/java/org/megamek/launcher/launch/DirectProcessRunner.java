@@ -56,28 +56,74 @@ public final class DirectProcessRunner implements ProcessRunner {
                              java.util.function.Consumer<ProcessIdentity> started)
             throws IOException, InterruptedException {
         ProcessBuilder builder = new ProcessBuilder(command).directory(workingDirectory.toFile());
-        Process process;
         ByteArrayOutputStream captured = new ByteArrayOutputStream();
-        Thread stdout = null;
-        Thread stderr = null;
-        if (inheritIo) {
-            builder.inheritIO();
-            process = builder.start();
-        } else {
-            process = builder.start();
-            stdout = Thread.ofVirtual().start(() -> copyBounded(process.getInputStream(), captured));
-            stderr = Thread.ofVirtual().start(() -> copyBounded(process.getErrorStream(), captured));
+        if (inheritIo) builder.inheritIO();
+        Process process = builder.start();
+        try (ProcessResources resources = new ProcessResources(process)) {
+            if (!inheritIo) {
+                resources.stdout = Thread.ofVirtual().start(() -> copyBounded(process.getInputStream(), captured));
+                resources.stderr = Thread.ofVirtual().start(() -> copyBounded(process.getErrorStream(), captured));
+            }
+            started.accept(ProcessIdentity.of(process.toHandle()));
+            boolean completed = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
+            if (!completed) {
+                process.destroyForcibly();
+                process.waitFor();
+            }
+            if (resources.stdout != null) resources.stdout.join();
+            if (resources.stderr != null) resources.stderr.join();
+            return new Result(completed ? process.exitValue() : -1,
+                    captured.toString(java.nio.charset.StandardCharsets.UTF_8), !completed);
         }
-        started.accept(ProcessIdentity.of(process.toHandle()));
-        boolean completed = process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS);
-        if (!completed) {
-            process.destroyForcibly();
-            process.waitFor();
+    }
+
+    private static final class ProcessResources implements AutoCloseable {
+        private final Process process;
+        private Thread stdout;
+        private Thread stderr;
+
+        private ProcessResources(Process process) {
+            this.process = process;
         }
-        if (stdout != null) stdout.join();
-        if (stderr != null) stderr.join();
-        return new Result(completed ? process.exitValue() : -1,
-                captured.toString(java.nio.charset.StandardCharsets.UTF_8), !completed);
+
+        @Override
+        public void close() throws IOException {
+            boolean interrupted = Thread.interrupted();
+            try {
+                if (process.isAlive()) process.destroyForcibly();
+                while (process.isAlive()) {
+                    try {
+                        process.waitFor();
+                    } catch (InterruptedException error) {
+                        interrupted = true;
+                    }
+                }
+                try (var input = process.getInputStream();
+                     var error = process.getErrorStream();
+                     var output = process.getOutputStream()) {
+                    // Close the pipes before joining collectors on an interrupted or failed run.
+                } finally {
+                    interrupted |= join(stdout);
+                    interrupted |= join(stderr);
+                }
+            } finally {
+                if (interrupted) Thread.currentThread().interrupt();
+            }
+        }
+
+        private static boolean join(Thread thread) {
+            boolean interrupted = false;
+            if (thread != null) {
+                while (thread.isAlive()) {
+                    try {
+                        thread.join();
+                    } catch (InterruptedException error) {
+                        interrupted = true;
+                    }
+                }
+            }
+            return interrupted;
+        }
     }
 
     private static void copyBounded(InputStream input, ByteArrayOutputStream output) {

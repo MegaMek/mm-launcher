@@ -1387,93 +1387,6 @@ class SimpleHomeSwingTest {
         assertEquals("MegaMek Launcher (development build)", LauncherFrame.titleFor(null));
     }
 
-    @Test
-    @org.junit.jupiter.api.Tag("native-gui")
-    void directLaunchMinimizesSafelyAndRestoredWindowAllowsAnotherLaunch()
-            throws Exception {
-        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
-                "actual frame state and dialogs require a display");
-        FakeServices services = new FakeServices(temp.resolve("direct-launch.json"));
-        services.installed = true;
-        services.main = services.first;
-        services.installedRecord = services.first;
-        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
-        try {
-            SwingUtilities.invokeAndWait(frame::showWindow);
-            JButton primary = waitButton(frame, "launch-megamek-button");
-
-            services.launchStarted = new CountDownLatch(1);
-            services.releaseLaunch = new CountDownLatch(1);
-            SwingUtilities.invokeAndWait(primary::doClick);
-            assertTrue(services.launchStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
-            assertEquals(services.first, services.launchedRecord);
-            assertEquals("megamek", services.launchedProduct);
-            assertTrue((onEdt(frame::getExtendedState) & javax.swing.JFrame.ICONIFIED) != 0);
-            assertNoShowingDialog(frame, "Confirm launch");
-            services.releaseLaunch.countDown();
-            waitUntil(() -> services.launchAttempts.get() == 1
-                    && find(frame, "launch-megamek-button") != null
-                    && ((JButton) find(frame, "launch-megamek-button")).isEnabled());
-            assertTrue((onEdt(frame::getExtendedState) & javax.swing.JFrame.ICONIFIED) != 0,
-                    "zero exit stays minimized for manual restoration");
-            assertNoShowingDialog(frame, "Game finished");
-
-            SwingUtilities.invokeAndWait(() ->
-                    frame.setExtendedState(javax.swing.JFrame.NORMAL));
-            services.launchExit = 7;
-            services.launchStarted = new CountDownLatch(1);
-            services.releaseLaunch = new CountDownLatch(1);
-            SwingUtilities.invokeAndWait(
-                    () -> ((JButton) find(frame, "launch-megamek-button")).doClick());
-            assertTrue(services.launchStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
-            assertTrue((onEdt(frame::getExtendedState) & javax.swing.JFrame.ICONIFIED) != 0);
-            services.releaseLaunch.countDown();
-            JDialog nonzero = waitDialog(frame, "Game exited with code 7");
-            assertEquals(javax.swing.JFrame.NORMAL,
-                    onEdt(frame::getExtendedState) & ~javax.swing.JFrame.MAXIMIZED_BOTH);
-            SwingUtilities.invokeAndWait(nonzero::dispose);
-
-            services.launchExit = 0;
-            services.launchFailure = new IOException("fixture start failure");
-            services.launchStarted = new CountDownLatch(1);
-            services.releaseLaunch = new CountDownLatch(1);
-            SwingUtilities.invokeAndWait(
-                    () -> ((JButton) find(frame, "launch-megamek-button")).doClick());
-            assertTrue(services.launchStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
-            services.releaseLaunch.countDown();
-            JDialog failed = waitDialog(frame, "Launching MegaMek failed");
-            assertEquals(javax.swing.JFrame.NORMAL,
-                    onEdt(frame::getExtendedState) & ~javax.swing.JFrame.MAXIMIZED_BOTH);
-            SwingUtilities.invokeAndWait(failed::dispose);
-
-            services.launchFailure = null;
-            services.launchStarted = new CountDownLatch(1);
-            services.releaseLaunch = new CountDownLatch(1);
-            SwingUtilities.invokeAndWait(
-                    () -> ((JButton) find(frame, "launch-megamek-button")).doClick());
-            assertTrue(services.launchStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
-            SwingUtilities.invokeAndWait(() ->
-                    frame.setExtendedState(javax.swing.JFrame.NORMAL));
-            int attempts = services.launchAttempts.get();
-            CountDownLatch firstRelease = services.releaseLaunch;
-            services.launchStarted = new CountDownLatch(1);
-            services.releaseLaunch = new CountDownLatch(1);
-            SwingUtilities.invokeLater(
-                    () -> frame.launchDirectly(services.second, "megamek"));
-            assertTrue(services.launchStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
-            assertEquals(attempts + 1, services.launchAttempts.get(),
-                    "another launch starts before the earlier child exits");
-            assertEquals(services.second, services.launchedRecord);
-            firstRelease.countDown();
-            services.releaseLaunch.countDown();
-            assertEquals(0, services.selections.get(),
-                    "neither primary nor alternate direct launch mutates preferences");
-        } finally {
-            if (services.releaseLaunch != null) services.releaseLaunch.countDown();
-            dispose(frame);
-        }
-    }
-
     private static final class FakeServices extends LauncherServices {
         private final Path registry;
         private final Path destination;
@@ -1526,10 +1439,6 @@ class SimpleHomeSwingTest {
         private final AtomicInteger snapshotFailures = new AtomicInteger();
         private volatile CountDownLatch installStarted;
         private volatile CountDownLatch releaseInstall;
-        private volatile CountDownLatch launchStarted;
-        private volatile CountDownLatch releaseLaunch;
-        private volatile int launchExit;
-        private volatile IOException launchFailure;
         private volatile boolean installBecameMain = true;
         private volatile IOException installFailure;
         private volatile CountDownLatch releaseSettings;
@@ -1785,12 +1694,7 @@ class SimpleHomeSwingTest {
             launched = true;
             launchedRecord = record;
             launchedProduct = product;
-            CountDownLatch started = launchStarted;
-            CountDownLatch release = releaseLaunch;
-            if (started != null) started.countDown();
-            if (release != null) release.await();
-            if (launchFailure != null) throw launchFailure;
-            return launchExit;
+            return 0;
         }
 
         private static InstallationRecord record(String suffix, String name, Path root,

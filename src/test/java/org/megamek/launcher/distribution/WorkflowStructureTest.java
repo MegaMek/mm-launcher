@@ -160,7 +160,19 @@ class WorkflowStructureTest {
         assertTrue(inspection.contains("if ($line -cne \"$actual  $($file.Name)\")"));
         assertTrue(inspection.contains("OpenDatabase($file.FullName, 0)"), "MSI inspection must be read-only");
         assertTrue(inspection.contains("pkgutil --expand-full"));
-        assertTrue(inspection.contains("dpkg-deb --field"));
+        assertTrue(inspection.contains("$file.Length -gt 300MB"));
+        assertTrue(inspection.contains("SelectNodes('//pkg-ref[@version]')"));
+        assertTrue(inspection.contains("CFBundleShortVersionString"));
+        assertTrue(inspection.contains("$packageInfo.DocumentElement.GetAttribute('identifier') -cne 'org.megamek.launcher'"));
+        assertFalse(inspection.contains("$packageInfo.'pkg-info'.version"),
+                "jpackage's zero-version receipt does not establish the app version");
+        assertTrue(inspection.contains("dpkg-deb --show"));
+        assertTrue(inspection.contains("\"megamek-launcher`t${version}`tamd64\""));
+        assertFalse(inspection.contains("${version}-1"),
+                "the Debian package has no revision suffix");
+        assertTrue(inspection.contains("${Package}\\t${Version}\\t${Architecture}"));
+        assertTrue(inspection.contains("%{NAME}\\t%{VERSION}\\t%{RELEASE}\\t%{ARCH}"));
+        assertTrue(inspection.contains("/opt/megamek-launcher/bin/MegaMek Launcher$"));
         assertTrue(inspection.contains("rpm -qp"));
         assertFalse(inspection.matches("(?s).*\\n\\s*(?:&\\s*)?msiexec(?:\\.exe)?\\b.*"),
                 "verification must not execute the MSI");
