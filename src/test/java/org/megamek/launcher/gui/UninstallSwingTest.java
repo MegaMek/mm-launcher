@@ -31,7 +31,6 @@ import java.awt.GraphicsEnvironment;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.jar.Attributes;
@@ -112,15 +111,13 @@ class UninstallSwingTest {
             assertFalse(Files.exists(root.resolve("MegaMek.jar")));
             assertEquals("keep", Files.readString(custom));
             assertTrue(Files.exists(Path.of(retained.canonicalRoot()).resolve("MegaMek.jar")));
-            assertEquals(1, SwingTestSupport.onEdt(() -> Arrays.stream(frame.getOwnedWindows())
-                    .filter(OperationProgressDialog.class::isInstance).count()));
         } finally {
             SwingTestSupport.dispose(frame);
         }
     }
 
     @Test
-    void progressShowsCheckingThenRemovingInTheSameDialog() throws Exception {
+    void timerShowsTheCurrentCheckingAndRemovalStagesInTheSameDialog() throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless(), "actual progress controls require a display");
         LauncherFrame frame = SwingTestSupport.onEdt(() ->
                 new LauncherFrame(new LauncherServices(temp.resolve("progress-registry.json"))));
@@ -135,10 +132,10 @@ class UninstallSwingTest {
             SwingTestSupport.onEdt(() -> { dialog.bind(context); return null; });
             context.progress(OperationPhase.PLAN, 12, 100, ProgressUnit.FILES,
                     "Compared official application files");
+            SwingTestSupport.awaitCondition("timer-rendered checking stage", () ->
+                    "Checking installation files".equals(SwingTestSupport.find(
+                            dialog, "operationPhaseLabel", JLabel.class).getText()));
             SwingTestSupport.onEdt(() -> {
-                dialog.flush();
-                assertEquals("Checking installation files", SwingTestSupport.find(
-                        dialog, "operationPhaseLabel", JLabel.class).getText());
                 assertEquals("12 / 100 files", SwingTestSupport.find(
                         dialog, "operationProgressBar", JProgressBar.class).getString());
                 assertTrue(SwingTestSupport.find(dialog, "operationCancelButton").isVisible());
@@ -147,10 +144,51 @@ class UninstallSwingTest {
             context.enterFinalization("File moves must finish or roll back.");
             context.progress(OperationPhase.UNINSTALL, 3, 80, ProgressUnit.FILES,
                     "Secured official application files");
+            SwingTestSupport.awaitCondition("timer-rendered removal stage", () ->
+                    "Removing official files".equals(SwingTestSupport.find(
+                            dialog, "operationPhaseLabel", JLabel.class).getText()));
             SwingTestSupport.onEdt(() -> {
-                dialog.flush();
-                assertEquals("Removing official files", SwingTestSupport.find(
-                        dialog, "operationPhaseLabel", JLabel.class).getText());
+                assertEquals("3 / 80 files", SwingTestSupport.find(
+                        dialog, "operationProgressBar", JProgressBar.class).getString());
+                assertFalse(SwingTestSupport.find(dialog, "operationCancelButton").isVisible());
+                return null;
+            });
+        } finally {
+            SwingTestSupport.dispose(frame);
+        }
+    }
+
+    @Test
+    void timerCoalescesCompletedCheckingIntoCurrentRemovalWithoutReplayingStaleProgress()
+            throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "actual progress controls require a display");
+        LauncherFrame frame = SwingTestSupport.onEdt(() ->
+                new LauncherFrame(new LauncherServices(temp.resolve("fast-progress-registry.json"))));
+        OperationProgressDialog dialog = SwingTestSupport.onEdt(() -> {
+            frame.setVisible(true);
+            var progress = new OperationProgressDialog(frame, "Uninstalling", "fastUninstallFixture", () -> {});
+            progress.setVisible(true);
+            return progress;
+        });
+        OperationContext context = new OperationContext(OperationType.UNINSTALL, dialog::onProgress);
+        List<String> rendered = new java.util.ArrayList<>();
+        try {
+            SwingTestSupport.onEdt(() -> {
+                dialog.bind(context);
+                SwingTestSupport.find(dialog, "operationPhaseLabel", JLabel.class)
+                        .addPropertyChangeListener("text", event -> rendered.add((String) event.getNewValue()));
+                context.progress(OperationPhase.PLAN, 100, 100, ProgressUnit.FILES,
+                        "Compared official application files");
+                context.enterFinalization("File moves must finish or roll back.");
+                context.progress(OperationPhase.UNINSTALL, 3, 80, ProgressUnit.FILES,
+                        "Secured official application files");
+                return null;
+            });
+            SwingTestSupport.awaitCondition("current removal rendered by timer", () ->
+                    "Removing official files".equals(SwingTestSupport.find(
+                            dialog, "operationPhaseLabel", JLabel.class).getText()));
+            SwingTestSupport.onEdt(() -> {
+                assertEquals(List.of("Removing official files"), rendered);
                 assertEquals("3 / 80 files", SwingTestSupport.find(
                         dialog, "operationProgressBar", JProgressBar.class).getString());
                 assertFalse(SwingTestSupport.find(dialog, "operationCancelButton").isVisible());

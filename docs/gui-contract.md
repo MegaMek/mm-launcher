@@ -45,8 +45,10 @@ Top-level actions are **Install another version** and **Import existing installa
 **Open location**, and **Remove from launcher…** when applicable. Managed/adopted cards also place
 **Uninstall…** at the destructive bottom; imported cards do not. A pending uninstall exposes only
 **Recover uninstall** instead of a new remove/uninstall action while its folder exists.
-Confirmed uninstall shows **Checking installation files** once, followed by **Removing official
-files** in the same progress dialog. Planning and removal retain one root/process lease;
+Confirmed uninstall has one checking pass, labelled **Checking installation files**, and a removal
+stage labelled **Removing official files** in the same progress dialog. Progress refreshes show
+the latest state; a very short stage may finish between refreshes rather than being replayed.
+Planning and removal retain one root/process lease;
 immediate per-file verification, modified/custom-file retention, and recovery protection remain.
 When the folder is positively confirmed missing, **More…** instead opens a styled
 **Installation not found** dialog with **Cancel** and **Remove from launcher**. The dialog
