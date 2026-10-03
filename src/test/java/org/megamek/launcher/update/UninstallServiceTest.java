@@ -301,6 +301,41 @@ class UninstallServiceTest {
     }
 
     @Test
+    void deletedAncestorsCanBeForgottenWithOrWithoutAnInterruptedUninstall() throws Exception {
+        for (boolean interrupted : List.of(false, true)) {
+            String name = "deleted-ancestors-" + interrupted;
+            Path container = temp.resolve(name + "-release");
+            Fixture fixture = managed(name, 0, container.resolve("payload").resolve("installation"));
+            InstallationRecord retained = fixture.store.register(
+                    fixture.registry, "Retained", suite(temp.resolve(name + "-retained")), null);
+            if (interrupted) {
+                UninstallService crashing = fixture.service(point -> {
+                    if (point.equals("file-moved")) throw new SimulatedCrash();
+                });
+                assertThrows(SimulatedCrash.class, () -> crashing.uninstall(
+                        crashing.plan(fixture.record, context()), UninstallService.CONFIRMATION, context()));
+            }
+            deleteFixture(container);
+            assertThrows(UninstallService.MissingInstallationException.class,
+                    () -> UninstallService.requirePresent(fixture.record));
+            try (var ignored = new RootCoordinator(fixture.registry.resolveSibling("coordination"))
+                    .acquireForRecovery(fixture.root, false)) {
+                assertThrows(IOException.class,
+                        () -> fixture.service(point -> {}).removeMissingFromLauncher(fixture.record));
+            }
+            assertNull(fixture.service(point -> {}).removeMissingFromLauncher(fixture.record).warning());
+            assertEquals(List.of(retained), fixture.store.read(fixture.registry).installations());
+            assertEquals(retained.id(),
+                    fixture.store.read(fixture.registry).preferredInstallationIds().get("megamek"));
+            assertFalse(Files.exists(container));
+            assertTrue(Files.isRegularFile(Path.of(retained.canonicalRoot()).resolve("MegaMek.jar")));
+            assertFalse(Files.exists(new ReceiptStore().receiptPath(fixture.registry, fixture.record.id())));
+            assertFalse(Files.exists(UninstallService.pendingJournalPath(fixture.registry, fixture.record.id())));
+            assertTrue(fixture.service(point -> {}).recoverCommitted().isEmpty());
+        }
+    }
+
+    @Test
     void deletedRootAfterInterruptedUninstallCanBeForgottenAndOwnedBackupsCleaned() throws Exception {
         Fixture fixture = managed("deleted-mid-uninstall");
         UninstallService crashing = fixture.service(point -> {
@@ -346,13 +381,15 @@ class UninstallServiceTest {
 
     @Test
     void failedMissingRemovalRestoresMetadataAndDoesNotDeleteAReappearingRoot() throws Exception {
-        Fixture fixture = managed("missing-rollback");
+        Path container = temp.resolve("missing-rollback-release");
+        Fixture fixture = managed("missing-rollback", 0,
+                container.resolve("payload").resolve("installation"));
         Path receipt = new ReceiptStore().receiptPath(fixture.registry, fixture.record.id());
         byte[] before = Files.readAllBytes(receipt);
-        deleteFixture(fixture.root);
+        deleteFixture(container);
         UninstallService racing = fixture.service(point -> {
             if (point.equals("remove-before-registry")) {
-                Files.createDirectory(fixture.root);
+                Files.createDirectories(fixture.root);
                 Files.writeString(fixture.root.resolve("new.txt"), "do not delete");
             }
         });
@@ -766,7 +803,11 @@ class UninstallServiceTest {
     }
 
     private Fixture managed(String name, int fileCount) throws Exception {
-        Path root = suite(temp.resolve(name));
+        return managed(name, fileCount, temp.resolve(name));
+    }
+
+    private Fixture managed(String name, int fileCount, Path installationRoot) throws Exception {
+        Path root = suite(installationRoot);
         for (int i = 0; i < fileCount; i++) {
             Path directory = Files.createDirectories(root.resolve("docs/bucket-" + (i % 64)));
             Files.writeString(directory.resolve("file-" + i + ".txt"), "official file " + i);

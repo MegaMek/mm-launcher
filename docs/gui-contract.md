@@ -19,6 +19,10 @@ preferred `InstallationRecord`, displays **Program Channel (Version)**, and uses
 static reinspection, Java, coordinator, and launch validation without a GUI preview or confirmation.
 Alternate rows are deterministic,
 launch-only exact-record actions and never mutate a preference or fall back at click time.
+Missing preferred folders show **Program (Version) · Not found** inline instead of a recovery
+banner. Their primary launch segment is disabled, but usable alternate installations remain
+available; known blocked alternatives are disabled. Genuine recovery/unavailable messages remain
+distinct and use the existing **Installations** navigation, without an extra navigation button.
 
 Registry schema 3 contains a strict `preferredInstallationIds`
 application-key/installation-UUID map and no per-installation Java. Older pre-release schemas are
@@ -50,14 +54,18 @@ stage labelled **Removing official files** in the same progress dialog. Progress
 the latest state; a very short stage may finish between refreshes rather than being replayed.
 Planning and removal retain one root/process lease;
 immediate per-file verification, modified/custom-file retention, and recovery protection remain.
-When the folder is positively confirmed missing, **More…** instead opens a styled
+When the folder is positively confirmed missing, the card shows **Folder not found**, retains
+its recorded applications/version and preferred markers, and replaces **More…** with **Remove…**.
+It does not describe the copy as an incomplete managed setup or offer update/recovery controls.
+**Remove…** opens a styled
 **Installation not found** dialog with **Cancel** and **Remove from launcher**. The dialog
-is offered only after a fresh worker-thread folder check on every **More…** click, not from cached
+is offered only after a fresh worker-thread folder check on every **More…** or **Remove…** click, not from cached
 card status; a folder restored since rendering opens the ordinary menu instead. Cancellation
 keeps the registration; confirmation removes that exact registration and its owned metadata,
 including validated interrupted-uninstall cleanup. It never reinstalls or recreates deleted
 application files. A folder deleted after rendering also routes an affected launch or operation
-to this dialog. Unavailable drives/parents, access errors, and unsafe paths are not treated as
+to this dialog, including when containing directories were deleted or moved.
+Unavailable filesystems, access errors, and unsafe paths are not treated as
 deleted folders. There is no standalone GUI Preview action. Update is primary only when known available.
 **Reset preferences…** appears in the More menu for ordinary registered copies, including
 imports. The confirmation explains the program scope, asks users to close the suite, and says

@@ -89,7 +89,9 @@ final class HomeLaunchSplitButton extends JPanel {
     private final SegmentButton optionsButton;
     private final JPopupMenu popupMenu;
     private final List<JMenuItem> optionItems;
+    private final List<Option> alternatives;
     private final boolean hasOptions;
+    private boolean primaryAvailable = true;
     private boolean disposed;
 
     HomeLaunchSplitButton(GuiScale scale, String productKey, String productName,
@@ -109,6 +111,7 @@ final class HomeLaunchSplitButton extends JPanel {
                           Runnable primaryAction, List<Option> alternatives) {
         this.scale = scale;
         List<Option> capturedOptions = List.copyOf(alternatives);
+        this.alternatives = capturedOptions;
         hasOptions = !capturedOptions.isEmpty();
         setName("launch-" + productKey + "-split-button");
         setLayout(new BorderLayout());
@@ -161,7 +164,7 @@ final class HomeLaunchSplitButton extends JPanel {
         }).toList();
         optionsButton.addPropertyChangeListener("enabled", event -> {
             boolean enabled = optionsButton.isEnabled() && isEnabled();
-            for (JMenuItem item : optionItems) item.setEnabled(enabled);
+            updateOptionAvailability();
             if (!enabled) closePopup();
             repaint();
         });
@@ -188,6 +191,7 @@ final class HomeLaunchSplitButton extends JPanel {
         primaryButton.getModel().addChangeListener(event -> repaint());
         optionsButton.getModel().addChangeListener(event -> repaint());
         add(primaryButton, BorderLayout.CENTER);
+        updateOptionAvailability();
     }
 
     private JMenuItem menuItem(String label, Palette palette) {
@@ -225,7 +229,9 @@ final class HomeLaunchSplitButton extends JPanel {
 
     private void invokeOption(Option option) {
         closePopup();
-        if (!disposed && isEnabled() && optionsButton.isEnabled()) option.action().run();
+        if (!disposed && isEnabled() && optionsButton.isEnabled() && option.available()) {
+            option.action().run();
+        }
     }
 
     void openPopup() {
@@ -235,10 +241,11 @@ final class HomeLaunchSplitButton extends JPanel {
         }
         int x = Math.max(0, getWidth() - popupMenu.getPreferredSize().width);
         popupMenu.show(this, x, Math.max(0, getHeight() - scale.scaleForGUI(3)));
-        MenuElement[] elements = popupMenu.getSubElements();
-        MenuSelectionManager.defaultManager().setSelectedPath(elements.length == 0
+        JMenuItem selected = optionItems.stream().filter(JMenuItem::isEnabled)
+                .findFirst().orElse(null);
+        MenuSelectionManager.defaultManager().setSelectedPath(selected == null
                 ? new MenuElement[]{popupMenu}
-                : new MenuElement[]{popupMenu, elements[0]});
+                : new MenuElement[]{popupMenu, selected});
     }
 
     void closePopup() {
@@ -269,13 +276,25 @@ final class HomeLaunchSplitButton extends JPanel {
         return hasOptions;
     }
 
+    void setPrimaryAvailable(boolean available) {
+        primaryAvailable = available;
+        primaryButton.setEnabled(isEnabled() && available);
+    }
+
+    private void updateOptionAvailability() {
+        boolean enabled = isEnabled() && optionsButton.isEnabled();
+        for (int index = 0; index < optionItems.size(); index++) {
+            optionItems.get(index).setEnabled(enabled && alternatives.get(index).available());
+        }
+    }
+
     @Override
     public void setEnabled(boolean enabled) {
         super.setEnabled(enabled);
         if (primaryButton == null) return;
-        primaryButton.setEnabled(enabled);
+        primaryButton.setEnabled(enabled && primaryAvailable);
         optionsButton.setEnabled(enabled && hasOptions);
-        for (JMenuItem item : optionItems) item.setEnabled(enabled);
+        updateOptionAvailability();
         repaint();
     }
 
@@ -312,7 +331,8 @@ final class HomeLaunchSplitButton extends JPanel {
                     && optionsButton.getModel().isArmed();
             boolean hover = primaryButton.getModel().isRollover()
                     || hasOptions && optionsButton.getModel().isRollover();
-            boolean enabled = isEnabled() && primaryButton.isEnabled();
+            boolean enabled = isEnabled() && (primaryButton.isEnabled()
+                    || hasOptions && optionsButton.isEnabled());
             Color top = enabled ? new Color(226, 196, 125) : new Color(54, 68, 69);
             Color lower = enabled ? new Color(192, 159, 88) : new Color(43, 55, 57);
             if (enabled && pressed) {
@@ -345,7 +365,11 @@ final class HomeLaunchSplitButton extends JPanel {
         super.paintComponent(graphics);
     }
 
-    record Option(String label, Runnable action) {
+    record Option(String label, Runnable action, boolean available) {
+        Option(String label, Runnable action) {
+            this(label, action, true);
+        }
+
         Option {
             if (label == null || label.isBlank()) {
                 throw new IllegalArgumentException("alternate label is required");

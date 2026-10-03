@@ -966,11 +966,7 @@ public final class UninstallService {
             throw new IOException("uninstall journal transaction id is invalid", error);
         }
         Path root = rootOf(journal.record());
-        Path rootParent = StrictPathSafety.requireDirectory(
-                root.getParent(), "uninstall root parent");
-        if (!rootParent.resolve(root.getFileName()).equals(root)) {
-            throw new IOException("uninstall root binding is not canonical");
-        }
+        InstallationDirectory.missing(root);
         Path backup = Path.of(journal.rootBackup()).toAbsolutePath().normalize();
         Path expectedBackup = root.resolveSibling("." + root.getFileName()
                 + ".mm-launcher-uninstall-" + journal.transactionId());

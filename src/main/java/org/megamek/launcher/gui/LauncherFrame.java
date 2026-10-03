@@ -819,8 +819,7 @@ public final class LauncherFrame extends JFrame {
         launches.setAlignmentX(Component.CENTER_ALIGNMENT);
         boolean pending = false;
         boolean pendingUninstall = false;
-        boolean unavailable = state.preferredError() != null
-                && targets.containsValue(state.preferred());
+        boolean unavailable = false;
         for (String productKey : List.of("mekhq", "megamek", "lab")) {
             InstallationRecord record = targets.get(productKey);
             if (record == null) continue;
@@ -830,12 +829,21 @@ public final class LauncherFrame extends JFrame {
                     () -> launchDirectly(record, productKey),
                     homeLaunchAlternatives(record, productKey));
             LauncherServices.InstallationStatus local = installationLocalStatus(record);
-            pending |= local != null && local.pendingUpdate();
-            pendingUninstall |= local != null && local.pendingUninstall();
-            unavailable |= local != null && local.error() != null;
-            launch.setEnabled(local == null
-                    || !local.pendingUpdate() && !local.pendingUninstall()
-                    && local.error() == null);
+            if (local != null && local.missing()) {
+                launch.primaryButton().setText(VersionDisplay.programChannelVersion(
+                        displayProduct(productKey), channel, record.observedBuild()) + " · Not found");
+                launch.primaryButton().getAccessibleContext().setAccessibleName(
+                        launch.primaryButton().getText());
+                launch.primaryButton().getAccessibleContext().setAccessibleDescription(
+                        "Preferred installation folder not found.");
+                launch.getAccessibleContext().setAccessibleDescription(
+                        "Preferred installation folder not found.");
+            } else {
+                pending |= local != null && local.pendingUpdate();
+                pendingUninstall |= local != null && local.pendingUninstall();
+                unavailable |= local != null && local.error() != null;
+            }
+            launch.setPrimaryAvailable(homeLaunchAvailable(local));
             homeLaunchButtons.add(launch);
             launches.add(launch);
         }
@@ -851,11 +859,12 @@ public final class LauncherFrame extends JFrame {
             blocker.setName("homeActionRequiredMessage");
             blocker.setForeground(FirstLaunchPanel.GOLD);
             panel.add(blocker);
-            JButton open = homeButton("Open Installations", "resolveHomeBlockerButton");
-            open.setAlignmentX(Component.CENTER_ALIGNMENT);
-            open.addActionListener(event -> navigateTo(Page.INSTALLATIONS));
-            panel.add(open);
         }
+    }
+
+    private static boolean homeLaunchAvailable(LauncherServices.InstallationStatus local) {
+        return local == null || !local.missing() && !local.pendingUpdate()
+                && !local.pendingUninstall() && local.error() == null;
     }
 
     private List<HomeLaunchSplitButton.Option> homeLaunchAlternatives(
@@ -870,7 +879,8 @@ public final class LauncherFrame extends JFrame {
                         .anyMatch(product -> product.key().equals(productKey)))
                 .map(record -> new HomeLaunchSplitButton.Option(
                         homeAlternativeLabel(record, productKey),
-                        () -> launchDirectly(record, productKey)))
+                        () -> launchDirectly(record, productKey),
+                        homeLaunchAvailable(installationLocalStatus(record))))
                 .toList();
     }
 
@@ -889,7 +899,8 @@ public final class LauncherFrame extends JFrame {
                 ? name + (version == null ? "" : " · " + version)
                         + (channel == null ? "" : " · " + channel)
                 : name + " · " + details;
-        return label + (update == null ? "" : " · " + update);
+        return label + (local != null && local.missing()
+                ? " · Not found" : update == null ? "" : " · " + update);
     }
 
     private static String knownInstallationVersion(InstallationRecord record) {
@@ -1237,14 +1248,17 @@ public final class LauncherFrame extends JFrame {
         }
         summary.add(titleRow);
         summary.add(Box.createVerticalStrut(guiScale.scaleForGUI(5)));
-        boolean ownershipProvenance = hasOwnershipProvenance(local);
+        boolean missing = local != null && local.missing();
+        boolean ownershipProvenance = !missing && hasOwnershipProvenance(local);
         boolean fixedChannel = hasFixedChannel(local);
-        boolean updateManaged = managedUpdatesAvailable(local);
-        boolean trueImported = trueImported(local);
+        boolean updateManaged = !missing && managedUpdatesAvailable(local);
+        boolean trueImported = !missing && trueImported(local);
         String products = record.products().stream()
                 .map(Product::key).map(LauncherFrame::displayProduct)
                 .collect(java.util.stream.Collectors.joining(", "));
-        String provenance = trueImported
+        String provenance = missing
+                ? products
+                : trueImported
                 ? "Imported copy · Launch only · Updates unavailable"
                 : fixedChannel
                 ? products
@@ -1351,10 +1365,11 @@ public final class LauncherFrame extends JFrame {
             adopt.addActionListener(event -> beginAdoption(record));
             actions.add(adopt);
         }
-        JButton more = homeButton("More…", "installationMenuButton-" + record.id());
+        JButton more = homeButton(missing ? "Remove…" : "More…",
+                "installationMenuButton-" + record.id());
         installationMenuButtons.put(record.id(), more);
         more.getAccessibleContext().setAccessibleDescription(
-                "More actions for " + record.name());
+                (missing ? "Remove from launcher: " : "More actions for ") + record.name());
         more.addActionListener(event -> run("Checking installation folder", () -> {
             services.requireInstallationPresent(record);
             return null;
@@ -1645,7 +1660,7 @@ public final class LauncherFrame extends JFrame {
     private String installationUpdateStatus(InstallationRecord record,
                                             LauncherServices.InstallationStatus local) {
         if (local != null && local.missing()) {
-            return "Installation folder no longer exists";
+            return "Folder not found";
         }
         if (local != null && local.pendingUninstall()) {
             return "Uninstall recovery required";
@@ -2240,8 +2255,8 @@ public final class LauncherFrame extends JFrame {
     private void removeMissingInstallation(InstallationRecord record) {
         boolean confirmed = LauncherAlertDialog.showConfirm(this, guiScale,
                 "Installation not found",
-                "The folder for \"" + record.name() + "\" no longer exists on disk.\n\n"
-                        + "Remove this installation from the launcher?",
+                "The folder for \"" + record.name() + "\" could not be found.\n\n"
+                        + "Remove this installation from the launcher? No game files will be deleted.",
                 "Remove from launcher");
         if (!confirmed) return;
         run("Removing missing installation",
