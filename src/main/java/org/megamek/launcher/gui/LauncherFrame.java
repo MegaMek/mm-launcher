@@ -4580,9 +4580,8 @@ public final class LauncherFrame extends JFrame {
         }
 
         private int availableWidth() {
-            if (getWidth() > 0) return getWidth();
             Container parent = getParent();
-            if (parent == null) return 0;
+            if (parent == null) return getWidth();
             int width = parent.getWidth();
             if (width == 0 && parent.getParent() != null) {
                 width = parent.getParent().getWidth();

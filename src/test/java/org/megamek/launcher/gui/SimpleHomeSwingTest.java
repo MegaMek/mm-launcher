@@ -92,9 +92,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.CountDownLatch;
 import java.util.function.BooleanSupplier;
 
@@ -1069,6 +1071,9 @@ class SimpleHomeSwingTest {
             });
             assertHomeAtSize(frame, 1044, 714, true);
             assertHomeAtSize(frame, 1100, 760, true);
+            assertHomeAtSize(frame, 960, 600, false);
+            assertHomeAtSize(frame, 720, 600, false);
+            assertHomeAtSize(frame, 1100, 760, true);
             assertHomeAtSize(frame, 720, 600, false);
         } finally {
             dispose(frame);
@@ -1082,21 +1087,44 @@ class SimpleHomeSwingTest {
             frame.validate();
             return null;
         });
-        waitUntil(() -> {
+        AtomicReference<List<Rectangle>> previous = new AtomicReference<>();
+        AtomicInteger stableSamples = new AtomicInteger();
+        SwingTestSupport.awaitCondition("settled Home layout at " + width + "x" + height, () -> {
             frame.validate();
             JPanel actions = find(frame, "homeLaunchActions");
             int preferred = actions.getComponent(0).getPreferredSize().height;
-            return java.util.Arrays.stream(actions.getComponents())
-                    .allMatch(button -> button.getHeight() <= preferred + 2)
+            boolean ready = frame.getWidth() == width && frame.getHeight() == height
+                    && java.util.Arrays.stream(actions.getComponents())
+                    .allMatch(button -> button.getHeight() >= button.getMinimumSize().height
+                            && button.getHeight() <= preferred + 2)
                     && (threeColumns
                     ? actions.getComponent(0).getY() == actions.getComponent(2).getY()
                     : actions.getComponent(2).getY() > actions.getComponent(0).getY())
                     && homeActionsVisible(frame);
-        });
-        onEdt(() -> {
+            if (!ready) {
+                previous.set(null);
+                stableSamples.set(0);
+                return false;
+            }
+            javax.swing.JScrollPane scroller = find(frame, "managedHomeDeckScroller");
+            List<Rectangle> geometry = new ArrayList<>();
+            geometry.add(frame.getBounds());
+            geometry.add(scroller.getViewport().getViewRect());
+            for (Component button : actions.getComponents()) geometry.add(button.getBounds());
+            for (Component action : homeActions(frame)) {
+                geometry.add(SwingUtilities.convertRectangle(action.getParent(),
+                        action.getBounds(), scroller.getViewport().getView()));
+            }
+            if (geometry.equals(previous.get())) {
+                stableSamples.incrementAndGet();
+            } else {
+                previous.set(geometry);
+                stableSamples.set(1);
+            }
+            if (stableSamples.get() < 3) return false;
             assertCompactLaunches(frame, threeColumns);
             assertHomeActionsVisible(frame);
-            return null;
+            return true;
         });
     }
 
@@ -1128,6 +1156,10 @@ class SimpleHomeSwingTest {
         assertEquals(3, actions.getComponentCount());
         int buttonHeight = actions.getComponent(0).getPreferredSize().height;
         for (Component button : actions.getComponents()) {
+            assertTrue(button.getHeight() >= button.getMinimumSize().height,
+                    () -> "launch buttons must not shrink below their minimum height: "
+                            + button.getHeight() + " < " + button.getMinimumSize().height
+                            + " at window " + frame.getSize());
             assertTrue(button.getHeight() <= buttonHeight + 2,
                     () -> "launch buttons must not be stretched to a multi-row deck height: "
                             + button.getHeight() + " > " + (buttonHeight + 2)

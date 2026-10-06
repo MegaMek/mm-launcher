@@ -227,8 +227,11 @@ compact vertical scrolling as first launch. It has no duplicate launcher header/
 art rail, raw registry path, or permanently reserved empty region. The deck contains the optional
 process-local notice, application launch row, aggregate update state, and compact
 Installations/Settings navigation. Three product controls share equal widths when they fit and
-wrap/stack as the viewport narrows. Each primary passes its preferred exact record/product to the
-existing launch backend. Its arrow lists the other matching records in registry order as
+wrap/stack as the viewport narrows. Deck height is measured from the incoming width before
+laying out the responsive controls, including transitions back to a wider window. Launch controls
+retain their minimum heights, with navigation visible without scrolling when the deck fits;
+smaller viewports scroll rather than compressing the controls. Each primary passes its preferred
+exact record/product to the existing launch backend. Its arrow lists the other matching records in registry order as
 **name · observed version** plus already-held status. Menu construction performs no filesystem or
 network read on the EDT. A row never persists a temporary target or falls back at click time.
 Layout/recovery failures disable the affected primary. Missing saved Java does not. With no alternate, the arrow is absent
