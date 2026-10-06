@@ -485,6 +485,10 @@ class SimpleHomeSwingTest {
                     firstMenu.getParent(), firstMenu.getBounds(), firstCard);
             Rectangle manualBounds = SwingUtilities.convertRectangle(
                     manualCheck.getParent(), manualCheck.getBounds(), firstCard);
+            assertTrue(Math.abs(menuBounds.y * 2 + menuBounds.height - firstCard.getHeight()) <= 1,
+                    "More is vertically centered in the managed card");
+            assertTrue(Math.abs(manualBounds.y * 2 + manualBounds.height - firstCard.getHeight()) <= 1,
+                    "Check is vertically centered in the managed card");
             assertFalse(automaticBounds.intersects(menuBounds));
             assertFalse(automaticBounds.intersects(manualBounds));
             assertNotNull(waitButton(frame,

@@ -143,6 +143,10 @@ A distinct identity current only in another channel is a typed mismatch and stop
 download. A version matching no current target remains historical/unknown, so the user's selected
 fixed channel remains valid for this exact-ancestor adoption route. This does not add unknown
 history to the normal record-only install browser.
+An explicitly empty, successfully read complete-record inventory also has no current identities;
+it does not block the exact release search or weaken ancestor/package verification. The launcher
+logs the absent targets and keeps update checks explicitly unavailable until the chosen channel
+has a published record. Invalid or failed inventory requests still stop automatic adoption.
 
 Zero, multiple, incomplete, or failed searches leave the copy launch-only and expose only a simple
 message plus **Choose a different version…**. That explicit fallback opens the bounded official

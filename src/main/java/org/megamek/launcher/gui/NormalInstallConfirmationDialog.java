@@ -71,10 +71,10 @@ import java.util.List;
 final class NormalInstallConfirmationDialog extends JDialog {
     static final Color BACKGROUND = FirstLaunchPanel.BACKGROUND;
     static final Color PANEL = FirstLaunchPanel.PANEL;
-    static final Color FIELD_BACKGROUND = new Color(12, 23, 26);
+    static final Color FIELD_BACKGROUND = LauncherTheme.INPUT_BACKGROUND;
     static final Color TEXT = FirstLaunchPanel.TEXT;
     static final Color MUTED = FirstLaunchPanel.MUTED;
-    static final Color GOLD = FirstLaunchSplitButton.POPUP_BORDER;
+    static final Color ACCENT = LauncherTheme.ACCENT;
 
     private static final String CANCEL_ACTION = "cancelNormalInstallConfirmation";
     private final GuiScale scale;
@@ -161,7 +161,7 @@ final class NormalInstallConfirmationDialog extends JDialog {
         summary.setLayout(new BoxLayout(summary, BoxLayout.Y_AXIS));
         summary.setBackground(PANEL);
         summary.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(scale.scaleForGUI(1), 0, 0, 0, GOLD),
+                BorderFactory.createMatteBorder(scale.scaleForGUI(1), 0, 0, 0, ACCENT),
                 BorderFactory.createEmptyBorder(scale.scaleForGUI(17),
                         scale.scaleForGUI(18), scale.scaleForGUI(17),
                         scale.scaleForGUI(18))));
@@ -190,7 +190,7 @@ final class NormalInstallConfirmationDialog extends JDialog {
         destination.setCaretColor(TEXT);
         destination.setToolTipText(destinationText);
         destination.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(new Color(90, 119, 120)),
+                BorderFactory.createLineBorder(LauncherTheme.BORDER),
                 BorderFactory.createEmptyBorder(scale.scaleForGUI(7),
                         scale.scaleForGUI(9), scale.scaleForGUI(7),
                         scale.scaleForGUI(9))));

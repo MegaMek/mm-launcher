@@ -32,9 +32,11 @@ Malformed/unknown keys or values fail closed. Registration/import fills only abs
 clears only values pointing at the removed UUID. Every mutation revalidates captured record
 identity under the registry lock and uses flushed atomic replacement.
 
-Installations has a centered title without explanatory subtitle and a scrollable dark-teal/gold
+Installations has a centered title without explanatory subtitle and a scrollable map-style
 card surface. Cards use their content height rather than filling fixed vertical blocks; the
-automatic-check checkbox aligns with summary text and compact actions sit at the top-right.
+automatic-check checkbox aligns with summary text and compact actions are vertically centered
+on the right. The fixed top-level action row aligns with the visible card viewport's right
+edge, including when a vertical scrollbar is present, without moving when cards scroll.
 Every physical record shows its editable launcher-only name, known version, and fixed channel
 beside one another on a left-aligned title row with a small gap before applications,
 per-application preferred markers, and applicable check/recovery state. Repeated
@@ -109,9 +111,11 @@ The title bar shows the packaged launcher version (0.14.5) or identifies a devel
 uses equal-width, top-aligned columns at wide window sizes: Game Java, Diagnostics, and
 Launcher update (supported native installations) on the left; Community and Latest news on the right.
 At narrow sizes these groups stack in that reading order, with the bottom navigation
-remaining visible and the sections scrolling vertically as needed. News headline buttons
-use the right column's available width with left-aligned text rather than a fixed character limit; at narrow
-widths their full titles remain available through tooltips and accessible names. Loading and error
+remaining visible and the sections scrolling vertically as needed. Settings utility buttons
+share the dimensions needed by their longest label. News titles, Join Discord, and All news
+are unboxed cyan links with underlines, keyboard activation, visible focus, and accessible link roles.
+News dates are smaller muted labels, and full titles wrap within the available column width
+rather than being truncated; tooltips and accessible names retain the date and title. Loading and error
 states keep the same layout. Settings
 includes Game Java, Diagnostics, Launcher update on supported native installations, Community, and Latest news;
 there is no global automatic-check control. Latest news loads up to three dated headlines from
@@ -137,7 +141,7 @@ before atomic publication. It is the sole explicit runtime for every registered 
 take effect on the next launch. If no default is saved, the exact Java runtime executing MM
 Launcher is displayed and used automatically without persistence. Invalid or corrupt explicit
 settings fail visibly; absence is healthy. Settings sections use spacing rather than framed backplates. **View logs** opens a
-dark-teal/gold local viewer with selectable text and styled Copy/Close controls. The Game Java
+map-style local viewer with selectable text and styled Copy/Close controls. The Game Java
 selector uses the same launcher styling. No Java download, installation,
 bundle, or generic Save settings action exists; Java acquisition remains deferred.
 
@@ -152,15 +156,20 @@ only useful aggregate update state: **Checking for updates…**,
 **Some installations could not be checked**. It makes no all-current claim when imported or
 unchecked installations prevent that conclusion. There is no separate middle status line and no
 post-install “ready” notice.
+A followed channel with no published suite record instead says
+**Milestone/Development/Weekly update information is not available yet** on Home and its
+installation card (or a combined message for multiple unpublished channels). This remains
+retryable and never counts as an update or an up-to-date result; request/validation failures
+still say **Could not check**.
 
 Download bars paint percentage only, with localized human-readable byte detail below. Extraction
 is indeterminate with processed-file detail and no bar string.
 
 The empty first-launch screen uses the supplied artwork, a responsive dark action panel, and
-suite-inspired vector buttons. Its joined split control keeps
+Interstellar Map-style outlined controls. Its joined split control keeps
 **Install latest MekHQ Milestone** as the
 large primary action for the fixed current Milestone MekHQ all-three-program suite. A distinct
-arrow opens a dark-teal/gold popup with exactly **Install latest MegaMek Milestone**,
+arrow opens a map-color popup with exactly **Install latest MegaMek Milestone**,
 **Install latest MegaMekLab Milestone**, **Install latest MekHQ Development**,
 **Install latest MegaMek Development**, **Install latest MegaMekLab Development**,
 **Install latest MekHQ Weekly**, **Install latest MegaMek Weekly**, and
@@ -249,7 +258,7 @@ managed picker. First-launch primary/menu actions instead pass their fixed cache
 same backend. Planning is metadata-only and binds the requested repository/product set/channel, source
 version/tag, full release/asset identity, product/channel-specific per-user destination, registry
 and compatibility-default snapshot, and validated game Java. Its dedicated
-dark-teal/gold confirmation has no release, channel, Java, or editable update-setting picker. The
+map-style confirmation has no release, channel, Java, or editable update-setting picker. The
 summary displays only the product/channel, validated version, actual programs, binary download
 size, full selectable destination with **Change location**, and Cancel/Install actions. Parent
 selection is followed by a styled folder-name dialog with a friendly preselected
@@ -283,7 +292,7 @@ no migration or filesystem write.
 Installations contains import, exact-release download, independent per-application preference,
 launcher removal, safe uninstall, location, channel/check, Update, and recovery actions on exact
 cards. Merely viewing/focusing a card mutates nothing. **Install another version** defaults to
-MekHQ/Milestone and uses a dark-teal/gold content, list, viewport, labels, vector buttons, and
+MekHQ/Milestone and uses map-colored content, list, viewport, labels, outlined buttons, and
 product/channel combos. The same combo class is used by the Game Java selector;
 it retains native Swing popup, keyboard, selection, and accessibility behavior while painting the
 field and arrow segment locally, with a system high-contrast palette fallback.
@@ -327,7 +336,7 @@ and mutation; a durable per-root ledger tracks every started child independently
 uninstalls, and recovery remain blocked while any tracked child is live, including children of
 other launcher processes. Ambiguous starts require explicit close-all recovery.
 The active operation dialog is exempt so its authoritative **Cancel** remains reachable. It uses a
-compact dark-teal/gold skin, logical `GuiScale` metrics, a clear typed phase, an honest accent
+compact map-style skin, logical `GuiScale` metrics, a clear typed phase, an honest accent
 progress bar, and one concise nontechnical detail. Backend stream text is retained only in a
 hidden bounded legacy capture; there is no visible log area or reserved blank space, and active
 progress has no log/copy/Open Installations clutter. While that dialog is open, the underlying
@@ -512,7 +521,7 @@ terminology. Technical causes are retained only in sanitized local diagnostics. 
 metadata/package work runs in a worker under `BusyGate`, with exact record, selected channel,
 dialog generation, and cancellation guards.
 
-The typed opposite-current result replaces the progress surface before package download. Its gold
+The typed opposite-current result replaces the progress surface before package download. Its cyan
 heading names **Use Milestone**, **Use Development**, or **Use Weekly for this installation**,
 plain copy identifies the version's current canonical channel and confirms that no files changed,
 and its only actions are a direct styled **Try Milestone** / **Try Development** / **Try Weekly** retry and
@@ -534,7 +543,7 @@ channel without a second confirmation. This includes read-only reconstruction of
 case-only managed data/docs/licenses prefixes (with any modified-file history); excluded
 `bin/*.bat` scripts remain outside managed ownership even when local bytes differ.
 Case-only runtime paths and structural conflicts still block adoption. An ineligible result uses
-the standard gold heading **Updates can't be enabled** and explains the
+the standard cyan heading **Updates can't be enabled** and explains the
 actual blocking category in plain language: version mismatch, a file/folder
 conflict, or modified core application files. It confirms that no files changed, directs the user
 toward a separate managed installation, and offers only **Close**. Detailed

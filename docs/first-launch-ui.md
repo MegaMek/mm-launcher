@@ -14,8 +14,11 @@ There is no redundant MekHQ Milestone row and no exact-picker
 row. Each available row includes its validated version in parentheses.
 
 Both segments are keyboard-focusable push buttons. Enter/Space activates the focused segment, and
-Alt+Down, F4, the menu key, or Shift+F10 opens the standard semantic popup; Escape closes it. The
-popup supplies explicit opaque dark-teal rows, gold border/selection, high-contrast palette
+Alt+Down, F4, the menu key, or Shift+F10 opens the standard semantic popup; Escape closes it.
+Button labels and dropdown arrows use the same normal light control text color. Either segment's
+focus produces one outline around the entire split control; focus changes repaint the whole
+outline so it cannot remain highlighted on only one segment.
+The popup supplies the map's opaque blue-black rows, outlined borders and cyan selection, high-contrast palette
 fallbacks, accessible names/descriptions, and visible focus/selection while retaining normal
 `JMenuItem` action and keyboard behavior. It is not an OS-default white popup.
 
@@ -108,11 +111,11 @@ a current-record lookup. The planner still freshly captures destination and regi
 planning failure/retry keeps
 the cached target. The planner, confirmation, verified transfer, cancellation, atomic registration, current-runtime
 reuse, destination, and Main-if-empty selection are shared by all nine.
-Each immutable quote uses the first-launch dark-teal/gold visual language without restyling other
+Each immutable quote uses the same map-derived visual language as the other launcher
 dialogs. The normal summary names the selected application/channel, validated version, actual
 program set, human-readable binary download size, and full selectable destination.
 **Change location** retains the existing-parent/safe-new-subfolder flow and builds a fresh quote.
-The native parent chooser is followed by a styled dark-teal/gold folder-name dialog with a
+The native parent chooser is followed by a map-style folder-name dialog with a
 preselected friendly `Program Channel (Version)` value, inline validation, Cancel/Escape, and no
 separate installation-name prompt; the same friendly value is registered automatically.
 The fresh quote remains for the same repository and channel; the validated launcher Java has no
@@ -160,7 +163,7 @@ preference or Main. A successful MekHQ package must inspect as exactly the three
 standalone MegaMek and MegaMekLab packages must inspect as exactly their selected product, so Home
 shows only actual products.
 
-After confirmation, the operation window uses the same dark-teal/gold visual language with a
+After confirmation, the operation window uses the same map-derived visual language with a
 clear phase, one concise detail, an accent progress bar, and only **Cancel** while cancellation is
 safe. It does not display backend log text or active log/copy/repair controls. Once publication
 wins, Cancel disappears and the window asks the user not to close it. Accepted cancellation closes
@@ -187,9 +190,11 @@ paint at the original aspect ratio with a centered cover treatment: no stretchin
 with only the crop required by the viewport shape. The PNG is still a finite-resolution bitmap; a
 high-DPI display does not create extra image detail.
 
-Buttons are vector-painted, suite-inspired beveled controls rather than copies of game textures,
-fonts, or the full skin framework. The split segments share one painted plate and separator, so
-there are no doubled borders or opposing bevel cuts. Standard JButton actions, keyboard
+Buttons use the Interstellar Map's flat rectangular surface, thin outline, hover/pressed colors,
+and cyan focus indication. Checkbox icons and scrollbar painting are copied from MekHQ's
+immersive controls; combo boxes retain launcher keyboard/high-contrast behavior with the map's
+input and popup treatment. The split segments share one outline and separator, so
+there are no doubled borders. Standard JButton actions, keyboard
 interaction, mnemonics and accessible names/descriptions are retained. Focus is visibly outlined.
 
 ## Scaling and responsive layout

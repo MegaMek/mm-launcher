@@ -48,6 +48,7 @@ import org.megamek.launcher.launch.ProcessRunner;
 import org.megamek.launcher.onboarding.InstallationInspector;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.registry.RegistryData;
+import org.megamek.launcher.registry.InstallationRecord;
 import org.megamek.launcher.registry.RegistryStore;
 import org.megamek.launcher.release.ReleaseTransport;
 import org.megamek.launcher.update.ImportedCopyAdoptionService;
@@ -87,6 +88,7 @@ import java.util.jar.Manifest;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -210,7 +212,7 @@ class ExistingImportSwingTest {
             JLabel message = (JLabel) find(dialog, "adoptionResultMessage");
             assertEquals("Updates can't be enabled", dialog.getTitle());
             assertEquals("Updates can't be enabled", heading.getText());
-            assertEquals(FirstLaunchPanel.GOLD, heading.getForeground());
+            assertEquals(FirstLaunchPanel.ACCENT, heading.getForeground());
             assertEquals(java.awt.Font.PLAIN, message.getFont().getStyle());
             assertTrue(message.getText().contains(
                     "Core application files differ from the official release."));
@@ -361,6 +363,87 @@ class ExistingImportSwingTest {
             assertNotNull(waitFor(() -> findButton(frame, "useExistingCopyButton")));
         } finally {
             dispose(frame);
+        }
+    }
+
+    @Test
+    void installationLayoutCentersActionsAndAlignsHeaderWithViewport() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing layout requires a display");
+        for (int count : new int[]{1, 12}) {
+            LauncherServices services = services(temp.resolve("layout-" + count + ".json"),
+                    new RecordingRunner());
+            List<InstallationRecord> records = new ArrayList<>();
+            for (int index = 0; index < count; index++) {
+                records.add(services.register("Imported " + index,
+                        versionedMegaMekSuite("layout-" + count + "-" + index)));
+            }
+            LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+            try {
+                onEdt(() -> {
+                    frame.showWindow();
+                    return null;
+                });
+                JButton manage = waitFor(() -> findButton(frame, "manageInstallationsButton"));
+                onEdt(() -> {
+                    manage.doClick();
+                    return null;
+                });
+                JButton enable = waitFor(() -> findButton(frame,
+                        "enableManagedUpdatesButton-" + records.get(0).id()));
+                for (int width : new int[]{1180, 680}) {
+                    onEdt(() -> {
+                        frame.setSize(width, width == 680 ? 470 : 760);
+                        frame.validate();
+                        return null;
+                    });
+                    waitUntil(() -> {
+                        var scroll = assertInstanceOf(javax.swing.JScrollPane.class,
+                                find(frame, "installationCardsScrollPane"));
+                        JButton importExisting = findButton(frame, "manageAddExistingButton");
+                        var viewportEdge = javax.swing.SwingUtilities.convertPoint(
+                                scroll.getViewport(), scroll.getViewport().getWidth(), 0, frame);
+                        var actionEdge = javax.swing.SwingUtilities.convertPoint(
+                                importExisting.getParent(),
+                                importExisting.getX() + importExisting.getWidth(), 0, frame);
+                        return viewportEdge.x == actionEdge.x;
+                    });
+                    onEdt(() -> {
+                        var scroll = assertInstanceOf(javax.swing.JScrollPane.class,
+                                find(frame, "installationCardsScrollPane"));
+                        assertEquals(count > 1, scroll.getVerticalScrollBar().isVisible());
+                        for (InstallationRecord record : records) {
+                            var card = assertInstanceOf(javax.swing.JPanel.class,
+                                    find(frame, "installationCard-" + record.id()));
+                            for (String name : List.of("enableManagedUpdatesButton-", "installationMenuButton-")) {
+                                JButton button = findButton(frame, name + record.id());
+                                var bounds = javax.swing.SwingUtilities.convertRectangle(
+                                        button.getParent(), button.getBounds(), card);
+                                assertTrue(Math.abs(bounds.y * 2 + bounds.height - card.getHeight()) <= 1,
+                                        "vertically centered " + name + " at width " + width);
+                            }
+                            if (card.getWidth() <= scroll.getViewport().getWidth()) {
+                                JButton importExisting = findButton(frame, "manageAddExistingButton");
+                                var borderEdge = javax.swing.SwingUtilities.convertPoint(
+                                        card, card.getWidth(), 0, frame);
+                                var actionEdge = javax.swing.SwingUtilities.convertPoint(
+                                        importExisting.getParent(),
+                                        importExisting.getX() + importExisting.getWidth(), 0, frame);
+                                assertEquals(borderEdge.x, actionEdge.x, "aligned card and header right edges");
+                            }
+                        }
+                        JButton importExisting = findButton(frame, "manageAddExistingButton");
+                        int headerX = importExisting.getX();
+                        scroll.getHorizontalScrollBar().setValue(scroll.getHorizontalScrollBar().getMaximum());
+                        scroll.getVerticalScrollBar().setValue(scroll.getVerticalScrollBar().getMaximum());
+                        assertEquals(headerX, importExisting.getX(), "scrolling must not move the fixed toolbar");
+                        assertTrue(enable.isEnabled());
+                        return null;
+                    });
+                }
+            } finally {
+                dispose(frame);
+            }
         }
     }
 
@@ -588,7 +671,7 @@ class ExistingImportSwingTest {
             JButton retry = (JButton) find(mismatch, "retrySuggestedAdoptionButton");
             assertEquals("Use Milestone for this installation", mismatch.getTitle());
             assertEquals("Use Milestone for this installation", heading.getText());
-            assertEquals(FirstLaunchPanel.GOLD, heading.getForeground());
+            assertEquals(FirstLaunchPanel.ACCENT, heading.getForeground());
             assertEquals(java.awt.Font.PLAIN, message.getFont().getStyle());
             assertTrue(message.getText().contains(
                     "Version 0.50.07 is currently a Milestone release"));

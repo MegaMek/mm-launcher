@@ -61,11 +61,11 @@ import java.io.IOException;
 /** Empty-home presentation only; all user actions are supplied by the existing launcher frame. */
 final class FirstLaunchPanel extends JPanel {
     static final String ART_RESOURCE = "/org/megamek/launcher/gui/first-launch-art.png";
-    static final Color BACKGROUND = new Color(16, 26, 29);
-    static final Color PANEL = new Color(22, 36, 40);
-    static final Color TEXT = new Color(237, 243, 237);
-    static final Color MUTED = new Color(166, 186, 181);
-    static final Color GOLD = new Color(226, 196, 125);
+    static final Color BACKGROUND = LauncherTheme.BACKGROUND;
+    static final Color PANEL = LauncherTheme.PANEL;
+    static final Color TEXT = LauncherTheme.TEXT;
+    static final Color MUTED = LauncherTheme.MUTED;
+    static final Color ACCENT = LauncherTheme.ACCENT;
     private final GuiScale scale;
     private final ArtworkPanel artwork;
     private final ContentPanel controls;
@@ -137,6 +137,7 @@ final class FirstLaunchPanel extends JPanel {
 
         scroller = new JScrollPane(controls, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
                 JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        LauncherTheme.styleScrollPane(scroller, scale);
         scroller.setName("firstLaunchControlsScroller");
         scroller.setBorder(BorderFactory.createEmptyBorder());
         scroller.getViewport().setBackground(PANEL);
@@ -273,6 +274,7 @@ final class FirstLaunchPanel extends JPanel {
             deck.add(controls, BorderLayout.CENTER);
             scroller = new JScrollPane(deck, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
                     JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+            LauncherTheme.styleScrollPane(scroller, scale);
             scroller.setName("managedHomeDeckScroller");
             scroller.setBackground(PANEL);
             scroller.setBorder(BorderFactory.createEmptyBorder());

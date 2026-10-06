@@ -37,6 +37,7 @@ import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
 
 import java.io.IOException;
+import java.util.Objects;
 
 /** Replaceable boundary for the official channel labels and exact release metadata. */
 public interface ChannelCatalog {
@@ -59,5 +60,19 @@ public interface ChannelCatalog {
 
     record Target(FollowChannel channel, String version, OfficialRepository repository,
                   ReleaseCatalog.Release release, ReleaseCatalog.Asset asset, String source) {
+    }
+
+    final class UnpublishedChannelException extends IOException {
+        private final FollowChannel channel;
+
+        public UnpublishedChannelException(FollowChannel channel) {
+            super("No complete " + Objects.requireNonNull(channel, "channel")
+                    + " suite record has been published.");
+            this.channel = channel;
+        }
+
+        public FollowChannel channel() {
+            return channel;
+        }
     }
 }

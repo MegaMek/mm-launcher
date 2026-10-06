@@ -46,6 +46,12 @@ The record's SHA-256 is mandatory; an absent GitHub digest does not discard that
 a conflicting or malformed GitHub digest fails. Optional minimum launcher requirements are
 checked against the running launcher's generated version resource. Missing or incompatible
 channels are explicitly unavailable, without hiding independently available channels.
+A successfully read inventory with no record for the followed channel is the distinct
+`CHANNEL_NOT_PUBLISHED` check state, not a failed request or an up-to-date result.
+Home and Installations say **Milestone/Development/Weekly update information is not available yet**
+and retain an explicit retry. CLI checks report `status=channel_not_published`.
+Malformed, incomplete, incompatible, or unreadable metadata remains a check failure; it
+never becomes this empty-inventory state or authorizes a fallback target.
 The programs are independently versioned (`MegaMek <= MegaMekLab <= MekHQ <= suite`); the offered
 tag/version belongs to the selected product, not necessarily to the suite record. Reused product
 artifacts keep their exact identity. A MekHQ installation still downloads only its complete
@@ -71,12 +77,36 @@ mismatch before package download. An identity matching no current product target
 historical/unknown and may be adopted into the user-selected fixed channel. Title, prerelease flag,
 and ordering never classify that historical identity. Failed or cancelled adoption publishes no
 channel. Nightly remains unsupported, and there is no adoption-based channel switching.
+A successfully read complete inventory containing no suite records has no current identities:
+automatic adoption logs that condition and still searches for one exact official ancestor.
+It does not manufacture channel membership or an update target. The full package verification
+and local file comparison still apply, and checks remain `CHANNEL_NOT_PUBLISHED` until a
+valid record for the selected channel is published. Inventory errors still stop adoption.
 
 The source hierarchy is one-directional: the canonical release index is authoritative for release
 identity and historical/current channel membership; a build-produced embedded manifest is an
 identity projection used to find or check a candidate; and the launcher's receipt/adoption record
 and fixed-channel sidecar are local ownership and policy. A marker, filename, displayed build, or
 local sidecar alone never proves an official ancestor.
+
+## Release-day migration from historical packages
+
+Publish and validate the new complete Milestone and Development records before telling
+users to migrate to the launcher. A Weekly record alone supplies neither of those targets.
+Existing non-suite releases do not need retroactive records or modified archives:
+import remains launch-only until explicit adoption verifies the exact historical official
+package. The user selects the fixed future channel; historical titles/prerelease flags
+do not assign it. Once adopted, the old verified tag is compared with that channel's new
+record and offers the normal recommended update.
+
+The release-day regression covers imports of old `v0.50.06` and `v0.50.07` packages
+following Milestone and Development respectively, against newly published channel metadata,
+through automatic ancestor matching, adoption, recommended preparation and Apply. It verifies
+in-place identity, unchanged channel/check preferences, preserved saves, custom content,
+configuration and local data overrides, updated runtime/new managed files, and an exact-current
+check afterward. Each attempt downloads its old ancestor once and its new update once;
+Apply reuses the retained update. This is local fixture coverage, not evidence that live
+records or release assets have been published.
 
 ## Comparison and action
 

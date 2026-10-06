@@ -75,12 +75,12 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 final class OperationProgressDialog extends JDialog implements OperationProgressListener {
     static final String OPERATION_CONTROL = "mmLauncherOperationControl";
-    static final Color BACKGROUND = new Color(16, 31, 34);
-    static final Color PANEL = new Color(23, 46, 49);
-    static final Color GOLD = new Color(226, 196, 125);
-    static final Color TEXT = new Color(239, 246, 240);
-    static final Color MUTED = new Color(174, 194, 189);
-    static final Color TRACK = new Color(41, 69, 72);
+    static final Color BACKGROUND = LauncherTheme.BACKGROUND;
+    static final Color PANEL = LauncherTheme.PANEL;
+    static final Color ACCENT = LauncherTheme.ACCENT;
+    static final Color TEXT = LauncherTheme.TEXT;
+    static final Color MUTED = LauncherTheme.MUTED;
+    static final Color TRACK = LauncherTheme.CONTROL_BACKGROUND;
     private static final int UPDATE_INTERVAL_MS = 150;
     private static final int DETAIL_LIMIT = 90;
 
@@ -121,7 +121,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
 
         phase.setName("operationPhaseLabel");
-        phase.setForeground(GOLD);
+        phase.setForeground(ACCENT);
         phase.setFont(scale.font(phase.getFont(), Font.BOLD, 22f));
         phase.setAlignmentX(LEFT_ALIGNMENT);
 
@@ -131,15 +131,15 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         detail.setAlignmentX(LEFT_ALIGNMENT);
 
         loggingWarning.setName("operationLoggingWarning");
-        loggingWarning.setForeground(GOLD);
+        loggingWarning.setForeground(LauncherTheme.SELECTED);
         loggingWarning.setFont(scale.font(loggingWarning.getFont(), Font.PLAIN, 12f));
         loggingWarning.setAlignmentX(LEFT_ALIGNMENT);
         loggingWarning.setVisible(false);
 
         progress.setName("operationProgressBar");
-        progress.setForeground(GOLD);
+        progress.setForeground(ACCENT);
         progress.setBackground(TRACK);
-        progress.setBorder(BorderFactory.createLineBorder(new Color(91, 124, 122)));
+        progress.setBorder(BorderFactory.createLineBorder(LauncherTheme.BORDER));
         progress.setStringPainted(true);
         progress.setIndeterminate(true);
         progress.setString("Starting…");
@@ -148,11 +148,11 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         progress.setAlignmentX(LEFT_ALIGNMENT);
         progress.setUI(new BasicProgressBarUI() {
             @Override protected Color getSelectionBackground() {
-                return BACKGROUND;
+                return TEXT;
             }
 
             @Override protected Color getSelectionForeground() {
-                return TEXT;
+                return BACKGROUND;
             }
         });
 
@@ -658,7 +658,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         button.setFocusPainted(true);
         button.setOpaque(true);
         button.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(GOLD),
+                BorderFactory.createLineBorder(ACCENT),
                 BorderFactory.createEmptyBorder(scale.scaleForGUI(6),
                         scale.scaleForGUI(12), scale.scaleForGUI(6),
                         scale.scaleForGUI(12))));

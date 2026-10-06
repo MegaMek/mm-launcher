@@ -36,7 +36,6 @@ package org.megamek.launcher.gui;
 import org.megamek.launcher.onboarding.PlatformInstallLocations;
 
 import javax.swing.SwingUtilities;
-import javax.swing.JOptionPane;
 import javax.swing.UIManager;
 import java.awt.GraphicsEnvironment;
 import java.io.PrintStream;
@@ -73,11 +72,10 @@ public final class GuiLauncher {
                 } catch (IOException migrationError) {
                     error.println("ERROR: launcher state migration stopped: "
                             + migrationError.getMessage());
-                    JOptionPane.showMessageDialog(null,
+                    LauncherAlertDialog.showMessage(null, GuiScale.DEFAULT, "MegaMek Launcher",
                             "MegaMek Launcher cannot safely migrate previous launcher state.\n"
                                     + migrationError.getMessage()
-                                    + "\nNo old state was removed. Resolve the conflict before retrying.",
-                            "MegaMek Launcher", JOptionPane.ERROR_MESSAGE);
+                                    + "\nNo old state was removed. Resolve the conflict before retrying.");
                     return;
                 }
             }

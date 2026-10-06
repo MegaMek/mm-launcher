@@ -53,6 +53,37 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OfficialSuiteChannelCatalogTest {
     @Test
+    void emptyInventoryHasNoCurrentIdentitiesAndASeparateUnpublishedChannelFailure() throws Exception {
+        SuiteTestData network = new SuiteTestData();
+        var pointers = catalog(network).currentPointers(OfficialRepository.MEGAMEK);
+        assertTrue(pointers.versions().isEmpty());
+        assertEquals(OfficialSuiteChannelCatalog.CurrentIdentity.UNKNOWN,
+                pointers.classify(FollowChannel.MILESTONE,
+                        VersionIdentity.fromExact("0.50.6").orElseThrow()));
+        for (FollowChannel channel : FollowChannel.values()) {
+            var error = assertThrows(ChannelCatalog.UnpublishedChannelException.class,
+                    () -> catalog(network).target(channel, OfficialRepository.MEGAMEK));
+            assertEquals(channel, error.channel());
+            assertTrue(error.getMessage().contains("No complete " + channel));
+        }
+        assertThrows(IOException.class, () -> catalog(network).quickInstallSnapshot());
+        assertNoPackages(network);
+    }
+
+    @Test
+    void anExistingWeeklyRecordDoesNotManufactureMilestoneOrDevelopmentTargets() throws Exception {
+        SuiteTestData network = new SuiteTestData();
+        network.suite("0.51.01", FollowChannel.WEEKLY, "0.51.01");
+        var pointers = catalog(network).currentPointers(OfficialRepository.MEGAMEK);
+        assertEquals(Map.of(FollowChannel.WEEKLY, "0.51.01"), pointers.versions());
+        for (FollowChannel channel : List.of(FollowChannel.MILESTONE, FollowChannel.DEVELOPMENT)) {
+            assertThrows(ChannelCatalog.UnpublishedChannelException.class,
+                    () -> catalog(network).target(channel, OfficialRepository.MEGAMEK));
+        }
+        assertNoPackages(network);
+    }
+
+    @Test
     void weeklyOnlyBootstrapLeavesMilestoneDefaultExplicitlyUnavailable() throws Exception {
         SuiteTestData network = new SuiteTestData();
         network.suite("0.51.01", FollowChannel.WEEKLY, "0.51.01");

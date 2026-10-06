@@ -267,6 +267,66 @@ class ChannelSwingIntegrationTest {
             }
 
     @Test
+    void unpublishedChannelShowsExplicitAvailabilityOnHomeAndInstallationsAndRemainsRetryable()
+            throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing channel integration requires a display");
+        FakeServices services = new FakeServices(temp.resolve("unpublished-check.json"), true);
+        services.checkStatus = ChannelUpdateChecker.Status.CHANNEL_NOT_PUBLISHED;
+        String message = "Milestone update information is not available yet";
+        LauncherFrame frame = SwingTestSupport.createWindow(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            assertTrue(services.started.await(30, TimeUnit.SECONDS));
+            services.release.countDown();
+            JLabel home = waitFor(() -> {
+                Component component = findNamed(frame, "homeInformationMessage");
+                return component instanceof JLabel label && message.equals(label.getText()) ? label : null;
+            });
+            assertEquals(message, onEdt(home::getText));
+            assertEquals("Installations", onEdt(() -> find(frame, "manageInstallationsButton").getText()));
+            JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
+            SwingUtilities.invokeAndWait(installations::doClick);
+            JLabel status = waitFor(() -> {
+                Component component = findNamed(frame, "installationStatus-" + services.record.id());
+                return component instanceof JLabel label && message.equals(label.getText()) ? label : null;
+            });
+            for (int width : new int[]{1180, 680}) {
+                onEdt(() -> {
+                    frame.setSize(width, 760);
+                    frame.validate();
+                    assertTrue(status.getWidth() <= status.getParent().getWidth(),
+                            "the availability message must fit its summary");
+                    assertTrue(status.getWidth() >= status.getFontMetrics(status.getFont()).stringWidth(message),
+                            "the full availability message must remain readable");
+                    return null;
+                });
+            }
+            JButton retry = waitFor(() -> find(frame, "checkUpdatesButton"));
+            assertEquals("Retry check", onEdt(retry::getText));
+            assertTrue(onEdt(retry::isEnabled));
+            assertNull(onEdt(() -> find(frame, "applyUpdateButton")));
+            services.checkStatus = ChannelUpdateChecker.Status.EXACT_CURRENT;
+            SwingUtilities.invokeAndWait(retry::doClick);
+            SwingTestSupport.awaitCondition("published channel recovery", () -> {
+                Component component = findNamed(frame, "installationStatus-" + services.record.id());
+                return component instanceof JLabel label && "Up to date".equals(label.getText());
+            });
+            assertEquals(2, services.checks.get());
+            assertNull(onEdt(() -> find(frame, "checkUpdatesButton")));
+            JButton backHome = waitFor(() -> find(frame, "homeButton"));
+            SwingUtilities.invokeAndWait(backHome::doClick);
+            SwingTestSupport.awaitCondition("current home after publication", () -> {
+                Component component = findNamed(frame, "homeInformationMessage");
+                return component instanceof JLabel label && "All installations are up to date".equals(label.getText());
+            });
+        } finally {
+            services.release.countDown();
+            SwingUtilities.invokeAndWait(frame::dispose);
+        }
+    }
+
+    @Test
     void failedAutomaticCheckShowsCouldNotCheckAndExplicitRetry() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing channel integration requires a display");
@@ -392,6 +452,7 @@ class ChannelSwingIntegrationTest {
         private final CountDownLatch diagnosticsRelease = new CountDownLatch(1);
         private final CountDownLatch diagnosticsFinished = new CountDownLatch(1);
         private volatile IOException checkFailure;
+        private volatile ChannelUpdateChecker.Status checkStatus = ChannelUpdateChecker.Status.EXACT_CURRENT;
         private volatile IOException saveFailure;
 
         FakeServices(Path registry) {
@@ -492,7 +553,7 @@ class ChannelSwingIntegrationTest {
             started.countDown();
             release.await();
             if (checkFailure != null) throw checkFailure;
-            return new ChannelUpdateChecker.Result(ChannelUpdateChecker.Status.EXACT_CURRENT,
+            return new ChannelUpdateChecker.Result(checkStatus,
                     record, preference.preference(), "v0.51.0", null,
                     "The exact followed release is installed.");
         }
