@@ -4604,15 +4604,24 @@ public final class LauncherFrame extends JFrame {
         }
 
         @Override
+        public Dimension getMinimumSize() {
+            return layoutSize(true);
+        }
+
+        @Override
         public Dimension getPreferredSize() {
+            return layoutSize(false);
+        }
+
+        private Dimension layoutSize(boolean minimum) {
             int count = getComponentCount();
             if (count == 0) return new Dimension();
             int width = 0;
             int height = 0;
             for (Component child : getComponents()) {
-                Dimension preferred = child.getPreferredSize();
-                width = Math.max(width, preferred.width);
-                height = Math.max(height, preferred.height);
+                Dimension size = minimum ? child.getMinimumSize() : child.getPreferredSize();
+                width = Math.max(width, size.width);
+                height = Math.max(height, size.height);
             }
             int usedColumns = columnsForWidth(availableWidth(), count);
             int rows = (count + usedColumns - 1) / usedColumns;

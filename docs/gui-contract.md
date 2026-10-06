@@ -228,7 +228,8 @@ art rail, raw registry path, or permanently reserved empty region. The deck cont
 process-local notice, application launch row, aggregate update state, and compact
 Installations/Settings navigation. Three product controls share equal widths when they fit and
 wrap/stack as the viewport narrows. Deck height is measured from the incoming width before
-laying out the responsive controls, including transitions back to a wider window. Launch controls
+laying out the responsive controls, including transitions back to a wider window. All row-size
+requirements use that same width before grid layout. Launch controls
 retain their minimum heights, with navigation visible without scrolling when the deck fits;
 smaller viewports scroll rather than compressing the controls. Each primary passes its preferred
 exact record/product to the existing launch backend. Its arrow lists the other matching records in registry order as

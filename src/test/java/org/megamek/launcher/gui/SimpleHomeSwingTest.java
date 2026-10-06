@@ -1050,6 +1050,51 @@ class SimpleHomeSwingTest {
 
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
+    void managedHomeSizeRequirementsFollowIncomingWidthBeforeGridLayout() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing layout requires a display");
+        FakeServices services = new FakeServices(temp.resolve("home-row-requirements.json"));
+        services.installed = true;
+        services.main = services.first;
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            waitButton(frame, "launch-lab-button");
+            onEdt(() -> {
+                JPanel actions = find(frame, "homeLaunchActions");
+                Container parent = actions.getParent();
+                java.awt.Dimension original = parent.getSize();
+                java.awt.GridLayout layout = assertInstanceOf(java.awt.GridLayout.class, actions.getLayout());
+                try {
+                    int minimum = java.util.Arrays.stream(actions.getComponents())
+                            .mapToInt(button -> button.getMinimumSize().height).max().orElseThrow();
+                    int preferred = java.util.Arrays.stream(actions.getComponents())
+                            .mapToInt(button -> button.getPreferredSize().height).max().orElseThrow();
+                    for (int[] size : new int[][]{{1100, 1}, {720, 2}, {580, 3}, {720, 2}, {1100, 1}}) {
+                        parent.setSize(size[0], parent.getHeight());
+                        int rows = size[1];
+                        int gaps = (rows - 1) * layout.getVgap();
+                        assertEquals(minimum * rows + gaps, actions.getMinimumSize().height,
+                                "minimum row height must use the incoming parent width");
+                        assertEquals(preferred * rows + gaps, actions.getPreferredSize().height,
+                                "preferred row height must use the incoming parent width");
+                        assertEquals(preferred * rows + gaps, actions.getMaximumSize().height);
+                        actions.doLayout();
+                    }
+                } finally {
+                    parent.setSize(original);
+                    parent.invalidate();
+                    frame.validate();
+                }
+                return null;
+            });
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void managedHomeFitsAllActionsAtTheInitialAndConstrainedWindowSizes() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing layout requires a display");
