@@ -114,6 +114,9 @@ At narrow sizes these groups stack in that reading order, with the bottom naviga
 remaining visible and the sections scrolling vertically as needed. Settings utility buttons
 share the dimensions needed by their longest label. News titles, Join Discord, and All news
 are unboxed cyan links with underlines, keyboard activation, visible focus, and accessible link roles.
+Custom links and checkboxes explicitly repaint on both focus gain and loss. Checkboxes
+show a whole-control focus outline in checked and unchecked states, including high contrast;
+selection color never replaces the keyboard-focus cue.
 News dates are smaller muted labels, and full titles wrap within the available column width
 rather than being truncated; tooltips and accessible names retain the date and title. Loading and error
 states keep the same layout. Settings

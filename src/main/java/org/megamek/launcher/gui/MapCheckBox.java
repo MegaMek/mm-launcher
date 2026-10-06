@@ -35,6 +35,7 @@ final class MapCheckBox extends JCheckBox {
                 ? LauncherTheme.uiColor("CheckBox.foreground", Color.WHITE) : LauncherTheme.TEXT);
         setFont(getFont().deriveFont(Font.PLAIN));
         setFocusPainted(false);
+        LauncherTheme.repaintOwnerOnFocusChange(this, this);
         Icon icon = new CheckBoxIcon();
         setIcon(icon);
         setSelectedIcon(icon);
@@ -44,6 +45,21 @@ final class MapCheckBox extends JCheckBox {
         setRolloverSelectedIcon(icon);
         setRolloverEnabled(true);
         setIconTextGap(scale.scaleForGUI(8));
+    }
+
+    @Override
+    protected void paintComponent(Graphics graphics) {
+        super.paintComponent(graphics);
+        if (isFocusOwner()) {
+            Graphics2D canvas = (Graphics2D) graphics.create();
+            try {
+                LauncherTheme.paintOutline(canvas, getWidth(), getHeight(), scale,
+                        LauncherTheme.highContrast()
+                                ? LauncherTheme.uiColor("Focus.color", Color.WHITE) : LauncherTheme.BUTTON_ICON);
+            } finally {
+                canvas.dispose();
+            }
+        }
     }
 
     @Override

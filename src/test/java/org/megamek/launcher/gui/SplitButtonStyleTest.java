@@ -94,7 +94,7 @@ class SplitButtonStyleTest {
                 fixture.control().setSize(620, 56);
                 fixture.control().doLayout();
                 RepaintManager previous = RepaintManager.currentManager(fixture.control());
-                RecordingRepaintManager recording = new RecordingRepaintManager(fixture.control());
+                FocusRepaintManager recording = new FocusRepaintManager(fixture.control());
                 try {
                     RepaintManager.setCurrentManager(recording);
                     for (JButton segment : List.of(fixture.primary(), fixture.options())) {
@@ -185,20 +185,4 @@ class SplitButtonStyleTest {
 
     private record SplitFixture(JComponent control, JButton primary, JButton options) {}
 
-    private static final class RecordingRepaintManager extends RepaintManager {
-        private final JComponent owner;
-        private Rectangle dirty;
-
-        private RecordingRepaintManager(JComponent owner) {
-            this.owner = owner;
-        }
-
-        @Override
-        public void addDirtyRegion(JComponent component, int x, int y, int width, int height) {
-            if (component == owner) {
-                Rectangle region = new Rectangle(x, y, width, height);
-                dirty = dirty == null ? region : dirty.union(region);
-            }
-        }
-    }
 }

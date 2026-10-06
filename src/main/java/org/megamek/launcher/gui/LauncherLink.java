@@ -59,6 +59,7 @@ final class LauncherLink extends JButton {
         setContentAreaFilled(false);
         setBorderPainted(false);
         setFocusPainted(false);
+        LauncherTheme.repaintOwnerOnFocusChange(this, this);
         setRolloverEnabled(true);
         setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         setAlignmentX(LEFT_ALIGNMENT);

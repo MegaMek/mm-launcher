@@ -100,6 +100,7 @@ import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -1276,9 +1277,11 @@ class SimpleHomeSwingTest {
         if (newsState.equals("newsArticleButton0")) {
             JPanel news = find(frame, "settingsLatestnewsSection");
             java.awt.Insets insets = news.getInsets();
-            assertEquals(news.getWidth() - insets.left - insets.right,
-                    newsAction.getWidth(), "headline button should use the whole news column");
-            assertEquals(javax.swing.SwingConstants.LEFT, ((JButton) newsAction).getHorizontalAlignment(),
+            LauncherLink headline = assertInstanceOf(LauncherLink.class, newsAction);
+            assertEquals(Math.min(news.getWidth() - insets.left - insets.right,
+                            headline.getPreferredSize().width),
+                    headline.getWidth(), "headline link should use its natural width within the news column");
+            assertEquals(javax.swing.SwingConstants.LEFT, headline.getHorizontalAlignment(),
                     "headline text should align with the other Settings content");
         }
         assertEquals(0, left.getX());
@@ -1339,16 +1342,22 @@ class SimpleHomeSwingTest {
                     "the news request does not block Settings navigation");
             releaseNews.countDown();
             JButton headline = waitButton(frame, "newsArticleButton0");
-            assertEquals("Aug 14, 2026 - MegaMek update and improvements for players and campaign testers",
-                    headline.getText());
+            String title = "MegaMek update and improvements for players and campaign testers";
+            String datedTitle = "Aug 14, 2026 - " + title;
+            assertInstanceOf(LauncherLink.class, headline);
+            assertEquals(title, onEdt(headline::getText));
+            JLabel date = onEdt(() -> assertInstanceOf(JLabel.class, find(frame, "newsArticleDate0")));
+            assertEquals("Aug 14, 2026", onEdt(date::getText));
             assertNotNull(waitFor(() -> find(frame, "defaultJavaPath")));
             onEdt(() -> {
                 frame.setSize(2000, 760);
                 frame.validate();
                 assertSettingsGeometry(frame, true, "newsArticleButton0");
-                assertEquals(headline.getText(), headline.getToolTipText());
-                assertEquals(headline.getText(),
+                assertEquals(datedTitle, headline.getToolTipText());
+                assertEquals(datedTitle,
                         headline.getAccessibleContext().getAccessibleName());
+                assertEquals(javax.accessibility.AccessibleRole.HYPERLINK,
+                        headline.getAccessibleContext().getAccessibleRole());
                 frame.setSize(1080, 760);
                 frame.validate();
                 assertSettingsGeometry(frame, true, "newsArticleButton0");
