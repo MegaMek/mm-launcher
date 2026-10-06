@@ -1080,6 +1080,8 @@ class SimpleHomeSwingTest {
                                 "preferred row height must use the incoming parent width");
                         assertEquals(preferred * rows + gaps, actions.getMaximumSize().height);
                         actions.doLayout();
+                        assertEquals((actions.getComponentCount() + rows - 1) / rows, layout.getColumns(),
+                                "grid columns must follow the incoming parent width");
                     }
                 } finally {
                     parent.setSize(original);
@@ -1114,31 +1116,49 @@ class SimpleHomeSwingTest {
                 }
                 return null;
             });
-            assertHomeAtSize(frame, 1044, 714, true);
-            assertHomeAtSize(frame, 1100, 760, true);
-            assertHomeAtSize(frame, 960, 600, false);
-            assertHomeAtSize(frame, 720, 600, false);
-            assertHomeAtSize(frame, 1100, 760, true);
-            assertHomeAtSize(frame, 720, 600, false);
+            assertHomeAtSize(frame, 1044, 714);
+            assertHomeAtSize(frame, 1100, 760);
+            assertHomeAtSize(frame, 960, 600);
+            assertHomeAtSize(frame, 720, 600);
+            assertHomeAtSize(frame, 1100, 760);
+            assertHomeAtSize(frame, 720, 600);
         } finally {
             dispose(frame);
         }
     }
 
-    private static void assertHomeAtSize(LauncherFrame frame, int width, int height,
-                                         boolean threeColumns) throws Exception {
-        onEdt(() -> {
-            frame.setSize(width, height);
+    private static void assertHomeAtSize(LauncherFrame frame, int width, int height) throws Exception {
+        java.awt.Dimension fitted = onEdt(() -> {
+            java.awt.Dimension target = GuiScale.fitWindow(new java.awt.Dimension(width, height),
+                    GuiScale.usableBounds(frame.getGraphicsConfiguration()));
+            frame.setSize(target);
             frame.validate();
-            return null;
+            return target;
+        });
+        boolean threeColumns = onEdt(() -> {
+            JPanel actions = find(frame, "homeLaunchActions");
+            java.awt.Insets frameInsets = frame.getInsets();
+            java.awt.Insets controlsInsets = actions.getParent().getInsets();
+            int availableWidth = fitted.width - frameInsets.left - frameInsets.right
+                    - controlsInsets.left - controlsInsets.right;
+            java.awt.GridLayout layout = assertInstanceOf(java.awt.GridLayout.class, actions.getLayout());
+            return availableWidth >= 3 * GuiScale.DEFAULT.scaleForGUI(300) + 2 * layout.getHgap();
         });
         AtomicReference<List<Rectangle>> previous = new AtomicReference<>();
         AtomicInteger stableSamples = new AtomicInteger();
-        SwingTestSupport.awaitCondition("settled Home layout at " + width + "x" + height, () -> {
+        AtomicReference<String> observed = new AtomicReference<>();
+        awaitHomeLayout("settled Home layout at " + fitted.width + "x" + fitted.height
+                + " (requested " + width + "x" + height + ")", observed, () -> {
             frame.validate();
             JPanel actions = find(frame, "homeLaunchActions");
             int preferred = actions.getComponent(0).getPreferredSize().height;
-            boolean ready = frame.getWidth() == width && frame.getHeight() == height
+            javax.swing.JScrollPane scroller = find(frame, "managedHomeDeckScroller");
+            observed.set("actual=" + frame.getSize() + ", threeColumns=" + threeColumns
+                    + ", viewport=" + scroller.getViewport().getViewRect()
+                    + ", buttons=" + java.util.Arrays.stream(actions.getComponents())
+                    .map(button -> button.getBounds() + " min=" + button.getMinimumSize()
+                            + " preferred=" + button.getPreferredSize()).toList());
+            boolean ready = frame.getWidth() == fitted.width && frame.getHeight() == fitted.height
                     && java.util.Arrays.stream(actions.getComponents())
                     .allMatch(button -> button.getHeight() >= button.getMinimumSize().height
                             && button.getHeight() <= preferred + 2)
@@ -1151,7 +1171,6 @@ class SimpleHomeSwingTest {
                 stableSamples.set(0);
                 return false;
             }
-            javax.swing.JScrollPane scroller = find(frame, "managedHomeDeckScroller");
             List<Rectangle> geometry = new ArrayList<>();
             geometry.add(frame.getBounds());
             geometry.add(scroller.getViewport().getViewRect());
@@ -1171,6 +1190,15 @@ class SimpleHomeSwingTest {
             assertHomeActionsVisible(frame);
             return true;
         });
+    }
+
+    private static void awaitHomeLayout(String description, AtomicReference<String> observed,
+                                        java.util.concurrent.Callable<Boolean> condition) throws Exception {
+        try {
+            SwingTestSupport.awaitCondition(description, condition);
+        } catch (AssertionError failure) {
+            throw new AssertionError(description + ": " + observed.get(), failure);
+        }
     }
 
     private static boolean homeActionsVisible(LauncherFrame frame) {
