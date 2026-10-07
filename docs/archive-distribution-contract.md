@@ -15,8 +15,9 @@ full-module runtime and WiX 3.14; Linux and macOS use a host-native
 These images retain `bin/java` for games, `lib/modules`, and upstream
 `legal/` notices. CI only inspects installer contents and checksums;
 the native-installer workflow never installs them or publishes a release. A separate manual
-release workflow reuses that complete build/test workflow before publication. Signing and notarization
-remain pending.
+release workflow reuses that complete build/test workflow before publication. Optional Windows MSI
+signing is prepared but disabled by default; Foundation approval and live verification remain pending.
+Linux/macOS signing and notarization remain outside this integration.
 
 Linux's stable package name is `megamek-launcher` under `/opt`; the macOS
 bundle identifier is `org.megamek.launcher` under `/Applications`.
@@ -89,7 +90,12 @@ and preparation keep that token read-only. The App's short-lived Contents-write 
 restricted to this repository, used only for candidate creation, revoked at the end of preparation,
 and never passed to installer/test jobs or publication.
 Artifacts come from the current workflow run, not a previous build or independently selected
-latest artifact.
+latest artifact. A read-only release-assets job validates the complete unsigned build outputs
+and optionally signs the Windows MSI. It uploads the final ten-file installer/checksum set as
+one immutable artifact. Publication and finalization both download that exact artifact ID,
+not the unsigned build outputs or a name selected from the newest run. Artifact IDs are captured
+as job outputs, so finalization-only reruns retain the original signed bytes even when the
+workflow attempt number changes. No signing credential is passed to native builds.
 
 ### Avoiding redundant CI after publication
 
@@ -116,6 +122,9 @@ job retains it using immutable v4 Actions artifacts, named
 Recording/upload failures are visible but nonblocking: this evidence enables a CI
 optimization, not publication safety, and its absence must cause normal installer builds
 and desktop tests.
+For signed releases, the record also retains Windows signature verification tied to the final
+MSI digest, candidate, and approved certificate. CI reuse verifies that binding in addition to
+the ordinary asset IDs, sizes and digests. Existing unsigned schema-1 provenance remains valid.
 
 The gate uses the successful publication job's attempt, not the overall run's latest
 attempt, so finalization-only reruns can retain valid proof. It checks the artifact's
@@ -196,9 +205,83 @@ the same candidate/base outputs and installer artifacts; do not rebuild, republi
 dispatch another patch. If main has advanced independently, the guard keeps rejecting the
 candidate: an authorized owner must review manual version synchronization that preserves
 newer source changes, rather than forcing the old candidate onto main.
-The workflow never installs packages, signs/notarizes, assembles a game suite, or updates an
+The workflow never installs packages, notarizes, assembles a game suite, or updates an
 installed launcher on a runner. A real self-update test requires separate explicit authorization
 to publish and to upgrade an older Windows MSI installation.
+
+### Optional Windows signing
+
+This is preparation for SignPath Foundation, not confirmation of approval or a signed release.
+The initial scope is the **Windows launcher MSI only**, not game archives, Linux/macOS installers
+or notarization. Ordinary PR, main-push and manual native CI builds remain unsigned and do not
+read SignPath secrets. Only the official manually dispatched release workflow can submit signing.
+
+Leave `LAUNCHER_SIGNING_ENABLED` unset or exactly `false` until the account is approved and
+configured. The disabled path preserves all five installer/checksum pairs byte-for-byte and
+needs no SignPath account or token. Any other nonempty value except exactly `true` is an error,
+not permission to fall back to unsigned publication.
+
+After approval, configure these repository Actions settings:
+
+| Setting | Kind | Value |
+| --- | --- | --- |
+| `LAUNCHER_SIGNING_ENABLED` | Variable | `true` only when explicitly activating production signing |
+| `SIGNPATH_ORGANIZATION_ID` | Variable | Organization UUID provided by SignPath |
+| `SIGNPATH_PROJECT_SLUG` | Variable | Approved launcher project slug |
+| `SIGNPATH_SIGNING_POLICY_SLUG` | Variable | Approved production signing policy slug |
+| `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG` | Variable | Approved Windows MSI artifact configuration slug |
+| `SIGNPATH_CERTIFICATE_SHA256` | Variable | 64 hexadecimal digits: SHA-256 of the approved signing certificate's DER bytes, **not** its usual SHA-1 thumbprint or an MSI checksum |
+| `SIGNPATH_API_TOKEN` | Secret | Submitter token scoped to the approved project/policy, not an approver/admin token |
+
+Slugs must contain 1-100 ASCII letters/digits, underscores, dots or hyphens and start with a
+letter/digit. Preparation validates all required values and captures public configuration before
+creating a candidate. The token is required only for enabled signing and is never exported in
+job outputs. Configuration changes during a run do not change its captured policy or certificate
+pin. Coordinate certificate rotation with the configured policy and pin before the next release;
+an unexpected certificate blocks publication.
+
+The SignPath project must trust only this official release workflow and its GitHub-hosted builds.
+Review the origin rules with SignPath: the workflow is dispatched from main, but all installer
+checkouts use the separately verified version-only candidate, not the triggering `github.sha`.
+The submitted v4 Actions artifact is a ZIP containing exactly the original tested Windows MSI;
+configure that ZIP/MSI shape and permitted product/version metadata, not arbitrary executable
+signing. Configure trusted signing approvers and the required manual authorization according to
+the Foundation policy. This adds no separate GitHub draft-review stage or requirement for a
+different person to approve. Do not configure an unapproved/test certificate for public releases.
+
+After all native tests pass, the signing action submits that immutable unsigned artifact ID,
+waits up to one hour for completion, and downloads the result. A Windows runner requires a
+trusted `Valid` Authenticode signature, a timestamp, and the captured certificate SHA-256.
+Both original and signed MSI databases are opened **read-only** and must retain
+`MegaMek Launcher`, the exact candidate ProductVersion, and the permanent upgrade UUID.
+The returned directory must contain exactly one correctly named MSI within 300 MiB.
+No MSI is installed or executed.
+
+A bounded verification record binds the original digest, final signed digest/size, source
+candidate and certificate. The final Windows checksum is regenerated **after signing**;
+Linux/macOS pairs remain unchanged. Publisher, provenance recorder and finalizer all validate
+the signed-byte binding and use the same immutable final artifacts. Signed release notes
+identify only the Windows MSI as signed and give SignPath/Foundation credit; disabled release
+notes continue to say installers are unsigned.
+
+Missing configuration, rejected/pending/timed-out signing, invalid trust/timestamp, a wrong
+certificate, changed MSI identity, malformed output, stale checksums or mismatched verification
+stop publication. There is no unsigned fallback and no nonblocking signing step.
+A failed signing run leaves the candidate as evidence; inspect the service request before
+rerunning to avoid duplicating an approval request. Published assets/tags are never overwritten.
+This code does not install the SignPath GitHub App, create/configure service accounts, set secrets,
+enable signing or publish a release. Those remain explicit owner actions after the response.
+
+Offline release/signing contracts, including mocked PowerShell signature/identity guards:
+
+```powershell
+python -B -m unittest discover -s scripts -p 'test_launcher_*.py'
+```
+
+These tests do not prove certificate issuance, live SignPath origin acceptance, actual MSI
+Authenticode trust, signing approval, or Windows installation. Those need the approved account
+and a separately authorized end-to-end release/upgrade test.
+See the [official GitHub integration](https://docs.signpath.io/trusted-build-systems/github).
 
 ### Installed launcher self-update
 
@@ -502,4 +585,4 @@ notarization identity is invented by the packaging.
 
 The current archive is an unsigned prototype and the app is not notarized. Users must not be
 instructed to disable or bypass Gatekeeper, SmartScreen, or another security control.
-Signing/notarization and release assembly remain explicit future owner actions.
+Activating Windows signing, notarization and publishing releases remain explicit owner actions.

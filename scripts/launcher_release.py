@@ -27,6 +27,7 @@ MAX_PAGES = 10
 PROVENANCE_FILE = "launcher-release-provenance.json"
 PROVENANCE_LIMIT = 16 * 1024
 PROVENANCE_ARCHIVE_LIMIT = 64 * 1024
+SIGNING_RECORD_LIMIT = 4096
 RELEASE_RUN = re.compile(r"^Launcher-Release-Run: ([1-9][0-9]{0,19})$", re.MULTILINE)
 INSTALLERS = (
     "windows-x64.msi", "linux-x64.deb", "linux-x64.rpm",
@@ -36,6 +37,78 @@ INSTALLERS = (
 
 class ReleaseError(Exception):
     pass
+
+
+@dataclass(frozen=True)
+class SigningConfiguration:
+    mode: str
+    organization_id: str = ""
+    project_slug: str = ""
+    signing_policy_slug: str = ""
+    artifact_configuration_slug: str = ""
+    certificate_sha256: str = ""
+
+
+def certificate_digest(value):
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", value):
+        raise ReleaseError("SIGNPATH_CERTIFICATE_SHA256 must be the approved certificate's 64-digit SHA-256")
+    return value.lower()
+
+
+def signing_configuration(environment):
+    enabled = environment.get("LAUNCHER_SIGNING_ENABLED", "")
+    if enabled in ("", "false"):
+        return SigningConfiguration("unsigned")
+    if enabled != "true":
+        raise ReleaseError("LAUNCHER_SIGNING_ENABLED must be exactly true, false, or unset")
+    values = {}
+    for field, variable in (
+            ("organization_id", "SIGNPATH_ORGANIZATION_ID"),
+            ("project_slug", "SIGNPATH_PROJECT_SLUG"),
+            ("signing_policy_slug", "SIGNPATH_SIGNING_POLICY_SLUG"),
+            ("artifact_configuration_slug", "SIGNPATH_ARTIFACT_CONFIGURATION_SLUG")):
+        value = environment.get(variable)
+        pattern = (r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}"
+                   if field == "organization_id" else r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}")
+        if not isinstance(value, str) or not re.fullmatch(pattern, value):
+            raise ReleaseError(f"{variable} is missing or invalid for enabled Windows signing")
+        values[field] = value
+    values["certificate_sha256"] = certificate_digest(environment.get("SIGNPATH_CERTIFICATE_SHA256"))
+    token = environment.get("SIGNPATH_API_TOKEN")
+    if not isinstance(token, str) or not token.strip():
+        raise ReleaseError("SIGNPATH_API_TOKEN is required when Windows signing is enabled")
+    return SigningConfiguration("signpath", **values)
+
+
+def load_signing_record(path):
+    if (path.is_symlink() or not path.is_file()
+            or not 0 < path.stat().st_size <= SIGNING_RECORD_LIMIT):
+        raise ReleaseError("Signing verification must be a bounded, nonempty regular JSON file")
+    try:
+        return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=unique_json_object)
+    except (UnicodeError, json.JSONDecodeError) as error:
+        raise ReleaseError("Invalid signing verification JSON") from error
+
+
+def verify_signing_record(record, version, commit, assets, certificate_sha256):
+    expected_certificate = certificate_digest(certificate_sha256)
+    name = f"MegaMek-Launcher-{version}-windows-x64.msi"
+    matches = [asset for asset in assets if asset.path.name == name]
+    fields = {"schema_version", "name", "version", "commit", "unsigned_sha256", "sha256",
+              "size", "certificate_sha256", "signature_status", "timestamped"}
+    if (not isinstance(record, dict) or set(record) != fields or len(matches) != 1
+            or type(record.get("schema_version")) is not int or record["schema_version"] != 1
+            or record.get("name") != name or record.get("version") != version
+            or record.get("commit") != require_sha(commit)
+            or record.get("certificate_sha256") != expected_certificate
+            or record.get("signature_status") != "Valid" or record.get("timestamped") is not True
+            or not isinstance(record.get("unsigned_sha256"), str)
+            or not re.fullmatch(r"[0-9a-f]{64}", record["unsigned_sha256"])
+            or record.get("unsigned_sha256") == record.get("sha256")
+            or record.get("sha256") != matches[0].sha256
+            or type(record.get("size")) is not int or record["size"] != matches[0].size):
+        raise ReleaseError("Windows signing verification does not bind the approved signer and final MSI bytes")
+    return record
 
 
 def numeric_version(value):
@@ -412,7 +485,10 @@ def release_run_identity(environment):
     return tuple(int(value) for value in values)
 
 
-def record_publication(github, version, commit, assets, environment, destination):
+def record_publication(github, version, commit, assets, environment, destination,
+                       signing_record=None, certificate_sha256=None):
+    if signing_record is not None or certificate_sha256 is not None:
+        verify_signing_record(signing_record, version, commit, assets, certificate_sha256)
     run_id, attempt = release_run_identity(environment)
     published = github.request("GET", f"{API}/releases/tags/v{version}")
     identifier = verify_release(published, assets, version, False)
@@ -426,6 +502,8 @@ def record_publication(github, version, commit, assets, environment, destination
               "release_id": identifier,
               "assets": [{"name": asset.path.name, "id": identities[asset.path.name],
                           "size": asset.size, "sha256": asset.sha256} for asset in assets]}
+    if signing_record is not None:
+        record["windows_signing"] = signing_record
     content = json.dumps(record, sort_keys=True).encode("utf-8")
     if len(content) > PROVENANCE_LIMIT:
         raise ReleaseError("Release provenance record exceeds limit")
@@ -610,21 +688,32 @@ def verified_release_push(github, root, environment):
         raise ReleaseError("Published release ID changed from the original publication")
     if {asset.path.name for asset in assets} != expected_names:
         raise ReleaseError("Published release assets were duplicated or substituted")
+    if "windows_signing" in record:
+        signing = record["windows_signing"]
+        certificate = signing.get("certificate_sha256") if isinstance(signing, dict) else None
+        verify_signing_record(signing, version, commit, assets, certificate)
     return True, (f"Exact version-only candidate {commit} was built, tested and published by "
                   f"https://github.com/{REPOSITORY}/actions/runs/{run_id}; no duplicate installer build. "
                   "No application/UI code changed, so post-release desktop checks are unnecessary.")
 
 
-def publish(github, version, commit, assets):
+def publish(github, version, commit, assets, signing_record=None, certificate_sha256=None):
+    if signing_record is not None or certificate_sha256 is not None:
+        verify_signing_record(signing_record, version, commit, assets, certificate_sha256)
     require_unused_version(github, version)
     tag = "v" + version
     reference = github.request("POST", f"{API}/git/refs",
                                {"ref": "refs/tags/" + tag, "sha": commit})
     verify_tag(reference, version, commit)
+    signing_notice = ("Installers are unsigned; macOS packages are not notarized. "
+                      if signing_record is None else
+                      "The Windows MSI is Authenticode-signed and timestamped through SignPath. "
+                      "Free code signing provided by SignPath.io, certificate by SignPath Foundation. "
+                      "Linux/macOS installers remain unsigned; macOS packages are not notarized. ")
     body = (f"Native installers built and tested from [{commit}](https://github.com/{REPOSITORY}/commit/{commit}).\n\n"
             "Installed launchers support user-authorized self-update on Windows, macOS, and supported "
             "Linux desktops. Linux requires PolicyKit and apt-get or dnf. "
-            "Installers are unsigned; macOS packages are not notarized. "
+            f"{signing_notice}"
             "SHA-256 files provide integrity checks, not independent publisher signing.\n")
     release = github.request("POST", f"{API}/releases", {
         "tag_name": tag, "target_commitish": commit, "name": f"MegaMek Launcher {version}",
@@ -652,15 +741,37 @@ def publish(github, version, commit, assets):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "candidate", "publish", "record", "finalize", "ci-plan"))
+    parser.add_argument("command", choices=("prepare", "candidate", "publish", "record", "finalize",
+                                           "ci-plan", "signing-plan"))
     parser.add_argument("--version")
     parser.add_argument("--commit")
     parser.add_argument("--assets", type=Path)
     parser.add_argument("--base")
     parser.add_argument("--provenance", type=Path)
+    parser.add_argument("--windows-signing", choices=("unsigned", "signpath"), default="unsigned")
+    parser.add_argument("--signing-verification", type=Path)
+    parser.add_argument("--signer-certificate-sha256")
     args = parser.parse_args()
     root = Path.cwd()
     github = GitHub()
+    if args.command == "signing-plan":
+        if any(value is not None for value in (args.version, args.commit, args.assets, args.base,
+                                               args.provenance, args.signing_verification,
+                                               args.signer_certificate_sha256)):
+            raise ReleaseError("Signing preparation derives its configuration from release Actions settings")
+        _, declaration = source_version(root)
+        validate_source(declaration.group(1), root, os.environ)
+        if os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch":
+            raise ReleaseError("Signing preparation requires the official manual release workflow")
+        configuration = signing_configuration(os.environ)
+        output = os.environ.get("GITHUB_OUTPUT")
+        if not output:
+            raise ReleaseError("GITHUB_OUTPUT is required for signing preparation")
+        with Path(output).open("a", encoding="utf-8") as file:
+            for field, value in vars(configuration).items():
+                file.write(f"{field}={value}\n")
+        print(f"::notice::Windows release signing mode: {configuration.mode}")
+        return
     if args.command == "ci-plan":
         if any(value is not None for value in (args.version, args.commit, args.assets, args.base, args.provenance)):
             raise ReleaseError("CI planning derives its identity from the triggering checkout")
@@ -701,17 +812,27 @@ def main():
         commit = validate_source(args.version, root, os.environ, args.commit)
         verify_checkout(root, commit)
         assets = validate_files(args.assets, args.version)
+        signing_record = None
+        if args.windows_signing == "signpath":
+            if args.signing_verification is None or args.signer_certificate_sha256 is None:
+                raise ReleaseError("Enabled signing requires the verification record and approved certificate")
+            signing_record = load_signing_record(args.signing_verification)
+            verify_signing_record(signing_record, args.version, commit, assets,
+                                  args.signer_certificate_sha256)
+        elif args.signing_verification is not None or args.signer_certificate_sha256 is not None:
+            raise ReleaseError("Unsigned publication must not claim signing verification")
         if args.command == "record":
             if args.base is not None or args.provenance is None:
                 raise ReleaseError("Publication recording requires only the exact source, assets and output")
-            record_publication(github, args.version, commit, assets, os.environ, args.provenance)
+            record_publication(github, args.version, commit, assets, os.environ, args.provenance,
+                               signing_record, args.signer_certificate_sha256)
             return
         if args.provenance is not None:
             raise ReleaseError("Only publication recording accepts a provenance output")
         if args.command == "publish":
             if args.base is not None:
                 raise ReleaseError("Publication does not update main; use finalize afterward")
-            publish(github, args.version, commit, assets)
+            publish(github, args.version, commit, assets, signing_record, args.signer_certificate_sha256)
         else:
             finalize_main(github, args.version, commit, require_sha(args.base), assets)
 

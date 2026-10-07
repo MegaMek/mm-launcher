@@ -20,11 +20,28 @@ jobs:
       version: ${{ steps.candidate.outputs.version }}
       commit: ${{ steps.candidate.outputs.commit }}
       base: ${{ steps.candidate.outputs.base }}
+      signing_mode: ${{ steps.signing.outputs.mode }}
+      organization_id: ${{ steps.signing.outputs.organization_id }}
+      project_slug: ${{ steps.signing.outputs.project_slug }}
+      signing_policy_slug: ${{ steps.signing.outputs.signing_policy_slug }}
+      artifact_configuration_slug: ${{ steps.signing.outputs.artifact_configuration_slug }}
+      certificate_sha256: ${{ steps.signing.outputs.certificate_sha256 }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
+      - name: Validate and capture optional Windows signing configuration
+        id: signing
+        env:
+          LAUNCHER_SIGNING_ENABLED: ${{ vars.LAUNCHER_SIGNING_ENABLED }}
+          SIGNPATH_ORGANIZATION_ID: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG }}
+          SIGNPATH_ARTIFACT_CONFIGURATION_SLUG: ${{ vars.SIGNPATH_ARTIFACT_CONFIGURATION_SLUG }}
+          SIGNPATH_CERTIFICATE_SHA256: ${{ vars.SIGNPATH_CERTIFICATE_SHA256 }}
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+        run: python3 -B scripts/launcher_release.py signing-plan
       - name: Validate official main source and next unused patch version
         env:
           GH_TOKEN: ${{ github.token }}
@@ -53,12 +70,21 @@ jobs:
     with:
       source_commit: ${{ needs.prepare.outputs.commit }}
 
-  publish:
+  release-assets:
     needs: [prepare, installers]
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    runs-on: ${{ needs.prepare.outputs.signing_mode == 'signpath' && 'windows-2025' || 'ubuntu-24.04' }}
+    timeout-minutes: 75
     permissions:
-      contents: write
+      contents: read
+      actions: read
+    outputs:
+      artifact_id: ${{ steps.publication.outputs.artifact-id }}
+      verification_artifact_id: ${{ steps.verification.outputs.artifact-id }}
+    env:
+      RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+      RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
+      WINDOWS_SIGNING: ${{ needs.prepare.outputs.signing_mode }}
+      CERTIFICATE_SHA256: ${{ needs.prepare.outputs.certificate_sha256 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -67,7 +93,97 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           pattern: MegaMek-Launcher-*-installers
+          path: build/unsigned
+          merge-multiple: true
+      - name: Prepare the exact same-run installer set
+        shell: pwsh
+        run: |
+          python -B scripts/launcher_signing.py prepare `
+            --version "$env:RELEASE_VERSION" --commit "$env:RELEASE_COMMIT" `
+            --source build/unsigned --assets build/publication `
+            --signing-input build/signing-input --windows-signing "$env:WINDOWS_SIGNING"
+      - name: Upload only the tested unsigned Windows MSI for SignPath
+        if: needs.prepare.outputs.signing_mode == 'signpath'
+        id: unsigned
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-unsigned-msi-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/signing-input/*.msi
+          if-no-files-found: error
+          retention-days: 14
+      - name: Request signing and download the completed artifact
+        if: needs.prepare.outputs.signing_mode == 'signpath'
+        id: signpath
+        uses: signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092 # v3.0.0
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ needs.prepare.outputs.organization_id }}
+          project-slug: ${{ needs.prepare.outputs.project_slug }}
+          signing-policy-slug: ${{ needs.prepare.outputs.signing_policy_slug }}
+          artifact-configuration-slug: ${{ needs.prepare.outputs.artifact_configuration_slug }}
+          github-artifact-id: ${{ steps.unsigned.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          service-unavailable-timeout-in-seconds: 60
+          output-artifact-directory: build/signpath-signed
+      - name: Verify the trusted signer, timestamp and unchanged MSI identity
+        if: needs.prepare.outputs.signing_mode == 'signpath'
+        shell: pwsh
+        run: |
+          . .\scripts\verify_launcher_signature.ps1
+          $name = "MegaMek-Launcher-$env:RELEASE_VERSION-windows-x64.msi"
+          Confirm-LauncherMsi `
+            -UnsignedMsi "build\signing-input\$name" -SignedMsi "build\signpath-signed\$name" `
+            -Version "$env:RELEASE_VERSION" -Commit "$env:RELEASE_COMMIT" `
+            -CertificateSha256 "$env:CERTIFICATE_SHA256" -Verification build\signing-verification.json
+          python -B scripts/launcher_signing.py complete `
+            --version "$env:RELEASE_VERSION" --commit "$env:RELEASE_COMMIT" `
+            --assets build/publication --signed build/signpath-signed `
+            --verification build/signing-verification.json `
+            --certificate-sha256 "$env:CERTIFICATE_SHA256" --windows-signing "$env:WINDOWS_SIGNING"
+      - name: Retain verified final installer and checksum bytes
+        id: publication
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-publication-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/publication/*
+          if-no-files-found: error
+          retention-days: 14
+      - name: Retain Windows signing verification
+        if: needs.prepare.outputs.signing_mode == 'signpath'
+        id: verification
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-signing-verification-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/signing-verification.json
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: [prepare, release-assets]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      actions: read
+    env:
+      WINDOWS_SIGNING: ${{ needs.prepare.outputs.signing_mode }}
+      CERTIFICATE_SHA256: ${{ needs.prepare.outputs.certificate_sha256 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.commit }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          artifact-ids: ${{ needs.release-assets.outputs.artifact_id }}
           path: build/release
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        if: needs.prepare.outputs.signing_mode == 'signpath'
+        with:
+          artifact-ids: ${{ needs.release-assets.outputs.verification_artifact_id }}
+          path: build/signing-verification
           merge-multiple: true
       - name: Validate and publish the complete stable launcher release
         env:
@@ -75,9 +191,14 @@ jobs:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
           RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
         run: |
+          signing=()
+          if [ "$WINDOWS_SIGNING" = signpath ]; then
+            signing=(--signing-verification build/signing-verification/signing-verification.json
+                     --signer-certificate-sha256 "$CERTIFICATE_SHA256")
+          fi
           python3 -B scripts/launcher_release.py publish \
             --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
-            --assets build/release
+            --assets build/release --windows-signing "$WINDOWS_SIGNING" "${signing[@]}"
 
       - name: Record verified publication for later CI reuse
         id: provenance
@@ -87,9 +208,15 @@ jobs:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
           RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
         run: |
+          signing=()
+          if [ "$WINDOWS_SIGNING" = signpath ]; then
+            signing=(--signing-verification build/signing-verification/signing-verification.json
+                     --signer-certificate-sha256 "$CERTIFICATE_SHA256")
+          fi
           python3 -B scripts/launcher_release.py record \
             --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
-            --assets build/release --provenance build/launcher-release-provenance.json
+            --assets build/release --provenance build/launcher-release-provenance.json \
+            --windows-signing "$WINDOWS_SIGNING" "${signing[@]}"
       - name: Retain immutable publication provenance
         if: steps.provenance.outcome == 'success'
         continue-on-error: true
@@ -101,9 +228,15 @@ jobs:
           retention-days: 14
 
   finalize:
-    needs: [prepare, publish]
+    needs: [prepare, publish, release-assets]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    env:
+      WINDOWS_SIGNING: ${{ needs.prepare.outputs.signing_mode }}
+      CERTIFICATE_SHA256: ${{ needs.prepare.outputs.certificate_sha256 }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -111,8 +244,14 @@ jobs:
           persist-credentials: false
       - uses: actions/download-artifact@v4
         with:
-          pattern: MegaMek-Launcher-*-installers
+          artifact-ids: ${{ needs.release-assets.outputs.artifact_id }}
           path: build/release
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        if: needs.prepare.outputs.signing_mode == 'signpath'
+        with:
+          artifact-ids: ${{ needs.release-assets.outputs.verification_artifact_id }}
+          path: build/signing-verification
           merge-multiple: true
       - name: Create repository-scoped version synchronization token
         id: release-bot
@@ -130,6 +269,12 @@ jobs:
           RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
           RELEASE_BASE: ${{ needs.prepare.outputs.base }}
         run: |
+          signing=()
+          if [ "$WINDOWS_SIGNING" = signpath ]; then
+            signing=(--signing-verification build/signing-verification/signing-verification.json
+                     --signer-certificate-sha256 "$CERTIFICATE_SHA256")
+          fi
           python3 -B scripts/launcher_release.py finalize \
             --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
-            --base "$RELEASE_BASE" --assets build/release
+            --base "$RELEASE_BASE" --assets build/release \
+            --windows-signing "$WINDOWS_SIGNING" "${signing[@]}"

@@ -55,7 +55,7 @@ jobs:
         with:
           ref: ${{ inputs.source_commit || github.sha }}
       - name: Test launcher release tooling without network or publication
-        run: python3 -B -m unittest discover -s scripts -p test_launcher_release.py
+        run: python3 -B -m unittest discover -s scripts -p 'test_launcher_*.py'
       - name: Determine whether this exact release candidate already passed installer CI
         id: ci-plan
         env:
