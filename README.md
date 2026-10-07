@@ -44,7 +44,9 @@ selection job before their four desktop jobs.
 
 `test` is the required headless gate: backend/file-safety tests, deterministic UI
 components and state, the production automatic-check worker, and safe Windows helper
-execution. Tests that open native windows are tagged `native-gui` and run separately:
+execution. Automatic-check policy tests run synchronously without executor deadlines;
+separate integration tests cover EDT handoff and cancellation with explicit latches.
+Tests that open native windows are tagged `native-gui` and run separately:
 `.\gradlew.bat nativeGuiTest` on Windows, `./gradlew nativeGuiTest` on macOS,
 or `xvfb-run -a ./gradlew nativeGuiTest` on Linux. The independent
 **Launcher desktop smoke tests (advisory)** workflow reports real failures on all four
