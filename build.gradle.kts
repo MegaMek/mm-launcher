@@ -609,6 +609,10 @@ tasks.withType<AbstractArchiveTask>().configureEach {
 }
 
 tasks.test {
+    inputs.files(fileTree(".github/workflows") {
+        include("launcher-*.yml")
+    }).withPropertyName("launcherWorkflows")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     systemProperty("java.awt.headless", "true")
     useJUnitPlatform {
         excludeTags("archive", "native-gui")

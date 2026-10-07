@@ -9,7 +9,8 @@ than also starting a duplicate push matrix. CI produces **only** five unsigned n
 pairs: Windows x64 `.msi`, Linux x64 `.deb` and `.rpm`, and macOS `.pkg` on both
 Intel and Apple Silicon. It does not build, verify, or upload portable archives,
 install packages on CI runners, create a release, sign, or notarize. The separate
-manual `Publish launcher release` workflow reuses these same builds and tests before publication. Each
+manual `Publish launcher release` workflow reuses these same builds and tests before publication,
+with an optional, disabled-by-default Windows MSI signing stage. Each
 installer contains a host-native Java 21 image with all JDK modules and `bin/java`
 for games launched by the application; no external Java is required.
 Run `./gradlew test buildDebInstaller buildRpmInstaller` on Linux,
@@ -46,6 +47,8 @@ selection job before their four desktop jobs.
 components and state, the production automatic-check worker, and safe Windows helper
 execution. Automatic-check policy tests run synchronously without executor deadlines;
 separate integration tests cover EDT handoff and cancellation with explicit latches.
+The headless task declares launcher workflow YAML files as inputs because its structural
+contracts read them directly; workflow-only changes invalidate cached test results.
 Tests that open native windows are tagged `native-gui` and run separately:
 `.\gradlew.bat nativeGuiTest` on Windows, `./gradlew nativeGuiTest` on macOS,
 or `xvfb-run -a ./gradlew nativeGuiTest` on Linux. The independent
@@ -139,17 +142,20 @@ or pull requests. Major/minor version changes remain explicit source changes.
 
 The workflow calls the ordinary native-installer CI at the captured candidate commit and
 waits for all four platforms' builds, package inspections, required headless tests, and release tooling
-tests to pass. Only then does one write-enabled
-job download this run's five installers and five checksum files, check the exact filenames and
-hashes, create `v<version>` at the tested commit, and upload the complete asset set. GitHub must
+tests to pass. A read-only release-assets job stages this run's five installers and five checksum
+files, optionally signs and verifies only the Windows MSI, and retains one immutable final asset
+set. The write-enabled publication job downloads that exact artifact ID, checks the filenames and
+hashes, creates `v<version>` at the tested commit, and uploads the complete asset set. GitHub must
 report the expected uploaded asset IDs, sizes, URLs, and SHA-256 digests, including the digest used
 by native self-update. All installers must fit the updater's 300 MiB limit.
 
 Publication goes straight to a stable release in that same run, with no draft-review approval
 stage. The upload operation briefly uses GitHub's draft flag so an incomplete asset set cannot
 become the update target; it is cleared automatically only after verification. The workflow then
-verifies the official latest-stable endpoint. Installers remain unsigned and macOS packages are
-not notarized. A separate finalization job rechecks the published release, latest endpoint,
+verifies the official latest-stable endpoint. Installers remain unsigned unless Windows signing is
+explicitly enabled after SignPath setup; Linux/macOS installers remain unsigned and macOS packages
+are not notarized. A separate finalization job downloads the same final artifact ID and rechecks
+the published release, latest endpoint,
 tested tag, and version-only candidate, then fast-forwards `main` without force. Main must
 still match the captured base commit; concurrent work is never overwritten.
 During upload, GitHub may give draft assets a temporary `untagged-...` download address.
@@ -164,6 +170,18 @@ the `LAUNCHER_RELEASE_APP_PRIVATE_KEY` Actions secret. Preparation and finalizat
 a fresh, repository-scoped App token, revoked at the end of their job; neither token is
 passed to builds or publication. See
 [release bot setup](docs/archive-distribution-contract.md#release-bot-setup).
+
+Windows signing is **off** when `LAUNCHER_SIGNING_ENABLED` is unset or `false`.
+Enabling it requires the approved SignPath organization/project/policy/artifact configuration,
+submitter token, and signing certificate SHA-256. Invalid flags or incomplete enabled
+configuration fail before candidate creation. Once enabled, signing, trusted Authenticode,
+timestamp, certificate-pin, MSI identity or final-checksum failures block publication; there is
+no unsigned fallback. Signing runs only in the official manually dispatched release workflow,
+never in PR or ordinary native-installer builds. The service waits up to one hour for the
+configured signing approval; timeout/rejection leaves the candidate unpublished.
+See [optional Windows signing setup](docs/archive-distribution-contract.md#optional-windows-signing).
+The integration can be prepared without an account, but **real signing remains unverified until
+Foundation approval, service configuration and an authorized end-to-end release test**.
 
 Writes are not automatically retried, existing assets/tags are never overwritten, and failure
 does not delete a candidate branch, tag, draft, or published release.
