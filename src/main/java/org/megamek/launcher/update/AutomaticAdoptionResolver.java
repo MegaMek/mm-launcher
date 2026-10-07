@@ -88,6 +88,10 @@ public final class AutomaticAdoptionResolver {
         try {
             OfficialSuiteChannelCatalog.CurrentPointers pointers =
                     new OfficialSuiteChannelCatalog(transport).currentPointers(repository);
+            if (pointers.versions().isEmpty()) {
+                diagnostics.println("ADOPTION automatic-resolution no complete suite records published; "
+                        + "searching for the exact official ancestor without a current channel target");
+            }
             OfficialSuiteChannelCatalog.CurrentIdentity current =
                     pointers.classify(selectedChannel, observed.get());
             if (current == OfficialSuiteChannelCatalog.CurrentIdentity.OPPOSITE_CURRENT) {

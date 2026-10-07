@@ -83,7 +83,7 @@ final class SubfolderDialog extends JDialog {
         if (base == null) base = new Font(Font.DIALOG, Font.PLAIN, 12);
         JLabel heading = new JLabel("New install folder");
         heading.setName("subfolderHeading");
-        heading.setForeground(FirstLaunchPanel.GOLD);
+        heading.setForeground(FirstLaunchPanel.ACCENT);
         heading.setFont(scale.font(base, Font.BOLD, 22f));
         heading.setAlignmentX(Component.LEFT_ALIGNMENT);
 
@@ -104,7 +104,7 @@ final class SubfolderDialog extends JDialog {
         folderName.setSelectionColor(HomeLaunchSplitButton.POPUP_SELECTION);
         folderName.setSelectedTextColor(HomeLaunchSplitButton.POPUP_SELECTION_FOREGROUND);
         folderName.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(new java.awt.Color(90, 119, 120)),
+                BorderFactory.createLineBorder(LauncherTheme.BORDER, scale.scaleForGUI(1)),
                 BorderFactory.createEmptyBorder(scale.scaleForGUI(7),
                         scale.scaleForGUI(9), scale.scaleForGUI(7),
                         scale.scaleForGUI(9))));

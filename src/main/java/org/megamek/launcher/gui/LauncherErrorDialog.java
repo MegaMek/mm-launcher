@@ -45,7 +45,6 @@ import javax.swing.JTextArea;
 import javax.swing.UIManager;
 import javax.swing.WindowConstants;
 import java.awt.BorderLayout;
-import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
@@ -55,7 +54,7 @@ import java.util.Objects;
 
 /**
  * Themed replacement for the raw {@link javax.swing.JOptionPane}-backed error details dialog,
- * matching the dark background / gold heading / {@link FirstLaunchButton} styling used
+ * matching the map background / cyan heading / {@link FirstLaunchButton} styling used
  * elsewhere in the launcher. Stays non-modal, like the dialog it replaces, so the main window
  * remains usable while diagnostics are being saved in the background.
  */
@@ -75,7 +74,7 @@ final class LauncherErrorDialog extends JDialog {
 
         JLabel heading = new JLabel(title);
         heading.setName("launcherErrorHeading");
-        heading.setForeground(FirstLaunchPanel.GOLD);
+        heading.setForeground(FirstLaunchPanel.ACCENT);
         heading.setFont(scale.font(base, Font.BOLD, 20f));
         heading.setAlignmentX(Component.LEFT_ALIGNMENT);
 
@@ -90,7 +89,8 @@ final class LauncherErrorDialog extends JDialog {
         area.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(7),
                 scale.scaleForGUI(9), scale.scaleForGUI(7), scale.scaleForGUI(9)));
         JScrollPane scroll = new JScrollPane(area);
-        scroll.setBorder(BorderFactory.createLineBorder(new Color(90, 119, 120)));
+        LauncherTheme.styleScrollPane(scroll, scale);
+        scroll.setBorder(BorderFactory.createLineBorder(LauncherTheme.BORDER));
         scroll.setPreferredSize(scale.scaleForGUI(640, 220));
         scroll.getViewport().setBackground(NormalInstallConfirmationDialog.FIELD_BACKGROUND);
         scroll.setAlignmentX(Component.LEFT_ALIGNMENT);

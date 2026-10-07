@@ -111,7 +111,6 @@ public final class OfficialSuiteChannelCatalog implements ChannelCatalog {
             throws IOException, InterruptedException {
         Objects.requireNonNull(repository, "repository");
         List<Located> records = records();
-        if (records.isEmpty()) throw new IOException("No complete suite records have been published yet.");
         Map<FollowChannel, String> versions = new EnumMap<>(FollowChannel.class);
         Map<ReleaseKey, ReleaseCatalog.Release> cache = new HashMap<>();
         for (FollowChannel channel : FollowChannel.values()) {
@@ -162,7 +161,7 @@ public final class OfficialSuiteChannelCatalog implements ChannelCatalog {
                 unique.putIfAbsent(located.record().products().get(repository).tag(), located);
             }
         }
-        if (unique.isEmpty()) throw new IOException("No complete " + channel + " suite record has been published.");
+        if (unique.isEmpty()) throw new UnpublishedChannelException(channel);
         List<Located> members = List.copyOf(unique.values());
         Target current = resolve(members.getFirst(), cache).get(repository);
         int start = Math.min((page - 1) * perPage, members.size());
@@ -290,7 +289,7 @@ public final class OfficialSuiteChannelCatalog implements ChannelCatalog {
 
     private static Located latest(List<Located> records, FollowChannel channel) throws IOException {
         Located latest = newest(records, channel);
-        if (latest == null) throw new IOException("No complete " + channel + " suite record has been published.");
+        if (latest == null) throw new UnpublishedChannelException(channel);
         return latest;
     }
 

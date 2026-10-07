@@ -246,7 +246,7 @@ program-files/user-data separation, native runner coverage, and release limitati
 
 After onboarding, Home is application-oriented. MegaMek, MekHQ, and MegaMekLab each have an
 independent preferred installation. Every application found across the union of registered
-static package records gets an equal gold split control whose primary label uses the shared
+static package records gets an equal map-style split control whose primary label uses the shared
 **Program Channel (Version)** format, such as **Launch MekHQ Milestone (0.51.0)**. The arrow lists the other records containing that
 application in deterministic registry order. An alternate row launches only that exact captured
 record and never changes a preference.
@@ -273,7 +273,7 @@ Home has no visible global “Main” block, per-copy update buttons, or a secon
 for update status. Its single **Installations** button gains a known count such as
 **Installations (2 updates)** when checked installations have updates; unknown and launch-only
 copies never create a false count. Update, retry, recovery, channel, location, removal, and explicit
-**Use as preferred for …** actions live on dark-teal installation cards. A managed card shows its
+**Use as preferred for …** actions live on map-style installation cards. A managed card shows its
 read-only **Channel: Milestone/Development/Weekly** identity and directly shows
 **Check for updates when the launcher opens**. This per-card checkbox is the sole automatic-check
 setting and saves immediately without changing the fixed channel. An imported card says
@@ -293,7 +293,10 @@ posts. **All news** opens the blog archive even if the feed cannot be loaded; ne
 the launcher. At wide window sizes Settings places Game Java, Diagnostics, and
 Launcher update in one column beside Community and Latest news in an equally wide
 column; narrower windows stack the groups in reading order above the fixed bottom
-navigation. **Change default Java** validates and
+navigation. News titles, **Join Discord**, and **All news** use unboxed, underlined cyan
+links with keyboard focus/activation; dates appear separately in smaller muted text.
+Comparable Settings utility buttons share a width and height sized for their longest label.
+**Change default Java** validates and
 atomically stores the sole external Java 21+ executable for every installation. Launch and
 explicit launch preview resolve and revalidate this setting; installation records contain no Java
 path or feature. With no saved default, the exact Java runtime executing MegaMek Launcher is the
@@ -304,7 +307,7 @@ fields and deliberately does not migrate older settings schemas. Settings presen
 left-aligned sections; the Java version and regular-font path appear above
 the left-aligned change action, and **View logs** opens a styled local viewer.
 Settings displays the effective runtime whether it is automatic or explicitly selected. The
-selector uses the same dark-teal/gold controls. No JRE is
+selector uses the same map-style controls. No JRE is
 downloaded or installed by the application; installed/native launcher
 distributions already bundle a runtime.
 
@@ -314,13 +317,39 @@ processed files below the bar.
 
 ## Developer CLI and graphical review
 
+The launcher uses MekHQ's Interstellar Map colors and flat outlined controls,
+not a separate launcher skin. The palette, button painter, checkbox icon,
+combo treatment, tooltips, and scrollbar treatment are copied/adapted from
+`MegaMek/mekhq` commit `622f8faeff18f2975498b5494a79059c6e3627bf`.
+The copies live in the launcher's GUI package and use `GuiScale`; they introduce
+no MekHQ/MegaMek runtime dependency, map rendering, or campaign logic.
+Keyboard actions, high-contrast fallbacks, update consent, and cancellation remain
+unchanged. A lightweight shared UI library can replace these presentation
+primitives later without changing the application services.
+This styling applies to the Swing application, not native installer wizards,
+OS window chrome, or system file pickers.
+Button labels use the normal light text color. The map's filter palette is retained:
+selected checkbox/radio icons use amber (`#EBA642`), while combo selections use cyan
+on the dark active background. Amber is not a primary-button accent.
+
+From the launcher checkout, run the source UI on Windows with Java 21 available:
+
+```powershell
+New-Item -ItemType Directory -Force .\build\ui-preview | Out-Null
+.\gradlew.bat run --args="gui --registry build\ui-preview\launcher-registry.json"
+```
+
+This separate registry starts with an empty Home and does not use the installed
+launcher's registrations/settings. To inspect the ordinary launcher state,
+run `.\gradlew.bat run --args="gui"` instead. No installer build is needed.
+
 With no registered copy, the artwork-led Home has an accessible split
 **Install latest MekHQ Milestone** control. Its large primary segment remains a one-click route to the
 normal confirmation for the current official Milestone MekHQ suite, which contains MegaMek,
 MekHQ, and MegaMekLab. Its validated version is added to the button label, for example
 **Install latest MekHQ Milestone (0.51.0)**; loading and unavailable states never invent a
 version. The separate arrow opens a
-styled dark-teal/gold popup containing exactly:
+styled map-color popup containing exactly:
 
 1. **Install latest MegaMek Milestone**
 2. **Install latest MegaMekLab Milestone**
@@ -408,7 +437,7 @@ selection, and direct launch behavior. The primary normal first install uses the
 Milestone suite record's MekHQ target. Each popup item binds its displayed official repository and
 record membership; no selection can substitute a different product, channel, title, or
 bundle.
-Before package transfer it shows a dedicated dark-teal/gold confirmation headed with the selected
+Before package transfer it shows a dedicated map-style confirmation headed with the selected
 product and channel. Its concise summary gives the validated version, actual included programs,
 binary download size, and full selectable destination.
 **Change location** chooses an existing parent and safe new subfolder, then produces a fresh
@@ -544,7 +573,7 @@ folders. Reinstalling the launcher intentionally preserves the per-user registry
 use this registration-removal flow rather than reinstalling to clear a missing game copy.
 
 Fresh download, standalone Preview, prepared Update, and recovery use one functional operation
-dialog with a compact dark-teal/gold presentation and typed phases: metadata, download,
+dialog with a compact map-style presentation and typed phases: metadata, download,
 verification, extraction, planning, consent, installation preparation, Apply/uninstall/recovery, and
 cleanup. Byte totals are shown for package transfer and retained-package verification. File totals
 are shown only when known; extraction remains indeterminate when the archive has no trustworthy
@@ -614,7 +643,7 @@ There are no automatic Applies, launcher self-updates, Nightly channel, bundled 
 or administrator requirement. A channel cannot be changed: another channel always means another
 managed copy/root, so there is no cross-channel in-place downgrade or retarget path. Advanced
 downloads need an existing writable parent and always create a new subfolder. A styled
-dark-teal/gold folder-name dialog validates the preselected friendly
+map-style folder-name dialog validates the preselected friendly
 `Program Channel (Version)` suggestion inline; Cancel or Escape changes no state. The same dialog
 is used by **Change location**, and the registered name is derived automatically from that
 friendly label. The normal
@@ -638,6 +667,12 @@ safely extracts it outside the application root, and compares its static product
 and ownership inventory with the imported copy. If automatic version lookup is unavailable, the
 user may explicitly choose an exact version from the bounded official release browser. Release
 titles and GitHub prerelease flags do not establish identity or channel history.
+A successfully read inventory with no complete suite records does not block that exact-ancestor
+search. Adoption still verifies the official package and local files, but a followed channel
+without a published record says **Milestone/Development/Weekly update information is not
+available yet**, with an explicit retry, rather than claiming the copy is up to date.
+Malformed or failed inventory requests remain errors; no website or inferred-channel fallback
+is introduced.
 
 All official application executables, application JARs, dependency JARs, and launch metadata must
 match byte-for-byte. Missing managed files, case/Unicode aliases, links, structural conflicts, a

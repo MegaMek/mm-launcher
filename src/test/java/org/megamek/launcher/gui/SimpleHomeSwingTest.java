@@ -92,14 +92,17 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.CountDownLatch;
 import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -485,6 +488,10 @@ class SimpleHomeSwingTest {
                     firstMenu.getParent(), firstMenu.getBounds(), firstCard);
             Rectangle manualBounds = SwingUtilities.convertRectangle(
                     manualCheck.getParent(), manualCheck.getBounds(), firstCard);
+            assertTrue(Math.abs(menuBounds.y * 2 + menuBounds.height - firstCard.getHeight()) <= 1,
+                    "More is vertically centered in the managed card");
+            assertTrue(Math.abs(manualBounds.y * 2 + manualBounds.height - firstCard.getHeight()) <= 1,
+                    "Check is vertically centered in the managed card");
             assertFalse(automaticBounds.intersects(menuBounds));
             assertFalse(automaticBounds.intersects(manualBounds));
             assertNotNull(waitButton(frame,
@@ -1043,6 +1050,53 @@ class SimpleHomeSwingTest {
 
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
+    void managedHomeSizeRequirementsFollowIncomingWidthBeforeGridLayout() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing layout requires a display");
+        FakeServices services = new FakeServices(temp.resolve("home-row-requirements.json"));
+        services.installed = true;
+        services.main = services.first;
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            waitButton(frame, "launch-lab-button");
+            onEdt(() -> {
+                JPanel actions = find(frame, "homeLaunchActions");
+                Container parent = actions.getParent();
+                java.awt.Dimension original = parent.getSize();
+                java.awt.GridLayout layout = assertInstanceOf(java.awt.GridLayout.class, actions.getLayout());
+                try {
+                    int minimum = java.util.Arrays.stream(actions.getComponents())
+                            .mapToInt(button -> button.getMinimumSize().height).max().orElseThrow();
+                    int preferred = java.util.Arrays.stream(actions.getComponents())
+                            .mapToInt(button -> button.getPreferredSize().height).max().orElseThrow();
+                    for (int[] size : new int[][]{{1100, 1}, {720, 2}, {580, 3}, {720, 2}, {1100, 1}}) {
+                        parent.setSize(size[0], parent.getHeight());
+                        int rows = size[1];
+                        int gaps = (rows - 1) * layout.getVgap();
+                        assertEquals(minimum * rows + gaps, actions.getMinimumSize().height,
+                                "minimum row height must use the incoming parent width");
+                        assertEquals(preferred * rows + gaps, actions.getPreferredSize().height,
+                                "preferred row height must use the incoming parent width");
+                        assertEquals(preferred * rows + gaps, actions.getMaximumSize().height);
+                        actions.doLayout();
+                        assertEquals((actions.getComponentCount() + rows - 1) / rows, layout.getColumns(),
+                                "grid columns must follow the incoming parent width");
+                    }
+                } finally {
+                    parent.setSize(original);
+                    parent.invalidate();
+                    frame.validate();
+                }
+                return null;
+            });
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void managedHomeFitsAllActionsAtTheInitialAndConstrainedWindowSizes() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing layout requires a display");
@@ -1062,37 +1116,89 @@ class SimpleHomeSwingTest {
                 }
                 return null;
             });
-            assertHomeAtSize(frame, 1044, 714, true);
-            assertHomeAtSize(frame, 1100, 760, true);
-            assertHomeAtSize(frame, 720, 600, false);
+            assertHomeAtSize(frame, 1044, 714);
+            assertHomeAtSize(frame, 1100, 760);
+            assertHomeAtSize(frame, 960, 600);
+            assertHomeAtSize(frame, 720, 600);
+            assertHomeAtSize(frame, 1100, 760);
+            assertHomeAtSize(frame, 720, 600);
         } finally {
             dispose(frame);
         }
     }
 
-    private static void assertHomeAtSize(LauncherFrame frame, int width, int height,
-                                         boolean threeColumns) throws Exception {
-        onEdt(() -> {
-            frame.setSize(width, height);
+    private static void assertHomeAtSize(LauncherFrame frame, int width, int height) throws Exception {
+        java.awt.Dimension fitted = onEdt(() -> {
+            java.awt.Dimension target = GuiScale.fitWindow(new java.awt.Dimension(width, height),
+                    GuiScale.usableBounds(frame.getGraphicsConfiguration()));
+            frame.setSize(target);
             frame.validate();
-            return null;
+            return target;
         });
-        waitUntil(() -> {
+        boolean threeColumns = onEdt(() -> {
+            JPanel actions = find(frame, "homeLaunchActions");
+            java.awt.Insets frameInsets = frame.getInsets();
+            java.awt.Insets controlsInsets = actions.getParent().getInsets();
+            int availableWidth = fitted.width - frameInsets.left - frameInsets.right
+                    - controlsInsets.left - controlsInsets.right;
+            java.awt.GridLayout layout = assertInstanceOf(java.awt.GridLayout.class, actions.getLayout());
+            return availableWidth >= 3 * GuiScale.DEFAULT.scaleForGUI(300) + 2 * layout.getHgap();
+        });
+        AtomicReference<List<Rectangle>> previous = new AtomicReference<>();
+        AtomicInteger stableSamples = new AtomicInteger();
+        AtomicReference<String> observed = new AtomicReference<>();
+        awaitHomeLayout("settled Home layout at " + fitted.width + "x" + fitted.height
+                + " (requested " + width + "x" + height + ")", observed, () -> {
             frame.validate();
             JPanel actions = find(frame, "homeLaunchActions");
             int preferred = actions.getComponent(0).getPreferredSize().height;
-            return java.util.Arrays.stream(actions.getComponents())
-                    .allMatch(button -> button.getHeight() <= preferred + 2)
+            javax.swing.JScrollPane scroller = find(frame, "managedHomeDeckScroller");
+            observed.set("actual=" + frame.getSize() + ", threeColumns=" + threeColumns
+                    + ", viewport=" + scroller.getViewport().getViewRect()
+                    + ", buttons=" + java.util.Arrays.stream(actions.getComponents())
+                    .map(button -> button.getBounds() + " min=" + button.getMinimumSize()
+                            + " preferred=" + button.getPreferredSize()).toList());
+            boolean ready = frame.getWidth() == fitted.width && frame.getHeight() == fitted.height
+                    && java.util.Arrays.stream(actions.getComponents())
+                    .allMatch(button -> button.getHeight() >= button.getMinimumSize().height
+                            && button.getHeight() <= preferred + 2)
                     && (threeColumns
                     ? actions.getComponent(0).getY() == actions.getComponent(2).getY()
                     : actions.getComponent(2).getY() > actions.getComponent(0).getY())
                     && homeActionsVisible(frame);
-        });
-        onEdt(() -> {
+            if (!ready) {
+                previous.set(null);
+                stableSamples.set(0);
+                return false;
+            }
+            List<Rectangle> geometry = new ArrayList<>();
+            geometry.add(frame.getBounds());
+            geometry.add(scroller.getViewport().getViewRect());
+            for (Component button : actions.getComponents()) geometry.add(button.getBounds());
+            for (Component action : homeActions(frame)) {
+                geometry.add(SwingUtilities.convertRectangle(action.getParent(),
+                        action.getBounds(), scroller.getViewport().getView()));
+            }
+            if (geometry.equals(previous.get())) {
+                stableSamples.incrementAndGet();
+            } else {
+                previous.set(geometry);
+                stableSamples.set(1);
+            }
+            if (stableSamples.get() < 3) return false;
             assertCompactLaunches(frame, threeColumns);
             assertHomeActionsVisible(frame);
-            return null;
+            return true;
         });
+    }
+
+    private static void awaitHomeLayout(String description, AtomicReference<String> observed,
+                                        java.util.concurrent.Callable<Boolean> condition) throws Exception {
+        try {
+            SwingTestSupport.awaitCondition(description, condition);
+        } catch (AssertionError failure) {
+            throw new AssertionError(description + ": " + observed.get(), failure);
+        }
     }
 
     private static boolean homeActionsVisible(LauncherFrame frame) {
@@ -1123,6 +1229,10 @@ class SimpleHomeSwingTest {
         assertEquals(3, actions.getComponentCount());
         int buttonHeight = actions.getComponent(0).getPreferredSize().height;
         for (Component button : actions.getComponents()) {
+            assertTrue(button.getHeight() >= button.getMinimumSize().height,
+                    () -> "launch buttons must not shrink below their minimum height: "
+                            + button.getHeight() + " < " + button.getMinimumSize().height
+                            + " at window " + frame.getSize());
             assertTrue(button.getHeight() <= buttonHeight + 2,
                     () -> "launch buttons must not be stretched to a multi-row deck height: "
                             + button.getHeight() + " > " + (buttonHeight + 2)
@@ -1272,9 +1382,11 @@ class SimpleHomeSwingTest {
         if (newsState.equals("newsArticleButton0")) {
             JPanel news = find(frame, "settingsLatestnewsSection");
             java.awt.Insets insets = news.getInsets();
-            assertEquals(news.getWidth() - insets.left - insets.right,
-                    newsAction.getWidth(), "headline button should use the whole news column");
-            assertEquals(javax.swing.SwingConstants.LEFT, ((JButton) newsAction).getHorizontalAlignment(),
+            LauncherLink headline = assertInstanceOf(LauncherLink.class, newsAction);
+            assertEquals(Math.min(news.getWidth() - insets.left - insets.right,
+                            headline.getPreferredSize().width),
+                    headline.getWidth(), "headline link should use its natural width within the news column");
+            assertEquals(javax.swing.SwingConstants.LEFT, headline.getHorizontalAlignment(),
                     "headline text should align with the other Settings content");
         }
         assertEquals(0, left.getX());
@@ -1335,16 +1447,22 @@ class SimpleHomeSwingTest {
                     "the news request does not block Settings navigation");
             releaseNews.countDown();
             JButton headline = waitButton(frame, "newsArticleButton0");
-            assertEquals("Aug 14, 2026 - MegaMek update and improvements for players and campaign testers",
-                    headline.getText());
+            String title = "MegaMek update and improvements for players and campaign testers";
+            String datedTitle = "Aug 14, 2026 - " + title;
+            assertInstanceOf(LauncherLink.class, headline);
+            assertEquals(title, onEdt(headline::getText));
+            JLabel date = onEdt(() -> assertInstanceOf(JLabel.class, find(frame, "newsArticleDate0")));
+            assertEquals("Aug 14, 2026", onEdt(date::getText));
             assertNotNull(waitFor(() -> find(frame, "defaultJavaPath")));
             onEdt(() -> {
                 frame.setSize(2000, 760);
                 frame.validate();
                 assertSettingsGeometry(frame, true, "newsArticleButton0");
-                assertEquals(headline.getText(), headline.getToolTipText());
-                assertEquals(headline.getText(),
+                assertEquals(datedTitle, headline.getToolTipText());
+                assertEquals(datedTitle,
                         headline.getAccessibleContext().getAccessibleName());
+                assertEquals(javax.accessibility.AccessibleRole.HYPERLINK,
+                        headline.getAccessibleContext().getAccessibleRole());
                 frame.setSize(1080, 760);
                 frame.validate();
                 assertSettingsGeometry(frame, true, "newsArticleButton0");

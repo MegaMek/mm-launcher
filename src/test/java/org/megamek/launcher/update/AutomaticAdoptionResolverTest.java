@@ -60,6 +60,34 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AutomaticAdoptionResolverTest {
     @Test
+    void emptySuiteInventoryStillSearchesForOneExactOfficialAncestor() throws Exception {
+        QueueTransport transport = new QueueTransport(200, "[]",
+                "[" + release("v0.50.06", "Milestone", false, true) + "]");
+        ByteArrayOutputStream diagnostics = new ByteArrayOutputStream();
+        var result = new AutomaticAdoptionResolver(transport).resolve(
+                OfficialRepository.MEGAMEK, "0.50.6", FollowChannel.MILESTONE,
+                new PrintStream(diagnostics), OperationContext.none(OperationType.ADOPT_EXISTING));
+
+        assertEquals(AutomaticAdoptionResolver.Status.MATCHED, result.status());
+        assertEquals("v0.50.06", result.release().tag());
+        assertEquals(2, transport.uris.size());
+        assertTrue(diagnostics.toString(StandardCharsets.UTF_8).contains("no complete suite records published"));
+        assertTrue(transport.uris.stream().allMatch(uri -> uri.toString().contains(
+                "/releases?per_page=50&page=1")));
+    }
+
+    @Test
+    void malformedSuiteInventoryDoesNotBecomeAnEmptyInventoryOrPermitReleaseSearch() throws Exception {
+        QueueTransport transport = new QueueTransport(200, "{\"unexpected\":true}",
+                "[" + release("v0.50.06", "Milestone", false, true) + "]");
+        var result = resolve(transport, "0.50.6");
+
+        assertEquals(AutomaticAdoptionResolver.Status.REQUEST_FAILED, result.status());
+        assertTrue(result.failure() instanceof IOException);
+        assertEquals(1, transport.uris.size());
+    }
+
+    @Test
     void numericLeadingZerosMatchWithoutGuessingAnExactEndpoint() throws Exception {
         QueueTransport transport = new QueueTransport(200,
                 channels("0.50.7", "0.51.0"),

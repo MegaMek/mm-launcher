@@ -44,6 +44,8 @@ import javax.swing.JList;
 import javax.swing.UIManager;
 import javax.swing.plaf.basic.BasicButtonUI;
 import javax.swing.plaf.basic.BasicComboBoxUI;
+import javax.swing.plaf.basic.BasicComboPopup;
+import javax.swing.plaf.basic.ComboPopup;
 import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Component;
@@ -66,10 +68,10 @@ import java.util.function.Function;
  * accessibility while avoiding an operating-system-painted white arrow segment.
  */
 final class StyledComboBox<E> extends JComboBox<E> {
-    static final Color FIELD_BACKGROUND = new Color(19, 39, 43);
-    static final Color ARROW_BACKGROUND = new Color(28, 53, 57);
-    static final Color BORDER = new Color(90, 119, 120);
-    static final Color FOCUS = FirstLaunchPanel.GOLD;
+    static final Color FIELD_BACKGROUND = LauncherTheme.INPUT_BACKGROUND;
+    static final Color ARROW_BACKGROUND = LauncherTheme.CONTROL_BACKGROUND;
+    static final Color BORDER = LauncherTheme.BORDER;
+    static final Color FOCUS = LauncherTheme.ACCENT;
     private final GuiScale scale;
     private Palette palette;
     private boolean focusListenerInstalled;
@@ -151,6 +153,29 @@ final class StyledComboBox<E> extends JComboBox<E> {
         repaint();
     }
 
+    @Override
+    public void setEnabled(boolean enabled) {
+        super.setEnabled(enabled);
+        if (palette != null) setBackground(fieldBackground());
+    }
+
+    @Override
+    public java.awt.Dimension getPreferredSize() {
+        java.awt.Dimension preferred = super.getPreferredSize();
+        if (scale == null) return preferred;
+        return new java.awt.Dimension(preferred.width,
+                Math.max(preferred.height, scale.scaleForGUI(LauncherTheme.CONTROL_HEIGHT)));
+    }
+
+    @Override
+    public javax.swing.JToolTip createToolTip() {
+        return LauncherTheme.toolTip(this, scale);
+    }
+
+    private Color fieldBackground() {
+        return isEnabled() || highContrast() ? palette.background() : LauncherTheme.DISABLED_BACKGROUND;
+    }
+
     private void updateBorder() {
         if (palette == null) return;
         setBorder(BorderFactory.createCompoundBorder(
@@ -174,28 +199,49 @@ final class StyledComboBox<E> extends JComboBox<E> {
             setText(displayText.apply(typedValue));
             setOpaque(true);
             setFont(scale.font(getFont(), Font.PLAIN, 13f));
-            setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(7),
-                    scale.scaleForGUI(9), scale.scaleForGUI(7),
-                    scale.scaleForGUI(9)));
-            setBackground(selected ? palette.selection() : palette.background());
+            setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(5),
+                    scale.scaleForGUI(10), scale.scaleForGUI(5),
+                    scale.scaleForGUI(10)));
+            boolean popupSelection = index >= 0 && selected;
+            setBackground(popupSelection ? palette.selection() : fieldBackground());
             setForeground(!StyledComboBox.this.isEnabled()
                     ? palette.disabled()
-                    : selected ? palette.selectionForeground() : palette.foreground());
+                    : popupSelection ? palette.selectionForeground() : palette.foreground());
             return this;
         }
     }
 
     private final class StyledComboBoxUI extends BasicComboBoxUI {
         @Override
+        protected ComboPopup createPopup() {
+            return new BasicComboPopup(comboBox) {
+                @Override
+                protected void configureScroller() {
+                    super.configureScroller();
+                    LauncherTheme.styleScrollPane(scroller, scale);
+                }
+            };
+        }
+
+        @Override
         protected JButton createArrowButton() {
             return new ArrowButton();
+        }
+
+        @Override
+        public void paintCurrentValue(Graphics graphics, java.awt.Rectangle bounds, boolean hasFocus) {
+            Component value = comboBox.getRenderer().getListCellRendererComponent(
+                    listBox, comboBox.getSelectedItem(), -1, false, false);
+            value.setFont(comboBox.getFont());
+            currentValuePane.paintComponent(graphics, value, comboBox,
+                    bounds.x, bounds.y, bounds.width, bounds.height, true);
         }
 
         @Override
         public void paintCurrentValueBackground(Graphics graphics,
                                                 java.awt.Rectangle bounds,
                                                 boolean hasFocus) {
-            graphics.setColor(palette.background());
+            graphics.setColor(fieldBackground());
             graphics.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
         }
     }
@@ -212,6 +258,7 @@ final class StyledComboBox<E> extends JComboBox<E> {
             setFocusPainted(false);
             setFocusable(false);
             setRolloverEnabled(true);
+            setPreferredSize(scale.scaleForGUI(28, LauncherTheme.CONTROL_HEIGHT));
             getAccessibleContext().setAccessibleName("Open choices");
             MouseAdapter hover = new MouseAdapter() {
                 @Override
@@ -235,15 +282,15 @@ final class StyledComboBox<E> extends JComboBox<E> {
             try {
                 canvas.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                         RenderingHints.VALUE_ANTIALIAS_ON);
-                Color fill = !isEnabled() ? palette.background()
-                        : getModel().isPressed() || hovered
-                        ? palette.selection() : palette.arrowBackground();
+                Color fill = !isEnabled() ? fieldBackground()
+                        : getModel().isPressed() ? palette.border()
+                        : hovered ? palette.selection() : palette.arrowBackground();
                 canvas.setColor(fill);
                 canvas.fillRect(0, 0, getWidth(), getHeight());
                 canvas.setColor(palette.border());
                 canvas.drawLine(0, 0, 0, getHeight());
-                int width = scale.scaleForGUI(10);
-                int height = scale.scaleForGUI(6);
+                int width = scale.scaleForGUI(8);
+                int height = scale.scaleForGUI(4);
                 int x = (getWidth() - width) / 2;
                 int y = (getHeight() - height) / 2;
                 Color arrow = getModel().isPressed() || hovered

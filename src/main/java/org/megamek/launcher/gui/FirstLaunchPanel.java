@@ -46,6 +46,7 @@ import javax.swing.SwingConstants;
 import javax.swing.UIManager;
 import java.awt.Color;
 import java.awt.BorderLayout;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Graphics;
@@ -61,11 +62,11 @@ import java.io.IOException;
 /** Empty-home presentation only; all user actions are supplied by the existing launcher frame. */
 final class FirstLaunchPanel extends JPanel {
     static final String ART_RESOURCE = "/org/megamek/launcher/gui/first-launch-art.png";
-    static final Color BACKGROUND = new Color(16, 26, 29);
-    static final Color PANEL = new Color(22, 36, 40);
-    static final Color TEXT = new Color(237, 243, 237);
-    static final Color MUTED = new Color(166, 186, 181);
-    static final Color GOLD = new Color(226, 196, 125);
+    static final Color BACKGROUND = LauncherTheme.BACKGROUND;
+    static final Color PANEL = LauncherTheme.PANEL;
+    static final Color TEXT = LauncherTheme.TEXT;
+    static final Color MUTED = LauncherTheme.MUTED;
+    static final Color ACCENT = LauncherTheme.ACCENT;
     private final GuiScale scale;
     private final ArtworkPanel artwork;
     private final ContentPanel controls;
@@ -137,6 +138,7 @@ final class FirstLaunchPanel extends JPanel {
 
         scroller = new JScrollPane(controls, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
                 JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        LauncherTheme.styleScrollPane(scroller, scale);
         scroller.setName("firstLaunchControlsScroller");
         scroller.setBorder(BorderFactory.createEmptyBorder());
         scroller.getViewport().setBackground(PANEL);
@@ -254,7 +256,6 @@ final class FirstLaunchPanel extends JPanel {
         private final ArtworkPanel artwork;
         private final JPanel deck;
         private final JScrollPane scroller;
-        private int lastDeckWidth = -1;
 
         private ManagedHomePanel(BufferedImage image, GuiScale scale, JPanel controls) {
             this.scale = scale;
@@ -273,6 +274,7 @@ final class FirstLaunchPanel extends JPanel {
             deck.add(controls, BorderLayout.CENTER);
             scroller = new JScrollPane(deck, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
                     JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+            LauncherTheme.styleScrollPane(scroller, scale);
             scroller.setName("managedHomeDeckScroller");
             scroller.setBackground(PANEL);
             scroller.setBorder(BorderFactory.createEmptyBorder());
@@ -284,15 +286,15 @@ final class FirstLaunchPanel extends JPanel {
 
         @Override
         public void doLayout() {
-            // The deck's preferred height depends on the width available to its
-            // responsive actions. Give it the current width before asking for
-            // that height (the viewport lays out its children afterwards).
-            if (getWidth() != lastDeckWidth) {
-                lastDeckWidth = getWidth();
+            // Measure responsive rows using the incoming deck/controls width;
+            // the viewport has not laid out their children yet.
+            Component controls = deck.getComponent(0);
+            if (getWidth() != deck.getWidth() || getWidth() != controls.getWidth()) {
                 deck.setSize(getWidth(), deck.getHeight());
+                controls.setSize(getWidth(), controls.getHeight());
                 // BoxLayout caches its children's preferred/maximum heights.
                 // Those change when launch actions wrap to another row count.
-                deck.getComponent(0).invalidate();
+                controls.invalidate();
                 deck.invalidate();
             }
             int minimumArt = Math.min(scale.scaleForGUI(180),

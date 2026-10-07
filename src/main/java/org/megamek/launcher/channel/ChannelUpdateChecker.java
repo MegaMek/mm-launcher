@@ -98,6 +98,10 @@ public final class ChannelUpdateChecker {
         final ChannelCatalog.Target target;
         try {
             target = catalog.target(preference.channel(), repository);
+        } catch (ChannelCatalog.UnpublishedChannelException error) {
+            return unavailable(error.channel() == preference.channel()
+                            ? Status.CHANNEL_NOT_PUBLISHED : Status.UNAVAILABLE,
+                    record, preference, snapshot.current().tag(), detail(error));
         } catch (IOException error) {
             return unavailable(Status.UNAVAILABLE, record, preference, snapshot.current().tag(),
                     "Channel check failed: " + detail(error));
@@ -188,6 +192,7 @@ public final class ChannelUpdateChecker {
     public enum Status {
         UNCONFIGURED,
         UNAVAILABLE,
+        CHANNEL_NOT_PUBLISHED,
         UPDATE_AVAILABLE,
         EXACT_CURRENT,
         INSTALLED_AHEAD,
@@ -242,6 +247,13 @@ public final class ChannelUpdateChecker {
                          Recommendation recommendation, String reason) {
         public boolean updateAvailable() {
             return status == Status.UPDATE_AVAILABLE && recommendation != null;
+        }
+
+        public boolean retryable() {
+            return switch (status) {
+                case UNCONFIGURED, UNAVAILABLE, CHANNEL_NOT_PUBLISHED, NON_COMPARABLE -> true;
+                case UPDATE_AVAILABLE, EXACT_CURRENT, INSTALLED_AHEAD -> false;
+            };
         }
     }
 }

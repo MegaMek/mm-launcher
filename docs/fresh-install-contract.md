@@ -195,7 +195,7 @@ directory creation and produces a separate logging warning without hiding the or
 outcome. Standalone CLI arguments, output/exit behavior, package model, and lack of cache/resume
 semantics are unchanged.
 
-The GUI operation window is a compact dark-teal/gold phase/progress surface, not a live technical
+The GUI operation window is a compact map-style phase/progress surface, not a live technical
 log viewer. While cancellation is safe its only bottom action is **Cancel**; after publication
 wins, Cancel disappears and the window says that installation is finishing and must remain open.
 Accepted pre-publication cancellation disposes progress and returns to the current page with
@@ -205,7 +205,7 @@ Accepted pre-publication cancellation disposes progress and returns to the curre
 
 On normal-install success the authoritative result reports whether the new record actually became
 Main under the locked registry outcome. Progress closes immediately and managed Home reloads
-without an install-complete modal or launch. Home shows a process-local gold/green notice naming
+without an install-complete modal or launch. Home shows a process-local map-accent notice naming
 the installed product and observed version. It says **installed and ready** only when that result
 became Main; otherwise it says to find the new copy in Installations while Home continues showing
 the existing Main.

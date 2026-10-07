@@ -38,20 +38,16 @@ import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.plaf.basic.BasicButtonUI;
 import javax.swing.plaf.basic.BasicGraphicsUtils;
-import java.awt.BasicStroke;
-import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Font;
-import java.awt.GradientPaint;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
-import java.awt.Polygon;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 
-/** A vector-painted command button, independent of the suite's texture and skin dependencies. */
+/** A map-style command button, independent of the suite's texture and skin dependencies. */
 final class FirstLaunchButton extends JButton {
-    enum Size { REGULAR, SMALL }
+    enum Size { REGULAR, SMALL, COMPACT }
 
     private final GuiScale scale;
     private final boolean primary;
@@ -68,9 +64,9 @@ final class FirstLaunchButton extends JButton {
         this.size = size;
         setName(name);
         getAccessibleContext().setAccessibleName(text);
-        setFont(scale.font(getFont(), Font.BOLD, size == Size.SMALL ? 12f : 16f));
-        int vertical = scale.scaleForGUI(size == Size.SMALL ? 8 : 14);
-        int horizontal = scale.scaleForGUI(size == Size.SMALL ? 14 : 18);
+        setFont(scale.font(getFont(), Font.BOLD, size == Size.REGULAR ? 16f : 12f));
+        int vertical = scale.scaleForGUI(size == Size.REGULAR ? 14 : size == Size.SMALL ? 8 : 5);
+        int horizontal = scale.scaleForGUI(size == Size.REGULAR ? 18 : size == Size.SMALL ? 14 : 10);
         setBorder(BorderFactory.createEmptyBorder(vertical, horizontal, vertical, horizontal));
         setOpaque(false);
         setContentAreaFilled(false);
@@ -85,8 +81,7 @@ final class FirstLaunchButton extends JButton {
                 try {
                     text.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
                             RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-                    text.setColor(!isEnabled() ? new Color(159, 174, 171)
-                            : primary ? new Color(25, 34, 30) : new Color(239, 246, 240));
+                    text.setColor(LauncherTheme.buttonText(primary, isEnabled()));
                     BasicGraphicsUtils.drawStringUnderlineCharAt(text, value,
                             getDisplayedMnemonicIndex(), textRectangle.x,
                             textRectangle.y + text.getFontMetrics().getAscent());
@@ -100,8 +95,10 @@ final class FirstLaunchButton extends JButton {
     @Override
     public Dimension getPreferredSize() {
         Dimension preferred = super.getPreferredSize();
-        return new Dimension(Math.max(preferred.width, scale.scaleForGUI(size == Size.SMALL ? 160 : 248)),
-                Math.max(preferred.height, scale.scaleForGUI(size == Size.SMALL ? 36 : 54)));
+        int minimumWidth = size == Size.REGULAR ? 248 : size == Size.SMALL ? 160 : 0;
+        int minimumHeight = size == Size.REGULAR ? 54 : size == Size.SMALL ? 36 : LauncherTheme.CONTROL_HEIGHT;
+        return new Dimension(Math.max(preferred.width, scale.scaleForGUI(minimumWidth)),
+                Math.max(preferred.height, scale.scaleForGUI(minimumHeight)));
     }
 
     @Override
@@ -110,39 +107,16 @@ final class FirstLaunchButton extends JButton {
         try {
             canvas.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                     RenderingHints.VALUE_ANTIALIAS_ON);
-            int inset = scale.scaleForGUI(3);
-            int cut = scale.scaleForGUI(8);
-            int right = getWidth() - inset - 1;
-            int bottom = getHeight() - inset - 1;
-            Polygon plate = new Polygon(
-                    new int[]{inset + cut, right, right, right - cut, inset, inset},
-                    new int[]{inset, inset, bottom - cut, bottom, bottom, inset + cut}, 6);
-            boolean pressed = getModel().isPressed() && getModel().isArmed();
-            boolean hover = getModel().isRollover();
-            Color top = primary ? new Color(226, 196, 125) : new Color(43, 65, 69);
-            Color lower = primary ? new Color(192, 159, 88) : new Color(28, 47, 51);
-            if (!isEnabled()) {
-                top = new Color(54, 68, 69);
-                lower = new Color(43, 55, 57);
-            } else if (pressed) {
-                top = lower;
-            } else if (hover) {
-                top = top.brighter();
-                lower = lower.brighter();
-            }
-            canvas.setPaint(new GradientPaint(0, inset, top, 0, bottom, lower));
-            canvas.fillPolygon(plate);
-            canvas.setColor(primary ? new Color(239, 211, 147) : new Color(90, 119, 120));
-            canvas.setStroke(new BasicStroke(scale.scaleForGUI(1f)));
-            canvas.drawPolygon(plate);
-            if (isFocusOwner()) {
-                canvas.setColor(new Color(246, 238, 207));
-                canvas.setStroke(new BasicStroke(scale.scaleForGUI(2f)));
-                canvas.drawPolygon(plate);
-            }
+            LauncherTheme.paintButton(canvas, getWidth(), getHeight(), scale, isEnabled(),
+                    getModel().isPressed() && getModel().isArmed(), getModel().isRollover(), isFocusOwner());
         } finally {
             canvas.dispose();
         }
         super.paintComponent(graphics);
+    }
+
+    @Override
+    public javax.swing.JToolTip createToolTip() {
+        return LauncherTheme.toolTip(this, scale);
     }
 }

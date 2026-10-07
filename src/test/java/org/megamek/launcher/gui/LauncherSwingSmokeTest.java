@@ -59,6 +59,7 @@ import javax.swing.SwingUtilities;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import java.awt.Component;
+import java.awt.Color;
 import java.awt.Container;
 import java.awt.GraphicsEnvironment;
 import java.awt.Graphics2D;
@@ -79,6 +80,7 @@ import java.util.jar.Manifest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -146,6 +148,10 @@ class LauncherSwingSmokeTest {
                 new SubfolderDialog(null, "MekHQ Milestone (0.51.0)", GuiScale.DEFAULT));
         try {
             JTextField field = component(valid, "subfolderNameField");
+            assertEquals(LauncherTheme.INPUT_BACKGROUND, field.getBackground());
+            var border = assertInstanceOf(javax.swing.border.CompoundBorder.class, field.getBorder());
+            assertEquals(LauncherTheme.BORDER,
+                    assertInstanceOf(javax.swing.border.LineBorder.class, border.getOutsideBorder()).getLineColor());
             JButton continueButton = find(valid, "continueSubfolderButton");
             SwingUtilities.invokeAndWait(() -> {
                 field.setText("../escape");
@@ -211,6 +217,105 @@ class LauncherSwingSmokeTest {
             assertEquals(1, services.readRegistry().installations().size(),
                     "opening Manage must not inspect or remove the broken entry");
             openDownloadFromManage(frame);
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
+    void settingsUseWrappedDatedLinksAndMatchingUtilityButtonSizes() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "actual Swing controls require a display");
+        PagingServices services = new PagingServices(temp.resolve("settings-links.json"));
+        services.register("Main", createSuite(temp.resolve("settings-links-copy")));
+        String title = "MegaMek improvements to equipment, campaign tools, installation management, "
+                + "and usability with a complete announcement title that remains readable at every window size";
+        String xml = "<feed xmlns=\"http://www.w3.org/2005/Atom\"><entry><title>" + title
+                + "</title><published>2026-10-01T00:00:00Z</published>"
+                + "<link rel=\"alternate\" href=\"https://megamek.org/settings-news\"/></entry></feed>";
+        java.util.concurrent.atomic.AtomicInteger requests = new java.util.concurrent.atomic.AtomicInteger();
+        LauncherNewsFeed feed = new LauncherNewsFeed((uri, accept) -> {
+            requests.incrementAndGet();
+            return new org.megamek.launcher.release.ReleaseTransport.Response(200, java.util.Map.of(),
+                    new java.io.ByteArrayInputStream(xml.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        });
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, feed));
+        try {
+            onEdt(() -> {
+                frame.showWindow();
+                return null;
+            });
+            JButton settings = waitForButton(frame, "settingsButton");
+            SwingUtilities.invokeAndWait(settings::doClick);
+            SwingTestSupport.awaitCondition("loaded settings and news", () -> find(frame, "newsArticleButton0") != null
+                    && find(frame, "changeDefaultJavaButton") != null);
+            for (int width : new int[]{1180, 680}) {
+                onEdt(() -> {
+                    frame.setSize(width, width == 680 ? 470 : 760);
+                    frame.validate();
+                    return null;
+                });
+                SwingTestSupport.awaitCondition("wrapped settings headline layout", () -> {
+                    LauncherLink link = assertInstanceOf(LauncherLink.class, find(frame, "newsArticleButton0"));
+                    return link.getWidth() > 0 && link.getHeight() >= link.getPreferredSize().height;
+                });
+                onEdt(() -> {
+                    LauncherLink link = assertInstanceOf(LauncherLink.class, find(frame, "newsArticleButton0"));
+                    assertEquals(title, link.getText());
+                    assertEquals(javax.accessibility.AccessibleRole.HYPERLINK,
+                            link.getAccessibleContext().getAccessibleRole());
+                    assertTrue(link.getHeight() > link.getFontMetrics(link.getFont()).getHeight() * 2);
+                    JLabel date = component(frame, "newsArticleDate0");
+                    assertEquals(LauncherTheme.MUTED, date.getForeground());
+                    assertTrue(date.getFont().getSize2D() < link.getFont().getSize2D());
+                    assertTrue(link.getAccessibleContext().getAccessibleName().contains(date.getText()));
+                    assertInstanceOf(LauncherLink.class, find(frame, "openDiscordButton"));
+                    assertInstanceOf(LauncherLink.class, find(frame, "allNewsButton"));
+                    JPanel news = component(frame, "settingsLatestnewsSection");
+                    assertTrue(link.getX() + link.getWidth() <= news.getWidth() - news.getInsets().right);
+                    JButton java = find(frame, "changeDefaultJavaButton");
+                    JButton logs = find(frame, "viewOperationLogsButton");
+                    assertEquals(java.getSize(), logs.getSize());
+                    JButton update = find(frame, "checkLauncherUpdateButton");
+                    if (update != null) assertEquals(java.getSize(), update.getSize());
+                    return null;
+                });
+                onEdt(() -> {
+                    frame.toFront();
+                    find(frame, "changeDefaultJavaButton").requestFocusInWindow();
+                    return null;
+                });
+                SwingTestSupport.awaitCondition("focused utility button", () ->
+                        find(frame, "changeDefaultJavaButton").isFocusOwner());
+                onEdt(() -> {
+                    find(frame, "newsArticleButton0").requestFocusInWindow();
+                    return null;
+                });
+                SwingTestSupport.awaitCondition("focused news link", () ->
+                        find(frame, "newsArticleButton0").isFocusOwner());
+                onEdt(() -> {
+                    LauncherLink link = assertInstanceOf(LauncherLink.class, find(frame, "newsArticleButton0"));
+                    var viewport = assertInstanceOf(javax.swing.JViewport.class,
+                            javax.swing.SwingUtilities.getAncestorOfClass(javax.swing.JViewport.class, link));
+                    var bounds = javax.swing.SwingUtilities.convertRectangle(
+                            link.getParent(), link.getBounds(), viewport.getView());
+                    assertTrue(viewport.getViewRect().contains(bounds),
+                            "keyboard focus must scroll the full link into view");
+                    BufferedImage image = new BufferedImage(link.getWidth(), link.getHeight(),
+                            BufferedImage.TYPE_INT_ARGB);
+                    Graphics2D graphics = image.createGraphics();
+                    try {
+                        link.paint(graphics);
+                    } finally {
+                        graphics.dispose();
+                    }
+                    assertEquals(LauncherTheme.BUTTON_ICON.getRGB(), image.getRGB(0, link.getHeight() / 2),
+                            "keyboard focus has a visible cyan outline");
+                    return null;
+                });
+                saveReviewImage(width == 1180 ? "settings-links-wide.png" : "settings-links-compact.png", frame);
+            }
+            assertEquals(1, requests.get(), "resizing and restyling must not fetch the feed again");
         } finally {
             dispose(frame);
         }
@@ -609,8 +714,8 @@ class LauncherSwingSmokeTest {
                     "phase, progress, and detail sit directly on the dialog background");
             assertEquals(0, summary.getBorder().getBorderInsets(summary).top);
             assertEquals(0, summary.getBorder().getBorderInsets(summary).left);
-            assertEquals(OperationProgressDialog.GOLD, phase.getForeground());
-            assertEquals(OperationProgressDialog.GOLD, bar.getForeground());
+            assertEquals(OperationProgressDialog.ACCENT, phase.getForeground());
+            assertEquals(OperationProgressDialog.ACCENT, bar.getForeground());
             assertTrue(cancel instanceof FirstLaunchButton,
                     "Cancel uses the local vector-painted secondary control");
             assertFalse(cancel.isOpaque());
@@ -641,7 +746,16 @@ class LauncherSwingSmokeTest {
             assertFalse(bar.getString().contains("282000000"));
             assertTrue(bar.getAccessibleContext().getAccessibleDescription()
                     .contains("Downloaded 282 MB of 690 MB"));
+            assertTrue(hasPaintedColor(bar, OperationProgressDialog.TEXT),
+                    "percentage text is light on the unfilled dark track");
             saveReviewImage("download-progress.png", dialog);
+            onEdt(() -> {
+                bar.setValue(100);
+                bar.setString("100%");
+                return null;
+            });
+            assertTrue(hasPaintedColor(bar, OperationProgressDialog.BACKGROUND),
+                    "percentage text is dark on the filled cyan bar");
 
             context.progress(OperationPhase.EXTRACT, 4_218, -1, ProgressUnit.FILES,
                     "Extracted 4218 archive entries");
@@ -959,7 +1073,24 @@ class LauncherSwingSmokeTest {
     private static void saveReviewImage(String name, Container component) throws Exception {
         String directory = System.getenv("MM_LAUNCHER_REVIEW_IMAGES");
         if (directory == null) return;
-        BufferedImage image = onEdt(() -> {
+        BufferedImage image = renderReviewImage(component);
+        Path path = Path.of(directory);
+        java.nio.file.Files.createDirectories(path);
+        ImageIO.write(image, "PNG", path.resolve(name).toFile());
+    }
+
+    private static boolean hasPaintedColor(Container component, Color color) throws Exception {
+        BufferedImage image = renderReviewImage(component);
+        for (int y = 0; y < image.getHeight(); y++) {
+            for (int x = 0; x < image.getWidth(); x++) {
+                if (image.getRGB(x, y) == color.getRGB()) return true;
+            }
+        }
+        return false;
+    }
+
+    private static BufferedImage renderReviewImage(Container component) throws Exception {
+        return onEdt(() -> {
             BufferedImage rendered = new BufferedImage(component.getWidth(),
                     component.getHeight(), BufferedImage.TYPE_INT_ARGB);
             Graphics2D graphics = rendered.createGraphics();
@@ -972,9 +1103,6 @@ class LauncherSwingSmokeTest {
             }
             return rendered;
         });
-        Path path = Path.of(directory);
-        java.nio.file.Files.createDirectories(path);
-        ImageIO.write(image, "PNG", path.resolve(name).toFile());
     }
 
     private static Path createSuite(Path root) throws Exception {

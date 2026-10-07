@@ -33,6 +33,8 @@
 
 package org.megamek.launcher.update;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorOutputStream;
@@ -40,7 +42,10 @@ import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
+import org.megamek.launcher.channel.ChannelUpdateChecker;
 import org.megamek.launcher.channel.FollowChannel;
+import org.megamek.launcher.channel.OfficialSuiteChannelCatalog;
+import org.megamek.launcher.channel.SuiteTestData;
 import org.megamek.launcher.launch.RootCoordinator;
 import org.megamek.launcher.onboarding.InstallationInspector;
 import org.megamek.launcher.operation.OperationContext;
@@ -53,6 +58,8 @@ import org.megamek.launcher.registry.InstallationRecord;
 import org.megamek.launcher.registry.RegistryData;
 import org.megamek.launcher.registry.RegistryStore;
 import org.megamek.launcher.release.ReleaseTransport;
+import org.megamek.launcher.release.OfficialRepository;
+import org.megamek.launcher.release.ReleaseCatalog;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -75,8 +82,10 @@ import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 import java.util.jar.Manifest;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -463,6 +472,156 @@ class ImportedCopyAdoptionServiceTest {
                     path.getFileName().toString().startsWith(".adoption-attempt-")));
         }
         assertNoProvenance(fixture);
+    }
+
+    @Test
+    void releaseDayLegacyMilestoneAndDevelopmentImportsCanAdoptAndApplyTheirPublishedChannelUpdate()
+            throws Exception {
+        for (FollowChannel channel : List.of(FollowChannel.MILESTONE, FollowChannel.DEVELOPMENT)) {
+            boolean milestone = channel == FollowChannel.MILESTONE;
+            String legacyVersion = milestone ? "0.50.06" : "0.50.07";
+            String targetVersion = milestone ? "0.52.00" : "0.52.01";
+            byte[] targetJar = jarVersion(0, 52, milestone ? 0 : 1, null);
+            byte[] legacyJar = jarVersion(0, 50, milestone ? 6 : 7, null);
+            byte[] legacyArchive = archive("MegaMek-" + legacyVersion, legacyJar,
+                    "old official data", "old official setting", Map.of());
+            String legacyMetadata = releaseJson(legacyArchive, "v" + legacyVersion, legacyVersion);
+            SuiteTestData network = new SuiteTestData();
+            for (FollowChannel publishedChannel : List.of(FollowChannel.MILESTONE, FollowChannel.DEVELOPMENT)) {
+                String version = publishedChannel == FollowChannel.MILESTONE ? "0.52.00" : "0.52.01";
+                byte[] target = archive("MegaMek-" + version,
+                        version.equals(targetVersion) ? targetJar
+                                : jarVersion(0, 52, publishedChannel == FollowChannel.MILESTONE ? 0 : 1, null),
+                        "new official data", "new official setting", Map.of(
+                                "data/added.txt", "new managed data",
+                                "suite-build.properties", "schemaVersion=1\nproduct=MegaMek\nversion=" + version
+                                        + "\nmegamekCommit=" + "b".repeat(40)
+                                        + "\nmegameklabCommit=" + "b".repeat(40)
+                                        + "\nmekhqCommit=" + "b".repeat(40)
+                                        + "\nmmDataCommit=" + "c".repeat(40) + "\nminimumJavaVersion=21\n"));
+                String hash = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(target));
+                network.suite(version, publishedChannel,
+                        Map.of(OfficialRepository.MEGAMEK, version,
+                                OfficialRepository.LAB, version, OfficialRepository.MEKHQ, version),
+                        Map.of(OfficialRepository.MEGAMEK, (long) target.length),
+                        Map.of(OfficialRepository.MEGAMEK, hash));
+                network.put(ReleaseCatalog.exactMetadataUri(OfficialRepository.MEGAMEK, "v" + version),
+                        SuiteTestData.bytes(network.product(OfficialRepository.MEGAMEK, version)));
+                network.put(SuiteTestData.packageUri(OfficialRepository.MEGAMEK, version), target);
+            }
+            URI inventoryUri = URI.create(OfficialSuiteChannelCatalog.SOURCE + "?per_page=50&page=1");
+            ObjectMapper mapper = new ObjectMapper();
+            ArrayNode inventory;
+            try (ReleaseTransport.Response response = network.get(inventoryUri, "application/vnd.github+json")) {
+                inventory = mapper.readerFor(ArrayNode.class).readValue(response.body());
+            }
+            inventory.add(mapper.readTree(legacyMetadata));
+            network.put(inventoryUri, SuiteTestData.bytes(inventory));
+            network.put(ReleaseCatalog.exactMetadataUri(OfficialRepository.MEGAMEK, "v" + legacyVersion),
+                    legacyMetadata.getBytes(StandardCharsets.UTF_8));
+            network.put(SuiteTestData.packageUri(OfficialRepository.MEGAMEK, legacyVersion), legacyArchive);
+            Fixture fixture = fixture(legacyJar, "my modified data", "my configuration", network, point -> {});
+            Files.createDirectories(fixture.root().resolve("saves"));
+            Files.createDirectories(fixture.root().resolve("custom"));
+            Files.writeString(fixture.root().resolve("saves/campaign.sav"), "my saved game");
+            Files.writeString(fixture.root().resolve("custom/unit.mtf"), "my custom unit");
+            Map<String, Evidence> beforeAdoption = rootEvidence(fixture.root());
+            try (PreparedAdoption prepared = fixture.service().prepareAutomatically(
+                    fixture.record(), OfficialRepository.MEGAMEK, channel,
+                    new PrintStream(new ByteArrayOutputStream()),
+                    OperationContext.none(OperationType.ADOPT_EXISTING))) {
+                assertTrue(prepared.report().eligible());
+                assertEquals("v" + legacyVersion, prepared.release().tag());
+                fixture.service().commit(prepared);
+            }
+            assertEquals(beforeAdoption, rootEvidence(fixture.root()));
+            byte[] preference = Files.readAllBytes(
+                    new ChannelPreferenceStore().path(fixture.registry(), fixture.record().id()));
+            var check = new ChannelUpdateChecker(fixture.registry(), network).check(fixture.record().id());
+            assertEquals(ChannelUpdateChecker.Status.UPDATE_AVAILABLE, check.status());
+            assertEquals("v" + targetVersion, check.recommendation().targetTag());
+            assertEquals(channel, check.preference().channel());
+            var coordinator = new RootCoordinator(temp.resolve("release-day-" + channel.cliName()));
+            var snapshot = new RealUpdateService(network, coordinator).snapshot(
+                    fixture.registry(), fixture.record().id());
+            var updates = new PreparedUpdateService(network, coordinator);
+            try (PreparedUpdate prepared = updates.prepareRecommended(fixture.registry(), snapshot.record(),
+                    snapshot.receipt(), snapshot.current(), check, new PrintStream(new ByteArrayOutputStream()))) {
+                var applied = updates.apply(prepared, RealUpdateService.CONFIRM,
+                        new PrintStream(new ByteArrayOutputStream()));
+                assertEquals("v" + targetVersion, applied.state().tag());
+                assertEquals(fixture.record().id(), applied.record().id());
+                assertEquals(fixture.record().canonicalRoot(), applied.record().canonicalRoot());
+            }
+            assertEquals("my saved game", Files.readString(fixture.root().resolve("saves/campaign.sav")));
+            assertEquals("my custom unit", Files.readString(fixture.root().resolve("custom/unit.mtf")));
+            assertEquals("my configuration", Files.readString(fixture.root().resolve("mmconf/user.cfg")));
+            assertEquals("my modified data", Files.readString(fixture.root().resolve("data/base.txt")));
+            assertEquals("new managed data", Files.readString(fixture.root().resolve("data/added.txt")));
+            assertArrayEquals(targetJar,
+                    Files.readAllBytes(fixture.root().resolve("MegaMek.jar")));
+            assertArrayEquals(preference, Files.readAllBytes(
+                    new ChannelPreferenceStore().path(fixture.registry(), fixture.record().id())));
+            var current = new ChannelUpdateChecker(fixture.registry(), network).check(fixture.record().id());
+            assertEquals(ChannelUpdateChecker.Status.EXACT_CURRENT, current.status());
+            assertEquals(2, network.requests.stream().filter(uri -> uri.getPath().endsWith(".tar.gz")).count(),
+                    "one legacy ancestor transfer and one retained update transfer, never another during Apply");
+        }
+    }
+
+    @Test
+    void automaticMilestoneAdoptionWithoutSuiteRecordsRemainsVerifiedAndChecksRecoverWhenPublished()
+            throws Exception {
+        byte[] jar = jarVersion(0, 50, 6, null);
+        byte[] archive = archive(jar, "official-data", "official-setting");
+        String metadata = releaseJson(archive, "v0.50.06", "0.50.06");
+        QueueTransport transport = new QueueTransport(response("[]"),
+                response("[" + metadata + "]"), response(metadata),
+                response(metadata), binary(archive), response("[]"), response("[]"));
+        Fixture fixture = fixture(jar, "official-data", "local-setting", transport, point -> {});
+        Map<String, Evidence> before = rootEvidence(fixture.root());
+        try (PreparedAdoption prepared = fixture.service().prepareAutomatically(
+                fixture.record(), org.megamek.launcher.release.OfficialRepository.MEGAMEK,
+                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                OperationContext.none(OperationType.ADOPT_EXISTING))) {
+            assertTrue(prepared.report().eligible());
+            assertEquals("v0.50.06", prepared.release().tag());
+            assertEquals(FollowChannel.MILESTONE, fixture.service().commit(prepared).channel());
+        }
+        assertEquals(1, transport.packageRequests);
+        byte[] registryBefore = Files.readAllBytes(fixture.registry());
+        Path preference = new ChannelPreferenceStore().path(fixture.registry(), fixture.record().id());
+        byte[] preferenceBefore = Files.readAllBytes(preference);
+        var missing = new org.megamek.launcher.channel.ChannelUpdateChecker(fixture.registry(), transport)
+                .check(fixture.record().id());
+        assertEquals(org.megamek.launcher.channel.ChannelUpdateChecker.Status.CHANNEL_NOT_PUBLISHED,
+                missing.status());
+        assertEquals("v0.50.06", missing.currentTag());
+        assertEquals(FollowChannel.MILESTONE, missing.preference().channel());
+        assertTrue(missing.retryable());
+        assertFalse(missing.updateAvailable());
+        assertNull(missing.recommendation());
+
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        ByteArrayOutputStream errors = new ByteArrayOutputStream();
+        assertEquals(0, org.megamek.launcher.Main.run(new String[]{
+                "check-updates", "--registry", fixture.registry().toString(),
+                "--id", fixture.record().id()}, new PrintStream(output), new PrintStream(errors), transport));
+        assertTrue(output.toString(StandardCharsets.UTF_8).contains("status=channel_not_published"));
+        assertTrue(output.toString(StandardCharsets.UTF_8).contains("No complete Milestone suite record"));
+        assertEquals("", errors.toString(StandardCharsets.UTF_8));
+
+        var published = new org.megamek.launcher.channel.SuiteTestData();
+        published.suite("0.50.06", FollowChannel.MILESTONE, "0.50.06");
+        var current = new org.megamek.launcher.channel.ChannelUpdateChecker(fixture.registry(), published)
+                .check(fixture.record().id());
+        assertEquals(org.megamek.launcher.channel.ChannelUpdateChecker.Status.EXACT_CURRENT, current.status());
+        assertFalse(current.retryable());
+        assertFalse(current.updateAvailable());
+        assertTrue(published.requests.stream().noneMatch(uri -> uri.getPath().endsWith(".tar.gz")));
+        assertArrayEquals(registryBefore, Files.readAllBytes(fixture.registry()));
+        assertArrayEquals(preferenceBefore, Files.readAllBytes(preference));
+        assertEquals(before, rootEvidence(fixture.root()));
     }
 
     @Test
@@ -878,7 +1037,7 @@ class ImportedCopyAdoptionServiceTest {
     }
 
     private Fixture fixture(byte[] localJar, String localData, String setting,
-                            QueueTransport transport,
+                            ReleaseTransport transport,
                             ImportedCopyAdoptionService.FailureHook failureHook)
             throws Exception {
         Path root = Files.createDirectory(temp.resolve("copy-" + System.nanoTime()));
@@ -961,21 +1120,26 @@ class ImportedCopyAdoptionServiceTest {
 
     private static byte[] archive(byte[] jar, String data, String setting,
                                   Map<String, String> extras) throws IOException {
+        return archive("MegaMek-1.2.3", jar, data, setting, extras);
+    }
+
+    private static byte[] archive(String root, byte[] jar, String data, String setting,
+                                  Map<String, String> extras) throws IOException {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (GzipCompressorOutputStream gzip = new GzipCompressorOutputStream(bytes);
              TarArchiveOutputStream tar = new TarArchiveOutputStream(gzip)) {
-            add(tar, "MegaMek-1.2.3/", null);
-            add(tar, "MegaMek-1.2.3/data/", null);
-            add(tar, "MegaMek-1.2.3/mmconf/", null);
-            add(tar, "MegaMek-1.2.3/lib/", null);
-            add(tar, "MegaMek-1.2.3/MegaMek.jar", jar);
-            add(tar, "MegaMek-1.2.3/lib/library.jar", DEPENDENCY);
-            add(tar, "MegaMek-1.2.3/data/base.txt",
+            add(tar, root + "/", null);
+            add(tar, root + "/data/", null);
+            add(tar, root + "/mmconf/", null);
+            add(tar, root + "/lib/", null);
+            add(tar, root + "/MegaMek.jar", jar);
+            add(tar, root + "/lib/library.jar", DEPENDENCY);
+            add(tar, root + "/data/base.txt",
                     data.getBytes(StandardCharsets.UTF_8));
-            add(tar, "MegaMek-1.2.3/mmconf/user.cfg",
+            add(tar, root + "/mmconf/user.cfg",
                     setting.getBytes(StandardCharsets.UTF_8));
             for (var entry : extras.entrySet()) {
-                add(tar, "MegaMek-1.2.3/" + entry.getKey(),
+                add(tar, root + "/" + entry.getKey(),
                         entry.getValue().getBytes(StandardCharsets.UTF_8));
             }
         }

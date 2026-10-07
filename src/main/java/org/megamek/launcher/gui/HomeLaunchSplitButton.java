@@ -50,17 +50,14 @@ import javax.swing.plaf.basic.BasicButtonUI;
 import javax.swing.plaf.basic.BasicGraphicsUtils;
 import javax.swing.plaf.basic.BasicMenuItemUI;
 import javax.swing.plaf.basic.BasicPopupMenuUI;
-import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
-import java.awt.GradientPaint;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.HeadlessException;
-import java.awt.Polygon;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Toolkit;
@@ -75,12 +72,12 @@ import java.util.List;
  * selected-copy state.
  */
 final class HomeLaunchSplitButton extends JPanel {
-    static final Color POPUP_BACKGROUND = new Color(22, 36, 40);
-    static final Color POPUP_FOREGROUND = new Color(237, 243, 237);
-    static final Color POPUP_SELECTION = new Color(226, 196, 125);
-    static final Color POPUP_SELECTION_FOREGROUND = new Color(25, 34, 30);
-    static final Color POPUP_BORDER = new Color(192, 159, 88);
-    private static final Color POPUP_DISABLED = new Color(166, 186, 181);
+    static final Color POPUP_BACKGROUND = LauncherTheme.POPUP_BACKGROUND;
+    static final Color POPUP_FOREGROUND = LauncherTheme.TEXT;
+    static final Color POPUP_SELECTION = LauncherTheme.ACTIVE_BACKGROUND;
+    static final Color POPUP_SELECTION_FOREGROUND = LauncherTheme.ACCENT;
+    static final Color POPUP_BORDER = LauncherTheme.BORDER;
+    private static final Color POPUP_DISABLED = LauncherTheme.MUTED;
     private static final String OPEN_POPUP_ACTION = "openAlternateInstallations";
     private static final String CLOSE_POPUP_ACTION = "closeAlternateInstallations";
 
@@ -318,13 +315,6 @@ final class HomeLaunchSplitButton extends JPanel {
         try {
             canvas.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                     RenderingHints.VALUE_ANTIALIAS_ON);
-            int inset = scale.scaleForGUI(3);
-            int cut = scale.scaleForGUI(8);
-            int right = getWidth() - inset - 1;
-            int bottom = getHeight() - inset - 1;
-            Polygon plate = new Polygon(
-                    new int[]{inset + cut, right, right, right - cut, inset, inset},
-                    new int[]{inset, inset, bottom - cut, bottom, bottom, inset + cut}, 6);
             boolean pressed = primaryButton.getModel().isPressed()
                     && primaryButton.getModel().isArmed()
                     || hasOptions && optionsButton.getModel().isPressed()
@@ -333,31 +323,14 @@ final class HomeLaunchSplitButton extends JPanel {
                     || hasOptions && optionsButton.getModel().isRollover();
             boolean enabled = isEnabled() && (primaryButton.isEnabled()
                     || hasOptions && optionsButton.isEnabled());
-            Color top = enabled ? new Color(226, 196, 125) : new Color(54, 68, 69);
-            Color lower = enabled ? new Color(192, 159, 88) : new Color(43, 55, 57);
-            if (enabled && pressed) {
-                top = lower;
-            } else if (enabled && hover) {
-                top = top.brighter();
-                lower = lower.brighter();
-            }
-            canvas.setPaint(new GradientPaint(0, inset, top, 0, bottom, lower));
-            canvas.fillPolygon(plate);
-            canvas.setColor(enabled ? new Color(239, 211, 147) : new Color(90, 105, 104));
-            canvas.setStroke(new BasicStroke(scale.scaleForGUI(1f)));
-            canvas.drawPolygon(plate);
+            LauncherTheme.paintButton(canvas, getWidth(), getHeight(), scale, enabled, pressed, hover,
+                    primaryButton.isFocusOwner() || hasOptions && optionsButton.isFocusOwner());
             if (hasOptions) {
                 int separator = optionsButton.getX();
-                canvas.setColor(enabled ? new Color(143, 115, 58)
-                        : new Color(74, 88, 88));
-                canvas.drawLine(separator, inset + scale.scaleForGUI(4),
-                        separator, bottom - scale.scaleForGUI(4));
-            }
-            if (primaryButton.isFocusOwner()
-                    || hasOptions && optionsButton.isFocusOwner()) {
-                canvas.setColor(new Color(246, 238, 207));
-                canvas.setStroke(new BasicStroke(scale.scaleForGUI(2f)));
-                canvas.drawPolygon(plate);
+                canvas.setColor(LauncherTheme.highContrast()
+                        ? LauncherTheme.uiColor("Button.foreground", Color.WHITE) : LauncherTheme.BORDER);
+                canvas.drawLine(separator, scale.scaleForGUI(4),
+                        separator, getHeight() - scale.scaleForGUI(4));
             }
         } finally {
             canvas.dispose();
@@ -391,6 +364,7 @@ final class HomeLaunchSplitButton extends JPanel {
             setContentAreaFilled(false);
             setBorderPainted(false);
             setFocusPainted(false);
+            LauncherTheme.repaintOwnerOnFocusChange(this, HomeLaunchSplitButton.this);
             setRolloverEnabled(true);
             setUI(new BasicButtonUI() {
                 @Override
@@ -400,8 +374,7 @@ final class HomeLaunchSplitButton extends JPanel {
                     try {
                         text.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
                                 RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-                        text.setColor(isEnabled() ? new Color(25, 34, 30)
-                                : new Color(159, 174, 171));
+                        text.setColor(LauncherTheme.buttonText(true, isEnabled()));
                         BasicGraphicsUtils.drawStringUnderlineCharAt(text, value,
                                 getDisplayedMnemonicIndex(), textRectangle.x,
                                 textRectangle.y + text.getFontMetrics().getAscent());
@@ -410,6 +383,11 @@ final class HomeLaunchSplitButton extends JPanel {
                     }
                 }
             });
+        }
+
+        @Override
+        public javax.swing.JToolTip createToolTip() {
+            return LauncherTheme.toolTip(this, scale);
         }
     }
 
@@ -455,7 +433,7 @@ final class HomeLaunchSplitButton extends JPanel {
             setBackground(palette.background());
             setForeground(palette.foreground());
             setBorder(BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(palette.border(), scale.scaleForGUI(2)),
+                    BorderFactory.createLineBorder(palette.border(), scale.scaleForGUI(1)),
                     BorderFactory.createEmptyBorder(scale.scaleForGUI(3),
                             scale.scaleForGUI(3), scale.scaleForGUI(3),
                             scale.scaleForGUI(3))));
@@ -503,8 +481,7 @@ final class HomeLaunchSplitButton extends JPanel {
             try {
                 canvas.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                         RenderingHints.VALUE_ANTIALIAS_ON);
-                canvas.setColor(component.isEnabled() ? new Color(25, 34, 30)
-                        : new Color(159, 174, 171));
+                canvas.setColor(LauncherTheme.buttonText(false, component.isEnabled()));
                 canvas.fillPolygon(new int[]{x, x + width, x + width / 2},
                         new int[]{y, y, y + height}, 3);
             } finally {
