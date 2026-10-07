@@ -89,36 +89,32 @@ class AutomaticInstallationChecksTest {
     }
 
     @Test
-    void authoritativePreferencesAndEligibilityAreRecheckedBeforeNetworkWork() throws Exception {
+    void authoritativeRechecksSkipUnconfiguredOptOutAndIneligibleCopies() {
         for (String change : List.of("unconfigured", "opt-out", "ineligible")) {
             FakeServices services = new FakeServices();
+            var worker = worker(services, List.of(record("one")), checked());
             services.status = change.equals("unconfigured") ? ChannelPreferenceStore.Status.UNKNOWN
                     : ChannelPreferenceStore.Status.CONFIGURED;
             services.optIn = !change.equals("opt-out");
             services.eligible = !change.equals("ineligible");
-            var worker = worker(services, List.of(record("one")), checked());
-            worker.execute();
-            assertTrue(worker.get(5, TimeUnit.SECONDS).isEmpty(), change);
+            assertTrue(worker.doInBackground().isEmpty(), change);
             assertEquals(0, services.checks);
         }
     }
 
     @Test
-    void deduplicationBindsRegistrationAndChannelRatherThanOnlyId() throws Exception {
+    void deduplicationBindsRegistrationAndChannelRatherThanOnlyId() {
         FakeServices services = new FakeServices();
         InstallationRecord record = record("one");
         Set<String> checked = checked();
         var first = worker(services, List.of(record, record), checked);
-        first.execute();
-        assertEquals(1, first.get(5, TimeUnit.SECONDS).size());
+        assertEquals(1, first.doInBackground().size());
         assertEquals(1, services.checks);
         var second = worker(services, List.of(record), checked);
-        second.execute();
-        assertTrue(second.get(5, TimeUnit.SECONDS).isEmpty());
+        assertTrue(second.doInBackground().isEmpty());
         services.channel = FollowChannel.WEEKLY;
         var changed = worker(services, List.of(record), checked);
-        changed.execute();
-        assertEquals(1, changed.get(5, TimeUnit.SECONDS).size());
+        assertEquals(1, changed.doInBackground().size());
         assertEquals(2, services.checks);
         assertNotEquals(AutomaticInstallationChecks.key(preference(record, true)),
                 AutomaticInstallationChecks.key(new ChannelPreference(1, record.id(),
@@ -126,22 +122,20 @@ class AutomaticInstallationChecksTest {
     }
 
     @Test
-    void changedBindingCannotApplyAnInFlightResult() throws Exception {
+    void changedBindingCannotApplyAnInFlightResult() {
         FakeServices services = new FakeServices();
         services.current = false;
         var worker = worker(services, List.of(record("one")), checked());
-        worker.execute();
-        assertTrue(worker.get(5, TimeUnit.SECONDS).isEmpty());
+        assertTrue(worker.doInBackground().isEmpty());
         assertEquals(1, services.checks);
     }
 
     @Test
-    void backendFailuresAreVisibleAndDoNotStopOtherCopies() throws Exception {
+    void backendFailuresAreVisibleAndDoNotStopOtherCopies() {
         FakeServices services = new FakeServices();
         services.failure = new IOException("fixture check failed");
         var worker = worker(services, List.of(record("one"), record("two")), checked());
-        worker.execute();
-        var results = worker.get(5, TimeUnit.SECONDS);
+        var results = worker.doInBackground();
         assertEquals(2, results.size());
         assertEquals("IOException: fixture check failed", results.get("one").error());
         assertNull(results.get("one").result());
