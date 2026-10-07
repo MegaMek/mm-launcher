@@ -78,6 +78,7 @@ jobs:
       contents: read
       actions: read
     outputs:
+      # Consumers keep these immutable IDs across finalization-only reruns.
       artifact_id: ${{ steps.publication.outputs.artifact-id }}
       verification_artifact_id: ${{ steps.verification.outputs.artifact-id }}
     env:

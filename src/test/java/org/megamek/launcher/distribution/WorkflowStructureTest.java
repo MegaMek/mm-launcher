@@ -85,8 +85,8 @@ class WorkflowStructureTest {
         assertEquals("read", tooling.path("permissions").path("actions").asText());
         assertEquals("${{ steps.ci-plan.outputs.build_installers }}",
                 tooling.path("outputs").path("build_installers").asText());
-        assertTrue(step(tooling, "Test launcher release tooling without network or publication")
-                .path("run").asText().contains("unittest discover -s scripts -p test_launcher_release.py"));
+        assertEquals("python3 -B -m unittest discover -s scripts -p 'test_launcher_*.py'",
+                step(tooling, "Test launcher release tooling without network or publication").path("run").asText());
         JsonNode plan = step(tooling,
                 "Determine whether this exact release candidate already passed installer CI");
         assertEquals("ci-plan", plan.path("id").asText());
@@ -236,12 +236,33 @@ class WorkflowStructureTest {
         assertEquals("launcher-stable-release", root.path("concurrency").path("group").asText());
         assertFalse(root.path("concurrency").path("cancel-in-progress").asBoolean());
         JsonNode jobs = root.path("jobs");
-        assertEquals(4, jobs.size());
+        assertEquals(5, jobs.size());
         JsonNode prepare = jobs.path("prepare");
         assertEquals("${{ steps.candidate.outputs.version }}", prepare.path("outputs").path("version").asText());
         assertEquals("${{ steps.candidate.outputs.commit }}", prepare.path("outputs").path("commit").asText());
         assertEquals("${{ steps.candidate.outputs.base }}", prepare.path("outputs").path("base").asText());
+        assertEquals("${{ steps.signing.outputs.mode }}", prepare.path("outputs").path("signing_mode").asText());
+        for (String setting : List.of("organization_id", "project_slug", "signing_policy_slug",
+                "artifact_configuration_slug", "certificate_sha256")) {
+            assertEquals("${{ steps.signing.outputs." + setting + " }}",
+                    prepare.path("outputs").path(setting).asText());
+        }
         assertEquals("${{ github.sha }}", prepare.path("steps").get(0).path("with").path("ref").asText());
+        JsonNode signingPlan = step(prepare, "Validate and capture optional Windows signing configuration");
+        assertEquals("signing", signingPlan.path("id").asText());
+        assertEquals("python3 -B scripts/launcher_release.py signing-plan", signingPlan.path("run").asText());
+        assertEquals("${{ vars.LAUNCHER_SIGNING_ENABLED }}",
+                signingPlan.path("env").path("LAUNCHER_SIGNING_ENABLED").asText());
+        for (String setting : List.of("ORGANIZATION_ID", "PROJECT_SLUG", "SIGNING_POLICY_SLUG",
+                "ARTIFACT_CONFIGURATION_SLUG", "CERTIFICATE_SHA256")) {
+            assertEquals("${{ vars.SIGNPATH_" + setting + " }}",
+                    signingPlan.path("env").path("SIGNPATH_" + setting).asText());
+        }
+        assertEquals("${{ secrets.SIGNPATH_API_TOKEN }}",
+                signingPlan.path("env").path("SIGNPATH_API_TOKEN").asText());
+        assertTrue(text.indexOf("Validate and capture optional Windows signing configuration")
+                < text.indexOf("Create repository-scoped release bot token"),
+                "invalid enabled signing must fail before candidate writes");
         JsonNode validation = step(prepare, "Validate official main source and next unused patch version");
         assertEquals("${{ github.token }}", validation.path("env").path("GH_TOKEN").asText());
         assertTrue(validation.path("run").asText().contains("launcher_release.py prepare"));
@@ -270,21 +291,32 @@ class WorkflowStructureTest {
                 installers.path("with").path("source_commit").asText());
         assertFalse(installers.has("secrets"), "installer jobs must not receive publisher secrets");
         JsonNode publish = jobs.path("publish");
-        List<String> prerequisites = new ArrayList<>();
-        publish.path("needs").forEach(dependency -> prerequisites.add(dependency.asText()));
-        assertEquals(List.of("prepare", "installers"), prerequisites);
+        assertEquals(List.of("prepare", "release-assets"), dependencies(publish));
         assertFalse(publish.has("if"), "default success dependency guard must not be bypassed");
         assertEquals("write", publish.path("permissions").path("contents").asText());
+        assertEquals("read", publish.path("permissions").path("actions").asText());
         assertEquals(List.of("actions/checkout@v4", "actions/download-artifact@v4",
-                "actions/upload-artifact@v4"), actions(publish));
+                "actions/download-artifact@v4", "actions/upload-artifact@v4"), actions(publish));
+        assertEquals("${{ needs.prepare.outputs.signing_mode }}",
+                publish.path("env").path("WINDOWS_SIGNING").asText());
+        assertEquals("${{ needs.prepare.outputs.certificate_sha256 }}",
+                publish.path("env").path("CERTIFICATE_SHA256").asText());
         assertEquals("${{ needs.prepare.outputs.commit }}",
                 publish.path("steps").get(0).path("with").path("ref").asText());
         assertFalse(publish.path("steps").get(0).path("with").path("persist-credentials").asBoolean());
         JsonNode download = publish.path("steps").get(1);
-        assertEquals("MegaMek-Launcher-*-installers", download.path("with").path("pattern").asText());
+        assertEquals("${{ needs.release-assets.outputs.artifact_id }}",
+                download.path("with").path("artifact-ids").asText());
+        assertFalse(download.path("with").has("pattern"), "publication must not reuse unsigned build outputs");
         assertEquals("build/release", download.path("with").path("path").asText());
         assertTrue(download.path("with").path("merge-multiple").asBoolean());
         assertFalse(download.path("with").has("run-id"), "artifacts must come from this exact run");
+        JsonNode verification = publish.path("steps").get(2);
+        assertEquals("needs.prepare.outputs.signing_mode == 'signpath'", verification.path("if").asText());
+        assertEquals("${{ needs.release-assets.outputs.verification_artifact_id }}",
+                verification.path("with").path("artifact-ids").asText());
+        assertEquals("build/signing-verification", verification.path("with").path("path").asText());
+        assertTrue(verification.path("with").path("merge-multiple").asBoolean());
         JsonNode publication = step(publish, "Validate and publish the complete stable launcher release");
         assertEquals("${{ needs.prepare.outputs.commit }}",
                 publication.path("env").path("RELEASE_COMMIT").asText());
@@ -292,6 +324,9 @@ class WorkflowStructureTest {
                 publication.path("env").path("RELEASE_VERSION").asText());
         assertTrue(publication.path("run").asText().contains("launcher_release.py publish"));
         assertTrue(publication.path("run").asText().contains("--assets build/release"));
+        assertTrue(publication.path("run").asText().contains("--windows-signing \"$WINDOWS_SIGNING\""));
+        assertTrue(publication.path("run").asText().contains("--signing-verification"));
+        assertTrue(publication.path("run").asText().contains("--signer-certificate-sha256 \"$CERTIFICATE_SHA256\""));
         assertFalse(publication.path("continue-on-error").asBoolean(), "publication failures still block main");
         JsonNode provenance = step(publish, "Record verified publication for later CI reuse");
         assertEquals("provenance", provenance.path("id").asText());
@@ -299,6 +334,8 @@ class WorkflowStructureTest {
         assertEquals(publication.path("env"), provenance.path("env"));
         assertTrue(provenance.path("run").asText().contains("launcher_release.py record"));
         assertTrue(provenance.path("run").asText().contains("--provenance build/launcher-release-provenance.json"));
+        assertTrue(provenance.path("run").asText().contains("--windows-signing \"$WINDOWS_SIGNING\""));
+        assertTrue(provenance.path("run").asText().contains("--signing-verification"));
         JsonNode retained = step(publish, "Retain immutable publication provenance");
         assertEquals("steps.provenance.outcome == 'success'", retained.path("if").asText());
         assertTrue(retained.path("continue-on-error").asBoolean());
@@ -313,15 +350,20 @@ class WorkflowStructureTest {
         assertTrue(text.indexOf("Record verified publication for later CI reuse")
                 < text.indexOf("Retain immutable publication provenance"));
         JsonNode finalize = jobs.path("finalize");
-        List<String> finalPrerequisites = new ArrayList<>();
-        finalize.path("needs").forEach(dependency -> finalPrerequisites.add(dependency.asText()));
-        assertEquals(List.of("prepare", "publish"), finalPrerequisites);
+        assertEquals(List.of("prepare", "publish", "release-assets"), dependencies(finalize));
         assertFalse(finalize.has("if"), "main synchronization must require successful publication");
-        assertFalse(finalize.has("permissions"), "use a fresh App token, not a writable default token");
+        assertEquals("read", finalize.path("permissions").path("contents").asText(),
+                "use a fresh App token, not a writable default token");
+        assertEquals("read", finalize.path("permissions").path("actions").asText());
+        assertEquals(publish.path("env"), finalize.path("env"));
+        assertEquals(List.of("actions/checkout@v4", "actions/download-artifact@v4",
+                "actions/download-artifact@v4", "actions/create-github-app-token@v2"), actions(finalize));
         assertEquals("${{ needs.prepare.outputs.commit }}",
                 finalize.path("steps").get(0).path("with").path("ref").asText());
         assertFalse(finalize.path("steps").get(0).path("with").path("persist-credentials").asBoolean());
         assertEquals(download.path("with"), finalize.path("steps").get(1).path("with"));
+        assertEquals(verification.path("with"), finalize.path("steps").get(2).path("with"));
+        assertEquals(verification.path("if"), finalize.path("steps").get(2).path("if"));
         JsonNode syncToken = step(finalize, "Create repository-scoped version synchronization token");
         assertEquals(bot.path("with"), syncToken.path("with"));
         assertEquals("actions/create-github-app-token@v2", syncToken.path("uses").asText());
@@ -333,12 +375,93 @@ class WorkflowStructureTest {
         assertTrue(sync.path("run").asText().contains("launcher_release.py finalize"));
         assertTrue(sync.path("run").asText().contains("--base \"$RELEASE_BASE\""));
         assertTrue(sync.path("run").asText().contains("--assets build/release"));
+        assertTrue(sync.path("run").asText().contains("--windows-signing \"$WINDOWS_SIGNING\""));
+        assertTrue(sync.path("run").asText().contains("--signing-verification"));
+        assertTrue(sync.path("run").asText().contains("--signer-certificate-sha256 \"$CERTIFICATE_SHA256\""));
         assertFalse(text.contains("launcher-gui-smoke"),
                 "advisory desktop checks must not gate publication");
         assertFalse(text.contains("${{ inputs.version }}\""), "input must pass through environment, not shell expansion");
         assertFalse(text.contains("buildWindowsInstaller"), "reuse packaging instead of duplicating it");
         assertFalse(text.contains("msiexec"));
         assertFalse(text.contains("secrets: inherit"));
+    }
+
+    @Test
+    void releaseAssetsSignOnlyWhenEnabledAndRetainImmutableVerifiedBytes() throws Exception {
+        String text = Files.readString(Path.of(".github", "workflows", "launcher-release.yml"));
+        JsonNode root = new ObjectMapper(new YAMLFactory()).readTree(text);
+        JsonNode assets = root.path("jobs").path("release-assets");
+        assertEquals(List.of("prepare", "installers"), dependencies(assets));
+        assertFalse(assets.has("if"), "failed installer tests must prevent staging and signing");
+        assertEquals("${{ needs.prepare.outputs.signing_mode == 'signpath' && 'windows-2025' || 'ubuntu-24.04' }}",
+                assets.path("runs-on").asText());
+        assertEquals("read", assets.path("permissions").path("contents").asText());
+        assertEquals("read", assets.path("permissions").path("actions").asText());
+        assertEquals("${{ steps.publication.outputs.artifact-id }}",
+                assets.path("outputs").path("artifact_id").asText());
+        assertEquals("${{ steps.verification.outputs.artifact-id }}",
+                assets.path("outputs").path("verification_artifact_id").asText());
+        assertEquals("${{ needs.prepare.outputs.commit }}",
+                assets.path("steps").get(0).path("with").path("ref").asText());
+        assertFalse(assets.path("steps").get(0).path("with").path("persist-credentials").asBoolean());
+        assertEquals(List.of("actions/checkout@v4", "actions/download-artifact@v4",
+                "actions/upload-artifact@v4",
+                "signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092",
+                "actions/upload-artifact@v4", "actions/upload-artifact@v4"), actions(assets));
+        assertEquals("${{ needs.prepare.outputs.signing_mode }}",
+                assets.path("env").path("WINDOWS_SIGNING").asText());
+        assertEquals("${{ needs.prepare.outputs.certificate_sha256 }}",
+                assets.path("env").path("CERTIFICATE_SHA256").asText());
+        JsonNode download = assets.path("steps").get(1);
+        assertEquals("MegaMek-Launcher-*-installers", download.path("with").path("pattern").asText());
+        assertEquals("build/unsigned", download.path("with").path("path").asText());
+        assertTrue(download.path("with").path("merge-multiple").asBoolean());
+        assertFalse(download.path("with").has("run-id"));
+        assertTrue(step(assets, "Prepare the exact same-run installer set").path("run").asText()
+                .contains("launcher_signing.py prepare"));
+        String enabled = "needs.prepare.outputs.signing_mode == 'signpath'";
+        JsonNode unsigned = step(assets, "Upload only the tested unsigned Windows MSI for SignPath");
+        assertEquals(enabled, unsigned.path("if").asText());
+        assertEquals("unsigned", unsigned.path("id").asText());
+        assertEquals("build/signing-input/*.msi", unsigned.path("with").path("path").asText());
+        JsonNode signing = step(assets, "Request signing and download the completed artifact");
+        assertEquals(enabled, signing.path("if").asText());
+        assertEquals("signpath", signing.path("id").asText());
+        assertEquals("${{ secrets.SIGNPATH_API_TOKEN }}", signing.path("with").path("api-token").asText());
+        for (String setting : List.of("organization-id", "project-slug", "signing-policy-slug",
+                "artifact-configuration-slug")) {
+            assertEquals("${{ needs.prepare.outputs." + setting.replace('-', '_') + " }}",
+                    signing.path("with").path(setting).asText());
+        }
+        assertEquals("${{ steps.unsigned.outputs.artifact-id }}",
+                signing.path("with").path("github-artifact-id").asText());
+        assertTrue(signing.path("with").path("wait-for-completion").asBoolean());
+        assertEquals("build/signpath-signed", signing.path("with").path("output-artifact-directory").asText());
+        JsonNode verify = step(assets, "Verify the trusted signer, timestamp and unchanged MSI identity");
+        assertEquals(enabled, verify.path("if").asText());
+        assertEquals("pwsh", verify.path("shell").asText());
+        assertTrue(verify.path("run").asText().contains("Confirm-LauncherMsi"));
+        assertTrue(verify.path("run").asText().contains("launcher_signing.py complete"));
+        assertTrue(verify.path("run").asText().contains("--certificate-sha256 \"$env:CERTIFICATE_SHA256\""));
+        JsonNode publication = step(assets, "Retain verified final installer and checksum bytes");
+        assertFalse(publication.has("if"), "disabled signing must still stage the complete unsigned asset set");
+        assertEquals("publication", publication.path("id").asText());
+        assertEquals("launcher-publication-${{ github.run_id }}-${{ github.run_attempt }}",
+                publication.path("with").path("name").asText());
+        assertEquals("build/publication/*", publication.path("with").path("path").asText());
+        JsonNode verification = step(assets, "Retain Windows signing verification");
+        assertEquals(enabled, verification.path("if").asText());
+        assertEquals("verification", verification.path("id").asText());
+        assertEquals("build/signing-verification.json", verification.path("with").path("path").asText());
+        for (JsonNode stage : List.of(unsigned, publication, verification)) {
+            assertEquals("error", stage.path("with").path("if-no-files-found").asText());
+            assertFalse(stage.path("with").path("overwrite").asBoolean(), "final artifact IDs must stay immutable");
+        }
+        for (JsonNode stage : assets.path("steps")) {
+            assertFalse(stage.path("continue-on-error").asBoolean(), "signing/staging failure must block publication");
+        }
+        assertTrue(text.indexOf("Verify the trusted signer, timestamp and unchanged MSI identity")
+                < text.indexOf("Retain verified final installer and checksum bytes"));
     }
 
     @Test
@@ -409,6 +532,12 @@ class WorkflowStructureTest {
             }
         }
         return actions;
+    }
+
+    private static List<String> dependencies(JsonNode job) {
+        List<String> result = new ArrayList<>();
+        job.path("needs").forEach(dependency -> result.add(dependency.asText()));
+        return result;
     }
 
     private static int count(String text, String token) {

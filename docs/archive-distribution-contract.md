@@ -158,7 +158,10 @@ matrices are skipped; ordinary PRs gain one lightweight desktop-selection job.
 The default `test` task excludes `archive` and `native-gui` tags and forces headless mode.
 It still compiles all tests and runs backend/material safety checks, safe Windows helper
 execution, deterministic UI components/state, and the actual automatic-check worker.
-Mixed classes retain their headless-safe methods in this gate. `nativeGuiTest` selects only
+Mixed classes retain their headless-safe methods in this gate.
+The headless task also declares `.github/workflows/launcher-*.yml` as inputs, so a workflow
+edit reruns the structural contracts instead of reusing an old `UP-TO-DATE` result.
+`nativeGuiTest` selects only
 display-dependent methods, requires actual execution rather than an all-skipped success, and
 runs in the independent [advisory desktop workflow](../.github/workflows/launcher-gui-smoke.yml)
 on PRs, ordinary main pushes, manual dispatch, and a weekly schedule across all four

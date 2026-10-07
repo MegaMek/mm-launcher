@@ -47,6 +47,8 @@ selection job before their four desktop jobs.
 components and state, the production automatic-check worker, and safe Windows helper
 execution. Automatic-check policy tests run synchronously without executor deadlines;
 separate integration tests cover EDT handoff and cancellation with explicit latches.
+The headless task declares launcher workflow YAML files as inputs because its structural
+contracts read them directly; workflow-only changes invalidate cached test results.
 Tests that open native windows are tagged `native-gui` and run separately:
 `.\gradlew.bat nativeGuiTest` on Windows, `./gradlew nativeGuiTest` on macOS,
 or `xvfb-run -a ./gradlew nativeGuiTest` on Linux. The independent
