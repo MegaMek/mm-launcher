@@ -50,7 +50,7 @@ def accept_signed_msi(destination, signed_directory, verification, version, comm
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("prepare", "complete"))
+    parser.add_argument("command", choices=("prepare", "complete", "verify-apple"))
     parser.add_argument("--version", required=True)
     parser.add_argument("--commit", required=True)
     parser.add_argument("--assets", type=Path, required=True)
@@ -60,6 +60,9 @@ def main():
     parser.add_argument("--verification", type=Path)
     parser.add_argument("--certificate-sha256")
     parser.add_argument("--windows-signing", choices=("unsigned", "signpath"), required=True)
+    parser.add_argument("--apple-verification", type=Path)
+    parser.add_argument("--apple-team-id")
+    parser.add_argument("--apple-signing-identity")
     args = parser.parse_args()
     commit = release.validate_source(args.version, Path.cwd(), os.environ, args.commit)
     if os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch":
@@ -69,12 +72,19 @@ def main():
         if args.source is None or args.signing_input is None:
             raise release.ReleaseError("Asset preparation requires source and signing input directories")
         prepare_assets(args.source, args.assets, args.signing_input, args.version, args.windows_signing)
-    else:
+    elif args.command == "complete":
         if (args.windows_signing != "signpath" or args.signed is None or args.verification is None
                 or args.certificate_sha256 is None):
             raise release.ReleaseError("Completing signing requires signed output, verification and certificate")
         accept_signed_msi(args.assets, args.signed, args.verification, args.version,
                           commit, args.certificate_sha256)
+    else:
+        if any(value is None for value in
+               (args.apple_verification, args.apple_team_id, args.apple_signing_identity)):
+            raise release.ReleaseError("Apple staging verification requires both records and approved team/identity")
+        release.verify_apple_records(release.load_apple_records(args.apple_verification),
+                                     args.version, commit, release.validate_files(args.assets, args.version),
+                                     args.apple_team_id, args.apple_signing_identity)
     print(f"Validated final {args.windows_signing} release assets for {args.version} at {commit}")
 
 

@@ -124,6 +124,7 @@ class WorkflowStructureTest {
                 "actions/setup-java@v4",
                 "gradle/actions/setup-gradle@v4",
                 "actions/upload-artifact@v4",
+                "actions/upload-artifact@v4",
                 "actions/upload-artifact@v4"
         ), actions(installers));
         assertEquals("temurin", installers.path("steps").get(1).path("with").path("distribution").asText());
@@ -218,7 +219,12 @@ class WorkflowStructureTest {
         assertFalse(text.contains("createExe"));
         assertFalse(text.contains("pull_request_target"));
         assertFalse(text.contains("contents: write"));
-        assertFalse(text.contains("secrets."));
+        for (JsonNode stage : installers.path("steps")) {
+            if (stage.path("env").toString().contains("secrets.")) {
+                assertEquals("Import release-only Apple signing credentials", stage.path("name").asText());
+                assertEquals("runner.os == 'macOS' && inputs.apple_signing", stage.path("if").asText());
+            }
+        }
         assertFalse(text.contains("gh release"));
         assertFalse(text.contains("actions/create-release"));
     }
@@ -289,7 +295,9 @@ class WorkflowStructureTest {
                 "the reusable tooling job needs read-only release-run provenance access");
         assertEquals("${{ needs.prepare.outputs.commit }}",
                 installers.path("with").path("source_commit").asText());
-        assertFalse(installers.has("secrets"), "installer jobs must not receive publisher secrets");
+        assertEquals(5, installers.path("secrets").size());
+        installers.path("secrets").fieldNames().forEachRemaining(secret ->
+                assertTrue(secret.startsWith("APPLE_"), "only Apple signing secrets may enter the reusable build"));
         JsonNode publish = jobs.path("publish");
         assertEquals(List.of("prepare", "release-assets"), dependencies(publish));
         assertFalse(publish.has("if"), "default success dependency guard must not be bypassed");
@@ -312,7 +320,8 @@ class WorkflowStructureTest {
         assertTrue(download.path("with").path("merge-multiple").asBoolean());
         assertFalse(download.path("with").has("run-id"), "artifacts must come from this exact run");
         JsonNode verification = publish.path("steps").get(2);
-        assertEquals("needs.prepare.outputs.signing_mode == 'signpath'", verification.path("if").asText());
+        assertEquals("needs.prepare.outputs.signing_mode == 'signpath' || needs.prepare.outputs.apple_mode == 'apple'",
+                verification.path("if").asText());
         assertEquals("${{ needs.release-assets.outputs.verification_artifact_id }}",
                 verification.path("with").path("artifact-ids").asText());
         assertEquals("build/signing-verification", verification.path("with").path("path").asText());
@@ -405,6 +414,7 @@ class WorkflowStructureTest {
                 assets.path("steps").get(0).path("with").path("ref").asText());
         assertFalse(assets.path("steps").get(0).path("with").path("persist-credentials").asBoolean());
         assertEquals(List.of("actions/checkout@v4", "actions/download-artifact@v4",
+                "actions/download-artifact@v4",
                 "actions/upload-artifact@v4",
                 "signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092",
                 "actions/upload-artifact@v4", "actions/upload-artifact@v4"), actions(assets));
@@ -449,10 +459,11 @@ class WorkflowStructureTest {
         assertEquals("launcher-publication-${{ github.run_id }}-${{ github.run_attempt }}",
                 publication.path("with").path("name").asText());
         assertEquals("build/publication/*", publication.path("with").path("path").asText());
-        JsonNode verification = step(assets, "Retain Windows signing verification");
-        assertEquals(enabled, verification.path("if").asText());
+        JsonNode verification = step(assets, "Retain platform signing verification");
+        assertEquals(enabled + " || needs.prepare.outputs.apple_mode == 'apple'",
+                verification.path("if").asText());
         assertEquals("verification", verification.path("id").asText());
-        assertEquals("build/signing-verification.json", verification.path("with").path("path").asText());
+        assertEquals("build/signing-verification/", verification.path("with").path("path").asText());
         for (JsonNode stage : List.of(unsigned, publication, verification)) {
             assertEquals("error", stage.path("with").path("if-no-files-found").asText());
             assertFalse(stage.path("with").path("overwrite").asBoolean(), "final artifact IDs must stay immutable");
@@ -462,6 +473,90 @@ class WorkflowStructureTest {
         }
         assertTrue(text.indexOf("Verify the trusted signer, timestamp and unchanged MSI identity")
                 < text.indexOf("Retain verified final installer and checksum bytes"));
+    }
+
+    @Test
+    void appleSigningIsIndependentReleaseOnlyAndVerifiedBeforePublication() throws Exception {
+        ObjectMapper yaml = new ObjectMapper(new YAMLFactory());
+        JsonNode build = yaml.readTree(Files.readString(WORKFLOW));
+        JsonNode inputs = build.path("on").path("workflow_call").path("inputs");
+        assertEquals("boolean", inputs.path("apple_signing").path("type").asText());
+        assertFalse(inputs.path("apple_signing").path("default").asBoolean());
+        assertFalse(build.path("on").path("workflow_dispatch").has("inputs"),
+                "ordinary manual native builds cannot opt into signing");
+        JsonNode installer = build.path("jobs").path("installers");
+        JsonNode setup = step(installer, "Import release-only Apple signing credentials");
+        String enabled = "runner.os == 'macOS' && inputs.apple_signing";
+        assertEquals(enabled, setup.path("if").asText());
+        assertTrue(setup.path("run").asText().contains("launcher_apple.py setup --commit \"$SOURCE_COMMIT\""));
+        assertEquals("${{ github.token }}", setup.path("env").path("GH_TOKEN").asText());
+        assertEquals("${{ inputs.apple_team_id }}", setup.path("env").path("APPLE_TEAM_ID").asText());
+        JsonNode macBuild = step(installer, "Build macOS installer (never install)");
+        assertEquals("${{ inputs.apple_signing }}", macBuild.path("env").path("APPLE_ENABLED").asText());
+        assertTrue(macBuild.path("run").asText().contains("if [ \"$APPLE_ENABLED\" = true ]"));
+        assertTrue(macBuild.path("run").asText().contains("-PappleSigningKeychain=$APPLE_SIGNING_KEYCHAIN"));
+        JsonNode notary = step(installer, "Notarize and verify the final macOS package");
+        assertEquals(enabled, notary.path("if").asText());
+        assertTrue(notary.path("run").asText().contains("launcher_apple.py complete --commit \"$SOURCE_COMMIT\""));
+        assertFalse(notary.path("continue-on-error").asBoolean());
+        JsonNode cleanup = step(installer, "Remove temporary Apple credentials and restore keychains");
+        assertEquals("always() && " + enabled, cleanup.path("if").asText());
+        assertTrue(cleanup.path("run").asText().contains("launcher_apple.py cleanup"));
+        assertFalse(cleanup.path("continue-on-error").asBoolean(),
+                "credential cleanup failure must block publication");
+        List<String> stepNames = new ArrayList<>();
+        for (JsonNode stage : installer.path("steps")) {
+            stepNames.add(stage.path("name").asText());
+        }
+        int cleanupIndex = stepNames.indexOf(cleanup.path("name").asText());
+        assertEquals(stepNames.indexOf(notary.path("name").asText()) + 1, cleanupIndex,
+                "remove private keys immediately after notarization, including on failure");
+        for (String laterStep : List.of(
+                "Verify exact installer/checksum pairs without installing",
+                "Upload native installers and SHA-256 files only",
+                "Test source on Windows", "Test source on Linux", "Test source on macOS",
+                "Upload platform test reports", "Retain same-run Apple verification for release staging")) {
+            assertTrue(cleanupIndex < stepNames.indexOf(laterStep),
+                    "private keys must be removed before " + laterStep);
+        }
+        JsonNode evidence = step(installer, "Retain same-run Apple verification for release staging");
+        assertEquals(enabled, evidence.path("if").asText());
+        assertEquals("launcher-apple-verification-${{ matrix.id }}", evidence.path("with").path("name").asText());
+        assertTrue(evidence.path("with").path("overwrite").asBoolean(),
+                "failed native-job reruns must replace matching same-run package and proof together");
+        String releaseText = Files.readString(Path.of(".github", "workflows", "launcher-release.yml"));
+        JsonNode jobs = yaml.readTree(releaseText).path("jobs");
+        JsonNode prepare = jobs.path("prepare");
+        JsonNode plan = step(prepare, "Validate and capture optional Apple signing configuration");
+        assertEquals("python3 -B scripts/launcher_apple.py plan", plan.path("run").asText());
+        assertEquals("${{ vars.APPLE_SIGNING_ENABLED }}", plan.path("env").path("APPLE_SIGNING_ENABLED").asText());
+        assertEquals("${{ steps.apple.outputs.mode }}", prepare.path("outputs").path("apple_mode").asText());
+        assertEquals("${{ needs.prepare.outputs.apple_mode == 'apple' }}",
+                jobs.path("installers").path("with").path("apple_signing").asText());
+        assertTrue(releaseText.indexOf("Validate and capture optional Apple signing configuration")
+                < releaseText.indexOf("Create repository-scoped release bot token"));
+        JsonNode assets = jobs.path("release-assets");
+        JsonNode verify = step(assets, "Bind Apple verification to the final staged packages");
+        assertEquals("needs.prepare.outputs.apple_mode == 'apple'", verify.path("if").asText());
+        assertTrue(verify.path("run").asText().contains("launcher_signing.py verify-apple"));
+        assertTrue(releaseText.indexOf("Bind Apple verification to the final staged packages")
+                < releaseText.indexOf("Retain verified final installer and checksum bytes"));
+        for (String consumer : List.of("publish", "finalize")) {
+            JsonNode job = jobs.path(consumer);
+            assertEquals("${{ needs.prepare.outputs.apple_mode }}", job.path("env").path("MACOS_SIGNING").asText());
+            assertEquals("${{ needs.prepare.outputs.apple_team_id }}", job.path("env").path("APPLE_TEAM_ID").asText());
+            for (JsonNode stage : job.path("steps")) {
+                if (stage.path("run").asText().contains("launcher_release.py")) {
+                    assertTrue(stage.path("run").asText().contains("--macos-signing \"$MACOS_SIGNING\""));
+                    assertTrue(stage.path("run").asText().contains("--apple-verification"));
+                    assertTrue(stage.path("run").asText().contains("--apple-team-id \"$APPLE_TEAM_ID\""));
+                }
+            }
+        }
+        String gradle = Files.readString(Path.of("build.gradle.kts"));
+        assertTrue(gradle.contains("args(\"--mac-sign\", \"--mac-signing-key-user-name\", signingIdentity"));
+        assertTrue(gradle.contains("--mac-signing-keychain"));
+        assertFalse(gradle.contains("APPLE_APPLICATION_P12_PASSWORD"), "private credentials never enter Gradle");
     }
 
     @Test

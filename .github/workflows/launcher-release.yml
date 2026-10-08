@@ -26,6 +26,11 @@ jobs:
       signing_policy_slug: ${{ steps.signing.outputs.signing_policy_slug }}
       artifact_configuration_slug: ${{ steps.signing.outputs.artifact_configuration_slug }}
       certificate_sha256: ${{ steps.signing.outputs.certificate_sha256 }}
+      apple_mode: ${{ steps.apple.outputs.mode }}
+      apple_team_id: ${{ steps.apple.outputs.team_id }}
+      apple_identity: ${{ steps.apple.outputs.identity }}
+      apple_key_id: ${{ steps.apple.outputs.key_id }}
+      apple_issuer_id: ${{ steps.apple.outputs.issuer_id }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,6 +47,20 @@ jobs:
           SIGNPATH_CERTIFICATE_SHA256: ${{ vars.SIGNPATH_CERTIFICATE_SHA256 }}
           SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
         run: python3 -B scripts/launcher_release.py signing-plan
+      - name: Validate and capture optional Apple signing configuration
+        id: apple
+        env:
+          APPLE_SIGNING_ENABLED: ${{ vars.APPLE_SIGNING_ENABLED }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          APPLE_SIGNING_IDENTITY: ${{ vars.APPLE_SIGNING_IDENTITY }}
+          APPLE_NOTARY_KEY_ID: ${{ vars.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ vars.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_APPLICATION_P12: ${{ secrets.APPLE_APPLICATION_P12 }}
+          APPLE_APPLICATION_P12_PASSWORD: ${{ secrets.APPLE_APPLICATION_P12_PASSWORD }}
+          APPLE_INSTALLER_P12: ${{ secrets.APPLE_INSTALLER_P12 }}
+          APPLE_INSTALLER_P12_PASSWORD: ${{ secrets.APPLE_INSTALLER_P12_PASSWORD }}
+          APPLE_NOTARY_PRIVATE_KEY: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY }}
+        run: python3 -B scripts/launcher_apple.py plan
       - name: Validate official main source and next unused patch version
         env:
           GH_TOKEN: ${{ github.token }}
@@ -69,6 +88,17 @@ jobs:
     uses: ./.github/workflows/launcher-archives.yml
     with:
       source_commit: ${{ needs.prepare.outputs.commit }}
+      apple_signing: ${{ needs.prepare.outputs.apple_mode == 'apple' }}
+      apple_team_id: ${{ needs.prepare.outputs.apple_team_id }}
+      apple_identity: ${{ needs.prepare.outputs.apple_identity }}
+      apple_key_id: ${{ needs.prepare.outputs.apple_key_id }}
+      apple_issuer_id: ${{ needs.prepare.outputs.apple_issuer_id }}
+    secrets:
+      APPLE_APPLICATION_P12: ${{ secrets.APPLE_APPLICATION_P12 }}
+      APPLE_APPLICATION_P12_PASSWORD: ${{ secrets.APPLE_APPLICATION_P12_PASSWORD }}
+      APPLE_INSTALLER_P12: ${{ secrets.APPLE_INSTALLER_P12 }}
+      APPLE_INSTALLER_P12_PASSWORD: ${{ secrets.APPLE_INSTALLER_P12_PASSWORD }}
+      APPLE_NOTARY_PRIVATE_KEY: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY }}
 
   release-assets:
     needs: [prepare, installers]
@@ -86,6 +116,9 @@ jobs:
       RELEASE_COMMIT: ${{ needs.prepare.outputs.commit }}
       WINDOWS_SIGNING: ${{ needs.prepare.outputs.signing_mode }}
       CERTIFICATE_SHA256: ${{ needs.prepare.outputs.certificate_sha256 }}
+      MACOS_SIGNING: ${{ needs.prepare.outputs.apple_mode }}
+      APPLE_TEAM_ID: ${{ needs.prepare.outputs.apple_team_id }}
+      APPLE_IDENTITY: ${{ needs.prepare.outputs.apple_identity }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -103,6 +136,22 @@ jobs:
             --version "$env:RELEASE_VERSION" --commit "$env:RELEASE_COMMIT" `
             --source build/unsigned --assets build/publication `
             --signing-input build/signing-input --windows-signing "$env:WINDOWS_SIGNING"
+      - name: Download both same-run Apple verification records
+        if: needs.prepare.outputs.apple_mode == 'apple'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: launcher-apple-verification-*
+          path: build/signing-verification/apple-verification
+          merge-multiple: true
+      - name: Bind Apple verification to the final staged packages
+        if: needs.prepare.outputs.apple_mode == 'apple'
+        shell: pwsh
+        run: |
+          python -B scripts/launcher_signing.py verify-apple `
+            --version "$env:RELEASE_VERSION" --commit "$env:RELEASE_COMMIT" `
+            --assets build/publication --windows-signing "$env:WINDOWS_SIGNING" `
+            --apple-verification build/signing-verification/apple-verification `
+            --apple-team-id "$env:APPLE_TEAM_ID" --apple-signing-identity "$env:APPLE_IDENTITY"
       - name: Upload only the tested unsigned Windows MSI for SignPath
         if: needs.prepare.outputs.signing_mode == 'signpath'
         id: unsigned
@@ -132,15 +181,16 @@ jobs:
         shell: pwsh
         run: |
           . .\scripts\verify_launcher_signature.ps1
+          New-Item -ItemType Directory -Force build\signing-verification | Out-Null
           $name = "MegaMek-Launcher-$env:RELEASE_VERSION-windows-x64.msi"
           Confirm-LauncherMsi `
             -UnsignedMsi "build\signing-input\$name" -SignedMsi "build\signpath-signed\$name" `
             -Version "$env:RELEASE_VERSION" -Commit "$env:RELEASE_COMMIT" `
-            -CertificateSha256 "$env:CERTIFICATE_SHA256" -Verification build\signing-verification.json
+            -CertificateSha256 "$env:CERTIFICATE_SHA256" -Verification build\signing-verification\signing-verification.json
           python -B scripts/launcher_signing.py complete `
             --version "$env:RELEASE_VERSION" --commit "$env:RELEASE_COMMIT" `
             --assets build/publication --signed build/signpath-signed `
-            --verification build/signing-verification.json `
+            --verification build/signing-verification/signing-verification.json `
             --certificate-sha256 "$env:CERTIFICATE_SHA256" --windows-signing "$env:WINDOWS_SIGNING"
       - name: Retain verified final installer and checksum bytes
         id: publication
@@ -150,13 +200,13 @@ jobs:
           path: build/publication/*
           if-no-files-found: error
           retention-days: 14
-      - name: Retain Windows signing verification
-        if: needs.prepare.outputs.signing_mode == 'signpath'
+      - name: Retain platform signing verification
+        if: needs.prepare.outputs.signing_mode == 'signpath' || needs.prepare.outputs.apple_mode == 'apple'
         id: verification
         uses: actions/upload-artifact@v4
         with:
           name: launcher-signing-verification-${{ github.run_id }}-${{ github.run_attempt }}
-          path: build/signing-verification.json
+          path: build/signing-verification/
           if-no-files-found: error
           retention-days: 14
 
@@ -170,6 +220,9 @@ jobs:
     env:
       WINDOWS_SIGNING: ${{ needs.prepare.outputs.signing_mode }}
       CERTIFICATE_SHA256: ${{ needs.prepare.outputs.certificate_sha256 }}
+      MACOS_SIGNING: ${{ needs.prepare.outputs.apple_mode }}
+      APPLE_TEAM_ID: ${{ needs.prepare.outputs.apple_team_id }}
+      APPLE_IDENTITY: ${{ needs.prepare.outputs.apple_identity }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -181,7 +234,7 @@ jobs:
           path: build/release
           merge-multiple: true
       - uses: actions/download-artifact@v4
-        if: needs.prepare.outputs.signing_mode == 'signpath'
+        if: needs.prepare.outputs.signing_mode == 'signpath' || needs.prepare.outputs.apple_mode == 'apple'
         with:
           artifact-ids: ${{ needs.release-assets.outputs.verification_artifact_id }}
           path: build/signing-verification
@@ -197,9 +250,14 @@ jobs:
             signing=(--signing-verification build/signing-verification/signing-verification.json
                      --signer-certificate-sha256 "$CERTIFICATE_SHA256")
           fi
+          if [ "$MACOS_SIGNING" = apple ]; then
+            signing+=(--apple-verification build/signing-verification/apple-verification
+                      --apple-team-id "$APPLE_TEAM_ID" --apple-signing-identity "$APPLE_IDENTITY")
+          fi
           python3 -B scripts/launcher_release.py publish \
             --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
-            --assets build/release --windows-signing "$WINDOWS_SIGNING" "${signing[@]}"
+            --assets build/release --windows-signing "$WINDOWS_SIGNING" \
+            --macos-signing "$MACOS_SIGNING" "${signing[@]}"
 
       - name: Record verified publication for later CI reuse
         id: provenance
@@ -214,10 +272,14 @@ jobs:
             signing=(--signing-verification build/signing-verification/signing-verification.json
                      --signer-certificate-sha256 "$CERTIFICATE_SHA256")
           fi
+          if [ "$MACOS_SIGNING" = apple ]; then
+            signing+=(--apple-verification build/signing-verification/apple-verification
+                      --apple-team-id "$APPLE_TEAM_ID" --apple-signing-identity "$APPLE_IDENTITY")
+          fi
           python3 -B scripts/launcher_release.py record \
             --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
             --assets build/release --provenance build/launcher-release-provenance.json \
-            --windows-signing "$WINDOWS_SIGNING" "${signing[@]}"
+            --windows-signing "$WINDOWS_SIGNING" --macos-signing "$MACOS_SIGNING" "${signing[@]}"
       - name: Retain immutable publication provenance
         if: steps.provenance.outcome == 'success'
         continue-on-error: true
@@ -238,6 +300,9 @@ jobs:
     env:
       WINDOWS_SIGNING: ${{ needs.prepare.outputs.signing_mode }}
       CERTIFICATE_SHA256: ${{ needs.prepare.outputs.certificate_sha256 }}
+      MACOS_SIGNING: ${{ needs.prepare.outputs.apple_mode }}
+      APPLE_TEAM_ID: ${{ needs.prepare.outputs.apple_team_id }}
+      APPLE_IDENTITY: ${{ needs.prepare.outputs.apple_identity }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -249,7 +314,7 @@ jobs:
           path: build/release
           merge-multiple: true
       - uses: actions/download-artifact@v4
-        if: needs.prepare.outputs.signing_mode == 'signpath'
+        if: needs.prepare.outputs.signing_mode == 'signpath' || needs.prepare.outputs.apple_mode == 'apple'
         with:
           artifact-ids: ${{ needs.release-assets.outputs.verification_artifact_id }}
           path: build/signing-verification
@@ -275,7 +340,11 @@ jobs:
             signing=(--signing-verification build/signing-verification/signing-verification.json
                      --signer-certificate-sha256 "$CERTIFICATE_SHA256")
           fi
+          if [ "$MACOS_SIGNING" = apple ]; then
+            signing+=(--apple-verification build/signing-verification/apple-verification
+                      --apple-team-id "$APPLE_TEAM_ID" --apple-signing-identity "$APPLE_IDENTITY")
+          fi
           python3 -B scripts/launcher_release.py finalize \
             --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" \
             --base "$RELEASE_BASE" --assets build/release \
-            --windows-signing "$WINDOWS_SIGNING" "${signing[@]}"
+            --windows-signing "$WINDOWS_SIGNING" --macos-signing "$MACOS_SIGNING" "${signing[@]}"
