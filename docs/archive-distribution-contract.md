@@ -97,7 +97,7 @@ to the Mac packages and their post-stapling checksums. It uploads the final ten-
 one immutable artifact. Publication and finalization both download that exact artifact ID,
 not the unsigned build outputs or a name selected from the newest run. Artifact IDs are captured
 as job outputs, so finalization-only reruns retain the original signed bytes even when the
-workflow attempt number changes. No signing credential is passed to native builds.
+workflow attempt number changes. No Windows signing credential is passed to native builds.
 
 ### Avoiding redundant CI after publication
 
@@ -360,8 +360,9 @@ Publisher/finalizer download its captured ID and recheck both Mac package bindin
 retains the same evidence for read-only CI reuse. Windows-only, Apple-only, both and neither
 are supported, with accurate platform-specific release notes.
 
-The `always()` cleanup step restores the previous keychain search list and removes only the
-owned temporary keychain/private files, including after partial import failures. Cleanup
+The `always()` cleanup step runs immediately after notarization, before installer inspection,
+artifact actions or source tests. It restores the previous keychain search list and removes only
+the owned temporary keychain/private files, including after partial import failures. Cleanup
 errors are visible and fail the job. Runner cancellation/termination may prevent cleanup from
 executing; GitHub-hosted ephemeral runners are required, not persistent/self-hosted workers.
 No automatic resubmission or unsigned recovery is attempted after an ambiguous signing or

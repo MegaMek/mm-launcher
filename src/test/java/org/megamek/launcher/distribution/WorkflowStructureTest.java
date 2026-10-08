@@ -502,6 +502,23 @@ class WorkflowStructureTest {
         JsonNode cleanup = step(installer, "Remove temporary Apple credentials and restore keychains");
         assertEquals("always() && " + enabled, cleanup.path("if").asText());
         assertTrue(cleanup.path("run").asText().contains("launcher_apple.py cleanup"));
+        assertFalse(cleanup.path("continue-on-error").asBoolean(),
+                "credential cleanup failure must block publication");
+        List<String> stepNames = new ArrayList<>();
+        for (JsonNode stage : installer.path("steps")) {
+            stepNames.add(stage.path("name").asText());
+        }
+        int cleanupIndex = stepNames.indexOf(cleanup.path("name").asText());
+        assertEquals(stepNames.indexOf(notary.path("name").asText()) + 1, cleanupIndex,
+                "remove private keys immediately after notarization, including on failure");
+        for (String laterStep : List.of(
+                "Verify exact installer/checksum pairs without installing",
+                "Upload native installers and SHA-256 files only",
+                "Test source on Windows", "Test source on Linux", "Test source on macOS",
+                "Upload platform test reports", "Retain same-run Apple verification for release staging")) {
+            assertTrue(cleanupIndex < stepNames.indexOf(laterStep),
+                    "private keys must be removed before " + laterStep);
+        }
         JsonNode evidence = step(installer, "Retain same-run Apple verification for release staging");
         assertEquals(enabled, evidence.path("if").asText());
         assertEquals("launcher-apple-verification-${{ matrix.id }}", evidence.path("with").path("name").asText());

@@ -198,6 +198,11 @@ jobs:
           APPLE_PLATFORM: ${{ matrix.id }}
         run: python3 -B scripts/launcher_apple.py complete --commit "$SOURCE_COMMIT" --platform "$APPLE_PLATFORM"
 
+      - name: Remove temporary Apple credentials and restore keychains
+        if: always() && runner.os == 'macOS' && inputs.apple_signing
+        shell: bash
+        run: python3 -B scripts/launcher_apple.py cleanup
+
       - name: Verify exact installer/checksum pairs without installing
         shell: pwsh
         env:
@@ -391,8 +396,3 @@ jobs:
           if-no-files-found: error
           overwrite: true
           retention-days: 14
-
-      - name: Remove temporary Apple credentials and restore keychains
-        if: always() && runner.os == 'macOS' && inputs.apple_signing
-        shell: bash
-        run: python3 -B scripts/launcher_apple.py cleanup

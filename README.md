@@ -191,7 +191,8 @@ When enabled, the existing Intel and Apple Silicon Mac runners use temporary key
 JDK 21's supported jpackage signing to sign the app, bundled native Java code and PKG. They
 submit each PKG to Apple's notarization service, require acceptance, staple/validate the
 ticket and check Gatekeeper before regenerating the final checksum. Private credentials are
-confined to official release preflight and guarded macOS setup; cleanup runs even after a failure.
+confined to official release preflight and guarded macOS setup. Cleanup runs immediately after
+notarization, even on failure, before installer inspection, artifact actions or source tests.
 No private credential is passed to Gradle, ordinary PR builds or Windows/Linux steps.
 Invalid configuration, signing, notarization, architecture, identity or final-byte checks
 block publication without an unsigned fallback.
