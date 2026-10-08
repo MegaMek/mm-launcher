@@ -33,6 +33,7 @@ INSTALLERS = (
     "windows-x64.msi", "linux-x64.deb", "linux-x64.rpm",
     "macos-intel.pkg", "macos-apple-silicon.pkg",
 )
+APPLE_PLATFORMS = ("macos-intel", "macos-apple-silicon")
 
 
 class ReleaseError(Exception):
@@ -118,6 +119,62 @@ def numeric_version(value):
     if any(part > limit for part, limit in zip(parts, (255, 255, 65535))):
         raise ReleaseError("Version exceeds Windows Installer's 255.255.65535 limits")
     return parts
+
+
+def apple_app_version(version):
+    major, minor, patch = numeric_version(version)
+    return f"{major + 1}.{minor}.{patch}"
+
+
+def verify_apple_identity(team_id, identity):
+    if (not isinstance(team_id, str) or not re.fullmatch(r"[A-Z0-9]{10}", team_id)
+            or not isinstance(identity, str) or not 1 <= len(identity) <= 200
+            or any(ord(char) < 32 or ord(char) == 127 for char in identity)
+            or not identity.endswith(f" ({team_id})")
+            or identity == f" ({team_id})"):
+        raise ReleaseError("Apple signing requires the approved team ID and certificate user/team name")
+
+
+def verify_apple_record(record, version, commit, assets, team_id, identity):
+    verify_apple_identity(team_id, identity)
+    fields = {"schema_version", "name", "version", "commit", "platform", "size", "sha256",
+              "team_id", "identity", "notarization_id", "notarization_status", "timestamped",
+              "hardened_runtime", "stapled", "gatekeeper_status"}
+    if not isinstance(record, dict) or set(record) != fields or record.get("platform") not in APPLE_PLATFORMS:
+        raise ReleaseError("Mac signing verification must identify the expected native platform")
+    name = f"MegaMek-Launcher-{version}-{record['platform']}.pkg"
+    matches = [asset for asset in assets if asset.path.name == name]
+    if (len(matches) != 1 or type(record["schema_version"]) is not int or record["schema_version"] != 1
+            or record["name"] != name or record["version"] != version
+            or record["commit"] != require_sha(commit) or record["team_id"] != team_id
+            or record["identity"] != identity or type(record["size"]) is not int
+            or record["size"] != matches[0].size or record["sha256"] != matches[0].sha256
+            or record["timestamped"] is not True or record["hardened_runtime"] is not True
+            or record["stapled"] is not True or record["notarization_status"] != "Accepted"
+            or record["gatekeeper_status"] != "accepted"
+            or not isinstance(record["notarization_id"], str)
+            or not re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}",
+                                record["notarization_id"])):
+        raise ReleaseError("Mac verification does not bind notarization, approved team and final PKG bytes")
+
+
+def verify_apple_records(records, version, commit, assets, team_id, identity):
+    if (not isinstance(records, list) or len(records) != 2
+            or any(not isinstance(record, dict) for record in records)
+            or any(record.get("platform") not in APPLE_PLATFORMS for record in records)
+            or {record.get("platform") for record in records} != set(APPLE_PLATFORMS)):
+        raise ReleaseError("Both Intel and Apple Silicon notarization records are required")
+    for record in records:
+        verify_apple_record(record, version, commit, assets, team_id, identity)
+
+
+def load_apple_records(directory):
+    if directory.is_symlink() or not directory.is_dir():
+        raise ReleaseError("Apple verification must be a real directory")
+    expected = {platform + ".json" for platform in APPLE_PLATFORMS}
+    if {file.name for file in directory.iterdir()} != expected:
+        raise ReleaseError("Apple verification must contain exactly the two native platform JSON files")
+    return [load_signing_record(directory / (platform + ".json")) for platform in APPLE_PLATFORMS]
 
 
 def source_version(root):
@@ -486,9 +543,12 @@ def release_run_identity(environment):
 
 
 def record_publication(github, version, commit, assets, environment, destination,
-                       signing_record=None, certificate_sha256=None):
+                       signing_record=None, certificate_sha256=None, apple_records=None,
+                       apple_team_id=None, apple_identity=None):
     if signing_record is not None or certificate_sha256 is not None:
         verify_signing_record(signing_record, version, commit, assets, certificate_sha256)
+    if apple_records is not None:
+        verify_apple_records(apple_records, version, commit, assets, apple_team_id, apple_identity)
     run_id, attempt = release_run_identity(environment)
     published = github.request("GET", f"{API}/releases/tags/v{version}")
     identifier = verify_release(published, assets, version, False)
@@ -504,6 +564,8 @@ def record_publication(github, version, commit, assets, environment, destination
                           "size": asset.size, "sha256": asset.sha256} for asset in assets]}
     if signing_record is not None:
         record["windows_signing"] = signing_record
+    if apple_records is not None:
+        record["apple_signing"] = apple_records
     content = json.dumps(record, sort_keys=True).encode("utf-8")
     if len(content) > PROVENANCE_LIMIT:
         raise ReleaseError("Release provenance record exceeds limit")
@@ -692,14 +754,23 @@ def verified_release_push(github, root, environment):
         signing = record["windows_signing"]
         certificate = signing.get("certificate_sha256") if isinstance(signing, dict) else None
         verify_signing_record(signing, version, commit, assets, certificate)
+    if "apple_signing" in record:
+        signing = record["apple_signing"]
+        if not isinstance(signing, list) or not signing or not isinstance(signing[0], dict):
+            raise ReleaseError("Invalid retained Apple signing verification")
+        verify_apple_records(signing, version, commit, assets,
+                             signing[0].get("team_id"), signing[0].get("identity"))
     return True, (f"Exact version-only candidate {commit} was built, tested and published by "
                   f"https://github.com/{REPOSITORY}/actions/runs/{run_id}; no duplicate installer build. "
                   "No application/UI code changed, so post-release desktop checks are unnecessary.")
 
 
-def publish(github, version, commit, assets, signing_record=None, certificate_sha256=None):
+def publish(github, version, commit, assets, signing_record=None, certificate_sha256=None,
+            apple_records=None, apple_team_id=None, apple_identity=None):
     if signing_record is not None or certificate_sha256 is not None:
         verify_signing_record(signing_record, version, commit, assets, certificate_sha256)
+    if apple_records is not None:
+        verify_apple_records(apple_records, version, commit, assets, apple_team_id, apple_identity)
     require_unused_version(github, version)
     tag = "v" + version
     reference = github.request("POST", f"{API}/git/refs",
@@ -710,6 +781,13 @@ def publish(github, version, commit, assets, signing_record=None, certificate_sh
                       "The Windows MSI is Authenticode-signed and timestamped through SignPath. "
                       "Free code signing provided by SignPath.io, certificate by SignPath Foundation. "
                       "Linux/macOS installers remain unsigned; macOS packages are not notarized. ")
+    if apple_records is not None:
+        signing_notice = (
+            "Windows MSI is Authenticode-signed and timestamped through SignPath. "
+            "Free code signing provided by SignPath.io, certificate by SignPath Foundation. "
+            if signing_record is not None else "Windows installer remains unsigned. ")
+        signing_notice += ("Both macOS packages are Developer ID-signed, notarized by Apple and stapled. "
+                           "Linux installers remain unsigned. ")
     body = (f"Native installers built and tested from [{commit}](https://github.com/{REPOSITORY}/commit/{commit}).\n\n"
             "Installed launchers support user-authorized self-update on Windows, macOS, and supported "
             "Linux desktops. Linux requires PolicyKit and apt-get or dnf. "
@@ -751,6 +829,10 @@ def main():
     parser.add_argument("--windows-signing", choices=("unsigned", "signpath"), default="unsigned")
     parser.add_argument("--signing-verification", type=Path)
     parser.add_argument("--signer-certificate-sha256")
+    parser.add_argument("--macos-signing", choices=("unsigned", "apple"), default="unsigned")
+    parser.add_argument("--apple-verification", type=Path)
+    parser.add_argument("--apple-team-id")
+    parser.add_argument("--apple-signing-identity")
     args = parser.parse_args()
     root = Path.cwd()
     github = GitHub()
@@ -812,6 +894,16 @@ def main():
         commit = validate_source(args.version, root, os.environ, args.commit)
         verify_checkout(root, commit)
         assets = validate_files(args.assets, args.version)
+        apple_records = None
+        if args.macos_signing == "apple":
+            if args.apple_verification is None or args.apple_team_id is None or args.apple_signing_identity is None:
+                raise ReleaseError("Apple signing requires both platform records and the approved team/identity")
+            apple_records = load_apple_records(args.apple_verification)
+            verify_apple_records(apple_records, args.version, commit, assets,
+                                 args.apple_team_id, args.apple_signing_identity)
+        elif any(value is not None for value in
+                 (args.apple_verification, args.apple_team_id, args.apple_signing_identity)):
+            raise ReleaseError("Unsigned Mac publication must not claim Apple signing verification")
         signing_record = None
         if args.windows_signing == "signpath":
             if args.signing_verification is None or args.signer_certificate_sha256 is None:
@@ -825,14 +917,16 @@ def main():
             if args.base is not None or args.provenance is None:
                 raise ReleaseError("Publication recording requires only the exact source, assets and output")
             record_publication(github, args.version, commit, assets, os.environ, args.provenance,
-                               signing_record, args.signer_certificate_sha256)
+                               signing_record, args.signer_certificate_sha256,
+                               apple_records, args.apple_team_id, args.apple_signing_identity)
             return
         if args.provenance is not None:
             raise ReleaseError("Only publication recording accepts a provenance output")
         if args.command == "publish":
             if args.base is not None:
                 raise ReleaseError("Publication does not update main; use finalize afterward")
-            publish(github, args.version, commit, assets, signing_record, args.signer_certificate_sha256)
+            publish(github, args.version, commit, assets, signing_record, args.signer_certificate_sha256,
+                    apple_records, args.apple_team_id, args.apple_signing_identity)
         else:
             finalize_main(github, args.version, commit, require_sha(args.base), assets)
 

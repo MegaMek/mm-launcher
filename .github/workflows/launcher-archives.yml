@@ -11,6 +11,33 @@ on:
         required: false
         type: string
         default: ""
+      apple_signing:
+        description: "Enable Apple signing only for an official release candidate"
+        type: boolean
+        default: false
+      apple_team_id:
+        type: string
+        default: ""
+      apple_identity:
+        type: string
+        default: ""
+      apple_key_id:
+        type: string
+        default: ""
+      apple_issuer_id:
+        type: string
+        default: ""
+    secrets:
+      APPLE_APPLICATION_P12:
+        required: false
+      APPLE_APPLICATION_P12_PASSWORD:
+        required: false
+      APPLE_INSTALLER_P12:
+        required: false
+      APPLE_INSTALLER_P12_PASSWORD:
+        required: false
+      APPLE_NOTARY_PRIVATE_KEY:
+        required: false
   workflow_dispatch:
   push:
     branches:
@@ -129,10 +156,47 @@ jobs:
         shell: bash
         run: ./gradlew "-PbuildIdentifier=${SOURCE_COMMIT}" buildDebInstaller buildRpmInstaller
 
+      - name: Import release-only Apple signing credentials
+        if: runner.os == 'macOS' && inputs.apple_signing
+        shell: bash
+        env:
+          APPLE_SIGNING_ENABLED: "true"
+          APPLE_TEAM_ID: ${{ inputs.apple_team_id }}
+          APPLE_SIGNING_IDENTITY: ${{ inputs.apple_identity }}
+          APPLE_NOTARY_KEY_ID: ${{ inputs.apple_key_id }}
+          APPLE_NOTARY_ISSUER_ID: ${{ inputs.apple_issuer_id }}
+          APPLE_APPLICATION_P12: ${{ secrets.APPLE_APPLICATION_P12 }}
+          APPLE_APPLICATION_P12_PASSWORD: ${{ secrets.APPLE_APPLICATION_P12_PASSWORD }}
+          APPLE_INSTALLER_P12: ${{ secrets.APPLE_INSTALLER_P12 }}
+          APPLE_INSTALLER_P12_PASSWORD: ${{ secrets.APPLE_INSTALLER_P12_PASSWORD }}
+          APPLE_NOTARY_PRIVATE_KEY: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 -B scripts/launcher_apple.py setup --commit "$SOURCE_COMMIT"
+
       - name: Build macOS installer (never install)
         if: runner.os == 'macOS'
         shell: bash
-        run: ./gradlew "-PbuildIdentifier=${SOURCE_COMMIT}" buildPkgInstaller
+        env:
+          APPLE_ENABLED: ${{ inputs.apple_signing }}
+          APPLE_IDENTITY: ${{ inputs.apple_identity }}
+        run: |
+          signing=()
+          if [ "$APPLE_ENABLED" = true ]; then
+            signing=("-PappleSigningIdentity=$APPLE_IDENTITY" "-PappleSigningKeychain=$APPLE_SIGNING_KEYCHAIN")
+          fi
+          ./gradlew "-PbuildIdentifier=${SOURCE_COMMIT}" "${signing[@]}" buildPkgInstaller
+
+      - name: Notarize and verify the final macOS package
+        if: runner.os == 'macOS' && inputs.apple_signing
+        shell: bash
+        env:
+          APPLE_SIGNING_ENABLED: "true"
+          APPLE_TEAM_ID: ${{ inputs.apple_team_id }}
+          APPLE_SIGNING_IDENTITY: ${{ inputs.apple_identity }}
+          APPLE_NOTARY_KEY_ID: ${{ inputs.apple_key_id }}
+          APPLE_NOTARY_ISSUER_ID: ${{ inputs.apple_issuer_id }}
+          APPLE_PLATFORM: ${{ matrix.id }}
+        run: python3 -B scripts/launcher_apple.py complete --commit "$SOURCE_COMMIT" --platform "$APPLE_PLATFORM"
 
       - name: Verify exact installer/checksum pairs without installing
         shell: pwsh
@@ -317,3 +381,18 @@ jobs:
           if-no-files-found: warn
           overwrite: true
           retention-days: 14
+
+      - name: Retain same-run Apple verification for release staging
+        if: runner.os == 'macOS' && inputs.apple_signing
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-apple-verification-${{ matrix.id }}
+          path: build/apple-verification/${{ matrix.id }}.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 14
+
+      - name: Remove temporary Apple credentials and restore keychains
+        if: always() && runner.os == 'macOS' && inputs.apple_signing
+        shell: bash
+        run: python3 -B scripts/launcher_apple.py cleanup

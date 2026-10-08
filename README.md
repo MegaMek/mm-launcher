@@ -5,12 +5,13 @@
 The official source repository is [MegaMek/mm-launcher](https://github.com/MegaMek/mm-launcher).
 The `Launcher native installers` workflow builds on pushes to `main`, pull requests,
 and manual dispatch. PR branch pushes run once through the pull-request event rather
-than also starting a duplicate push matrix. CI produces **only** five unsigned native installer/checksum
+than also starting a duplicate push matrix. Ordinary CI produces **only** five unsigned native installer/checksum
 pairs: Windows x64 `.msi`, Linux x64 `.deb` and `.rpm`, and macOS `.pkg` on both
 Intel and Apple Silicon. It does not build, verify, or upload portable archives,
 install packages on CI runners, create a release, sign, or notarize. The separate
 manual `Publish launcher release` workflow reuses these same builds and tests before publication,
-with an optional, disabled-by-default Windows MSI signing stage. Each
+with independent, disabled-by-default Windows MSI and Apple signing/notarization modes.
+Only an official release call can opt the reusable Mac packaging jobs into Apple credentials. Each
 installer contains a host-native Java 21 image with all JDK modules and `bin/java`
 for games launched by the application; no external Java is required.
 Run `./gradlew test buildDebInstaller buildRpmInstaller` on Linux,
@@ -49,6 +50,7 @@ execution. Automatic-check policy tests run synchronously without executor deadl
 separate integration tests cover EDT handoff and cancellation with explicit latches.
 The headless task declares launcher workflow YAML files as inputs because its structural
 contracts read them directly; workflow-only changes invalidate cached test results.
+The distribution build script is also an explicit input to its packaging contracts.
 Tests that open native windows are tagged `native-gui` and run separately:
 `.\gradlew.bat nativeGuiTest` on Windows, `./gradlew nativeGuiTest` on macOS,
 or `xvfb-run -a ./gradlew nativeGuiTest` on Linux. The independent
@@ -143,7 +145,8 @@ or pull requests. Major/minor version changes remain explicit source changes.
 The workflow calls the ordinary native-installer CI at the captured candidate commit and
 waits for all four platforms' builds, package inspections, required headless tests, and release tooling
 tests to pass. A read-only release-assets job stages this run's five installers and five checksum
-files, optionally signs and verifies only the Windows MSI, and retains one immutable final asset
+files, optionally signs and verifies the Windows MSI, validates any enabled Apple notarization
+records from the Mac packaging jobs, and retains one immutable final asset
 set. The write-enabled publication job downloads that exact artifact ID, checks the filenames and
 hashes, creates `v<version>` at the tested commit, and uploads the complete asset set. GitHub must
 report the expected uploaded asset IDs, sizes, URLs, and SHA-256 digests, including the digest used
@@ -152,9 +155,9 @@ by native self-update. All installers must fit the updater's 300 MiB limit.
 Publication goes straight to a stable release in that same run, with no draft-review approval
 stage. The upload operation briefly uses GitHub's draft flag so an incomplete asset set cannot
 become the update target; it is cleared automatically only after verification. The workflow then
-verifies the official latest-stable endpoint. Installers remain unsigned unless Windows signing is
-explicitly enabled after SignPath setup; Linux/macOS installers remain unsigned and macOS packages
-are not notarized. A separate finalization job downloads the same final artifact ID and rechecks
+verifies the official latest-stable endpoint. Windows and Mac signing remain independently disabled
+until their approved credentials are configured and explicitly activated. Linux installers remain
+unsigned. A separate finalization job downloads the same final artifact ID and rechecks
 the published release, latest endpoint,
 tested tag, and version-only candidate, then fast-forwards `main` without force. Main must
 still match the captured base commit; concurrent work is never overwritten.
@@ -182,6 +185,19 @@ configured signing approval; timeout/rejection leaves the candidate unpublished.
 See [optional Windows signing setup](docs/archive-distribution-contract.md#optional-windows-signing).
 The integration can be prepared without an account, but **real signing remains unverified until
 Foundation approval, service configuration and an authorized end-to-end release test**.
+
+Apple signing is **off** when `APPLE_SIGNING_ENABLED` is unset or `false`.
+When enabled, the existing Intel and Apple Silicon Mac runners use temporary keychains and
+JDK 21's supported jpackage signing to sign the app, bundled native Java code and PKG. They
+submit each PKG to Apple's notarization service, require acceptance, staple/validate the
+ticket and check Gatekeeper before regenerating the final checksum. Private credentials are
+confined to official release preflight and guarded macOS setup; cleanup runs even after a failure.
+No private credential is passed to Gradle, ordinary PR builds or Windows/Linux steps.
+Invalid configuration, signing, notarization, architecture, identity or final-byte checks
+block publication without an unsigned fallback.
+See [optional Apple signing setup](docs/archive-distribution-contract.md#optional-apple-signing).
+This needs Apple Developer membership and an authorized live Mac release/upgrade test;
+offline mocks do not establish Apple acceptance or actual Gatekeeper behavior.
 
 Writes are not automatically retried, existing assets/tags are never overwritten, and failure
 does not delete a candidate branch, tag, draft, or published release.

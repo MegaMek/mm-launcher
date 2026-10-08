@@ -16,8 +16,8 @@ These images retain `bin/java` for games, `lib/modules`, and upstream
 `legal/` notices. CI only inspects installer contents and checksums;
 the native-installer workflow never installs them or publishes a release. A separate manual
 release workflow reuses that complete build/test workflow before publication. Optional Windows MSI
-signing is prepared but disabled by default; Foundation approval and live verification remain pending.
-Linux/macOS signing and notarization remain outside this integration.
+signing and separate Apple signing/notarization are prepared but disabled by default;
+account setup and live verification remain pending. Linux signing remains outside this integration.
 
 Linux's stable package name is `megamek-launcher` under `/opt`; the macOS
 bundle identifier is `org.megamek.launcher` under `/Applications`.
@@ -88,10 +88,12 @@ commit, not the older workflow-triggering SHA. Publication requires that entire 
 to succeed. Only the publication job receives workflow-token `contents: write`; ordinary CI
 and preparation keep that token read-only. The App's short-lived Contents-write token is
 restricted to this repository, used only for candidate creation, revoked at the end of preparation,
-and never passed to installer/test jobs or publication.
+and never passed to installer/test jobs or publication. Apple signing credentials are separately
+confined to official release preflight and enabled macOS setup, never Windows/Linux or ordinary PR build steps.
 Artifacts come from the current workflow run, not a previous build or independently selected
-latest artifact. A read-only release-assets job validates the complete unsigned build outputs
-and optionally signs the Windows MSI. It uploads the final ten-file installer/checksum set as
+latest artifact. A read-only release-assets job validates the complete native build outputs
+and optionally signs the Windows MSI. It also binds both enabled Apple notarization records
+to the Mac packages and their post-stapling checksums. It uploads the final ten-file installer/checksum set as
 one immutable artifact. Publication and finalization both download that exact artifact ID,
 not the unsigned build outputs or a name selected from the newest run. Artifact IDs are captured
 as job outputs, so finalization-only reruns retain the original signed bytes even when the
@@ -124,7 +126,9 @@ optimization, not publication safety, and its absence must cause normal installe
 and desktop tests.
 For signed releases, the record also retains Windows signature verification tied to the final
 MSI digest, candidate, and approved certificate. CI reuse verifies that binding in addition to
-the ordinary asset IDs, sizes and digests. Existing unsigned schema-1 provenance remains valid.
+the ordinary asset IDs, sizes and digests. Enabled Apple releases also retain both platform
+notarization records bound to the final PKG digests and approved team/identity. Existing unsigned
+schema-1 provenance remains valid.
 
 The gate uses the successful publication job's attempt, not the overall run's latest
 attempt, so finalization-only reruns can retain valid proof. It checks the artifact's
@@ -208,7 +212,7 @@ the same candidate/base outputs and installer artifacts; do not rebuild, republi
 dispatch another patch. If main has advanced independently, the guard keeps rejecting the
 candidate: an authorized owner must review manual version synchronization that preserves
 newer source changes, rather than forcing the old candidate onto main.
-The workflow never installs packages, notarizes, assembles a game suite, or updates an
+The workflow never installs packages, assembles a game suite, or updates an
 installed launcher on a runner. A real self-update test requires separate explicit authorization
 to publish and to upgrade an older Windows MSI installation.
 
@@ -285,6 +289,93 @@ These tests do not prove certificate issuance, live SignPath origin acceptance, 
 Authenticode trust, signing approval, or Windows installation. Those need the approved account
 and a separately authorized end-to-end release/upgrade test.
 See the [official GitHub integration](https://docs.signpath.io/trusted-build-systems/github).
+
+### Optional Apple signing
+
+This is disabled preparation for Developer ID distribution, **not** confirmation of membership,
+working certificates, notarization or a signed release. It uses our existing GitHub-hosted
+Intel and Apple Silicon macOS runners; no dedicated Mac build machine or App Store submission
+is required. A real Mac is still needed to validate the initial installation, first launch,
+bundled Java/game launch and upgrade experience before activation.
+
+`APPLE_SIGNING_ENABLED` is independent of the Windows `LAUNCHER_SIGNING_ENABLED` flag.
+Leave it unset or exactly `false`; missing Apple settings/credentials are then irrelevant and
+the ordinary Mac packaging path remains unchanged. Invalid nonempty flags fail explicitly.
+Both platforms must sign/notarize successfully once enabled; no unsigned fallback is permitted.
+
+Configure repository Actions settings only after enrollment and explicit activation authorization:
+
+| Setting | Kind | Value |
+| --- | --- | --- |
+| `APPLE_SIGNING_ENABLED` | Variable | `true` only when activating the approved Mac release path |
+| `APPLE_TEAM_ID` | Variable | Approved 10-character Apple team ID |
+| `APPLE_SIGNING_IDENTITY` | Variable | Exact user/team portion shared by both Developer ID certificates, such as `Approved Legal Name (TEAMID)`; do not include `Developer ID Application:` or `Developer ID Installer:` |
+| `APPLE_NOTARY_KEY_ID` | Variable | 10-character team App Store Connect API key ID with notarization access |
+| `APPLE_NOTARY_ISSUER_ID` | Variable | That team API key's issuer UUID |
+| `APPLE_APPLICATION_P12` | Secret | Base64 export of Developer ID Application certificate **and its private key** |
+| `APPLE_APPLICATION_P12_PASSWORD` | Secret | Nonempty password protecting that PKCS#12 export |
+| `APPLE_INSTALLER_P12` | Secret | Base64 export of Developer ID Installer certificate **and its private key** |
+| `APPLE_INSTALLER_P12_PASSWORD` | Secret | Nonempty password protecting that PKCS#12 export |
+| `APPLE_NOTARY_PRIVATE_KEY` | Secret | Base64 contents of the API key's `.p8` private key |
+
+The public identity must end in the captured team ID. Placeholder, development, ad-hoc and
+Mac App Store certificates are not substitutes. Obtain the identities under the approved
+publisher/account ownership, limit API-key permissions to what's required, and rotate/revoke
+credentials deliberately. No credential value is committed or exported in job outputs.
+The temporary keychain password is generated on the runner; Gradle receives only the public
+identity and temporary keychain path.
+
+Release preparation validates the enable flag, public settings and credential presence/base64
+before creating a candidate. The manual release caller explicitly passes only the five Apple
+secrets to the reusable build workflow, not `secrets: inherit`. The signing step is guarded by
+both `runner.os == 'macOS'` and the release-only `apple_signing` input, whose default is false.
+Ordinary native dispatch has no signing inputs. Before key import, the setup script requires
+official main/manual dispatch, verifies the checkout and proves its version-only candidate
+against the captured main SHA. Forks, PRs and arbitrary source commits cannot use this setup.
+
+Each enabled Mac build creates a private task-owned directory and temporary keychain, imports
+the two identities, permits the Apple signing tools to use them, and adds only that keychain to
+the existing search list. The existing JDK 21 jpackage path receives `--mac-sign`,
+`--mac-signing-key-user-name` and `--mac-signing-keychain`, signing the application and nested
+native runtime before the PKG. It uses JDK 21's Java signing/entitlement profile rather than
+inventing a different profile. Verification separately requires the approved app authority/team,
+secure timestamps and hardened runtime for the app, launcher and bundled `bin/java`.
+Entitlements and actual game launching must still be validated on a live Mac before activation.
+
+The signed PKG is checked for the approved trusted Developer ID Installer. Read-only expansion
+must contain exactly one correctly identified/versioned launcher with the expected native
+architecture. Deep/strict code validation runs without executing the app. `notarytool submit`
+waits up to 30 minutes for an **Accepted** result; rejection, pending status or timeout stops
+the job. `stapler staple` and `stapler validate` must succeed; an explicit install assessment
+must report accepted **Notarized Developer ID** software. No package is installed on CI.
+Notarization occurs inside each Mac packaging job; overall publication still requires all
+four native jobs and their required source tests to succeed.
+
+Only afterward is the PKG SHA-256 regenerated and a bounded platform record written, binding
+candidate, version, architecture, approved identity/team, notarization request and final
+size/digest. Source failures cannot authorize publication. The same-run Mac proof artifact is
+replaceable alongside its native package on a failed-job rerun; the final staging job verifies
+both records and retains them with any Windows proof as one **immutable** artifact.
+Publisher/finalizer download its captured ID and recheck both Mac package bindings; provenance
+retains the same evidence for read-only CI reuse. Windows-only, Apple-only, both and neither
+are supported, with accurate platform-specific release notes.
+
+The `always()` cleanup step restores the previous keychain search list and removes only the
+owned temporary keychain/private files, including after partial import failures. Cleanup
+errors are visible and fail the job. Runner cancellation/termination may prevent cleanup from
+executing; GitHub-hosted ephemeral runners are required, not persistent/self-hosted workers.
+No automatic resubmission or unsigned recovery is attempted after an ambiguous signing or
+notarization failure. Inspect Apple submission/run evidence before an authorized retry.
+After successful publication, rerun only finalization with its retained immutable final
+artifacts; do not rebuild, re-sign or re-notarize already published packages.
+
+Offline tests use mocked Apple commands and verify credential cleanup, guards, both architectures,
+post-stapling checksums, rejected notarization, Windows/Apple combinations and publication,
+finalization/provenance bindings. They do **not** prove certificate validity, Apple's service,
+actual jpackage signing, runtime entitlements or macOS Gatekeeper/installation behavior.
+Do not activate either signing mode from this preparation alone.
+See [Apple Developer ID](https://developer.apple.com/developer-id/) and
+[JDK 21 jpackage signing options](https://docs.oracle.com/en/java/javase/21/docs/specs/man/jpackage.html).
 
 ### Installed launcher self-update
 

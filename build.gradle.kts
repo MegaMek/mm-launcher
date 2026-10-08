@@ -305,6 +305,12 @@ abstract class NativeInstaller : DefaultTask() {
     @get:Input
     abstract val appVersion: Property<String>
 
+    @get:Input
+    abstract val appleSigningIdentity: Property<String>
+
+    @get:Input
+    abstract val appleSigningKeychain: Property<String>
+
     @get:OutputFile
     abstract val installerFile: RegularFileProperty
 
@@ -317,6 +323,14 @@ abstract class NativeInstaller : DefaultTask() {
         check((type == "pkg" && OperatingSystem.current().isMacOsX) ||
             ((type == "deb" || type == "rpm") && OperatingSystem.current().isLinux)) {
             "$type installers can only be built on their native host."
+        }
+        val signingIdentity = appleSigningIdentity.get()
+        val signingKeychain = appleSigningKeychain.get()
+        check(signingIdentity.isEmpty() == signingKeychain.isEmpty()) {
+            "Apple signing requires both the identity and temporary keychain."
+        }
+        check(signingIdentity.isEmpty() || (type == "pkg" && File(signingKeychain).isFile)) {
+            "Apple signing requires macOS PKG packaging and an existing temporary keychain."
         }
         val runtime = runtimeDirectory.get().asFile
         check(File(runtime, "bin/java").isFile &&
@@ -352,6 +366,10 @@ abstract class NativeInstaller : DefaultTask() {
                 args("--mac-package-identifier", "org.megamek.launcher",
                     "--icon", macIconFile.get().asFile.absolutePath,
                     "--install-dir", "/Applications")
+                if (signingIdentity.isNotEmpty()) {
+                    args("--mac-sign", "--mac-signing-key-user-name", signingIdentity,
+                        "--mac-signing-keychain", signingKeychain)
+                }
             } else {
                 args("--linux-package-name", "megamek-launcher",
                     "--install-dir", "/opt")
@@ -609,6 +627,8 @@ tasks.withType<AbstractArchiveTask>().configureEach {
 }
 
 tasks.test {
+    inputs.file("build.gradle.kts").withPropertyName("distributionBuild")
+        .withPathSensitivity(PathSensitivity.RELATIVE)
     inputs.files(fileTree(".github/workflows") {
         include("launcher-*.yml")
     }).withPropertyName("launcherWorkflows")
@@ -1100,6 +1120,8 @@ if (OperatingSystem.current().isLinux || OperatingSystem.current().isMacOsX) {
             packageType.set(type)
             mainJarFileName.set(tasks.named<Jar>("jar").flatMap { it.archiveFileName })
             appVersion.set(if (type == "pkg") macInstallerAppVersion else windowsInstallerAppVersion)
+            appleSigningIdentity.set(providers.gradleProperty("appleSigningIdentity").orElse(""))
+            appleSigningKeychain.set(providers.gradleProperty("appleSigningKeychain").orElse(""))
             installerFile.set(distributionsDirectory.map { it.file(fileName) })
             outputs.cacheIf { false }
         }
