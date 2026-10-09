@@ -98,6 +98,7 @@ class WorkflowStructureTest {
             assertTrue(paths.contains("scripts/**"));
             assertTrue(paths.contains(".github/workflows/launcher-release.yml"));
             assertTrue(paths.contains(".github/workflows/launcher-gui-smoke.yml"));
+            assertTrue(paths.contains(".github/workflows/launcher-test-signing.yml"));
         }
         JsonNode installers = jobs.path("installers");
         assertEquals("release-tooling", installers.path("needs").asText());
@@ -557,6 +558,79 @@ class WorkflowStructureTest {
         assertTrue(gradle.contains("args(\"--mac-sign\", \"--mac-signing-key-user-name\", signingIdentity"));
         assertTrue(gradle.contains("--mac-signing-keychain"));
         assertFalse(gradle.contains("APPLE_APPLICATION_P12_PASSWORD"), "private credentials never enter Gradle");
+    }
+
+    @Test
+    void testSigningIsManualPinnedReadOnlyAndNeverPublishes() throws Exception {
+        String text = Files.readString(Path.of(".github", "workflows", "launcher-test-signing.yml"));
+        JsonNode root = new ObjectMapper(new YAMLFactory()).readTree(text);
+        assertEquals(1, root.path("on").size());
+        assertTrue(root.path("on").has("workflow_dispatch"));
+        assertFalse(root.path("on").path("workflow_dispatch").has("inputs"));
+        assertEquals("read", root.path("permissions").path("contents").asText());
+        assertEquals("read", root.path("permissions").path("actions").asText());
+        assertFalse(root.path("concurrency").path("cancel-in-progress").asBoolean());
+        JsonNode jobs = root.path("jobs");
+        assertEquals(4, jobs.size());
+        JsonNode plan = jobs.path("plan");
+        assertFalse(plan.has("if"), "invalid dispatch must fail explicitly rather than silently skip");
+        String origin = step(plan, "Reject nonofficial or nonmain dispatch before reading credentials")
+                .path("run").asText();
+        assertTrue(origin.contains("MegaMek/mm-launcher"));
+        assertTrue(origin.contains("refs/heads/main"));
+        assertTrue(origin.contains("workflow_dispatch"));
+        assertTrue(origin.contains("exit 1"));
+        assertTrue(text.indexOf("Reject nonofficial or nonmain dispatch before reading credentials")
+                < text.indexOf("Validate official main and capture test-only signing settings"));
+        JsonNode settings = step(plan, "Validate official main and capture test-only signing settings");
+        assertEquals("python3 -B scripts/launcher_test_signing.py plan", settings.path("run").asText());
+        assertEquals("${{ vars.SIGNPATH_TEST_CERTIFICATE_SHA256 }}",
+                settings.path("env").path("SIGNPATH_TEST_CERTIFICATE_SHA256").asText());
+        assertFalse(settings.path("env").has("SIGNPATH_CERTIFICATE_SHA256"));
+        assertEquals("./.github/workflows/launcher-archives.yml", jobs.path("installers").path("uses").asText());
+        assertEquals("${{ needs.plan.outputs.commit }}",
+                jobs.path("installers").path("with").path("source_commit").asText());
+        assertFalse(jobs.path("installers").has("secrets"));
+        assertFalse(jobs.path("installers").path("with").has("apple_signing"));
+        JsonNode signing = jobs.path("sign-test");
+        assertEquals("windows-2025", signing.path("runs-on").asText());
+        assertEquals(List.of("plan", "installers"), dependencies(signing));
+        JsonNode request = step(signing, "Request self-signed test signing only");
+        assertEquals("signpath/github-action-submit-signing-request@f6d04783b4569d051e0c80105fe66e82819d0092",
+                request.path("uses").asText());
+        assertEquals("test-signing", request.path("with").path("signing-policy-slug").asText());
+        assertEquals("${{ steps.unsigned.outputs.artifact-id }}",
+                request.path("with").path("github-artifact-id").asText());
+        assertTrue(request.path("with").path("wait-for-completion").asBoolean());
+        assertFalse(request.path("continue-on-error").asBoolean());
+        JsonNode verify = jobs.path("verify-test");
+        assertEquals(List.of("plan", "sign-test"), dependencies(verify));
+        assertEquals("ubuntu-24.04", verify.path("runs-on").asText());
+        JsonNode download = verify.path("steps").get(1);
+        assertEquals("${{ needs.sign-test.outputs.artifact_id }}",
+                download.path("with").path("artifact-ids").asText());
+        assertTrue(step(verify, "Verify signature and MSI digest using only the pinned test certificate")
+                .path("run").asText().contains("launcher_test_signing.py verify"));
+        assertTrue(step(verify, "Retain verified test-only result (do not distribute or install)")
+                .path("with").path("name").asText().startsWith("DO-NOT-INSTALL-test-signpath-"));
+        for (JsonNode job : jobs) {
+            assertFalse(job.has("secrets"));
+            assertFalse(job.path("permissions").toString().contains("write"));
+            for (JsonNode stage : job.path("steps")) {
+                assertFalse(stage.path("continue-on-error").asBoolean());
+                if (stage.path("uses").asText().startsWith("actions/checkout@")) {
+                    assertFalse(stage.path("with").path("persist-credentials").asBoolean());
+                }
+                String command = stage.path("run").asText();
+                assertFalse(command.contains("launcher_release.py"));
+                assertFalse(command.contains("git push"));
+                assertFalse(command.contains("gh release"));
+                assertFalse(command.contains("Import-Certificate"));
+            }
+        }
+        assertFalse(text.contains("LAUNCHER_RELEASE_APP"));
+        assertFalse(text.contains("release-signing"));
+        assertFalse(text.contains("APPLE_APPLICATION_P12"));
     }
 
     @Test

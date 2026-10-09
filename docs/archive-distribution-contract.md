@@ -218,10 +218,11 @@ to publish and to upgrade an older Windows MSI installation.
 
 ### Optional Windows signing
 
-This is preparation for SignPath Foundation, not confirmation of approval or a signed release.
+The production integration remains disabled until service configuration and live verification.
 The initial scope is the **Windows launcher MSI only**, not game archives, Linux/macOS installers
 or notarization. Ordinary PR, main-push and manual native CI builds remain unsigned and do not
-read SignPath secrets. Only the official manually dispatched release workflow can submit signing.
+read SignPath secrets. Only the official manually dispatched release workflow can submit
+production signing; a separate manual onboarding workflow submits test-signing only.
 
 Leave `LAUNCHER_SIGNING_ENABLED` unset or exactly `false` until the account is approved and
 configured. The disabled path preserves all five installer/checksum pairs byte-for-byte and
@@ -278,6 +279,77 @@ A failed signing run leaves the candidate as evidence; inspect the service reque
 rerunning to avoid duplicating an approval request. Published assets/tags are never overwritten.
 This code does not install the SignPath GitHub App, create/configure service accounts, set secrets,
 enable signing or publish a release. Those remain explicit owner actions after the response.
+
+#### SignPath test-signing onboarding
+
+Foundation onboarding uses the provided self-signed certificate first. After a successful
+integration and setup review, the Foundation orders/imports the production certificate.
+A production certificate showing `CSR PENDING` is not ready; do not try to replace it with
+the test certificate or turn on public signing.
+
+Accept the organization invitation before confirming the separate CI user's email.
+Configure the SignPath project for the official **MegaMek/mm-launcher** repository, link
+its trusted GitHub build system and authorize the **test-signing** policy for the CI submitter.
+The project slug may differ from the repository name; verify the linked repository explicitly.
+Use an approved artifact configuration accepting a ZIP with exactly one
+`MegaMek-Launcher-<version>-windows-x64.msi`, enforcing the expected MSI metadata.
+Existing same-run unsigned MSI artifacts can be used as configuration samples; no private
+key is needed or exported.
+
+Set these repository Actions settings:
+
+| Setting | Kind | Value |
+| --- | --- | --- |
+| `SIGNPATH_ORGANIZATION_ID` | Variable | SignPath organization UUID |
+| `SIGNPATH_PROJECT_SLUG` | Variable | Project authorized for MegaMek/mm-launcher |
+| `SIGNPATH_ARTIFACT_CONFIGURATION_SLUG` | Variable | Approved ZIP/MSI configuration |
+| `SIGNPATH_TEST_CERTIFICATE_SHA256` | Variable | SHA-256 of the supplied self-signed test certificate's DER bytes, not its SHA-1 thumbprint |
+| `SIGNPATH_API_TOKEN` | Secret | Confirmed CI user's submitter token, without approver/admin privileges |
+
+Export/download the **public test certificate** from SignPath and compute its SHA-256.
+For a binary DER `.cer`, `Get-FileHash -Algorithm SHA256` gives that digest directly.
+A PEM/PKCS#7 file must first be decoded/exported as the individual signer certificate's DER;
+hashing its text/container is not the certificate pin. The workflow compares that independent
+pin with the certificate embedded in the returned MSI.
+
+Keep `LAUNCHER_SIGNING_ENABLED` unset or `false`. Production policy/certificate variables are
+not used by the rehearsal, and it cannot opt into Apple signing or receive Apple/release-bot
+credentials.
+
+After explicit authorization, select **main** and dispatch **Test launcher signing (no publication)**.
+It accepts no arbitrary source/version/policy inputs, verifies the exact dispatched checkout,
+and captures the existing committed version and public configuration before calling the
+ordinary native workflow. All four native jobs and their tests must succeed before submission.
+It creates no candidate branch, tag, release or version change; GitHub permissions are read-only.
+The pinned official v3 SignPath action receives only the tested Windows MSI artifact ID,
+hardcodes `test-signing`, and waits for completion without an unsigned fallback.
+
+Windows opens both MSI databases read-only, verifies the unchanged product/version/upgrade
+identity, the independently pinned self-issued signer and presence of a timestamp, and retains
+the final checksum plus a bounded **test-only** inspection record and public certificate.
+Windows trust status is not treated as cryptographic acceptance of a self-signed signature.
+A mandatory Ubuntu verification job downloads that exact inspection artifact ID, rechecks
+all bytes and bindings, and uses `osslsigncode` to verify the Authenticode signature/file digest.
+Its temporary `-CAfile` contains only the pinned public test certificate; timestamp trust uses
+the runner's separate system CA bundle, and `-require-leaf-hash` independently pins the signer.
+The verifier must report successful timestamp verification: its zero exit alone can otherwise
+accept a current signer after a timestamp failure. OpenSSL also checks the self-signed
+certificate's signature. No certificate is imported into any machine/user trust store.
+
+Only after those checks does the workflow retain `DO-NOT-INSTALL-test-signpath-<run>-<attempt>`
+with explicit `TEST-ONLY.txt` and verification marked `publicly_trusted: false`.
+Earlier unsigned/inspection artifacts are also test-only and are not successful verification.
+No MSI is installed/executed; do not distribute or install these onboarding results.
+Test evidence has a distinct purpose/schema and is rejected by production signing verification.
+Failures block completion; inspect the existing SignPath request before an authorized retry.
+Send the successful workflow/request to the Foundation for setup review. Configure/activate
+production signing separately after the production certificate is imported and its pin verified.
+
+Offline tests cover planning, artifact bindings, mocked native verification failures,
+Windows identity/test-pin inspection and unchanged production trust guards. They do not prove
+live origin acceptance, actual SignPath signatures/timestamps or Windows installation.
+The local host must have PowerShell to execute the Windows mock guards; real cryptographic
+verification uses OpenSSL/osslsigncode on the Ubuntu runner.
 
 Offline release/signing contracts, including mocked PowerShell signature/identity guards:
 

@@ -179,12 +179,22 @@ Enabling it requires the approved SignPath organization/project/policy/artifact 
 submitter token, and signing certificate SHA-256. Invalid flags or incomplete enabled
 configuration fail before candidate creation. Once enabled, signing, trusted Authenticode,
 timestamp, certificate-pin, MSI identity or final-checksum failures block publication; there is
-no unsigned fallback. Signing runs only in the official manually dispatched release workflow,
+no unsigned fallback. Production signing runs only in the official manually dispatched release workflow,
 never in PR or ordinary native-installer builds. The service waits up to one hour for the
 configured signing approval; timeout/rejection leaves the candidate unpublished.
 See [optional Windows signing setup](docs/archive-distribution-contract.md#optional-windows-signing).
 The integration can be prepared without an account, but **real signing remains unverified until
 Foundation approval, service configuration and an authorized end-to-end release test**.
+
+For Foundation onboarding, use the separate manual **Test launcher signing (no publication)**
+workflow from **main**, after its project/artifact settings, CI submitter token and
+`SIGNPATH_TEST_CERTIFICATE_SHA256` are configured. It hardcodes `test-signing`, builds/tests
+the unchanged main commit through ordinary native CI, and verifies the self-signed MSI using
+an isolated pinned certificate without modifying any trust store. Results are test-only
+Actions artifacts, never releases or updates; do not distribute or install them.
+Keep `LAUNCHER_SIGNING_ENABLED` disabled. Send the successful run to the Foundation for setup
+review and production certificate provisioning.
+See [test-signing onboarding](docs/archive-distribution-contract.md#signpath-test-signing-onboarding).
 
 Apple signing is **off** when `APPLE_SIGNING_ENABLED` is unset or `false`.
 When enabled, the existing Intel and Apple Silicon Mac runners use temporary keychains and

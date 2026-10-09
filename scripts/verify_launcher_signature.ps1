@@ -46,14 +46,12 @@ function Get-LauncherMsiIdentity([string]$Path) {
     return $identity
 }
 
-function Confirm-LauncherMsi {
+function Get-LauncherMsiPair {
     param(
         [Parameter(Mandatory)][string]$UnsignedMsi,
         [Parameter(Mandatory)][string]$SignedMsi,
         [Parameter(Mandatory)][string]$Version,
-        [Parameter(Mandatory)][string]$Commit,
-        [Parameter(Mandatory)][string]$CertificateSha256,
-        [Parameter(Mandatory)][string]$Verification
+        [Parameter(Mandatory)][string]$Commit
     )
     $ErrorActionPreference = 'Stop'
     if ($Commit -cnotmatch '^[0-9a-f]{40}$') {
@@ -71,6 +69,22 @@ function Confirm-LauncherMsi {
     if ($unsigned.FullName -ieq $signed.FullName) {
         throw 'Signed output must be separate from the original tested MSI.'
     }
+    return @{ Unsigned = $unsigned; Signed = $signed }
+}
+
+function Confirm-LauncherMsi {
+    param(
+        [Parameter(Mandatory)][string]$UnsignedMsi,
+        [Parameter(Mandatory)][string]$SignedMsi,
+        [Parameter(Mandatory)][string]$Version,
+        [Parameter(Mandatory)][string]$Commit,
+        [Parameter(Mandatory)][string]$CertificateSha256,
+        [Parameter(Mandatory)][string]$Verification
+    )
+    $ErrorActionPreference = 'Stop'
+    $pair = Get-LauncherMsiPair -UnsignedMsi $UnsignedMsi -SignedMsi $SignedMsi -Version $Version -Commit $Commit
+    $unsigned = $pair.Unsigned
+    $signed = $pair.Signed
     Assert-LauncherSignature (Get-AuthenticodeSignature -LiteralPath $signed.FullName) $CertificateSha256
     Assert-LauncherMsiIdentity (Get-LauncherMsiIdentity $unsigned.FullName) $Version
     Assert-LauncherMsiIdentity (Get-LauncherMsiIdentity $signed.FullName) $Version
