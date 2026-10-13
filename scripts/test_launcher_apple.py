@@ -71,7 +71,8 @@ class AppleReleaseTest(unittest.TestCase):
         self.calls.append(command)
         if "--check-signature" in command:
             if self.package_signature:
-                return f"Status: signed by a certificate trusted by macOS\n    1. Developer ID Installer: {IDENTITY}\n"
+                return ("Status: signed by a developer certificate issued by Apple for distribution\n"
+                        f"    1. Developer ID Installer: {IDENTITY}\n")
             return "Status: no signature\n"
         if "--expand-full" in command:
             app = Path(command[-1]) / "Payload" / "MegaMek Launcher.app"
@@ -451,6 +452,38 @@ class AppleReleaseTest(unittest.TestCase):
                      valid.replace("trusted by macOS", "untrusted"), "Status: no signature"):
             with self.subTest(text=text), self.assertRaises(release.ReleaseError):
                 apple.verify_package_signature(text, IDENTITY)
+
+    def test_pkg_signature_accepts_native_developer_id_and_existing_trusted_status(self):
+        for status in ("signed by a developer certificate issued by Apple for distribution",
+                       "signed by a certificate trusted by macOS"):
+            text = (f'Package "MegaMek Launcher.pkg":\n'
+                    f"   Status: {status}\n"
+                    "   Signed with a trusted timestamp on: 2026-10-13 03:10:44 +0000\n"
+                    "   Certificate Chain:\n"
+                    f"    1. Developer ID Installer: {IDENTITY}\n"
+                    "       SHA256 Fingerprint:\n"
+                    "           AA BB CC DD\n"
+                    "    2. Developer ID Certification Authority\n"
+                    "    3. Apple Root CA\n")
+            with self.subTest(status=status):
+                apple.verify_package_signature(text, IDENTITY)
+
+    def test_pkg_signature_rejects_unknown_or_ambiguous_status_and_reports_native_output(self):
+        good = "signed by a developer certificate issued by Apple for distribution"
+        statuses = ("no signature", "signed by an untrusted certificate", "invalid signature",
+                    "signed by a certificate trusted by macOS but revoked", good + " but expired",
+                    good + "\n   Status: invalid signature", good + "\n   Status: " + good, "")
+        for status in statuses:
+            text = f"   Status: {status}\n    1. Developer ID Installer: {IDENTITY}\n"
+            with self.subTest(status=status), self.assertRaises(release.ReleaseError) as raised:
+                apple.verify_package_signature(text, IDENTITY)
+            self.assertIn("pkgutil --check-signature output:", str(raised.exception))
+            self.assertIn(text.strip(), str(raised.exception))
+        for leaf in (f"Other Team ({TEAM})", IDENTITY + f"\n    1. Developer ID Installer: {IDENTITY}"):
+            text = f"   Status: {good}\n    1. Developer ID Installer: {leaf}\n"
+            with self.subTest(leaf=leaf), self.assertRaises(release.ReleaseError) as raised:
+                apple.verify_package_signature(text, IDENTITY)
+            self.assertIn(text.strip(), str(raised.exception))
 
     def test_changed_or_incomplete_records_cannot_authorize_publication(self):
         records = [self.complete(platform) for platform in release.APPLE_PLATFORMS]

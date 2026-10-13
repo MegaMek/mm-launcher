@@ -417,7 +417,12 @@ inventing a different profile. Verification separately requires the approved app
 secure timestamps and hardened runtime for the app, launcher and bundled `bin/java`.
 Entitlements and actual game launching must still be validated on a live Mac before activation.
 
-The signed PKG is checked for the approved trusted Developer ID Installer. Read-only expansion
+The signed PKG is checked for the approved trusted Developer ID Installer. The check accepts
+`pkgutil`'s Developer ID distribution status and the existing trusted-macOS status, requires
+exactly one recognized status and the exact approved leaf identity, and rejects unsigned,
+untrusted, unknown or ambiguous results. Rejections include the public `pkgutil` output in
+the error so certificate/trust failures are distinguishable from output-format mismatches.
+Do not override certificate trust to make a failing check pass. Read-only expansion
 must contain exactly one correctly identified/versioned launcher with the expected native
 architecture. Deep/strict code validation runs without executing the app. `notarytool submit`
 waits up to 30 minutes for an **Accepted** result; rejection, pending status or timeout stops
