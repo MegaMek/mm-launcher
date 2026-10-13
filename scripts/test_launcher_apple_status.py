@@ -67,6 +67,8 @@ class AppleStatusTest(unittest.TestCase):
             self.assertEqual(0o600, stat.S_IMODE(key.stat().st_mode))
             self.assertEqual(0o700, stat.S_IMODE(key.parent.stat().st_mode))
         if command[2] == self.fail_command:
+            if command[2] == "log":
+                Path(command[-1]).write_text('{"jobId":', encoding="utf-8")
             raise release.ReleaseError("notarytool authentication/service failure")
         identifier = command[3]
         if command[2] == "info":
@@ -76,7 +78,7 @@ class AppleStatusTest(unittest.TestCase):
                         self.info_padding))
         self.assertIn(self.statuses[identifier], ("Invalid", "Rejected"))
         log_path = Path(command[-1])
-        self.assertEqual(self.output, log_path.parent)
+        self.assertEqual(key.parent, log_path.parent)
         log_path.write_text(self.log_override if self.log_override is not None else json.dumps(
             {"jobId": identifier, "status": self.statuses[identifier],
              "issues": [{"message": "fixture signing rejection"}]}), encoding="utf-8")
@@ -196,6 +198,8 @@ class AppleStatusTest(unittest.TestCase):
                 with self.assertRaisesRegex(release.ReleaseError, "authentication/service failure"):
                     self.check()
                 self.assertEqual(before + (1 if operation == "info" else 2), len(self.calls))
+                self.assertEqual({"macos-intel-info.json"} if operation == "log" else set(),
+                                 {file.name for file in self.output.glob("*.json")})
                 self.assertFalse(self.summary.exists())
                 self.assert_clean_private_key()
 
@@ -210,8 +214,26 @@ class AppleStatusTest(unittest.TestCase):
                 with self.assertRaises((release.ReleaseError, ValueError)):
                     self.check()
                 self.assertTrue((self.output / "macos-intel-info.json").exists())
+                self.assertEqual({"macos-intel-info.json"},
+                                 {file.name for file in self.output.iterdir()},
+                                 "invalid logs must never enter the public artifact directory")
                 self.assertFalse(self.summary.exists())
                 self.assert_clean_private_key()
+
+    def test_failed_report_copy_cannot_publish_partial_json_and_cleans_staging(self):
+        self.statuses[INTEL] = "Invalid"
+
+        def partial_copy(source, destination):
+            self.assertEqual(self.runner_temp, source.parent.parent)
+            Path(destination).write_text('{"jobId":', encoding="utf-8")
+            raise OSError("fixture report copy failed")
+
+        with patch.object(apple.shutil, "copyfile", side_effect=partial_copy):
+            with self.assertRaisesRegex(OSError, "fixture report copy failed"):
+                self.check()
+        self.assertEqual({"macos-intel-info.json"}, {file.name for file in self.output.iterdir()})
+        self.assertFalse(self.summary.exists())
+        self.assert_clean_private_key()
 
     def test_cli_status_uses_exact_dispatch_and_requested_ids_without_signing(self):
         with patch.dict(os.environ, self.environment, clear=True), patch.object(apple.sys, "argv", [

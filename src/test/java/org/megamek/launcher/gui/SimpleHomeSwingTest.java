@@ -1268,26 +1268,12 @@ class SimpleHomeSwingTest {
             SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
             assertNotNull(waitFor(() -> find(frame, "changeDefaultJavaButton")));
             // The news worker is still pending while settings finishes loading.
-            onEdt(() -> {
-                frame.setSize(1080, 760);
-                frame.validate();
-                assertSettingsGeometry(frame, true, "newsLoadingMessage");
-                frame.setSize(720, 600);
-                frame.validate();
-                assertSettingsGeometry(frame, false, "newsLoadingMessage");
-                return null;
-            });
+            assertSettingsGeometryAtSize(frame, 1080, 760, true, "newsLoadingMessage");
+            assertSettingsGeometryAtSize(frame, 720, 600, false, "newsLoadingMessage");
             releaseNews.countDown();
             assertNotNull(waitFor(() -> find(frame, "newsUnavailableMessage")));
-            onEdt(() -> {
-                frame.setSize(1080, 760);
-                frame.validate();
-                assertSettingsGeometry(frame, true, "newsUnavailableMessage");
-                frame.setSize(720, 600);
-                frame.validate();
-                assertSettingsGeometry(frame, false, "newsUnavailableMessage");
-                return null;
-            });
+            assertSettingsGeometryAtSize(frame, 1080, 760, true, "newsUnavailableMessage");
+            assertSettingsGeometryAtSize(frame, 720, 600, false, "newsUnavailableMessage");
         } finally {
             releaseNews.countDown();
             dispose(frame);
@@ -1310,9 +1296,8 @@ class SimpleHomeSwingTest {
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
+            resizeSettingsWindow(frame, 1080, 760);
             onEdt(() -> {
-                frame.setSize(1080, 760);
-                frame.validate();
                 assertEquals(0, ((JPanel) find(frame, "settingsRightColumn")).getY());
                 assertNotNull(find(frame, "settingsLoadingMessage"));
                 assertNotNull(find(frame, "allNewsButton"));
@@ -1320,9 +1305,8 @@ class SimpleHomeSwingTest {
             });
             services.releaseSettings.countDown();
             assertNotNull(waitFor(() -> find(frame, "settingsErrorMessage")));
+            resizeSettingsWindow(frame, 720, 600);
             onEdt(() -> {
-                frame.setSize(720, 600);
-                frame.validate();
                 JPanel left = find(frame, "settingsLeftColumn");
                 JPanel right = find(frame, "settingsRightColumn");
                 assertEquals(left.getWidth(), right.getWidth());
@@ -1362,6 +1346,34 @@ class SimpleHomeSwingTest {
             services.releaseSettings.countDown();
             dispose(frame);
         }
+    }
+
+    private static void resizeSettingsWindow(LauncherFrame frame, int width, int height) throws Exception {
+        java.awt.Dimension target = onEdt(() -> {
+            java.awt.Dimension fitted = GuiScale.fitWindow(new java.awt.Dimension(width, height),
+                    GuiScale.usableBounds(frame.getGraphicsConfiguration()));
+            frame.setSize(fitted);
+            return fitted;
+        });
+        SwingTestSupport.awaitCondition("Settings viewport at " + target.width + "x" + target.height, () -> {
+            frame.validate();
+            java.awt.Insets insets = frame.getInsets();
+            javax.swing.JScrollPane scroll = find(frame, "settingsScrollPane");
+            return frame.getWidth() == target.width && frame.getHeight() == target.height
+                    && frame.getContentPane().getWidth() == target.width - insets.left - insets.right
+                    && frame.getContentPane().getHeight() == target.height - insets.top - insets.bottom
+                    && scroll != null && scroll.getViewport().getView() != null
+                    && scroll.getViewport().getView().getWidth() == scroll.getViewport().getExtentSize().width;
+        });
+    }
+
+    private static void assertSettingsGeometryAtSize(LauncherFrame frame, int width, int height,
+                                                     boolean wide, String newsState) throws Exception {
+        resizeSettingsWindow(frame, width, height);
+        onEdt(() -> {
+            assertSettingsGeometry(frame, wide, newsState);
+            return null;
+        });
     }
 
     private static void assertSettingsGeometry(LauncherFrame frame, boolean wide, String newsState) {
@@ -1454,23 +1466,17 @@ class SimpleHomeSwingTest {
             JLabel date = onEdt(() -> assertInstanceOf(JLabel.class, find(frame, "newsArticleDate0")));
             assertEquals("Aug 14, 2026", onEdt(date::getText));
             assertNotNull(waitFor(() -> find(frame, "defaultJavaPath")));
+            assertSettingsGeometryAtSize(frame, 2000, 760, true, "newsArticleButton0");
             onEdt(() -> {
-                frame.setSize(2000, 760);
-                frame.validate();
-                assertSettingsGeometry(frame, true, "newsArticleButton0");
                 assertEquals(datedTitle, headline.getToolTipText());
                 assertEquals(datedTitle,
                         headline.getAccessibleContext().getAccessibleName());
                 assertEquals(javax.accessibility.AccessibleRole.HYPERLINK,
                         headline.getAccessibleContext().getAccessibleRole());
-                frame.setSize(1080, 760);
-                frame.validate();
-                assertSettingsGeometry(frame, true, "newsArticleButton0");
-                frame.setSize(720, 600);
-                frame.validate();
-                assertSettingsGeometry(frame, false, "newsArticleButton0");
                 return null;
             });
+            assertSettingsGeometryAtSize(frame, 1080, 760, true, "newsArticleButton0");
+            assertSettingsGeometryAtSize(frame, 720, 600, false, "newsArticleButton0");
             assertEquals(1, requests.get());
             SwingUtilities.invokeAndWait(waitButton(frame, "homeButton")::doClick);
             SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);

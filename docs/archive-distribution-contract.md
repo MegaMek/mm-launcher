@@ -537,9 +537,12 @@ and native authentication/service errors fail visibly without retry or fallback.
 is shown as pending, not accepted; a successful status query is not a successful rehearsal.
 `Invalid` or `Rejected` retrieves the corresponding bounded, submission-bound JSON rejection log
 and fails the job after reporting both statuses. The workflow retains available public JSON only
-as `APPLE-NOTARY-STATUS-<run>-<attempt>`, including partial evidence on failure, and writes a status
-table in its summary after complete queries. These reports are diagnostic, not signing/release
-proofs, and do not satisfy any release-publication verification.
+as `APPLE-NOTARY-STATUS-<run>-<attempt>`, including validated partial evidence on failure, and writes
+a status table in its summary after complete queries. Native logs are downloaded into the owned
+private temporary directory; only logs that pass every check are copied to a non-artifact staging
+name and atomically renamed into the public `.json` glob. Malformed, duplicate-key, wrong-submission,
+oversized and partially downloaded/copied logs cannot be published. These reports are diagnostic,
+not signing/release proofs, and do not satisfy any release-publication verification.
 
 The current rehearsal retains packages only after successful notarization and final checks.
 If it timed out, its ephemeral runners no longer hold the original packages. Even `Accepted`

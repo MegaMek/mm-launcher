@@ -131,7 +131,7 @@ def check_notarization_status(environment, intel_submission_id, silicon_submissi
             statuses.append((platform, identifier, status))
             print(f"{platform}: {status} ({identifier})")
             if status in ("Invalid", "Rejected"):
-                log_path = output / f"{platform}-log.json"
+                log_path = directory / f"{platform}-log.json"
                 run(["/usr/bin/xcrun", "notarytool", "log", identifier, *authentication, str(log_path)])
                 if (log_path.is_symlink() or not log_path.is_file()
                         or not 0 < log_path.stat().st_size <= 2 * 1024 * 1024):
@@ -140,6 +140,12 @@ def check_notarization_status(environment, intel_submission_id, silicon_submissi
                 if (not isinstance(log, dict) or not isinstance(log.get("jobId"), str)
                         or log["jobId"].lower() != identifier):
                     raise release.ReleaseError(f"Apple rejection log does not match the submission for {platform}")
+                staged = output / f"{platform}-log.pending"
+                try:
+                    shutil.copyfile(log_path, staged)
+                    staged.replace(output / f"{platform}-log.json")
+                finally:
+                    staged.unlink(missing_ok=True)
     with Path(environment["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as summary:
         summary.write("### Existing Apple notarization submissions\n\n"
                       "| Platform | Submission ID | Apple status |\n|---|---|---|\n")
