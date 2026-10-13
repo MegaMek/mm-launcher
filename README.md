@@ -220,6 +220,11 @@ Mac testers may install the matching package on a disposable test system to chec
 launch, bundled Java/game launch and upgrades. Do not distribute these as public updates.
 See [Apple signing rehearsal](docs/archive-distribution-contract.md#apple-signing-rehearsal).
 
+If a rehearsal times out waiting for Apple, use the separate manual **Check Apple notarization
+status (no submission)** workflow from **main** before retrying. It queries the two existing
+submission IDs without building or uploading another package, and retains public status/rejection
+reports only. See [Apple notarization status](docs/archive-distribution-contract.md#apple-notarization-status).
+
 Writes are not automatically retried, existing assets/tags are never overwritten, and failure
 does not delete a candidate branch, tag, draft, or published release.
 A failed build or unpublished draft leaves `main` unchanged. Inspect any partial state before

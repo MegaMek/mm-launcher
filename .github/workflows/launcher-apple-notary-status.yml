@@ -1,0 +1,66 @@
+# Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
+# SPDX-License-Identifier: GPL-3.0-or-later
+name: Check Apple notarization status (no submission)
+run-name: Apple notarization status (${{ github.run_id }})
+
+on:
+  workflow_dispatch:
+    inputs:
+      intel_submission_id:
+        description: "Existing Intel Apple submission UUID; never submits a new package"
+        required: true
+        type: string
+        default: "a6bdee64-dece-4e6b-a38d-6367c4255f68"
+      silicon_submission_id:
+        description: "Existing Apple Silicon submission UUID; never submits a new package"
+        required: true
+        type: string
+        default: "a4ba432e-66e7-485b-9ee9-504dc2707545"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: launcher-apple-notary-status
+  cancel-in-progress: false
+
+jobs:
+  status:
+    runs-on: macos-15
+    timeout-minutes: 10
+    steps:
+      - name: Reject nonofficial or nonmain dispatch before reading credentials
+        run: |
+          if [[ "$GITHUB_REPOSITORY" != MegaMek/mm-launcher ||
+                "$GITHUB_REF" != refs/heads/main ||
+                "$GITHUB_EVENT_NAME" != workflow_dispatch ]]; then
+            echo 'Apple status requires manual dispatch from official main.' >&2
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Test release tooling without network or publication
+        run: python3 -B -m unittest discover -s scripts -p 'test_launcher_*.py'
+      - name: Query existing submissions and remove the temporary private key
+        id: status
+        env:
+          INTEL_SUBMISSION_ID: ${{ inputs.intel_submission_id }}
+          SILICON_SUBMISSION_ID: ${{ inputs.silicon_submission_id }}
+          APPLE_NOTARY_KEY_ID: ${{ vars.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ vars.APPLE_NOTARY_ISSUER_ID }}
+          APPLE_NOTARY_PRIVATE_KEY: ${{ secrets.APPLE_NOTARY_PRIVATE_KEY }}
+        run: |
+          python3 -B scripts/launcher_apple.py status \
+            --intel-submission-id "$INTEL_SUBMISSION_ID" \
+            --silicon-submission-id "$SILICON_SUBMISSION_ID" \
+            --assets build/apple-notary-status
+      - name: Retain public status evidence after private-key cleanup
+        if: ${{ !cancelled() && hashFiles('build/apple-notary-status/*.json') != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: APPLE-NOTARY-STATUS-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build/apple-notary-status/*.json
+          if-no-files-found: error
+          retention-days: 14

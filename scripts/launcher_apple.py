@@ -1,6 +1,6 @@
 # Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Apple keychain setup, notarization and PKG verification for releases and rehearsals."""
+"""Apple keychain setup, notarization/status and PKG verification for releases and rehearsals."""
 
 import argparse
 import base64
@@ -42,6 +42,17 @@ def decoded_secret(environment, key):
     return content
 
 
+def notary_identity(environment):
+    key_id = environment.get("APPLE_NOTARY_KEY_ID", "")
+    issuer = environment.get("APPLE_NOTARY_ISSUER_ID", "")
+    if not isinstance(key_id, str) or not re.fullmatch(r"[A-Z0-9]{10}", key_id):
+        raise release.ReleaseError("APPLE_NOTARY_KEY_ID must be the 10-character API key ID")
+    if (not isinstance(issuer, str)
+            or not re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", issuer)):
+        raise release.ReleaseError("APPLE_NOTARY_ISSUER_ID must be the team API issuer UUID")
+    return key_id, issuer
+
+
 def configuration(environment, require_credentials=True):
     flag = environment.get("APPLE_SIGNING_ENABLED", "")
     if flag in ("", "false"):
@@ -50,13 +61,8 @@ def configuration(environment, require_credentials=True):
         raise release.ReleaseError("APPLE_SIGNING_ENABLED must be exactly true, false, or unset")
     team = environment.get("APPLE_TEAM_ID", "")
     identity = environment.get("APPLE_SIGNING_IDENTITY", "")
-    key_id = environment.get("APPLE_NOTARY_KEY_ID", "")
-    issuer = environment.get("APPLE_NOTARY_ISSUER_ID", "")
     release.verify_apple_identity(team, identity)
-    if not re.fullmatch(r"[A-Z0-9]{10}", key_id):
-        raise release.ReleaseError("APPLE_NOTARY_KEY_ID must be the 10-character API key ID")
-    if not re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", issuer):
-        raise release.ReleaseError("APPLE_NOTARY_ISSUER_ID must be the team API issuer UUID")
+    key_id, issuer = notary_identity(environment)
     if require_credentials:
         for key in ("APPLE_APPLICATION_P12", "APPLE_INSTALLER_P12", "APPLE_NOTARY_PRIVATE_KEY"):
             decoded_secret(environment, key)
@@ -82,6 +88,70 @@ def run(command, timeout=120):
     if result.returncode:
         raise release.ReleaseError(f"{Path(command[0]).name} failed: {result.stdout.strip()} {result.stderr.strip()}")
     return result.stdout + result.stderr
+
+
+def check_notarization_status(environment, intel_submission_id, silicon_submission_id, output):
+    require_release(environment)
+    if sys.platform != "darwin":
+        raise release.ReleaseError("Apple notarization status requires a macOS runner")
+    release.verify_checkout(Path.cwd(), release.require_sha(environment.get("GITHUB_SHA")))
+    identifiers = (intel_submission_id, silicon_submission_id)
+    if any(not isinstance(value, str)
+           or not re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", value)
+           for value in identifiers):
+        raise release.ReleaseError("Both Apple submission IDs must be UUIDs")
+    identifiers = tuple(value.lower() for value in identifiers)
+    if identifiers[0] == identifiers[1]:
+        raise release.ReleaseError("Apple architecture submission IDs must be distinct")
+    key_id, issuer = notary_identity(environment)
+    credential = decoded_secret(environment, "APPLE_NOTARY_PRIVATE_KEY")
+    output.mkdir(parents=True)
+    statuses = []
+    with tempfile.TemporaryDirectory(prefix="mm-launcher-notary-status-",
+                                     dir=environment["RUNNER_TEMP"]) as temporary:
+        directory = Path(temporary)
+        directory.chmod(0o700)
+        key = directory / f"AuthKey_{key_id}.p8"
+        key.write_bytes(credential)
+        key.chmod(0o600)
+        authentication = ["--key", str(key), "--key-id", key_id, "--issuer", issuer]
+        for platform, identifier in zip(release.APPLE_PLATFORMS, identifiers):
+            text = run(["/usr/bin/xcrun", "notarytool", "info", identifier,
+                        *authentication, "--output-format", "json"])
+            if not 0 < len(text.encode("utf-8")) <= release.SIGNING_RECORD_LIMIT:
+                raise release.ReleaseError(f"Apple status response must be bounded JSON for {platform}")
+            info = json.loads(text, object_pairs_hook=release.unique_json_object)
+            if (not isinstance(info, dict) or not isinstance(info.get("id"), str)
+                    or info["id"].lower() != identifier
+                    or info.get("status") not in ("Accepted", "In Progress", "Invalid", "Rejected")):
+                raise release.ReleaseError(f"Apple status response has an unexpected ID or status for {platform}")
+            status = info["status"]
+            (output / f"{platform}-info.json").write_text(
+                json.dumps(info, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            statuses.append((platform, identifier, status))
+            print(f"{platform}: {status} ({identifier})")
+            if status in ("Invalid", "Rejected"):
+                log_path = output / f"{platform}-log.json"
+                run(["/usr/bin/xcrun", "notarytool", "log", identifier, *authentication, str(log_path)])
+                if (log_path.is_symlink() or not log_path.is_file()
+                        or not 0 < log_path.stat().st_size <= 2 * 1024 * 1024):
+                    raise release.ReleaseError(f"Apple rejection log must be bounded regular JSON for {platform}")
+                log = json.loads(log_path.read_text(encoding="utf-8"), object_pairs_hook=release.unique_json_object)
+                if (not isinstance(log, dict) or not isinstance(log.get("jobId"), str)
+                        or log["jobId"].lower() != identifier):
+                    raise release.ReleaseError(f"Apple rejection log does not match the submission for {platform}")
+    with Path(environment["GITHUB_STEP_SUMMARY"]).open("a", encoding="utf-8") as summary:
+        summary.write("### Existing Apple notarization submissions\n\n"
+                      "| Platform | Submission ID | Apple status |\n|---|---|---|\n")
+        for platform, identifier, status in statuses:
+            summary.write(f"| {platform} | `{identifier}` | {status} |\n")
+        summary.write("\nThis query did not build, submit, staple, install or publish anything. "
+                      "`In Progress` is pending, not acceptance. These reports are not release proofs "
+                      "and cannot recover packages lost after a rehearsal timeout.\n")
+    rejected = [platform for platform, _, status in statuses if status in ("Invalid", "Rejected")]
+    if rejected:
+        raise release.ReleaseError("Apple rejected existing submissions for " + ", ".join(rejected)
+                                   + "; inspect the retained rejection logs before retrying")
 
 
 def setup(environment):
@@ -155,7 +225,7 @@ def verify_code_details(text, team, identity, identifier=None):
 
 
 def verify_package_signature(text, identity):
-    statuses = re.findall(r"(?m)^[ \t]*Status:[ \t]*(.+?)[ \t]*$", text)
+    statuses = re.findall(r"(?m)^[ \t]*Status:[ \t]*(.*?)[ \t]*$", text)
     leaves = re.findall(r"(?m)^[ \t]*1\.[ \t]+(.+?)[ \t]*$", text)
     if (len(statuses) != 1 or statuses[0] not in (
             "signed by a developer certificate issued by Apple for distribution",
@@ -321,6 +391,7 @@ def rehearse(args, environment):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("plan", "setup", "complete", "cleanup",
+                                           "status",
                                            "rehearsal-plan", "rehearsal-setup",
                                            "rehearsal-complete", "rehearsal-verify"))
     parser.add_argument("--version")
@@ -329,12 +400,18 @@ def main():
     parser.add_argument("--package", type=Path)
     parser.add_argument("--verification", type=Path)
     parser.add_argument("--assets", type=Path)
+    parser.add_argument("--intel-submission-id")
+    parser.add_argument("--silicon-submission-id")
     args = parser.parse_args()
     if args.command == "cleanup":
         cleanup(os.environ)
         return
     require_release(os.environ)
-    if args.command.startswith("rehearsal-"):
+    if args.command == "status":
+        if args.assets is None:
+            raise release.ReleaseError("Apple status requires an output directory for public reports")
+        check_notarization_status(os.environ, args.intel_submission_id, args.silicon_submission_id, args.assets)
+    elif args.command.startswith("rehearsal-"):
         if args.package is not None or args.verification is not None:
             raise release.ReleaseError("Apple rehearsal cannot override package or verification paths")
         rehearse(args, os.environ)

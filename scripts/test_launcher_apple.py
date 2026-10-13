@@ -472,7 +472,8 @@ class AppleReleaseTest(unittest.TestCase):
         good = "signed by a developer certificate issued by Apple for distribution"
         statuses = ("no signature", "signed by an untrusted certificate", "invalid signature",
                     "signed by a certificate trusted by macOS but revoked", good + " but expired",
-                    good + "\n   Status: invalid signature", good + "\n   Status: " + good, "")
+                    good + "\n   Status: invalid signature", good + "\n   Status: " + good,
+                    good + "\n   Status:", good + "\n   Status: \t", "\n   Status: " + good, "")
         for status in statuses:
             text = f"   Status: {status}\n    1. Developer ID Installer: {IDENTITY}\n"
             with self.subTest(status=status), self.assertRaises(release.ReleaseError) as raised:
