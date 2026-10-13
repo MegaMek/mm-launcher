@@ -364,7 +364,7 @@ See the [official GitHub integration](https://docs.signpath.io/trusted-build-sys
 
 ### Optional Apple signing
 
-This is disabled preparation for Developer ID distribution, **not** confirmation of membership,
+The production path is disabled preparation for Developer ID distribution, **not** confirmation of membership,
 working certificates, notarization or a signed release. It uses our existing GitHub-hosted
 Intel and Apple Silicon macOS runners; no dedicated Mac build machine or App Store submission
 is required. A real Mac is still needed to validate the initial installation, first launch,
@@ -375,7 +375,8 @@ Leave it unset or exactly `false`; missing Apple settings/credentials are then i
 the ordinary Mac packaging path remains unchanged. Invalid nonempty flags fail explicitly.
 Both platforms must sign/notarize successfully once enabled; no unsigned fallback is permitted.
 
-Configure repository Actions settings only after enrollment and explicit activation authorization:
+After enrollment, configure the following repository Actions settings for an authorized rehearsal
+or release. Setting the production enable flag requires separate explicit activation authorization:
 
 | Setting | Kind | Value |
 | --- | --- | --- |
@@ -403,7 +404,9 @@ secrets to the reusable build workflow, not `secrets: inherit`. The signing step
 both `runner.os == 'macOS'` and the release-only `apple_signing` input, whose default is false.
 Ordinary native dispatch has no signing inputs. Before key import, the setup script requires
 official main/manual dispatch, verifies the checkout and proves its version-only candidate
-against the captured main SHA. Forks, PRs and arbitrary source commits cannot use this setup.
+against the captured main SHA. The separate rehearsal requires the unchanged exact dispatched
+main checkout instead; it cannot supply a candidate or arbitrary version. Forks, PRs and
+arbitrary source commits cannot use either setup.
 
 Each enabled Mac build creates a private task-owned directory and temporary keychain, imports
 the two identities, permits the Apple signing tools to use them, and adds only that keychain to
@@ -449,6 +452,59 @@ actual jpackage signing, runtime entitlements or macOS Gatekeeper/installation b
 Do not activate either signing mode from this preparation alone.
 See [Apple Developer ID](https://developer.apple.com/developer-id/) and
 [JDK 21 jpackage signing options](https://docs.oracle.com/en/java/javase/21/docs/specs/man/jpackage.html).
+
+#### Apple signing rehearsal
+
+Use **Test Apple signing (no publication)** to prove the configured Apple credentials and
+notarization integration before public release activation. Configure the four public Apple
+settings and five secrets above, but keep `APPLE_SIGNING_ENABLED` unset or `false`. The exact
+identity spelling must match both certificates, not an informal account name. The rehearsal
+uses a local configuration mapping to request signing; it does not change repository variables
+or authorize any release.
+
+The workflow is manual-only, has no source/version/identity override inputs, and rejects
+nonofficial/nonmain origins explicitly before reading credentials. It captures the exact
+dispatched main SHA, existing version and validated public settings, without a GitHub API
+write or version-only candidate. Offline release tooling and each architecture's required
+headless source tests must pass before that Mac imports private credentials. Both existing
+GitHub-hosted Mac runner types are used; Windows/Linux builds and signing are not requested.
+
+Dedicated rehearsal commands reuse the release keychain setup, jpackage signing and mandatory
+Developer ID, timestamp, hardened-runtime, architecture, notarization, stapling and Gatekeeper
+checks. Release setup retains its version-only-candidate verification. The `always()` cleanup
+runs immediately after notarization, including on failure, before staging or any artifact action.
+It restores the keychain search list and removes the temporary keychain and private files.
+No installer or app is executed on CI.
+
+Each successful Mac job stages only its exact final PKG, post-stapling checksum and record in
+a flat directory, then captures its immutable artifact ID under a distinct architecture output.
+The final job requires both IDs, downloads those exact same-run artifacts, and validates the
+complete six-file set, source/version/team/identity, approval records and final-byte hashes.
+Records carry `purpose: apple-rehearsal-only` and are rejected by production proof consumers.
+Only after both platforms and aggregation succeed does it retain
+`TEST-ONLY-Apple-signed-launcher-<run>-<attempt>` with `TEST-ONLY.txt` and a bound manifest.
+Intermediate per-platform artifacts are not evidence that the whole rehearsal succeeded.
+No public release, tag, candidate branch, version change, automatic launcher update, production
+enablement, release-bot credential or SignPath request is involved.
+
+After separate authorization and merge to official main, select **main** and dispatch the
+rehearsal once. Notarization can take up to 30 minutes per architecture. On failure or timeout,
+inspect the existing Apple submission/run evidence before retrying; do not automatically
+resubmit, skip notarization or use an unsigned fallback.
+
+After the entire workflow is green, authorized Mac testers may download the final artifact and
+install the package matching their architecture on a disposable/test Mac. These are real
+Developer ID-signed/notarized installers, not self-signed certificates, but are not public
+release/update assets. Installation may replace an existing launcher because the package
+identity is intentionally preserved; do not test over an everyday launcher or the only copy
+of campaign/game data. Validate first installation/launch, bundled Java and all three games,
+plus upgrade behavior with disposable data. Normal browser quarantine must be retained;
+do not use quarantine removal or global trust changes as a substitute for Gatekeeper acceptance.
+Real Mac results and separate approval are required before production activation.
+
+Offline tests cover source/credential guards, release candidate preservation, shared native
+verification, test-only proofs and aggregation failures. They do not establish live Apple
+acceptance, certificate/private-key validity, runtime entitlements or actual installation.
 
 ### Installed launcher self-update
 
