@@ -46,6 +46,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WorkflowStructureTest {
@@ -100,6 +101,7 @@ class WorkflowStructureTest {
             assertTrue(paths.contains(".github/workflows/launcher-gui-smoke.yml"));
             assertTrue(paths.contains(".github/workflows/launcher-test-signing.yml"));
             assertTrue(paths.contains(".github/workflows/launcher-apple-rehearsal.yml"));
+            assertTrue(paths.contains(".github/workflows/launcher-apple-notary-status.yml"));
         }
         JsonNode installers = jobs.path("installers");
         assertEquals("release-tooling", installers.path("needs").asText());
@@ -730,6 +732,68 @@ class WorkflowStructureTest {
         for (String forbidden : List.of("contents: write", "LAUNCHER_RELEASE_APP", "SIGNPATH_API_TOKEN",
                 "vars.APPLE_SIGNING_ENABLED", "launcher_release.py", "git push", "gh release", "sudo installer")) {
             assertFalse(text.contains(forbidden), "rehearsal must not contain " + forbidden);
+        }
+    }
+
+    @Test
+    void appleStatusQueriesOnlyExistingSubmissionsWithOneSecretAndNoPublication() throws Exception {
+        String text = Files.readString(Path.of(".github", "workflows", "launcher-apple-notary-status.yml"));
+        JsonNode root = new ObjectMapper(new YAMLFactory()).readTree(text);
+        assertEquals(1, root.path("on").size());
+        JsonNode inputs = root.path("on").path("workflow_dispatch").path("inputs");
+        assertEquals(2, inputs.size());
+        for (String architecture : List.of("intel", "silicon")) {
+            JsonNode input = inputs.path(architecture + "_submission_id");
+            assertTrue(input.path("required").asBoolean());
+            assertEquals("string", input.path("type").asText());
+            assertTrue(input.path("default").asText().matches(
+                    "[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"));
+        }
+        assertNotEquals(inputs.path("intel_submission_id").path("default").asText(),
+                inputs.path("silicon_submission_id").path("default").asText());
+        assertEquals(1, root.path("permissions").size());
+        assertEquals("read", root.path("permissions").path("contents").asText());
+        assertFalse(root.path("concurrency").path("cancel-in-progress").asBoolean());
+        assertEquals(1, root.path("jobs").size());
+        JsonNode job = root.path("jobs").path("status");
+        assertEquals("macos-15", job.path("runs-on").asText());
+        assertFalse(job.has("if"), "wrong origins must fail visibly");
+        JsonNode guard = job.path("steps").get(0);
+        for (String required : List.of("MegaMek/mm-launcher", "refs/heads/main", "workflow_dispatch", "exit 1")) {
+            assertTrue(guard.path("run").asText().contains(required));
+        }
+        JsonNode checkout = job.path("steps").get(1);
+        assertEquals("${{ github.sha }}", checkout.path("with").path("ref").asText());
+        assertFalse(checkout.path("with").path("persist-credentials").asBoolean());
+        assertEquals("python3 -B -m unittest discover -s scripts -p 'test_launcher_*.py'",
+                job.path("steps").get(2).path("run").asText());
+        JsonNode query = job.path("steps").get(3);
+        assertTrue(query.path("run").asText().contains("launcher_apple.py status"));
+        assertEquals("${{ inputs.intel_submission_id }}", query.path("env").path("INTEL_SUBMISSION_ID").asText());
+        assertEquals("${{ inputs.silicon_submission_id }}", query.path("env").path("SILICON_SUBMISSION_ID").asText());
+        assertEquals("${{ secrets.APPLE_NOTARY_PRIVATE_KEY }}",
+                query.path("env").path("APPLE_NOTARY_PRIVATE_KEY").asText());
+        JsonNode artifact = job.path("steps").get(4);
+        assertTrue(artifact.path("if").asText().contains("!cancelled()"));
+        assertTrue(artifact.path("if").asText().contains("hashFiles('build/apple-notary-status/*.json')"));
+        assertEquals("build/apple-notary-status/*.json", artifact.path("with").path("path").asText());
+        assertEquals("error", artifact.path("with").path("if-no-files-found").asText());
+        assertTrue(artifact.path("with").path("name").asText().startsWith("APPLE-NOTARY-STATUS-"));
+        assertEquals(List.of("actions/checkout@v4", "actions/upload-artifact@v4"), actions(job));
+        assertEquals(5, job.path("steps").size());
+        assertFalse(job.has("env"));
+        assertFalse(job.has("secrets"));
+        for (JsonNode stage : job.path("steps")) {
+            assertFalse(stage.path("continue-on-error").asBoolean());
+            if (stage.path("env").toString().contains("secrets.")) {
+                assertEquals(query, stage);
+                assertEquals(1, stage.path("env").toString().split("secrets\\.", -1).length - 1);
+            }
+        }
+        for (String forbidden : List.of("contents: write", "APPLE_SIGNING_ENABLED", "APPLE_APPLICATION",
+                "APPLE_INSTALLER", "setup-java", "setup-gradle", "gradlew", "launcher_release.py",
+                "rehearsal-complete", "notarytool submit", "git push", "gh release", "sudo installer")) {
+            assertFalse(text.contains(forbidden), "status must not contain " + forbidden);
         }
     }
 

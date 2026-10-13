@@ -511,6 +511,45 @@ Offline tests cover source/credential guards, release candidate preservation, sh
 verification, test-only proofs and aggregation failures. They do not establish live Apple
 acceptance, certificate/private-key validity, runtime entitlements or actual installation.
 
+#### Apple notarization status
+
+Use the separate manual **Check Apple notarization status (no submission)** workflow from
+official **main** to inspect existing submissions after a notarization timeout. Its two required
+UUID inputs default to the Intel and Apple Silicon submissions from rehearsal run `38342623241`:
+`a6bdee64-dece-4e6b-a38d-6367c4255f68` and `a4ba432e-66e7-485b-9ee9-504dc2707545`.
+For a later rehearsal, copy the distinct submission IDs from that run rather than reusing these
+defaults. Queries are read-only against Apple and do not change repository contents or releases:
+no build, signing, submission, waiting, stapling, installation, candidate, release or production
+activation occurs.
+
+The single Mac job rejects nonofficial/nonmain dispatch, checks out the exact dispatched SHA,
+tests the offline tooling before credentials, and verifies checkout identity again before any
+credential file is written. It needs only `APPLE_NOTARY_KEY_ID`, `APPLE_NOTARY_ISSUER_ID` and
+the `APPLE_NOTARY_PRIVATE_KEY` secret. It does not require either P12, either certificate password,
+the signing identity, or `APPLE_SIGNING_ENABLED`. The API key is decoded into an owned runner-temp
+directory with mode `0700`; its `.p8` file has mode `0600`. The helper's temporary-directory context
+removes it on successful query or failure, before any artifact upload. It imports nothing into
+the keychain; cancellation also discards the ephemeral runner.
+
+Each `notarytool info` response must be bounded, duplicate-key-free JSON, match the requested UUID
+and report exactly `Accepted`, `In Progress`, `Invalid` or `Rejected`. Unknown/malformed replies
+and native authentication/service errors fail visibly without retry or fallback. `In Progress`
+is shown as pending, not accepted; a successful status query is not a successful rehearsal.
+`Invalid` or `Rejected` retrieves the corresponding bounded, submission-bound JSON rejection log
+and fails the job after reporting both statuses. The workflow retains available public JSON only
+as `APPLE-NOTARY-STATUS-<run>-<attempt>`, including validated partial evidence on failure, and writes
+a status table in its summary after complete queries. Native logs are downloaded into the owned
+private temporary directory; only logs that pass every check are copied to a non-artifact staging
+name and atomically renamed into the public `.json` glob. Malformed, duplicate-key, wrong-submission,
+oversized and partially downloaded/copied logs cannot be published. These reports are diagnostic,
+not signing/release proofs, and do not satisfy any release-publication verification.
+
+The current rehearsal retains packages only after successful notarization and final checks.
+If it timed out, its ephemeral runners no longer hold the original packages. Even `Accepted`
+from this status query cannot recover, staple, verify or install those missing bytes. Inspect the
+existing Apple result before separately authorizing another rehearsal; never infer release
+readiness, automatically resubmit, or change the wait policy from a status result alone.
+
 ### Installed launcher self-update
 
 Startup and Settings use the same update check. A single themed **Update now**
