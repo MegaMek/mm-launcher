@@ -46,7 +46,6 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class WorkflowStructureTest {
@@ -567,6 +566,7 @@ class WorkflowStructureTest {
     void testSigningIsManualPinnedReadOnlyAndNeverPublishes() throws Exception {
         String text = Files.readString(Path.of(".github", "workflows", "launcher-test-signing.yml"));
         JsonNode root = new ObjectMapper(new YAMLFactory()).readTree(text);
+        assertEquals("Maintenance: Test Windows signing (no publication)", root.path("name").asText());
         assertEquals(1, root.path("on").size());
         assertTrue(root.path("on").has("workflow_dispatch"));
         assertFalse(root.path("on").path("workflow_dispatch").has("inputs"));
@@ -640,6 +640,7 @@ class WorkflowStructureTest {
     void appleRehearsalIsManualExactMainReadOnlyAndNeverPublishes() throws Exception {
         String text = Files.readString(Path.of(".github", "workflows", "launcher-apple-rehearsal.yml"));
         JsonNode root = new ObjectMapper(new YAMLFactory()).readTree(text);
+        assertEquals("Maintenance: Test Apple signing (no publication)", root.path("name").asText());
         assertEquals(1, root.path("on").size());
         assertTrue(root.path("on").has("workflow_dispatch"));
         assertFalse(root.path("on").path("workflow_dispatch").has("inputs"));
@@ -739,6 +740,7 @@ class WorkflowStructureTest {
     void appleStatusQueriesOnlyExistingSubmissionsWithOneSecretAndNoPublication() throws Exception {
         String text = Files.readString(Path.of(".github", "workflows", "launcher-apple-notary-status.yml"));
         JsonNode root = new ObjectMapper(new YAMLFactory()).readTree(text);
+        assertEquals("Maintenance: Check Apple notarization status (no submission)", root.path("name").asText());
         assertEquals(1, root.path("on").size());
         JsonNode inputs = root.path("on").path("workflow_dispatch").path("inputs");
         assertEquals(2, inputs.size());
@@ -746,11 +748,8 @@ class WorkflowStructureTest {
             JsonNode input = inputs.path(architecture + "_submission_id");
             assertTrue(input.path("required").asBoolean());
             assertEquals("string", input.path("type").asText());
-            assertTrue(input.path("default").asText().matches(
-                    "[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}"));
+            assertFalse(input.has("default"), "submission IDs must be supplied for the run being inspected");
         }
-        assertNotEquals(inputs.path("intel_submission_id").path("default").asText(),
-                inputs.path("silicon_submission_id").path("default").asText());
         assertEquals(1, root.path("permissions").size());
         assertEquals("read", root.path("permissions").path("contents").asText());
         assertFalse(root.path("concurrency").path("cancel-in-progress").asBoolean());
