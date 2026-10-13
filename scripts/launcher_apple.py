@@ -1,6 +1,6 @@
 # Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Release-only Apple keychain setup, notarization and final PKG verification."""
+"""Apple keychain setup, notarization and PKG verification for releases and rehearsals."""
 
 import argparse
 import base64
@@ -71,7 +71,7 @@ def require_release(environment):
     if (environment.get("GITHUB_REPOSITORY") != release.REPOSITORY
             or environment.get("GITHUB_REF") != "refs/heads/main"
             or environment.get("GITHUB_EVENT_NAME") != "workflow_dispatch"):
-        raise release.ReleaseError("Apple signing is restricted to official manual releases from main")
+        raise release.ReleaseError("Apple signing is restricted to official manual dispatch from main")
 
 
 def run(command, timeout=120):
@@ -161,7 +161,8 @@ def verify_package_signature(text, identity):
         raise release.ReleaseError("PKG must be trusted and signed by the approved Developer ID Installer")
 
 
-def complete(package, version, commit, platform, team, identity, key_id, issuer, directory, verification):
+def complete(package, version, commit, platform, team, identity, key_id, issuer, directory, verification,
+             rehearsal=False):
     release.verify_apple_identity(team, identity)
     name = f"MegaMek-Launcher-{version}-{platform}.pkg"
     if (platform not in release.APPLE_PLATFORMS or package.name != name
@@ -223,26 +224,116 @@ def complete(package, version, commit, platform, team, identity, key_id, issuer,
               "stapled": True, "gatekeeper_status": "accepted"}
     release.verify_apple_record(record, version, commit,
                                 [release.Asset(package, package.stat().st_size, sha)], team, identity)
+    if rehearsal:
+        record["purpose"] = "apple-rehearsal-only"
     verification.parent.mkdir(parents=True, exist_ok=True)
     with verification.open("x", encoding="utf-8") as output:
         json.dump(record, output, sort_keys=True)
     package.with_name(name + ".sha256").write_text(f"{sha}  {name}\n", encoding="ascii", newline="\n")
 
 
+def verify_rehearsal(directory, version, commit, team, identity):
+    release.numeric_version(version)
+    release.require_sha(commit)
+    release.verify_apple_identity(team, identity)
+    expected = set()
+    for platform in release.APPLE_PLATFORMS:
+        name = f"MegaMek-Launcher-{version}-{platform}.pkg"
+        expected.update((name, name + ".sha256", platform + ".json"))
+    if (directory.is_symlink() or not directory.is_dir()
+            or {file.name for file in directory.iterdir()} != expected):
+        raise release.ReleaseError("Apple rehearsal requires exactly both PKGs, checksums and test-only records")
+    records = []
+    for platform in release.APPLE_PLATFORMS:
+        name = f"MegaMek-Launcher-{version}-{platform}.pkg"
+        package = directory / name
+        checksum = directory / (name + ".sha256")
+        for file, limit in ((package, release.INSTALLER_LIMIT), (checksum, 256)):
+            if file.is_symlink() or not file.is_file() or not 0 < file.stat().st_size <= limit:
+                raise release.ReleaseError("Apple rehearsal requires bounded, nonempty regular files")
+        record = release.load_signing_record(directory / (platform + ".json"))
+        if (not isinstance(record, dict) or record.get("purpose") != "apple-rehearsal-only"
+                or record.get("platform") != platform):
+            raise release.ReleaseError("Apple rehearsal requires a distinct record for each test-only platform")
+        evidence = {key: value for key, value in record.items() if key != "purpose"}
+        sha = release.digest(package)
+        release.verify_apple_record(evidence, version, commit,
+                                    [release.Asset(package, package.stat().st_size, sha)], team, identity)
+        if checksum.read_bytes() != f"{sha}  {name}\n".encode("ascii"):
+            raise release.ReleaseError("Apple rehearsal checksum must bind the final stapled PKG bytes")
+        records.append(record)
+    manifest = {"schema_version": 1, "purpose": "apple-rehearsal-only", "version": version,
+                "commit": commit, "team_id": team, "identity": identity, "records": records}
+    with (directory / "apple-rehearsal-verification.json").open("x", encoding="utf-8", newline="\n") as output:
+        json.dump(manifest, output, sort_keys=True)
+    (directory / "TEST-ONLY.txt").write_text(
+        "Apple signing rehearsal only. These are not public release or launcher update assets.\n"
+        "Authorized Mac testers may install the matching architecture on a disposable test system.\n"
+        "Do not replace your everyday launcher or use your only copy of campaign/game data.\n",
+        encoding="ascii", newline="\n")
+
+
+def rehearse(args, environment):
+    root = Path.cwd()
+    _, declaration = release.source_version(root)
+    version = declaration.group(1)
+    commit = release.validate_source(version, root, environment)
+    if ((args.version is not None and args.version != version)
+            or (args.commit is not None and args.commit != commit)):
+        raise release.ReleaseError("Apple rehearsal requires the unchanged version and exact dispatched main commit")
+    release.verify_checkout(root, commit)
+    if args.command != "rehearsal-plan" and (args.version is None or args.commit is None):
+        raise release.ReleaseError("Apple rehearsal requires the captured version and source commit")
+    enabled = {**environment, "APPLE_SIGNING_ENABLED": "true"}
+    config = configuration(enabled, require_credentials=args.command in ("rehearsal-plan", "rehearsal-setup"))
+    if args.command == "rehearsal-plan":
+        values = {"version": version, "commit": commit, "team_id": config.team_id,
+                  "identity": config.identity, "key_id": config.key_id, "issuer_id": config.issuer_id}
+        with Path(environment["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+            for key, value in values.items():
+                output.write(f"{key}={value}\n")
+        print("Planned Apple rehearsal only; no release, candidate or version change is authorized.")
+    elif args.command == "rehearsal-verify":
+        if args.assets is None:
+            raise release.ReleaseError("Apple rehearsal verification requires the same-run test artifacts")
+        verify_rehearsal(args.assets, version, commit, config.team_id, config.identity)
+        print("Verified both Apple rehearsal packages; no publication is authorized.")
+    else:
+        if sys.platform != "darwin":
+            raise release.ReleaseError("Apple rehearsal signing requires a macOS runner")
+        if args.command == "rehearsal-setup":
+            setup(enabled)
+        else:
+            if args.platform is None:
+                raise release.ReleaseError("Apple rehearsal completion requires the native platform")
+            package = Path("build") / "distributions" / f"MegaMek-Launcher-{version}-{args.platform}.pkg"
+            verification = Path("build") / "apple-rehearsal" / (args.platform + ".json")
+            complete(package, version, commit, args.platform, config.team_id, config.identity,
+                     config.key_id, config.issuer_id, Path(environment["APPLE_SIGNING_DIRECTORY"]),
+                     verification, rehearsal=True)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("plan", "setup", "complete", "cleanup"))
+    parser.add_argument("command", choices=("plan", "setup", "complete", "cleanup",
+                                           "rehearsal-plan", "rehearsal-setup",
+                                           "rehearsal-complete", "rehearsal-verify"))
     parser.add_argument("--version")
     parser.add_argument("--commit")
     parser.add_argument("--platform", choices=release.APPLE_PLATFORMS)
     parser.add_argument("--package", type=Path)
     parser.add_argument("--verification", type=Path)
+    parser.add_argument("--assets", type=Path)
     args = parser.parse_args()
     if args.command == "cleanup":
         cleanup(os.environ)
         return
     require_release(os.environ)
-    if args.command == "plan":
+    if args.command.startswith("rehearsal-"):
+        if args.package is not None or args.verification is not None:
+            raise release.ReleaseError("Apple rehearsal cannot override package or verification paths")
+        rehearse(args, os.environ)
+    elif args.command == "plan":
         config = configuration(os.environ)
         with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
             for key, value in vars(config).items():
@@ -278,5 +369,5 @@ if __name__ == "__main__":
     try:
         main()
     except (release.ReleaseError, OSError, ValueError, subprocess.TimeoutExpired) as error:
-        print(f"Apple release signing failed: {error}. Publication must not continue.", file=sys.stderr)
+        print(f"Apple signing failed: {error}. Publication must not continue.", file=sys.stderr)
         sys.exit(1)

@@ -99,6 +99,7 @@ class WorkflowStructureTest {
             assertTrue(paths.contains(".github/workflows/launcher-release.yml"));
             assertTrue(paths.contains(".github/workflows/launcher-gui-smoke.yml"));
             assertTrue(paths.contains(".github/workflows/launcher-test-signing.yml"));
+            assertTrue(paths.contains(".github/workflows/launcher-apple-rehearsal.yml"));
         }
         JsonNode installers = jobs.path("installers");
         assertEquals("release-tooling", installers.path("needs").asText());
@@ -631,6 +632,105 @@ class WorkflowStructureTest {
         assertFalse(text.contains("LAUNCHER_RELEASE_APP"));
         assertFalse(text.contains("release-signing"));
         assertFalse(text.contains("APPLE_APPLICATION_P12"));
+    }
+
+    @Test
+    void appleRehearsalIsManualExactMainReadOnlyAndNeverPublishes() throws Exception {
+        String text = Files.readString(Path.of(".github", "workflows", "launcher-apple-rehearsal.yml"));
+        JsonNode root = new ObjectMapper(new YAMLFactory()).readTree(text);
+        assertEquals(1, root.path("on").size());
+        assertTrue(root.path("on").has("workflow_dispatch"));
+        assertFalse(root.path("on").path("workflow_dispatch").has("inputs"));
+        assertEquals("read", root.path("permissions").path("contents").asText());
+        assertEquals("read", root.path("permissions").path("actions").asText());
+        assertFalse(root.path("concurrency").path("cancel-in-progress").asBoolean());
+        JsonNode jobs = root.path("jobs");
+        assertEquals(3, jobs.size());
+        JsonNode plan = jobs.path("plan");
+        assertFalse(plan.has("if"), "wrong origins must fail visibly");
+        String origin = step(plan, "Reject nonofficial or nonmain dispatch before reading credentials")
+                .path("run").asText();
+        for (String required : List.of("MegaMek/mm-launcher", "refs/heads/main", "workflow_dispatch", "exit 1")) {
+            assertTrue(origin.contains(required));
+        }
+        assertTrue(text.indexOf("Reject nonofficial or nonmain dispatch before reading credentials")
+                < text.indexOf("Validate exact main and capture Apple rehearsal settings"));
+        assertEquals("${{ github.sha }}", plan.path("steps").get(1).path("with").path("ref").asText());
+        assertTrue(step(plan, "Validate exact main and capture Apple rehearsal settings")
+                .path("run").asText().contains("launcher_apple.py rehearsal-plan"));
+        JsonNode mac = jobs.path("macos");
+        assertEquals("plan", mac.path("needs").asText());
+        assertEquals("${{ matrix.os }}", mac.path("runs-on").asText());
+        assertFalse(mac.path("strategy").path("fail-fast").asBoolean());
+        List<String> platforms = new ArrayList<>();
+        List<String> runners = new ArrayList<>();
+        for (JsonNode row : mac.path("strategy").path("matrix").path("include")) {
+            platforms.add(row.path("id").asText());
+            runners.add(row.path("os").asText());
+        }
+        assertEquals(List.of("macos-intel", "macos-apple-silicon"), platforms);
+        assertEquals(List.of("macos-15-intel", "macos-15"), runners);
+        assertEquals("${{ needs.plan.outputs.commit }}", mac.path("steps").get(0).path("with").path("ref").asText());
+        assertEquals("${{ needs.plan.outputs.identity }}", mac.path("env").path("APPLE_SIGNING_IDENTITY").asText());
+        JsonNode setup = step(mac, "Import temporary Apple rehearsal credentials");
+        assertTrue(setup.path("run").asText().contains("launcher_apple.py rehearsal-setup"));
+        assertTrue(text.indexOf("Test source before importing private credentials")
+                < text.indexOf("Import temporary Apple rehearsal credentials"));
+        String build = step(mac, "Build the signed Mac installer without installing").path("run").asText();
+        assertTrue(build.contains("-PbuildIdentifier=$SOURCE_COMMIT"));
+        assertTrue(build.contains("-PappleSigningIdentity=$APPLE_SIGNING_IDENTITY"));
+        assertTrue(build.contains("-PappleSigningKeychain=$APPLE_SIGNING_KEYCHAIN"));
+        assertTrue(build.contains("buildPkgInstaller"));
+        JsonNode notary = step(mac, "Notarize staple and verify the rehearsal package");
+        assertTrue(notary.path("run").asText().contains("launcher_apple.py rehearsal-complete"));
+        JsonNode cleanup = step(mac, "Remove temporary Apple credentials and restore keychains");
+        assertEquals("always()", cleanup.path("if").asText());
+        assertEquals("python3 -B scripts/launcher_apple.py cleanup", cleanup.path("run").asText());
+        List<String> stepNames = new ArrayList<>();
+        mac.path("steps").forEach(stage -> stepNames.add(stage.path("name").asText()));
+        assertEquals(stepNames.indexOf(notary.path("name").asText()) + 1,
+                stepNames.indexOf(cleanup.path("name").asText()));
+        assertTrue(text.indexOf("Remove temporary Apple credentials and restore keychains")
+                < text.indexOf("Stage only the exact rehearsal package checksum and record"));
+        JsonNode platformArtifact = step(mac, "Retain the verified platform rehearsal only");
+        assertEquals("build/apple-rehearsal-platform/", platformArtifact.path("with").path("path").asText());
+        assertTrue(platformArtifact.path("with").path("name").asText().startsWith("APPLE-REHEARSAL-"));
+        for (String architecture : List.of("intel", "silicon")) {
+            assertEquals("${{ steps.result.outputs." + architecture + "_artifact_id }}",
+                    mac.path("outputs").path(architecture + "_artifact_id").asText());
+        }
+        JsonNode verify = jobs.path("verify");
+        assertEquals(List.of("plan", "macos"), dependencies(verify));
+        assertEquals("ubuntu-24.04", verify.path("runs-on").asText());
+        JsonNode download = verify.path("steps").get(2);
+        assertEquals("${{ needs.macos.outputs.intel_artifact_id }},${{ needs.macos.outputs.silicon_artifact_id }}",
+                download.path("with").path("artifact-ids").asText());
+        assertFalse(download.path("with").has("pattern"));
+        assertTrue(download.path("with").path("merge-multiple").asBoolean());
+        assertTrue(step(verify, "Bind both final packages to the exact source and approved identity")
+                .path("run").asText().contains("launcher_apple.py rehearsal-verify"));
+        assertTrue(step(verify, "Retain the test-only packages for authorized Mac testing")
+                .path("with").path("name").asText().startsWith("TEST-ONLY-Apple-signed-launcher-"));
+        for (JsonNode job : jobs) {
+            assertFalse(job.has("secrets"));
+            for (JsonNode stage : job.path("steps")) {
+                assertFalse(stage.path("continue-on-error").asBoolean());
+                if (stage.path("uses").asText().startsWith("actions/checkout@")) {
+                    assertFalse(stage.path("with").path("persist-credentials").asBoolean());
+                }
+                if (stage.path("uses").asText().startsWith("actions/upload-artifact@")) {
+                    assertFalse(stage.path("with").path("overwrite").asBoolean());
+                }
+                if (stage.path("env").toString().contains("secrets.")) {
+                    assertTrue(stage.equals(setup) || stage.equals(
+                            step(plan, "Validate exact main and capture Apple rehearsal settings")));
+                }
+            }
+        }
+        for (String forbidden : List.of("contents: write", "LAUNCHER_RELEASE_APP", "SIGNPATH_API_TOKEN",
+                "vars.APPLE_SIGNING_ENABLED", "launcher_release.py", "git push", "gh release", "sudo installer")) {
+            assertFalse(text.contains(forbidden), "rehearsal must not contain " + forbidden);
+        }
     }
 
     @Test

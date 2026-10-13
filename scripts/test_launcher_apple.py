@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import plistlib
 import shlex
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -110,14 +111,194 @@ class AppleReleaseTest(unittest.TestCase):
             return f"{command[-1]}: accepted\nsource=Notarized Developer ID\n"
         raise AssertionError(f"Unexpected Apple tool: {command}")
 
-    def complete(self, platform="macos-intel", version=VERSION, commit=COMMIT):
+    def complete(self, platform="macos-intel", version=VERSION, commit=COMMIT, rehearsal=False):
         self.current_platform = platform
         package = self.assets / f"MegaMek-Launcher-{version}-{platform}.pkg"
         proof = self.verification / (platform + ".json")
         with patch("launcher_apple.run", side_effect=self.fake_run):
             apple.complete(package, version, commit, platform, TEAM, IDENTITY,
-                           ENV["APPLE_NOTARY_KEY_ID"], REQUEST, self.root, proof)
+                           ENV["APPLE_NOTARY_KEY_ID"], REQUEST, self.root, proof, rehearsal=rehearsal)
         return json.loads(proof.read_text())
+
+    def rehearsal_assets(self):
+        for platform in release.APPLE_PLATFORMS:
+            self.complete(platform, rehearsal=True)
+            shutil.copyfile(self.verification / (platform + ".json"), self.assets / (platform + ".json"))
+        for file in self.assets.iterdir():
+            if "macos-" not in file.name:
+                file.unlink()
+
+    def test_rehearsal_plan_captures_unchanged_main_without_enabling_production_or_network_calls(self):
+        for flag in ("", "false"):
+            output = self.root / ("rehearsal-output-" + flag)
+            environment = {**ENV, "APPLE_SIGNING_ENABLED": flag, "GITHUB_OUTPUT": str(output)}
+            with self.subTest(flag=flag), patch.dict(os.environ, environment, clear=True), \
+                    patch("launcher_apple.Path.cwd", return_value=self.root), \
+                    patch("launcher_apple.release.verify_checkout") as checkout, \
+                    patch("launcher_apple.release.GitHub") as github, \
+                    patch("launcher_apple.release.verify_candidate") as candidate, \
+                    patch("launcher_apple.sys.argv", ["launcher_apple.py", "rehearsal-plan"]), \
+                    patch("builtins.print"):
+                apple.main()
+                self.assertEqual(flag, os.environ["APPLE_SIGNING_ENABLED"])
+            checkout.assert_called_once_with(self.root, COMMIT)
+            github.assert_not_called()
+            candidate.assert_not_called()
+            values = dict(line.split("=", 1) for line in output.read_text().splitlines())
+            self.assertEqual({"version": VERSION, "commit": COMMIT, "team_id": TEAM, "identity": IDENTITY,
+                              "key_id": ENV["APPLE_NOTARY_KEY_ID"], "issuer_id": REQUEST}, values)
+            for key, value in ENV.items():
+                if key.startswith("APPLE_") and ("P12" in key or "PRIVATE_KEY" in key):
+                    self.assertNotIn(value, output.read_text())
+
+    def test_rehearsal_rejects_wrong_origin_checkout_and_source_overrides_before_key_import(self):
+        environment = {**ENV, "APPLE_SIGNING_ENABLED": "false"}
+        arguments = ["launcher_apple.py", "rehearsal-setup", "--version", VERSION, "--commit", COMMIT]
+        cases = [
+            ({"GITHUB_REPOSITORY": "fork/mm-launcher"}, arguments, None),
+            ({"GITHUB_REF": "refs/heads/feature"}, arguments, None),
+            ({"GITHUB_EVENT_NAME": "push"}, arguments, None),
+            ({}, [*arguments[:-1], "b" * 40], None),
+            ({}, [*arguments, "--version", "0.14.99"], None),
+            ({}, ["launcher_apple.py", "rehearsal-setup"], None),
+            ({}, [*arguments, "--package", str(self.assets / "override.pkg")], None),
+            ({}, [*arguments, "--verification", str(self.verification / "override.json")], None),
+            ({}, arguments, release.ReleaseError("checkout does not match")),
+        ]
+        for changes, argv, checkout_error in cases:
+            with self.subTest(changes=changes, argv=argv, checkout_error=checkout_error), \
+                    patch.dict(os.environ, {**environment, **changes}, clear=True), \
+                    patch("launcher_apple.Path.cwd", return_value=self.root), \
+                    patch("launcher_apple.release.verify_checkout", side_effect=checkout_error), \
+                    patch("launcher_apple.sys.argv", argv), patch("launcher_apple.setup") as setup, \
+                    patch("launcher_apple.configuration") as config, self.assertRaises(release.ReleaseError):
+                apple.main()
+            setup.assert_not_called()
+            config.assert_not_called()
+
+    def test_rehearsal_requires_all_credentials_even_when_production_signing_is_disabled(self):
+        for key in ("APPLE_TEAM_ID", "APPLE_SIGNING_IDENTITY", "APPLE_NOTARY_KEY_ID", "APPLE_NOTARY_ISSUER_ID",
+                    "APPLE_APPLICATION_P12", "APPLE_APPLICATION_P12_PASSWORD",
+                    "APPLE_INSTALLER_P12", "APPLE_INSTALLER_P12_PASSWORD", "APPLE_NOTARY_PRIVATE_KEY"):
+            environment = {**ENV, "APPLE_SIGNING_ENABLED": "false", "GITHUB_OUTPUT": str(self.root / "output")}
+            del environment[key]
+            with self.subTest(missing=key), patch.dict(os.environ, environment, clear=True), \
+                    patch("launcher_apple.Path.cwd", return_value=self.root), \
+                    patch("launcher_apple.release.verify_checkout"), \
+                    patch("launcher_apple.sys.argv", ["launcher_apple.py", "rehearsal-plan"]), \
+                    self.assertRaises(release.ReleaseError):
+                apple.main()
+            self.assertFalse((self.root / "output").exists())
+
+    def test_rehearsal_setup_reuses_owned_keychain_without_release_candidate_or_flag_mutation(self):
+        environment = {**ENV, "APPLE_SIGNING_ENABLED": "false"}
+        with patch.dict(os.environ, environment, clear=True), \
+                patch("launcher_apple.Path.cwd", return_value=self.root), \
+                patch("launcher_apple.release.verify_checkout"), \
+                patch("launcher_apple.release.verify_candidate") as candidate, \
+                patch("launcher_apple.sys.platform", "darwin"), \
+                patch("launcher_apple.sys.argv", ["launcher_apple.py", "rehearsal-setup",
+                      "--version", VERSION, "--commit", COMMIT]), patch("launcher_apple.setup") as setup:
+            apple.main()
+            self.assertEqual("false", os.environ["APPLE_SIGNING_ENABLED"])
+        setup.assert_called_once_with({**environment, "APPLE_SIGNING_ENABLED": "true"})
+        candidate.assert_not_called()
+        with patch.dict(os.environ, environment, clear=True), \
+                patch("launcher_apple.Path.cwd", return_value=self.root), \
+                patch("launcher_apple.release.verify_checkout"), patch("launcher_apple.sys.platform", "win32"), \
+                patch("launcher_apple.sys.argv", ["launcher_apple.py", "rehearsal-setup",
+                      "--version", VERSION, "--commit", COMMIT]), patch("launcher_apple.setup") as setup, \
+                self.assertRaises(release.ReleaseError):
+            apple.main()
+        setup.assert_not_called()
+
+    def test_rehearsal_completion_reuses_native_checks_and_cannot_authorize_production(self):
+        for platform in release.APPLE_PLATFORMS:
+            environment = {key: value for key, value in ENV.items()
+                           if "P12" not in key and key != "APPLE_NOTARY_PRIVATE_KEY"}
+            environment.update(APPLE_SIGNING_ENABLED="false", APPLE_SIGNING_DIRECTORY=str(self.root))
+            with self.subTest(platform=platform), patch.dict(os.environ, environment, clear=True), \
+                    patch("launcher_apple.Path.cwd", return_value=self.root), \
+                    patch("launcher_apple.release.verify_checkout"), patch("launcher_apple.sys.platform", "darwin"), \
+                    patch("launcher_apple.complete") as complete, \
+                    patch("launcher_apple.sys.argv", ["launcher_apple.py", "rehearsal-complete",
+                          "--version", VERSION, "--commit", COMMIT, "--platform", platform]):
+                apple.main()
+            complete.assert_called_once_with(
+                Path("build") / "distributions" / f"MegaMek-Launcher-{VERSION}-{platform}.pkg",
+                VERSION, COMMIT, platform, TEAM, IDENTITY, ENV["APPLE_NOTARY_KEY_ID"], REQUEST,
+                self.root, Path("build") / "apple-rehearsal" / (platform + ".json"), rehearsal=True)
+            record = self.complete(platform, rehearsal=True)
+            package = self.assets / record["name"]
+            self.assertEqual("apple-rehearsal-only", record["purpose"])
+            self.assertEqual(release.digest(package), record["sha256"])
+            self.assertTrue(record["stapled"])
+            with self.assertRaises(release.ReleaseError):
+                release.verify_apple_record(record, VERSION, COMMIT,
+                                            [release.Asset(package, package.stat().st_size, record["sha256"])],
+                                            TEAM, IDENTITY)
+
+    def test_rehearsal_aggregates_both_bound_final_packages_without_private_credentials(self):
+        self.rehearsal_assets()
+        environment = {key: value for key, value in ENV.items()
+                       if "P12" not in key and key != "APPLE_NOTARY_PRIVATE_KEY"}
+        environment["APPLE_SIGNING_ENABLED"] = "false"
+        with patch.dict(os.environ, environment, clear=True), \
+                patch("launcher_apple.Path.cwd", return_value=self.root), \
+                patch("launcher_apple.release.verify_checkout"), \
+                patch("launcher_apple.sys.argv", ["launcher_apple.py", "rehearsal-verify",
+                      "--version", VERSION, "--commit", COMMIT, "--assets", str(self.assets)]), \
+                patch("builtins.print"):
+            apple.main()
+        result = json.loads((self.assets / "apple-rehearsal-verification.json").read_text())
+        self.assertEqual("apple-rehearsal-only", result["purpose"])
+        self.assertEqual(COMMIT, result["commit"])
+        self.assertEqual(set(release.APPLE_PLATFORMS), {item["platform"] for item in result["records"]})
+        self.assertIn("disposable test system", (self.assets / "TEST-ONLY.txt").read_text())
+        self.assertIn("not public release", (self.assets / "TEST-ONLY.txt").read_text())
+
+    def test_rehearsal_rejects_missing_extra_changed_files_and_corrupt_test_records(self):
+        self.rehearsal_assets()
+        name = f"MegaMek-Launcher-{VERSION}-macos-intel.pkg"
+        for file in list(self.assets.iterdir()):
+            original = file.read_bytes()
+            with self.subTest(missing=file.name):
+                file.unlink()
+                with self.assertRaises(release.ReleaseError):
+                    apple.verify_rehearsal(self.assets, VERSION, COMMIT, TEAM, IDENTITY)
+                file.write_bytes(original)
+            with self.subTest(changed=file.name):
+                file.write_bytes(original + b"changed")
+                with self.assertRaises(release.ReleaseError):
+                    apple.verify_rehearsal(self.assets, VERSION, COMMIT, TEAM, IDENTITY)
+                file.write_bytes(original)
+        extra = self.assets / "extra"
+        extra.write_bytes(b"extra")
+        with self.assertRaises(release.ReleaseError):
+            apple.verify_rehearsal(self.assets, VERSION, COMMIT, TEAM, IDENTITY)
+        extra.unlink()
+        file = self.assets / "macos-intel.json"
+        original = file.read_bytes()
+        valid = json.loads(original)
+        for field, value in (("purpose", "release"), ("platform", "macos-apple-silicon"),
+                             ("commit", "b" * 40), ("identity", f"Other ({TEAM})"),
+                             ("sha256", "f" * 64), ("size", True), ("timestamped", False),
+                             ("stapled", False), ("gatekeeper_status", "rejected"),
+                             ("notarization_status", "Invalid"), ("extra", "unexpected")):
+            with self.subTest(field=field, value=value):
+                file.write_text(json.dumps({**valid, field: value}))
+                with self.assertRaises(release.ReleaseError):
+                    apple.verify_rehearsal(self.assets, VERSION, COMMIT, TEAM, IDENTITY)
+        for text in ('null', '[]', '"text"', '{"purpose":"apple-rehearsal-only","purpose":"release"}'):
+            file.write_text(text)
+            with self.subTest(record=text), self.assertRaises(release.ReleaseError):
+                apple.verify_rehearsal(self.assets, VERSION, COMMIT, TEAM, IDENTITY)
+        file.write_bytes(original)
+        (self.assets / (name + ".sha256")).write_text("f" * 64 + "  " + name + "\n")
+        with self.assertRaises(release.ReleaseError):
+            apple.verify_rehearsal(self.assets, VERSION, COMMIT, TEAM, IDENTITY)
+        self.assertFalse((self.assets / "apple-rehearsal-verification.json").exists())
+        self.assertFalse((self.assets / "TEST-ONLY.txt").exists())
 
     def test_disabled_mode_is_independent_of_windows_and_requires_no_apple_credentials(self):
         for flag in ("", "false"):

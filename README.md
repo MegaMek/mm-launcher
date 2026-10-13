@@ -201,14 +201,24 @@ When enabled, the existing Intel and Apple Silicon Mac runners use temporary key
 JDK 21's supported jpackage signing to sign the app, bundled native Java code and PKG. They
 submit each PKG to Apple's notarization service, require acceptance, staple/validate the
 ticket and check Gatekeeper before regenerating the final checksum. Private credentials are
-confined to official release preflight and guarded macOS setup. Cleanup runs immediately after
-notarization, even on failure, before installer inspection, artifact actions or source tests.
+confined to official manual release/rehearsal preflight and guarded macOS setup. Cleanup runs
+immediately after notarization, even on failure, before installer inspection or artifact actions.
+Release source tests follow cleanup; rehearsal source tests run before credential import.
 No private credential is passed to Gradle, ordinary PR builds or Windows/Linux steps.
 Invalid configuration, signing, notarization, architecture, identity or final-byte checks
 block publication without an unsigned fallback.
 See [optional Apple signing setup](docs/archive-distribution-contract.md#optional-apple-signing).
 This needs Apple Developer membership and an authorized live Mac release/upgrade test;
 offline mocks do not establish Apple acceptance or actual Gatekeeper behavior.
+
+Before activation, use the separate manual **Test Apple signing (no publication)** workflow
+from **main**. It uses the configured Apple credentials while leaving `APPLE_SIGNING_ENABLED`
+unset or `false`, tests the exact unchanged source on both Mac architectures, and reuses the
+release signing/notarization checks. It retains only labelled rehearsal artifacts, with no
+version change, candidate branch, tag or release. After the entire run succeeds, authorized
+Mac testers may install the matching package on a disposable test system to check installation,
+launch, bundled Java/game launch and upgrades. Do not distribute these as public updates.
+See [Apple signing rehearsal](docs/archive-distribution-contract.md#apple-signing-rehearsal).
 
 Writes are not automatically retried, existing assets/tags are never overwritten, and failure
 does not delete a candidate branch, tag, draft, or published release.
