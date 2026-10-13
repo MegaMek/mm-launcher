@@ -155,10 +155,15 @@ def verify_code_details(text, team, identity, identifier=None):
 
 
 def verify_package_signature(text, identity):
-    if ("Status: signed by a certificate trusted by macOS" not in text
-            or not re.search(r"(?m)^\s*1\.\s+" +
-                             re.escape(f"Developer ID Installer: {identity}") + r"\s*$", text)):
-        raise release.ReleaseError("PKG must be trusted and signed by the approved Developer ID Installer")
+    statuses = re.findall(r"(?m)^[ \t]*Status:[ \t]*(.+?)[ \t]*$", text)
+    leaves = re.findall(r"(?m)^[ \t]*1\.[ \t]+(.+?)[ \t]*$", text)
+    if (len(statuses) != 1 or statuses[0] not in (
+            "signed by a developer certificate issued by Apple for distribution",
+            "signed by a certificate trusted by macOS")
+            or leaves != [f"Developer ID Installer: {identity}"]):
+        raise release.ReleaseError(
+            "PKG must be trusted and signed by the approved Developer ID Installer. "
+            f"pkgutil --check-signature output:\n{text.strip()}")
 
 
 def complete(package, version, commit, platform, team, identity, key_id, issuer, directory, verification,
