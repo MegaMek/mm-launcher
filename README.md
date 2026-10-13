@@ -186,8 +186,11 @@ See [optional Windows signing setup](docs/archive-distribution-contract.md#optio
 The integration can be prepared without an account, but **real signing remains unverified until
 Foundation approval, service configuration and an authorized end-to-end release test**.
 
-For Foundation onboarding, use the separate manual **Test launcher signing (no publication)**
-workflow from **main**, after its project/artifact settings, CI submitter token and
+The **Maintenance:** workflows are manual-only signing rehearsals and diagnostics.
+They do not run on pushes or pull requests and do not publish releases.
+
+For Foundation onboarding, use **Maintenance: Test Windows signing (no publication)**
+from **main**, after its project/artifact settings, CI submitter token and
 `SIGNPATH_TEST_CERTIFICATE_SHA256` are configured. It hardcodes `test-signing`, builds/tests
 the unchanged main commit through ordinary native CI, and verifies the self-signed MSI using
 an isolated pinned certificate without modifying any trust store. Results are test-only
@@ -211,8 +214,8 @@ See [optional Apple signing setup](docs/archive-distribution-contract.md#optiona
 This needs Apple Developer membership and an authorized live Mac release/upgrade test;
 offline mocks do not establish Apple acceptance or actual Gatekeeper behavior.
 
-Before activation, use the separate manual **Test Apple signing (no publication)** workflow
-from **main**. It uses the configured Apple credentials while leaving `APPLE_SIGNING_ENABLED`
+Before activation, use **Maintenance: Test Apple signing (no publication)** from **main**.
+It uses the configured Apple credentials while leaving `APPLE_SIGNING_ENABLED`
 unset or `false`, tests the exact unchanged source on both Mac architectures, and reuses the
 release signing/notarization checks. It retains only labelled rehearsal artifacts, with no
 version change, candidate branch, tag or release. After the entire run succeeds, authorized
@@ -220,9 +223,10 @@ Mac testers may install the matching package on a disposable test system to chec
 launch, bundled Java/game launch and upgrades. Do not distribute these as public updates.
 See [Apple signing rehearsal](docs/archive-distribution-contract.md#apple-signing-rehearsal).
 
-If a rehearsal times out waiting for Apple, use the separate manual **Check Apple notarization
-status (no submission)** workflow from **main** before retrying. It queries the two existing
-submission IDs without building or uploading another package, and retains public status/rejection
+If notarization times out waiting for Apple, use **Maintenance: Check Apple notarization
+status (no submission)** from **main** before retrying. Supply the two distinct submission UUIDs
+from the run being inspected; there are no pre-filled IDs. It queries those existing submissions
+without building or uploading another package, and retains public status/rejection
 reports only. See [Apple notarization status](docs/archive-distribution-contract.md#apple-notarization-status).
 
 Writes are not automatically retried, existing assets/tags are never overwritten, and failure

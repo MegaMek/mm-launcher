@@ -1,6 +1,6 @@
 # Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
 # SPDX-License-Identifier: GPL-3.0-or-later
-name: Check Apple notarization status (no submission)
+name: "Maintenance: Check Apple notarization status (no submission)"
 run-name: Apple notarization status (${{ github.run_id }})
 
 on:
@@ -10,12 +10,10 @@ on:
         description: "Existing Intel Apple submission UUID; never submits a new package"
         required: true
         type: string
-        default: "a6bdee64-dece-4e6b-a38d-6367c4255f68"
       silicon_submission_id:
         description: "Existing Apple Silicon submission UUID; never submits a new package"
         required: true
         type: string
-        default: "a4ba432e-66e7-485b-9ee9-504dc2707545"
 
 permissions:
   contents: read

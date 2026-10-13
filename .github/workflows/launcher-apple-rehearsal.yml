@@ -1,6 +1,6 @@
 # Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
 # SPDX-License-Identifier: GPL-3.0-or-later
-name: Test Apple signing (no publication)
+name: "Maintenance: Test Apple signing (no publication)"
 run-name: Apple signing rehearsal (${{ github.sha }})
 
 on:

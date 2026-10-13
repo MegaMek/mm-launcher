@@ -1,6 +1,6 @@
 # Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
 # SPDX-License-Identifier: GPL-3.0-or-later
-name: Test launcher signing (no publication)
+name: "Maintenance: Test Windows signing (no publication)"
 run-name: SignPath test-only rehearsal (${{ github.sha }})
 
 on:

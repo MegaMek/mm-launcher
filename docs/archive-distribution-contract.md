@@ -316,7 +316,8 @@ Keep `LAUNCHER_SIGNING_ENABLED` unset or `false`. Production policy/certificate 
 not used by the rehearsal, and it cannot opt into Apple signing or receive Apple/release-bot
 credentials.
 
-After explicit authorization, select **main** and dispatch **Test launcher signing (no publication)**.
+After explicit authorization, select **main** and dispatch
+**Maintenance: Test Windows signing (no publication)**.
 It accepts no arbitrary source/version/policy inputs, verifies the exact dispatched checkout,
 and captures the existing committed version and public configuration before calling the
 ordinary native workflow. All four native jobs and their tests must succeed before submission.
@@ -460,7 +461,7 @@ See [Apple Developer ID](https://developer.apple.com/developer-id/) and
 
 #### Apple signing rehearsal
 
-Use **Test Apple signing (no publication)** to prove the configured Apple credentials and
+Use **Maintenance: Test Apple signing (no publication)** to prove the configured Apple credentials and
 notarization integration before public release activation. Configure the four public Apple
 settings and five secrets above, but keep `APPLE_SIGNING_ENABLED` unset or `false`. The exact
 identity spelling must match both certificates, not an informal account name. The rehearsal
@@ -513,12 +514,11 @@ acceptance, certificate/private-key validity, runtime entitlements or actual ins
 
 #### Apple notarization status
 
-Use the separate manual **Check Apple notarization status (no submission)** workflow from
-official **main** to inspect existing submissions after a notarization timeout. Its two required
-UUID inputs default to the Intel and Apple Silicon submissions from rehearsal run `38342623241`:
-`a6bdee64-dece-4e6b-a38d-6367c4255f68` and `a4ba432e-66e7-485b-9ee9-504dc2707545`.
-For a later rehearsal, copy the distinct submission IDs from that run rather than reusing these
-defaults. Queries are read-only against Apple and do not change repository contents or releases:
+Use **Maintenance: Check Apple notarization status (no submission)** from official **main**
+to inspect existing submissions after a notarization timeout. Its two required UUID inputs have
+no defaults. Copy the distinct Intel and Apple Silicon submission IDs from the run being
+inspected; missing, malformed or duplicate IDs cannot start a query. Queries are read-only
+against Apple and do not change repository contents or releases:
 no build, signing, submission, waiting, stapling, installation, candidate, release or production
 activation occurs.
 
