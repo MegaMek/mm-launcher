@@ -309,6 +309,54 @@ class LauncherSwingSmokeTest {
             });
             saveReviewImage("home-news-wide.png", frame);
 
+            onEdt(() -> {
+                frame.setSize(680, 470);
+                frame.validate();
+                return null;
+            });
+                        SwingTestSupport.awaitCondition("compact home layout", () ->
+                    ((Component) component(frame, "managedHomeNavigationRow")).getWidth() < 680);
+            onEdt(() -> {
+                Component row = component(frame, "managedHomeNavigationRow");
+                assertTrue(row.getHeight() > find(frame, "settingsButton").getHeight() * 3 / 2,
+                        "the community links drop below the navigation: row=" + row.getBounds()
+                                + " pref=" + row.getPreferredSize() + " nav="
+                                + ((Component) component(frame, "managedHomeNavigation")).getBounds()
+                                + " links=" + find(frame, "openDiscordButton").getParent().getParent().getBounds());
+                return null;
+            });
+            onEdt(() -> {
+                JPanel navigation = component(frame, "managedHomeNavigation");
+                JButton manage = find(frame, "manageInstallationsButton");
+                JButton settingsButton = find(frame, "settingsButton");
+                assertEquals(manage.getY(), settingsButton.getY(), "compact navigation stays on one line");
+                for (JButton button : new JButton[]{manage, settingsButton}) {
+                    assertTrue(button.isShowing());
+                    assertTrue(button.getX() >= 0 && button.getX() + button.getWidth() <= navigation.getWidth()
+                            && button.getY() >= 0 && button.getY() + button.getHeight() <= navigation.getHeight(),
+                            button.getName() + " is not clipped at the minimum window size");
+                }
+                Component row = component(frame, "managedHomeNavigationRow");
+                java.awt.Rectangle nav = SwingUtilities.convertRectangle(navigation.getParent(),
+                        navigation.getBounds(), row);
+                for (String name : new String[]{"openDiscordButton", "playOnlineButton"}) {
+                    Component community = find(frame, name);
+                    assertTrue(community.isShowing(), name + " stays visible");
+                    java.awt.Rectangle bounds = SwingUtilities.convertRectangle(community.getParent(),
+                            community.getBounds(), row);
+                    assertTrue(bounds.y >= nav.y + nav.height, name + " drops below the navigation");
+                    assertTrue(bounds.x >= 0 && bounds.x + bounds.width <= row.getWidth()
+                            && bounds.y + bounds.height <= row.getHeight(), name + " stays inside the row");
+                }
+                return null;
+            });
+            saveReviewImage("home-news-compact.png", frame);
+            onEdt(() -> {
+                frame.setSize(1180, 820);
+                frame.validate();
+                return null;
+            });
+
             JButton settings = waitForButton(frame, "settingsButton");
             SwingUtilities.invokeAndWait(settings::doClick);
             SwingTestSupport.awaitCondition("loaded settings", () ->

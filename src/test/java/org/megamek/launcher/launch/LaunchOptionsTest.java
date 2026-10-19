@@ -89,7 +89,7 @@ class LaunchOptionsTest {
     void argumentsThatCouldChangeWhatStartsAreRejected() {
         for (String text : List.of("-jar x.jar", "-cp other", "--class-path=x", "-classpath x",
                 "megamek.Other", "@argfile", "-Xmx2g", "--add-opens java.base/java.lang=ALL-UNNAMED",
-                "\"-Dunclosed", "-Dbad=\u0007", "-")) {
+                "\"-Dunclosed", "-Dbad=\u0007", "-", "--enable-native-access")) {
             assertThrows(IllegalArgumentException.class, () -> LaunchOptions.parseArguments(text), text);
         }
         assertThrows(IllegalArgumentException.class,
@@ -152,6 +152,7 @@ class LaunchOptionsTest {
                 "{\"schemaVersion\":1,\"global\":{\"extraJvmArguments\":\"-jar x\"}}",
                 "{\"schemaVersion\":1,\"installations\":{\"../escape\":{}}}",
                 "{\"schemaVersion\":1,\"schemaVersion\":1}",
+                "{\"schemaVersion\":1} {\"global\":{\"megamekHeapMb\":8192}}",
                 "[]")) {
             Files.writeString(store.path(), json, StandardCharsets.UTF_8);
             assertThrows(IOException.class, store::read, json);
@@ -164,5 +165,19 @@ class LaunchOptionsTest {
         assertThrows(IOException.class, () -> store.writeGlobal(
                 new LaunchOptions(100, null, null, null, null, null)));
         assertFalse(Files.exists(store.path()));
+    }
+
+    @Test
+    void storeRefusesToWriteMoreOverridesThanItCanRead() throws Exception {
+        LaunchOptionsStore store = new LaunchOptionsStore(temp.resolve("registry.json"));
+        LaunchOptions override = new LaunchOptions(1024, null, null, null, null, null);
+        for (int i = 0; i < 256; i++) {
+            store.writeInstallation("install-" + i, override);
+        }
+        String saved = Files.readString(store.path(), StandardCharsets.UTF_8);
+        assertThrows(IOException.class, () -> store.writeInstallation("install-256", override));
+        assertEquals(saved, Files.readString(store.path(), StandardCharsets.UTF_8));
+        assertEquals(256, store.read().installations().size());
+        store.writeInstallation("install-0", override);
     }
 }

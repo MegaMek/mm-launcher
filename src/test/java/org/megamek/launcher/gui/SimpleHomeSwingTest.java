@@ -42,6 +42,8 @@ import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.channel.QuickInstallSnapshot;
 import org.megamek.launcher.channel.SuiteTestData;
+import org.megamek.launcher.launch.LaunchOptions;
+import org.megamek.launcher.launch.LaunchOptionsStore;
 import org.megamek.launcher.onboarding.Inspection;
 import org.megamek.launcher.onboarding.NormalInstallService;
 import org.megamek.launcher.onboarding.Product;
@@ -98,6 +100,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -1551,19 +1554,48 @@ class SimpleHomeSwingTest {
             JDialog discard = waitDialog(frame, "Discard changes?");
             invokeDialogEscape(discard);
             SwingTestSupport.awaitCondition("discard prompt closed", () -> !discard.isShowing());
-            onEdt(() -> {
+            Component unsaved = onEdt(() -> {
                 assertEquals("-Dinline=1",
                         ((javax.swing.JTextField) find(frame, "launchOptionsJvmArguments")).getText(),
                         "cancelling the prompt keeps the unsaved edit");
                 ((JButton) find(frame, "saveGlobalLaunchOptionsButton")).doClick();
-                return null;
+                return find(frame, "launchOptionsForm");
             });
             SwingTestSupport.awaitCondition("launch options saved", () ->
                     "-Dinline=1".equals(services.launchOptions().global().extraJvmArguments()));
+            // The saved page is rendered after the operation finishes.
+            assertNotNull(waitFor(() -> {
+                Component form = find(frame, "launchOptionsForm");
+                return form != null && form != unsaved ? form : null;
+            }));
             assertNotNull(waitFor(() -> {
                 JButton save = find(frame, "saveGlobalLaunchOptionsButton");
                 return save != null && !save.isEnabled() ? save : null;
             }));
+
+            CountDownLatch gate = new CountDownLatch(1);
+            services.launchOptionsSaveGate = gate;
+            Component saving = onEdt(() -> {
+                ((javax.swing.JTextField) find(frame, "launchOptionsJvmArguments")).setText("-Dinline=2");
+                ((JButton) find(frame, "saveGlobalLaunchOptionsButton")).doClick();
+                ((javax.swing.JTextField) find(frame, "launchOptionsJvmArguments")).setText("-Dinline=3");
+                return find(frame, "launchOptionsForm");
+            });
+            gate.countDown();
+            SwingTestSupport.awaitCondition("second save finished", () ->
+                    "-Dinline=2".equals(services.launchOptions().global().extraJvmArguments()));
+            assertNotNull(waitFor(() -> {
+                Component form = find(frame, "launchOptionsForm");
+                return form != null && form != saving ? form : null;
+            }));
+            onEdt(() -> {
+                assertEquals("-Dinline=3",
+                        ((javax.swing.JTextField) find(frame, "launchOptionsJvmArguments")).getText(),
+                        "edits made while saving are kept as unsaved changes");
+                ((JButton) find(frame, "revertLaunchOptionsButton")).doClick();
+                return null;
+            });
+            services.launchOptionsSaveGate = null;
             SwingUtilities.invokeAndWait(waitButton(frame, "homeButton")::doClick);
             assertNoShowingDialog(frame, "Discard changes?");
             assertNotNull(waitButton(frame, "settingsButton"));
@@ -1598,6 +1630,7 @@ class SimpleHomeSwingTest {
         private final AtomicInteger installs = new AtomicInteger();
         private final AtomicInteger releaseFetches = new AtomicInteger();
         private final AtomicInteger catalogRequests = new AtomicInteger();
+        private volatile CountDownLatch launchOptionsSaveGate;
         private final AtomicInteger selections = new AtomicInteger();
         private final AtomicInteger launchAttempts = new AtomicInteger();
         private final AtomicInteger resetPlans = new AtomicInteger();
@@ -1673,6 +1706,19 @@ class SimpleHomeSwingTest {
             main = first;
         }
 
+        @Override
+        public LaunchOptionsStore.Document saveGlobalLaunchOptions(LaunchOptions options) throws IOException {
+            CountDownLatch gate = launchOptionsSaveGate;
+            if (gate != null) {
+                try {
+                    if (!gate.await(10, TimeUnit.SECONDS)) throw new IOException("save gate timed out");
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException(interrupted);
+                }
+            }
+            return super.saveGlobalLaunchOptions(options);
+        }
         @Override public void requireInstallationPresent(InstallationRecord record) {
             assertTrue(records.stream().anyMatch(candidate -> candidate.id().equals(record.id())));
         }

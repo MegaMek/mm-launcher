@@ -209,7 +209,7 @@ public record LaunchOptions(Integer megamekHeapMb, Integer mekhqHeapMb, Integer 
             }
             if (token.equals("--add-opens") || token.equals("--add-exports") || token.equals("--add-reads")
                     || token.equals("--add-modules") || token.equals("--patch-module")
-                    || token.equals("--limit-modules")) {
+                    || token.equals("--limit-modules") || token.equals("--enable-native-access")) {
                 throw new IllegalArgumentException("Write “" + token + "” as " + token + "=value.");
             }
         }

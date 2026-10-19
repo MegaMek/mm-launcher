@@ -129,8 +129,9 @@ rendered in the launcher and news loading never delays navigation.
 
 Home offers two community links: **Join Discord** opens the MegaMek Discord invitation and
 **Play online** opens megamek.games, which lists public MegaMek servers. On the managed home they
-sit on the right of the Installations/Settings row, which stays centered; on the first-run home
-they appear centered below the status line.
+sit on the right of the Installations/Settings row, which stays centered; when the window is too
+narrow for both, the links move centered below that row so the buttons never wrap or clip. On the
+first-run home they appear centered below the status line.
 
 Launch options set per-application maximum memory (MegaMek, MekHQ, MegaMekLab), a graphics
 renderer (default, Disable Direct3D on Windows, or OpenGL), additional Java arguments, and the MegaMek user

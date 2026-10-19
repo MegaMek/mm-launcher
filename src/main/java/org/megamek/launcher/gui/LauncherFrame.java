@@ -382,17 +382,9 @@ public final class LauncherFrame extends JFrame {
         JPanel links = new JPanel(new java.awt.GridBagLayout());
         links.setOpaque(false);
         links.add(communityLinks());
-        JPanel navigationRow = new JPanel(new BorderLayout(guiScale.scaleForGUI(8), 0));
+        JPanel navigationRow = new NavigationRow(navigation, links, guiScale.scaleForGUI(8));
         navigationRow.setName("managedHomeNavigationRow");
-        navigationRow.setOpaque(false);
         navigationRow.setAlignmentX(Component.CENTER_ALIGNMENT);
-        // A matching spacer on the left keeps the navigation buttons centered in the deck.
-        navigationRow.add(Box.createRigidArea(new Dimension(links.getPreferredSize().width, 0)),
-                BorderLayout.WEST);
-        navigationRow.add(navigation, BorderLayout.CENTER);
-        navigationRow.add(links, BorderLayout.EAST);
-        navigationRow.setMaximumSize(new Dimension(Integer.MAX_VALUE,
-                navigationRow.getPreferredSize().height));
         center.add(navigationRow);
 
         homeNewsPanel = FirstLaunchPanel.backplate(guiScale);
@@ -2690,9 +2682,11 @@ public final class LauncherFrame extends JFrame {
                 return;
             }
             run("Saving launch options", () -> services.saveGlobalLaunchOptions(options), saved -> {
+                // Text fields stay editable while saving; keep anything changed after Save was pressed.
+                LaunchOptions live = launchOptionsForm == form ? form.values() : null;
                 launchOptionsDocument = saved;
                 launchOptionsError = null;
-                launchOptionsDraft = null;
+                launchOptionsDraft = live != null && !live.equals(saved.global()) ? live : null;
                 launchOptionsForm = null;
                 status.setText("Saved launch options.");
                 if (page == Page.SETTINGS) renderSettingsPage();
@@ -2758,6 +2752,103 @@ public final class LauncherFrame extends JFrame {
             return argument;
         }
         return '"' + argument.replace("\"", "\\\"") + '"';
+    }
+
+    /**
+     * Keeps the home navigation centered with the community links on its right, and stacks the links below the
+     * navigation when the deck is too narrow for both.
+     */
+    private static final class NavigationRow extends JPanel {
+        private final java.awt.Container navigation;
+        private final java.awt.Container links;
+        private final int gap;
+        private boolean stacked;
+
+        NavigationRow(java.awt.Container navigation, java.awt.Container links, int gap) {
+            super(null);
+            this.navigation = navigation;
+            this.links = links;
+            this.gap = gap;
+            setOpaque(false);
+            add(navigation);
+            add(links);
+            addComponentListener(new java.awt.event.ComponentAdapter() {
+                @Override
+                public void componentResized(java.awt.event.ComponentEvent event) {
+                    if (stacked != shouldStack(rowWidth())) {
+                        revalidate();
+                        repaint();
+                    }
+                }
+            });
+        }
+
+        /**
+         * The home deck is measured at its new width before this row is resized, so follow the parent's inner width
+         * (the row always fills it).
+         */
+        private int rowWidth() {
+            java.awt.Container parent = getParent();
+            if (parent != null && parent.getWidth() > 0) {
+                java.awt.Insets insets = parent.getInsets();
+                return parent.getWidth() - insets.left - insets.right;
+            }
+            return getWidth();
+        }
+
+        private boolean shouldStack(int width) {
+            if (width <= 0) return false;
+            java.awt.Insets insets = getInsets();
+            int available = width - insets.left - insets.right;
+            // The links sit on the right and an equal empty margin on the left keeps the navigation centered.
+            return navigation.getPreferredSize().width + 2 * (links.getPreferredSize().width + gap) > available;
+        }
+
+        @Override
+        public Dimension getPreferredSize() {
+            if (isPreferredSizeSet()) return super.getPreferredSize();
+            Dimension nav = navigation.getPreferredSize();
+            Dimension link = links.getPreferredSize();
+            java.awt.Insets insets = getInsets();
+            boolean stack = shouldStack(rowWidth());
+            int width = stack ? Math.max(nav.width, link.width) : nav.width + 2 * (link.width + gap);
+            int height = stack ? nav.height + gap + link.height : Math.max(nav.height, link.height);
+            return new Dimension(width + insets.left + insets.right, height + insets.top + insets.bottom);
+        }
+
+        @Override
+        public Dimension getMinimumSize() {
+            java.awt.Insets insets = getInsets();
+            return new Dimension(Math.max(navigation.getPreferredSize().width, links.getPreferredSize().width)
+                    + insets.left + insets.right, getPreferredSize().height);
+        }
+
+        @Override
+        public Dimension getMaximumSize() {
+            return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+        }
+
+        @Override
+        public void doLayout() {
+            java.awt.Insets insets = getInsets();
+            int x = insets.left;
+            int y = insets.top;
+            int width = Math.max(0, getWidth() - insets.left - insets.right);
+            int height = Math.max(0, getHeight() - insets.top - insets.bottom);
+            Dimension nav = navigation.getPreferredSize();
+            Dimension link = links.getPreferredSize();
+            stacked = shouldStack(getWidth());
+            if (stacked) {
+                int navWidth = Math.min(width, nav.width);
+                navigation.setBounds(x + (width - navWidth) / 2, y, navWidth, nav.height);
+                int linkWidth = Math.min(width, link.width);
+                links.setBounds(x + (width - linkWidth) / 2, y + nav.height + gap, linkWidth, link.height);
+            } else {
+                navigation.setBounds(x + (width - nav.width) / 2, y + (height - nav.height) / 2,
+                        nav.width, nav.height);
+                links.setBounds(x + width - link.width, y + (height - link.height) / 2, link.width, link.height);
+            }
+        }
     }
 
     private JPanel communityLinks() {

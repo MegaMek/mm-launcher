@@ -34,6 +34,7 @@
 package org.megamek.launcher.launch;
 
 import com.fasterxml.jackson.core.StreamReadFeature;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
@@ -73,7 +74,8 @@ public final class LaunchOptionsStore {
             "renderer", "extraJvmArguments", "userDirectory");
     private final Path registry;
     private final ObjectMapper mapper = JsonMapper.builder()
-            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build();
+            .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
 
     public LaunchOptionsStore(Path registry) {
         this.registry = registry.toAbsolutePath().normalize();
@@ -243,6 +245,11 @@ public final class LaunchOptionsStore {
         try (FileChannel channel = FileChannel.open(lockPath, StandardOpenOption.CREATE,
                 StandardOpenOption.WRITE); FileLock ignored = lock(channel, lockPath)) {
             Document next = change.apply(read());
+            // Never publish a file that read() would reject.
+            if (next.installations().size() > MAX_INSTALLATIONS) {
+                throw new IOException("Too many installations have their own launch options (limit "
+                        + MAX_INSTALLATIONS + ").");
+            }
             byte[] bytes = mapper.writerWithDefaultPrettyPrinter().writeValueAsBytes(toJson(next));
             if (bytes.length > MAX_BYTES) throw new IOException("launch options exceed size limit");
             Path staging = file.resolveSibling(file.getFileName() + ".new");
