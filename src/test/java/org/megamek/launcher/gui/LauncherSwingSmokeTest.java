@@ -314,7 +314,7 @@ class LauncherSwingSmokeTest {
                 frame.validate();
                 return null;
             });
-                        SwingTestSupport.awaitCondition("compact home layout", () ->
+            SwingTestSupport.awaitCondition("compact home layout", () ->
                     ((Component) component(frame, "managedHomeNavigationRow")).getWidth() < 680);
             onEdt(() -> {
                 Component row = component(frame, "managedHomeNavigationRow");
@@ -366,12 +366,7 @@ class LauncherSwingSmokeTest {
                 frame.validate();
                 return null;
             });
-            onEdt(() -> {
-                javax.swing.JScrollPane scroll = (javax.swing.JScrollPane) component(frame, "settingsScrollPane");
-                assertFalse(scroll.getVerticalScrollBar().isVisible(),
-                        "Settings fits the default window without scrolling");
-                return null;
-            });
+            assertSettingsFitsDefaultWindow(frame);
             for (int width : new int[]{1180, 680}) {
                 onEdt(() -> {
                     frame.setSize(width, width == 680 ? 470 : 760);
@@ -1033,6 +1028,39 @@ class LauncherSwingSmokeTest {
 
     private static JButton waitForButton(Container root, String name) throws Exception {
         return SwingTestSupport.await("button " + name, () -> find(root, name));
+    }
+
+    /**
+     * Some CI displays are smaller than the default window, and the OS clamps the frame (and may apply the size
+     * asynchronously), so only check for a scrollbar once the frame really is 1180x820.
+     */
+    private static void assertSettingsFitsDefaultWindow(LauncherFrame frame) throws Exception {
+        java.awt.Dimension target = new java.awt.Dimension(1180, 820);
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
+        while (true) {
+            boolean settled = onEdt(() -> {
+                frame.validate();
+                javax.swing.JScrollPane scroll = component(frame, "settingsScrollPane");
+                return target.equals(frame.getSize()) && !scroll.getVerticalScrollBar().isVisible();
+            });
+            if (settled || System.nanoTime() > deadline) break;
+            Thread.sleep(50);
+        }
+        onEdt(() -> {
+            java.awt.Rectangle screen = frame.getGraphicsConfiguration().getBounds();
+            if (!target.equals(frame.getSize())) {
+                System.out.println("Skipping the Settings no-scroll check: the frame is " + frame.getSize()
+                        + " on a " + screen.width + "x" + screen.height + " screen.");
+                return null;
+            }
+            javax.swing.JScrollPane scroll = component(frame, "settingsScrollPane");
+            assertFalse(scroll.getVerticalScrollBar().isVisible(),
+                    "Settings fits the default window without scrolling: viewport="
+                            + scroll.getViewport().getExtentSize() + " view="
+                            + scroll.getViewport().getView().getPreferredSize() + " content="
+                            + frame.getContentPane().getSize() + " screen=" + screen.getSize());
+            return null;
+        });
     }
 
     private static JButton find(Container root, String name) {
