@@ -210,7 +210,15 @@ final class LaunchOptionsDialog {
 
         dialog.setContentPane(body);
         dialog.getRootPane().setDefaultButton(save);
-        dialog.setSize(scale.scaleForGUI(760, 720));
+        dialog.pack();
+        Rectangle usable = (owner != null ? owner.getGraphicsConfiguration()
+                : dialog.getGraphicsConfiguration()).getBounds();
+        java.awt.Insets screenInsets = java.awt.Toolkit.getDefaultToolkit()
+                .getScreenInsets(dialog.getGraphicsConfiguration());
+        int maxHeight = usable.height - screenInsets.top - screenInsets.bottom;
+        int maxWidth = usable.width - screenInsets.left - screenInsets.right;
+        dialog.setSize(Math.min(Math.max(scale.scaleForGUI(760), dialog.getWidth()), maxWidth),
+                Math.min(Math.max(scale.scaleForGUI(420), dialog.getHeight()), maxHeight));
         dialog.setMinimumSize(scale.scaleForGUI(560, 420));
         dialog.setLocationRelativeTo(owner);
     }
@@ -328,7 +336,7 @@ final class LaunchOptionsDialog {
         inheritConstraints.anchor = GridBagConstraints.WEST;
         inheritConstraints.weightx = 1;
         inheritConstraints.fill = GridBagConstraints.HORIZONTAL;
-        inheritConstraints.insets = new Insets(scale.scaleForGUI(12), 0, 0, 0);
+        inheritConstraints.insets = new Insets(scale.scaleForGUI(12), -inherit.getInsets().left, 0, 0);
         fields.add(inherit, inheritConstraints);
 
         GridBagConstraints editorConstraints = new GridBagConstraints();
