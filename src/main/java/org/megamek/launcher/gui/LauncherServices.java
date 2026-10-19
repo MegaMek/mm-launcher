@@ -45,12 +45,15 @@ import org.megamek.launcher.diagnostics.OperationLogStore;
 import org.megamek.launcher.diagnostics.SanitizedErrors;
 import org.megamek.launcher.launch.ApplicationLauncher;
 import org.megamek.launcher.launch.JavaRuntime;
+import org.megamek.launcher.launch.LaunchOptions;
+import org.megamek.launcher.launch.LaunchOptionsStore;
 import org.megamek.launcher.launch.RootCoordinator;
 import org.megamek.launcher.onboarding.ExistingImportService;
 import org.megamek.launcher.onboarding.Inspection;
 import org.megamek.launcher.onboarding.InstallationInspector;
 import org.megamek.launcher.onboarding.NormalInstallService;
 import org.megamek.launcher.onboarding.PlatformInstallLocations;
+import org.megamek.launcher.onboarding.Product;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationOutcome;
 import org.megamek.launcher.operation.OperationPhase;
@@ -82,6 +85,7 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -104,6 +108,7 @@ public class LauncherServices {
     private final ExistingImportService existingImports;
     private final ImportedCopyAdoptionService adoptions;
     private final LauncherSettingsStore settings;
+    private final LaunchOptionsStore launchOptions;
     private final UninstallService uninstalls;
     private final OpenLocationService locations;
 
@@ -148,6 +153,7 @@ public class LauncherServices {
         this.preparedUpdates = new PreparedUpdateService(transport, updateCoordinator);
         this.operationLogs = new OperationLogStore(this.registry);
         this.settings = new LauncherSettingsStore(this.registry);
+        this.launchOptions = new LaunchOptionsStore(this.registry);
         this.normalInstalls = new NormalInstallService(this.registry, transport,
                 installLocations);
         this.existingImports = new ExistingImportService(this.registry, store, inspector);
@@ -454,7 +460,51 @@ public class LauncherServices {
                                                        String name,
                                                        OperationContext context)
             throws IOException, InterruptedException {
-        return existingImports.register(plan, name, context);
+        ExistingImportService.Result result = existingImports.register(plan, name, context);
+        adoptLegacyHeapSettings(result.record());
+        return result;
+    }
+
+    /**
+     * Keeps the memory a player configured in an imported copy's Launch4j .l4j.ini files as that
+     * installation's launch override. Best effort: the import has already succeeded.
+     */
+    private void adoptLegacyHeapSettings(InstallationRecord record) {
+        try {
+            Map<String, Integer> heaps = new HashMap<>();
+            for (Product product : record.products()) {
+                Integer heap = legacyHeapMb(Path.of(record.canonicalRoot()), product.jar());
+                if (heap != null && heap != InstallationInspector.heapMb(product.key())) {
+                    heaps.put(product.key(), heap);
+                }
+            }
+            if (heaps.isEmpty()) return;
+            LaunchOptions overrides = new LaunchOptions(heaps.get("megamek"), heaps.get("mekhq"),
+                    heaps.get("lab"), null, null, null);
+            launchOptions.writeInstallation(record.id(), overrides);
+        } catch (IOException | RuntimeException ignored) {
+            // The installation keeps the launcher-wide memory settings.
+        }
+    }
+
+    static Integer legacyHeapMb(Path root, String jar) throws IOException {
+        if (!jar.endsWith(".jar") || jar.contains("/") || jar.contains("\\")) return null;
+        Path ini = root.resolve(jar.substring(0, jar.length() - 4) + ".l4j.ini");
+        if (!Files.isRegularFile(ini, LinkOption.NOFOLLOW_LINKS) || Files.size(ini) > 65_536) {
+            return null;
+        }
+        Integer heap = null;
+        for (String line : Files.readAllLines(ini, java.nio.charset.StandardCharsets.UTF_8)) {
+            java.util.regex.Matcher match = java.util.regex.Pattern
+                    .compile("-Xmx(\\d{1,7})([mMgG])").matcher(line.strip());
+            if (!match.matches()) continue;
+            long value = Long.parseLong(match.group(1));
+            if (match.group(2).equalsIgnoreCase("g")) value *= 1024;
+            if (value >= LaunchOptions.MIN_HEAP_MB && value <= LaunchOptions.MAX_HEAP_MB) {
+                heap = (int) value;
+            }
+        }
+        return heap;
     }
 
     public ImportedCopyAdoptionService.Suggestion adoptionSuggestion(
@@ -509,14 +559,31 @@ public class LauncherServices {
             throws IOException, InterruptedException {
         InstallationRecord current = requireCurrentLaunchRecord(record);
         JavaRuntime.CurrentJava java = configuredGameJava(current);
-        return applicationLauncher.command(current, product, java);
+        return applicationLauncher.command(current, product, java,
+                launchOptions.read().effective(current.id()));
     }
 
     public int launch(InstallationRecord record, String product)
             throws IOException, InterruptedException {
         InstallationRecord current = requireCurrentLaunchRecord(record);
         JavaRuntime.CurrentJava java = configuredGameJava(current);
-        return applicationLauncher.launch(current, product, java);
+        return applicationLauncher.launch(current, product, java,
+                launchOptions.read().effective(current.id()));
+    }
+
+    public LaunchOptionsStore.Document launchOptions() throws IOException {
+        return launchOptions.read();
+    }
+
+    public LaunchOptionsStore.Document saveGlobalLaunchOptions(LaunchOptions options)
+            throws IOException {
+        return launchOptions.writeGlobal(options);
+    }
+
+    public LaunchOptionsStore.Document saveInstallationLaunchOptions(InstallationRecord record,
+                                                                     LaunchOptions overrides)
+            throws IOException {
+        return launchOptions.writeInstallation(record.id(), overrides);
     }
 
     private JavaRuntime.CurrentJava configuredGameJava(InstallationRecord record)
@@ -568,12 +635,26 @@ public class LauncherServices {
 
     public UninstallService.Result removeFromLauncher(InstallationRecord record)
             throws IOException {
-        return uninstalls.removeFromLauncher(record);
+        UninstallService.Result result = uninstalls.removeFromLauncher(record);
+        forgetLaunchOptions(record);
+        return result;
     }
 
     public UninstallService.Result removeMissingFromLauncher(InstallationRecord record)
             throws IOException {
-        return uninstalls.removeMissingFromLauncher(record);
+        UninstallService.Result result = uninstalls.removeMissingFromLauncher(record);
+        forgetLaunchOptions(record);
+        return result;
+    }
+
+    private void forgetLaunchOptions(InstallationRecord record) {
+        try {
+            if (!launchOptions.read().installation(record.id()).inheritsEverything()) {
+                launchOptions.writeInstallation(record.id(), LaunchOptions.INHERIT);
+            }
+        } catch (IOException ignored) {
+            // A stale override for a removed installation is never applied.
+        }
     }
 
     public UninstallService.Plan planUninstall(InstallationRecord record,

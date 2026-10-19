@@ -38,6 +38,7 @@ import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
@@ -80,6 +81,12 @@ final class FirstLaunchPanel extends JPanel {
 
     FirstLaunchPanel(BufferedImage image, GuiScale scale, FirstLaunchSplitButton download,
                      JButton useExisting, JLabel status) {
+        this(image, scale, download, useExisting, status, null);
+    }
+
+    /** @param links optional row shown centered below the status line, or {@code null} */
+    FirstLaunchPanel(BufferedImage image, GuiScale scale, FirstLaunchSplitButton download,
+                     JButton useExisting, JLabel status, JComponent links) {
         this.scale = scale;
         setName("firstLaunchPanel");
         setLayout(null);
@@ -133,6 +140,11 @@ final class FirstLaunchPanel extends JPanel {
         status.setName("homeStatusLabel");
         status.setVisible(true);
         controls.add(status);
+        if (links != null) {
+            controls.add(Box.createVerticalStrut(scale.scaleForGUI(14)));
+            links.setAlignmentX(CENTER_ALIGNMENT);
+            controls.add(links);
+        }
         verticalCenterAfter = flexibleSpace();
         controls.add(verticalCenterAfter);
 
@@ -157,7 +169,39 @@ final class FirstLaunchPanel extends JPanel {
 
     /** Reuses the accepted full-aspect artwork for managed, unavailable, and recovery Home. */
     static JPanel managedHome(BufferedImage image, GuiScale scale, JPanel controls) {
-        return new ManagedHomePanel(image, scale, controls);
+        return new ManagedHomePanel(image, scale, controls, null);
+    }
+
+    /**
+     * Managed Home with {@code overlay} floating over the artwork's top-right corner. The overlay is hidden
+     * when the visible artwork is too small to hold it without covering the launch controls.
+     */
+    static JPanel managedHome(BufferedImage image, GuiScale scale, JPanel controls, JComponent overlay) {
+        return new ManagedHomePanel(image, scale, controls, overlay);
+    }
+
+    /** Rounded, translucent backplate that keeps text readable over the artwork. */
+    static JPanel backplate(GuiScale scale) {
+        JPanel plate = new JPanel() {
+            @Override protected void paintComponent(Graphics graphics) {
+                Graphics2D canvas = (Graphics2D) graphics.create();
+                try {
+                    canvas.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                            RenderingHints.VALUE_ANTIALIAS_ON);
+                    int arc = scale.scaleForGUI(12);
+                    canvas.setColor(new Color(PANEL.getRed(), PANEL.getGreen(), PANEL.getBlue(), 225));
+                    canvas.fillRoundRect(0, 0, getWidth() - 1, getHeight() - 1, arc, arc);
+                    canvas.setColor(LauncherTheme.BORDER);
+                    canvas.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 1, arc, arc);
+                } finally {
+                    canvas.dispose();
+                }
+            }
+        };
+        plate.setOpaque(false);
+        plate.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(12), scale.scaleForGUI(16),
+                scale.scaleForGUI(12), scale.scaleForGUI(16)));
+        return plate;
     }
 
     private JLabel label(String text, Font font, Color color) {
@@ -256,9 +300,12 @@ final class FirstLaunchPanel extends JPanel {
         private final ArtworkPanel artwork;
         private final JPanel deck;
         private final JScrollPane scroller;
+        private final JComponent overlay;
 
-        private ManagedHomePanel(BufferedImage image, GuiScale scale, JPanel controls) {
+        private ManagedHomePanel(BufferedImage image, GuiScale scale, JPanel controls,
+                                 JComponent overlay) {
             this.scale = scale;
+            this.overlay = overlay;
             setName("managedHomePanel");
             setLayout(null);
             setBackground(BACKGROUND);
@@ -280,8 +327,15 @@ final class FirstLaunchPanel extends JPanel {
             scroller.setBorder(BorderFactory.createEmptyBorder());
             scroller.getViewport().setBackground(PANEL);
             scroller.getVerticalScrollBar().setUnitIncrement(scale.scaleForGUI(18));
+            // Lower indexes paint on top, so the overlay goes before the artwork.
+            if (overlay != null) add(overlay);
             add(artwork);
             add(scroller);
+        }
+
+        @Override
+        public boolean isOptimizedDrawingEnabled() {
+            return overlay == null;
         }
 
         @Override
@@ -304,8 +358,26 @@ final class FirstLaunchPanel extends JPanel {
             int artHeight = Math.max(0, getHeight() - deckHeight);
             artwork.setBounds(0, 0, getWidth(), artHeight);
             scroller.setBounds(0, artHeight, getWidth(), deckHeight);
+            layoutOverlay(artHeight);
         }
 
+        private void layoutOverlay(int artHeight) {
+            if (overlay == null) return;
+            int margin = scale.scaleForGUI(16);
+            int width = Math.min(scale.scaleForGUI(380), getWidth() - 2 * margin);
+            if (width < scale.scaleForGUI(240)) {
+                overlay.setVisible(false);
+                return;
+            }
+            overlay.setSize(width, Math.max(1, artHeight));
+            // Lay out once at the final width so wrapped headlines report their real height.
+            overlay.validate();
+            overlay.invalidate();
+            int height = overlay.getPreferredSize().height;
+            boolean fits = height + 2 * margin <= artHeight;
+            overlay.setVisible(fits);
+            if (fits) overlay.setBounds(getWidth() - width - margin, margin, width, height);
+        }
     }
 
     private static final class ManagedDeckPanel extends JPanel implements Scrollable {

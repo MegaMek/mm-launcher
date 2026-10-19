@@ -224,7 +224,7 @@ class LauncherSwingSmokeTest {
 
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
-    void settingsUseWrappedDatedLinksAndMatchingUtilityButtonSizes() throws Exception {
+    void homeNewsUsesWrappedDatedLinksAndSettingsKeepMatchingUtilityButtonSizes() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "actual Swing controls require a display");
         PagingServices services = new PagingServices(temp.resolve("settings-links.json"));
         services.register("Main", createSuite(temp.resolve("settings-links-copy")));
@@ -243,36 +243,139 @@ class LauncherSwingSmokeTest {
         try {
             onEdt(() -> {
                 frame.showWindow();
+                frame.setSize(1180, 820);
+                frame.validate();
                 return null;
             });
+            SwingTestSupport.awaitCondition("wrapped home headline layout", () -> {
+                if (!(find(frame, "newsArticleButton0") instanceof LauncherLink link)) return false;
+                return link.isShowing() && link.getWidth() > 0
+                        && link.getHeight() >= link.getPreferredSize().height;
+            });
+            onEdt(() -> {
+                LauncherLink link = assertInstanceOf(LauncherLink.class, find(frame, "newsArticleButton0"));
+                assertEquals(title, link.getText());
+                assertEquals(javax.accessibility.AccessibleRole.HYPERLINK,
+                        link.getAccessibleContext().getAccessibleRole());
+                assertTrue(link.getHeight() > link.getFontMetrics(link.getFont()).getHeight() * 2);
+                JLabel date = component(frame, "newsArticleDate0");
+                assertEquals(LauncherTheme.MUTED, date.getForeground());
+                assertTrue(date.getFont().getSize2D() < link.getFont().getSize2D());
+                assertTrue(link.getAccessibleContext().getAccessibleName().contains(date.getText()));
+                assertInstanceOf(LauncherLink.class, find(frame, "allNewsButton"));
+                JPanel news = component(frame, "homeNewsPanel");
+                assertTrue(link.getX() + link.getWidth() <= news.getWidth() - news.getInsets().right);
+                JPanel deck = component(frame, "managedHomeDeck");
+                JPanel navigation = component(frame, "managedHomeNavigation");
+                java.awt.Rectangle nav = SwingUtilities.convertRectangle(navigation.getParent(),
+                        navigation.getBounds(), deck);
+                java.awt.Rectangle settingsBounds = SwingUtilities.convertRectangle(
+                        find(frame, "settingsButton").getParent(), find(frame, "settingsButton").getBounds(), deck);
+                java.awt.Rectangle manageBounds = SwingUtilities.convertRectangle(
+                        find(frame, "manageInstallationsButton").getParent(),
+                        find(frame, "manageInstallationsButton").getBounds(), deck);
+                int buttonsCenter = (manageBounds.x + settingsBounds.x + settingsBounds.width) / 2;
+                assertTrue(Math.abs(buttonsCenter - deck.getWidth() / 2) <= 2,
+                        "the navigation buttons stay centered beside the community links");
+                for (String name : new String[]{"openDiscordButton", "playOnlineButton"}) {
+                    LauncherLink community = assertInstanceOf(LauncherLink.class, find(frame, name));
+                    java.awt.Rectangle bounds = SwingUtilities.convertRectangle(community.getParent(),
+                            community.getBounds(), deck);
+                    assertTrue(bounds.x >= nav.x + nav.width, name + " sits right of the navigation");
+                    assertTrue(bounds.x + bounds.width <= deck.getWidth(), name + " stays inside the deck");
+                }
+                return null;
+            });
+            onEdt(() -> {
+                frame.toFront();
+                find(frame, "newsArticleButton0").requestFocusInWindow();
+                return null;
+            });
+            SwingTestSupport.awaitCondition("focused news link", () ->
+                    find(frame, "newsArticleButton0").isFocusOwner());
+            onEdt(() -> {
+                LauncherLink link = assertInstanceOf(LauncherLink.class, find(frame, "newsArticleButton0"));
+                BufferedImage image = new BufferedImage(link.getWidth(), link.getHeight(),
+                        BufferedImage.TYPE_INT_ARGB);
+                Graphics2D graphics = image.createGraphics();
+                try {
+                    link.paint(graphics);
+                } finally {
+                    graphics.dispose();
+                }
+                assertEquals(LauncherTheme.BUTTON_ICON.getRGB(), image.getRGB(0, link.getHeight() / 2),
+                        "keyboard focus has a visible cyan outline");
+                return null;
+            });
+            saveReviewImage("home-news-wide.png", frame);
+
+            onEdt(() -> {
+                frame.setSize(680, 470);
+                frame.validate();
+                return null;
+            });
+            SwingTestSupport.awaitCondition("compact home layout", () ->
+                    ((Component) component(frame, "managedHomeNavigationRow")).getWidth() < 680);
+            onEdt(() -> {
+                Component row = component(frame, "managedHomeNavigationRow");
+                assertTrue(row.getHeight() > find(frame, "settingsButton").getHeight() * 3 / 2,
+                        "the community links drop below the navigation: row=" + row.getBounds()
+                                + " pref=" + row.getPreferredSize() + " nav="
+                                + ((Component) component(frame, "managedHomeNavigation")).getBounds()
+                                + " links=" + find(frame, "openDiscordButton").getParent().getParent().getBounds());
+                return null;
+            });
+            onEdt(() -> {
+                JPanel navigation = component(frame, "managedHomeNavigation");
+                JButton manage = find(frame, "manageInstallationsButton");
+                JButton settingsButton = find(frame, "settingsButton");
+                assertEquals(manage.getY(), settingsButton.getY(), "compact navigation stays on one line");
+                for (JButton button : new JButton[]{manage, settingsButton}) {
+                    assertTrue(button.isShowing());
+                    assertTrue(button.getX() >= 0 && button.getX() + button.getWidth() <= navigation.getWidth()
+                            && button.getY() >= 0 && button.getY() + button.getHeight() <= navigation.getHeight(),
+                            button.getName() + " is not clipped at the minimum window size");
+                }
+                Component row = component(frame, "managedHomeNavigationRow");
+                java.awt.Rectangle nav = SwingUtilities.convertRectangle(navigation.getParent(),
+                        navigation.getBounds(), row);
+                for (String name : new String[]{"openDiscordButton", "playOnlineButton"}) {
+                    Component community = find(frame, name);
+                    assertTrue(community.isShowing(), name + " stays visible");
+                    java.awt.Rectangle bounds = SwingUtilities.convertRectangle(community.getParent(),
+                            community.getBounds(), row);
+                    assertTrue(bounds.y >= nav.y + nav.height, name + " drops below the navigation");
+                    assertTrue(bounds.x >= 0 && bounds.x + bounds.width <= row.getWidth()
+                            && bounds.y + bounds.height <= row.getHeight(), name + " stays inside the row");
+                }
+                return null;
+            });
+            saveReviewImage("home-news-compact.png", frame);
+            onEdt(() -> {
+                frame.setSize(1180, 820);
+                frame.validate();
+                return null;
+            });
+
             JButton settings = waitForButton(frame, "settingsButton");
             SwingUtilities.invokeAndWait(settings::doClick);
-            SwingTestSupport.awaitCondition("loaded settings and news", () -> find(frame, "newsArticleButton0") != null
-                    && find(frame, "changeDefaultJavaButton") != null);
+            SwingTestSupport.awaitCondition("loaded settings", () ->
+                    find(frame, "changeDefaultJavaButton") != null);
+            onEdt(() -> {
+                frame.setSize(1180, 820);
+                frame.validate();
+                return null;
+            });
+            assertSettingsFitsDefaultWindow(frame);
             for (int width : new int[]{1180, 680}) {
                 onEdt(() -> {
                     frame.setSize(width, width == 680 ? 470 : 760);
                     frame.validate();
                     return null;
                 });
-                SwingTestSupport.awaitCondition("wrapped settings headline layout", () -> {
-                    LauncherLink link = assertInstanceOf(LauncherLink.class, find(frame, "newsArticleButton0"));
-                    return link.getWidth() > 0 && link.getHeight() >= link.getPreferredSize().height;
-                });
                 onEdt(() -> {
-                    LauncherLink link = assertInstanceOf(LauncherLink.class, find(frame, "newsArticleButton0"));
-                    assertEquals(title, link.getText());
-                    assertEquals(javax.accessibility.AccessibleRole.HYPERLINK,
-                            link.getAccessibleContext().getAccessibleRole());
-                    assertTrue(link.getHeight() > link.getFontMetrics(link.getFont()).getHeight() * 2);
-                    JLabel date = component(frame, "newsArticleDate0");
-                    assertEquals(LauncherTheme.MUTED, date.getForeground());
-                    assertTrue(date.getFont().getSize2D() < link.getFont().getSize2D());
-                    assertTrue(link.getAccessibleContext().getAccessibleName().contains(date.getText()));
-                    assertInstanceOf(LauncherLink.class, find(frame, "openDiscordButton"));
-                    assertInstanceOf(LauncherLink.class, find(frame, "allNewsButton"));
-                    JPanel news = component(frame, "settingsLatestnewsSection");
-                    assertTrue(link.getX() + link.getWidth() <= news.getWidth() - news.getInsets().right);
+                    assertNull(find(frame, "openDiscordButton"), "community links live on Home");
+                    assertNotNull(component(frame, "launchOptionsForm"));
                     JButton java = find(frame, "changeDefaultJavaButton");
                     JButton logs = find(frame, "viewOperationLogsButton");
                     assertEquals(java.getSize(), logs.getSize());
@@ -280,42 +383,9 @@ class LauncherSwingSmokeTest {
                     if (update != null) assertEquals(java.getSize(), update.getSize());
                     return null;
                 });
-                onEdt(() -> {
-                    frame.toFront();
-                    find(frame, "changeDefaultJavaButton").requestFocusInWindow();
-                    return null;
-                });
-                SwingTestSupport.awaitCondition("focused utility button", () ->
-                        find(frame, "changeDefaultJavaButton").isFocusOwner());
-                onEdt(() -> {
-                    find(frame, "newsArticleButton0").requestFocusInWindow();
-                    return null;
-                });
-                SwingTestSupport.awaitCondition("focused news link", () ->
-                        find(frame, "newsArticleButton0").isFocusOwner());
-                onEdt(() -> {
-                    LauncherLink link = assertInstanceOf(LauncherLink.class, find(frame, "newsArticleButton0"));
-                    var viewport = assertInstanceOf(javax.swing.JViewport.class,
-                            javax.swing.SwingUtilities.getAncestorOfClass(javax.swing.JViewport.class, link));
-                    var bounds = javax.swing.SwingUtilities.convertRectangle(
-                            link.getParent(), link.getBounds(), viewport.getView());
-                    assertTrue(viewport.getViewRect().contains(bounds),
-                            "keyboard focus must scroll the full link into view");
-                    BufferedImage image = new BufferedImage(link.getWidth(), link.getHeight(),
-                            BufferedImage.TYPE_INT_ARGB);
-                    Graphics2D graphics = image.createGraphics();
-                    try {
-                        link.paint(graphics);
-                    } finally {
-                        graphics.dispose();
-                    }
-                    assertEquals(LauncherTheme.BUTTON_ICON.getRGB(), image.getRGB(0, link.getHeight() / 2),
-                            "keyboard focus has a visible cyan outline");
-                    return null;
-                });
                 saveReviewImage(width == 1180 ? "settings-links-wide.png" : "settings-links-compact.png", frame);
             }
-            assertEquals(1, requests.get(), "resizing and restyling must not fetch the feed again");
+            assertEquals(1, requests.get(), "resizing and navigating must not fetch the feed again");
         } finally {
             dispose(frame);
         }
@@ -958,6 +1028,39 @@ class LauncherSwingSmokeTest {
 
     private static JButton waitForButton(Container root, String name) throws Exception {
         return SwingTestSupport.await("button " + name, () -> find(root, name));
+    }
+
+    /**
+     * Some CI displays are smaller than the default window, and the OS clamps the frame (and may apply the size
+     * asynchronously), so only check for a scrollbar once the frame really is 1180x820.
+     */
+    private static void assertSettingsFitsDefaultWindow(LauncherFrame frame) throws Exception {
+        java.awt.Dimension target = new java.awt.Dimension(1180, 820);
+        long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(3);
+        while (true) {
+            boolean settled = onEdt(() -> {
+                frame.validate();
+                javax.swing.JScrollPane scroll = component(frame, "settingsScrollPane");
+                return target.equals(frame.getSize()) && !scroll.getVerticalScrollBar().isVisible();
+            });
+            if (settled || System.nanoTime() > deadline) break;
+            Thread.sleep(50);
+        }
+        onEdt(() -> {
+            java.awt.Rectangle screen = frame.getGraphicsConfiguration().getBounds();
+            if (!target.equals(frame.getSize())) {
+                System.out.println("Skipping the Settings no-scroll check: the frame is " + frame.getSize()
+                        + " on a " + screen.width + "x" + screen.height + " screen.");
+                return null;
+            }
+            javax.swing.JScrollPane scroll = component(frame, "settingsScrollPane");
+            assertFalse(scroll.getVerticalScrollBar().isVisible(),
+                    "Settings fits the default window without scrolling: viewport="
+                            + scroll.getViewport().getExtentSize() + " view="
+                            + scroll.getViewport().getView().getPreferredSize() + " content="
+                            + frame.getContentPane().getSize() + " screen=" + screen.getSize());
+            return null;
+        });
     }
 
     private static JButton find(Container root, String name) {

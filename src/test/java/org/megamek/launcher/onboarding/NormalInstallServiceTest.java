@@ -47,6 +47,7 @@ import org.megamek.launcher.channel.SuiteTestData;
 import org.megamek.launcher.gui.LauncherServices;
 import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.launch.ApplicationLauncher;
+import org.megamek.launcher.launch.LaunchOptions;
 import org.megamek.launcher.launch.ProcessRunner;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationPhase;
@@ -189,6 +190,23 @@ class NormalInstallServiceTest {
         assertTrue(launcher.command(latest, "megamek", java).contains("megamek.MegaMek"));
         assertTrue(launcher.command(latest, "mekhq", java).contains("mekhq.MekHQ"));
         assertTrue(launcher.command(latest, "lab", java).contains("megameklab.MegaMekLab"));
+        assertTrue(launcher.command(latest, "megamek", java).contains("-Xmx4096m"));
+        Path userDir = fixture.destination.getParent().resolve("shared-user-data").toAbsolutePath();
+        List<String> tuned = launcher.command(latest, "megamek", java, new LaunchOptions(2048, null, null,
+                LaunchOptions.Renderer.OPENGL, "-Dsun.java2d.uiScale=1.5", userDir.toString()));
+        assertTrue(tuned.contains("-Xmx2048m"));
+        assertFalse(tuned.contains("-Xmx4096m"));
+        int classPath = tuned.indexOf("-cp");
+        for (String expected : List.of("-Dsun.java2d.opengl=true", "-Dmegamek.userDir=" + userDir,
+                "-Dsun.java2d.uiScale=1.5")) {
+            int index = tuned.indexOf(expected);
+            assertTrue(index > tuned.indexOf("-Dsun.awt.disablegrab=true") && index < classPath, expected);
+        }
+        assertTrue(launcher.command(latest, "mekhq", java, new LaunchOptions(2048, null, null,
+                null, null, null)).contains("-Xmx4096m"), "per-product memory stays independent");
+        IOException invalid = assertThrows(IOException.class, () -> launcher.command(latest, "megamek", java,
+                new LaunchOptions(null, null, null, null, "-jar other.jar", null)));
+        assertTrue(invalid.getMessage().contains("launch options are invalid"));
     }
 
     @Test

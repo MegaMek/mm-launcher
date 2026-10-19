@@ -42,6 +42,8 @@ import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.channel.QuickInstallSnapshot;
 import org.megamek.launcher.channel.SuiteTestData;
+import org.megamek.launcher.launch.LaunchOptions;
+import org.megamek.launcher.launch.LaunchOptionsStore;
 import org.megamek.launcher.onboarding.Inspection;
 import org.megamek.launcher.onboarding.NormalInstallService;
 import org.megamek.launcher.onboarding.Product;
@@ -98,6 +100,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -132,6 +135,14 @@ class SimpleHomeSwingTest {
             assertFalse(options.isEnabled());
             assertFalse(options.isFocusable());
             assertTrue(existing.isEnabled());
+            onEdt(() -> {
+                Component links = find(frame, "communityLinks");
+                assertTrue(SwingUtilities.isDescendingFrom(links, find(frame, "firstLaunchPanel")),
+                        "first-run Home also offers the community links");
+                assertInstanceOf(LauncherLink.class, find(frame, "openDiscordButton"));
+                assertInstanceOf(LauncherLink.class, find(frame, "playOnlineButton"));
+                return null;
+            });
             SwingUtilities.invokeAndWait(() -> {
                 primary.doClick();
                 options.doClick();
@@ -1254,45 +1265,32 @@ class SimpleHomeSwingTest {
         FakeServices services = new FakeServices(temp.resolve("settings-layout.json"));
         services.installed = true;
         services.main = services.first;
-        CountDownLatch releaseNews = new CountDownLatch(1);
-        LauncherNewsFeed feed = new LauncherNewsFeed((uri, accept) -> {
-            if (!releaseNews.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
-                throw new IOException("Test news release timed out");
-            }
-            return new ReleaseTransport.Response(503, Map.of(),
-                    new ByteArrayInputStream(new byte[0]));
-        });
-        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, feed));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, unavailableNews()));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
             assertNotNull(waitFor(() -> find(frame, "changeDefaultJavaButton")));
-            // The news worker is still pending while settings finishes loading.
-            assertSettingsGeometryAtSize(frame, 1080, 760, true, "newsLoadingMessage");
-            assertSettingsGeometryAtSize(frame, 720, 600, false, "newsLoadingMessage");
-            releaseNews.countDown();
-            assertNotNull(waitFor(() -> find(frame, "newsUnavailableMessage")));
-            assertSettingsGeometryAtSize(frame, 1080, 760, true, "newsUnavailableMessage");
-            assertSettingsGeometryAtSize(frame, 720, 600, false, "newsUnavailableMessage");
+            assertSettingsGeometryAtSize(frame, 1080, 760, true);
+            assertSettingsGeometryAtSize(frame, 720, 600, false);
         } finally {
-            releaseNews.countDown();
             dispose(frame);
         }
+    }
+    private static LauncherNewsFeed unavailableNews() {
+        return new LauncherNewsFeed((uri, accept) ->
+                new ReleaseTransport.Response(503, Map.of(), new ByteArrayInputStream(new byte[0])));
     }
 
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
-    void settingsLoadingAndErrorKeepResponsiveGroupsAndNewsActions() throws Exception {
+    void settingsLoadingAndErrorKeepResponsiveGroups() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         FakeServices services = new FakeServices(temp.resolve("settings-error-layout.json"));
         services.installed = true;
         services.main = services.first;
         services.releaseSettings = new CountDownLatch(1);
         services.settingsFailure = new IOException("Unreadable test settings");
-        LauncherFrame frame = onEdt(() -> new LauncherFrame(services,
-                new LauncherNewsFeed((uri, accept) ->
-                        new ReleaseTransport.Response(503, Map.of(),
-                                new ByteArrayInputStream(new byte[0])))));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, unavailableNews()));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
@@ -1300,7 +1298,7 @@ class SimpleHomeSwingTest {
             onEdt(() -> {
                 assertEquals(0, ((JPanel) find(frame, "settingsRightColumn")).getY());
                 assertNotNull(find(frame, "settingsLoadingMessage"));
-                assertNotNull(find(frame, "allNewsButton"));
+                assertNull(find(frame, "launchOptionsForm"));
                 return null;
             });
             services.releaseSettings.countDown();
@@ -1312,7 +1310,7 @@ class SimpleHomeSwingTest {
                 assertEquals(left.getWidth(), right.getWidth());
                 assertTrue(right.getY() >= left.getHeight());
                 assertNotNull(find(frame, "retrySettingsButton"));
-                assertNotNull(find(frame, "allNewsButton"));
+                assertNull(find(frame, "launchOptionsForm"));
                 return null;
             });
         } finally {
@@ -1368,47 +1366,45 @@ class SimpleHomeSwingTest {
     }
 
     private static void assertSettingsGeometryAtSize(LauncherFrame frame, int width, int height,
-                                                     boolean wide, String newsState) throws Exception {
+                                                     boolean wide) throws Exception {
         resizeSettingsWindow(frame, width, height);
         onEdt(() -> {
-            assertSettingsGeometry(frame, wide, newsState);
+            assertSettingsGeometry(frame, wide);
             return null;
         });
     }
 
-    private static void assertSettingsGeometry(LauncherFrame frame, boolean wide, String newsState) {
+    private static void assertSettingsGeometry(LauncherFrame frame, boolean wide) {
         JPanel left = find(frame, "settingsLeftColumn");
         JPanel right = find(frame, "settingsRightColumn");
         javax.swing.JScrollPane scroll = find(frame, "settingsScrollPane");
         Component navigation = find(frame, "homeButton");
-        assertNotNull(find(frame, newsState));
-        assertNotNull(find(frame, "allNewsButton"));
         assertNotNull(find(frame, "defaultJavaPath"));
         assertNotNull(find(frame, "viewOperationLogsButton"));
-        Component newsAction = find(frame, newsState.equals("newsArticleButton0")
-                ? "newsArticleButton0" : "allNewsButton");
-        Rectangle actionBounds = SwingUtilities.convertRectangle(newsAction.getParent(),
-                newsAction.getBounds(), right);
-        assertTrue(actionBounds.x + actionBounds.width <= right.getWidth(),
-                "news action must fit inside its column");
-        if (newsState.equals("newsArticleButton0")) {
-            JPanel news = find(frame, "settingsLatestnewsSection");
-            java.awt.Insets insets = news.getInsets();
-            LauncherLink headline = assertInstanceOf(LauncherLink.class, newsAction);
-            assertEquals(Math.min(news.getWidth() - insets.left - insets.right,
-                            headline.getPreferredSize().width),
-                    headline.getWidth(), "headline link should use its natural width within the news column");
-            assertEquals(javax.swing.SwingConstants.LEFT, headline.getHorizontalAlignment(),
-                    "headline text should align with the other Settings content");
+        assertNull(find(frame, "editLaunchOptionsButton"), "launcher-wide options are edited inline");
+        Component form = find(frame, "launchOptionsForm");
+        assertTrue(SwingUtilities.isDescendingFrom(form, right), "launch options live in the right column");
+        for (String name : List.of("launchOptionsForm", "launchOptionsJvmArguments",
+                "saveGlobalLaunchOptionsButton")) {
+            Component component = find(frame, name);
+            Rectangle bounds = SwingUtilities.convertRectangle(component.getParent(),
+                    component.getBounds(), right);
+            assertTrue(bounds.x >= 0 && bounds.x + bounds.width <= right.getWidth(),
+                    name + " must fit inside its column");
         }
+        Component save = find(frame, "saveGlobalLaunchOptionsButton");
+        Component revert = find(frame, "revertLaunchOptionsButton");
+        Rectangle saveBounds = SwingUtilities.convertRectangle(save.getParent(), save.getBounds(), form);
+        Rectangle revertBounds = SwingUtilities.convertRectangle(revert.getParent(), revert.getBounds(), form);
+        assertTrue(Math.abs(saveBounds.x + saveBounds.width - form.getWidth()) <= 1,
+                "Save ends at the form's right edge");
+        assertTrue(revertBounds.x + revertBounds.width <= saveBounds.x, "Revert sits left of Save");
         assertEquals(0, left.getX());
         if (wide) {
             assertEquals(0, left.getY());
             assertEquals(0, right.getY());
             assertTrue(Math.abs(left.getWidth() - right.getWidth()) <= 1);
             assertTrue(right.getX() >= left.getX() + left.getWidth());
-            assertTrue(find(frame, "settingsCommunitySection").getY()
-                    < find(frame, "settingsLatestnewsSection").getY());
         } else {
             assertEquals(left.getWidth(), right.getWidth());
             assertEquals(0, right.getX());
@@ -1423,10 +1419,9 @@ class SimpleHomeSwingTest {
                 "bottom navigation stays outside and below the scrolling settings");
         assertTrue(nav.y + nav.height <= frame.getContentPane().getHeight());
     }
-
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
-    void latestNewsLoadsIndependentlyOfSettingsAndOnlyOncePerWindow() throws Exception {
+    void latestNewsLoadsOnHomeIndependentlyAndOnlyOncePerWindow() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         FakeServices services = new FakeServices(temp.resolve("news.json"));
         services.installed = true;
@@ -1451,12 +1446,11 @@ class SimpleHomeSwingTest {
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services, feed));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
-            SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
             assertTrue(newsStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
             assertNotNull(waitButton(frame, "allNewsButton"));
             assertNotNull(onEdt(() -> find(frame, "newsLoadingMessage")));
-            assertNotNull(onEdt(() -> find(frame, "homeButton")),
-                    "the news request does not block Settings navigation");
+            assertNotNull(onEdt(() -> find(frame, "settingsButton")),
+                    "the news request does not block home navigation");
             releaseNews.countDown();
             JButton headline = waitButton(frame, "newsArticleButton0");
             String title = "MegaMek update and improvements for players and campaign testers";
@@ -1465,8 +1459,6 @@ class SimpleHomeSwingTest {
             assertEquals(title, onEdt(headline::getText));
             JLabel date = onEdt(() -> assertInstanceOf(JLabel.class, find(frame, "newsArticleDate0")));
             assertEquals("Aug 14, 2026", onEdt(date::getText));
-            assertNotNull(waitFor(() -> find(frame, "defaultJavaPath")));
-            assertSettingsGeometryAtSize(frame, 2000, 760, true, "newsArticleButton0");
             onEdt(() -> {
                 assertEquals(datedTitle, headline.getToolTipText());
                 assertEquals(datedTitle,
@@ -1475,11 +1467,12 @@ class SimpleHomeSwingTest {
                         headline.getAccessibleContext().getAccessibleRole());
                 return null;
             });
-            assertSettingsGeometryAtSize(frame, 1080, 760, true, "newsArticleButton0");
-            assertSettingsGeometryAtSize(frame, 720, 600, false, "newsArticleButton0");
+            assertHomeNewsOverlay(frame);
             assertEquals(1, requests.get());
-            SwingUtilities.invokeAndWait(waitButton(frame, "homeButton")::doClick);
             SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
+            assertNotNull(waitButton(frame, "changeDefaultJavaButton"));
+            assertNull(onEdt(() -> find(frame, "homeNewsPanel")), "news no longer lives in Settings");
+            SwingUtilities.invokeAndWait(waitButton(frame, "homeButton")::doClick);
             assertNotNull(waitButton(frame, "newsArticleButton0"));
             assertEquals(1, requests.get());
         } finally {
@@ -1488,31 +1481,140 @@ class SimpleHomeSwingTest {
         }
     }
 
+    private static void assertHomeNewsOverlay(LauncherFrame frame) throws Exception {
+        SwingTestSupport.awaitCondition("home news overlay laid out", () -> {
+            JPanel news = find(frame, "homeNewsPanel");
+            return news != null && news.isShowing() && news.getWidth() > 0;
+        });
+        onEdt(() -> {
+            JPanel news = find(frame, "homeNewsPanel");
+            Component artwork = find(frame, "homeArtwork");
+            Rectangle plate = SwingUtilities.convertRectangle(news.getParent(), news.getBounds(),
+                    frame.getContentPane());
+            Rectangle art = SwingUtilities.convertRectangle(artwork.getParent(), artwork.getBounds(),
+                    frame.getContentPane());
+            assertTrue(art.contains(plate), "news backplate stays over the artwork, above the launch deck");
+            Component headline = find(frame, "newsArticleButton0");
+            Rectangle link = SwingUtilities.convertRectangle(headline.getParent(), headline.getBounds(), news);
+            assertTrue(link.x + link.width <= news.getWidth() && link.y + link.height <= news.getHeight(),
+                    "headline fits inside the backplate");
+            return null;
+        });
+    }
+
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
-    void unavailableNewsLeavesArchiveAndSettingsUsable() throws Exception {
+    void unavailableNewsLeavesArchiveAndHomeUsable() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         FakeServices services = new FakeServices(temp.resolve("news-unavailable.json"));
         services.installed = true;
         services.main = services.first;
-        LauncherNewsFeed feed = new LauncherNewsFeed((uri, accept) ->
-                new ReleaseTransport.Response(503, Map.of(), new ByteArrayInputStream(new byte[0])));
-        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, feed));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, unavailableNews()));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
-            SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
             assertNotNull(waitFor(() -> find(frame, "newsUnavailableMessage")));
             assertNotNull(waitButton(frame, "allNewsButton"));
-            assertNotNull(waitButton(frame, "changeDefaultJavaButton"));
+            assertNotNull(waitButton(frame, "settingsButton"));
         } finally {
             dispose(frame);
         }
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
+    void inlineLaunchOptionsTrackChangesRevertSaveAndGuardNavigation() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
+        FakeServices services = new FakeServices(temp.resolve("inline-options.json"));
+        services.installed = true;
+        services.main = services.first;
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, unavailableNews()));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
+            assertNotNull(waitFor(() -> find(frame, "launchOptionsForm")));
+            onEdt(() -> {
+                assertFalse(((JButton) find(frame, "saveGlobalLaunchOptionsButton")).isEnabled());
+                assertFalse(((JButton) find(frame, "revertLaunchOptionsButton")).isEnabled());
+                ((javax.swing.JCheckBox) find(frame, "launchOptionsJvmArgumentsInherit")).doClick();
+                ((javax.swing.JTextField) find(frame, "launchOptionsJvmArguments")).setText("-Dinline=1");
+                assertTrue(((JButton) find(frame, "saveGlobalLaunchOptionsButton")).isEnabled());
+                ((JButton) find(frame, "revertLaunchOptionsButton")).doClick();
+                return null;
+            });
+            onEdt(() -> {
+                assertTrue(((javax.swing.JCheckBox) find(frame, "launchOptionsJvmArgumentsInherit")).isSelected(),
+                        "Revert restores the saved values");
+                assertFalse(((JButton) find(frame, "saveGlobalLaunchOptionsButton")).isEnabled());
+                ((javax.swing.JCheckBox) find(frame, "launchOptionsJvmArgumentsInherit")).doClick();
+                ((javax.swing.JTextField) find(frame, "launchOptionsJvmArguments")).setText("-Dinline=1");
+                return null;
+            });
+
+            SwingUtilities.invokeLater(() -> ((JButton) find(frame, "homeButton")).doClick());
+            JDialog discard = waitDialog(frame, "Discard changes?");
+            invokeDialogEscape(discard);
+            SwingTestSupport.awaitCondition("discard prompt closed", () -> !discard.isShowing());
+            Component unsaved = onEdt(() -> {
+                assertEquals("-Dinline=1",
+                        ((javax.swing.JTextField) find(frame, "launchOptionsJvmArguments")).getText(),
+                        "cancelling the prompt keeps the unsaved edit");
+                ((JButton) find(frame, "saveGlobalLaunchOptionsButton")).doClick();
+                return find(frame, "launchOptionsForm");
+            });
+            SwingTestSupport.awaitCondition("launch options saved", () ->
+                    "-Dinline=1".equals(services.launchOptions().global().extraJvmArguments()));
+            // The saved page is rendered after the operation finishes.
+            assertNotNull(waitFor(() -> {
+                Component form = find(frame, "launchOptionsForm");
+                return form != null && form != unsaved ? form : null;
+            }));
+            assertNotNull(waitFor(() -> {
+                JButton save = find(frame, "saveGlobalLaunchOptionsButton");
+                return save != null && !save.isEnabled() ? save : null;
+            }));
+
+            CountDownLatch gate = new CountDownLatch(1);
+            services.launchOptionsSaveGate = gate;
+            Component saving = onEdt(() -> {
+                ((javax.swing.JTextField) find(frame, "launchOptionsJvmArguments")).setText("-Dinline=2");
+                ((JButton) find(frame, "saveGlobalLaunchOptionsButton")).doClick();
+                ((javax.swing.JTextField) find(frame, "launchOptionsJvmArguments")).setText("-Dinline=3");
+                return find(frame, "launchOptionsForm");
+            });
+            gate.countDown();
+            SwingTestSupport.awaitCondition("second save finished", () ->
+                    "-Dinline=2".equals(services.launchOptions().global().extraJvmArguments()));
+            assertNotNull(waitFor(() -> {
+                Component form = find(frame, "launchOptionsForm");
+                return form != null && form != saving ? form : null;
+            }));
+            onEdt(() -> {
+                assertEquals("-Dinline=3",
+                        ((javax.swing.JTextField) find(frame, "launchOptionsJvmArguments")).getText(),
+                        "edits made while saving are kept as unsaved changes");
+                ((JButton) find(frame, "revertLaunchOptionsButton")).doClick();
+                return null;
+            });
+            services.launchOptionsSaveGate = null;
+            SwingUtilities.invokeAndWait(waitButton(frame, "homeButton")::doClick);
+            assertNoShowingDialog(frame, "Discard changes?");
+            assertNotNull(waitButton(frame, "settingsButton"));
+        } finally {
+            dispose(frame);
+        }
+    }
+    @Test
     void launcherTitleShowsPackagedVersionOrDevelopmentBuild() {
         assertEquals("MegaMek Launcher 0.14.0", LauncherFrame.titleFor("0.14.0"));
         assertEquals("MegaMek Launcher (development build)", LauncherFrame.titleFor(null));
+    }
+
+    @Test
+    void copiedLaunchCommandsQuoteArgumentsWithSpaces() {
+        assertEquals("-Da=1", LauncherFrame.quoteArgument("-Da=1"));
+        assertEquals("\"C:\\Program Files\\Java\\bin\\java.exe\"",
+                LauncherFrame.quoteArgument("C:\\Program Files\\Java\\bin\\java.exe"));
+        assertEquals("\"\"", LauncherFrame.quoteArgument(""));
     }
 
     private static final class FakeServices extends LauncherServices {
@@ -1528,6 +1630,7 @@ class SimpleHomeSwingTest {
         private final AtomicInteger installs = new AtomicInteger();
         private final AtomicInteger releaseFetches = new AtomicInteger();
         private final AtomicInteger catalogRequests = new AtomicInteger();
+        private volatile CountDownLatch launchOptionsSaveGate;
         private final AtomicInteger selections = new AtomicInteger();
         private final AtomicInteger launchAttempts = new AtomicInteger();
         private final AtomicInteger resetPlans = new AtomicInteger();
@@ -1603,6 +1706,19 @@ class SimpleHomeSwingTest {
             main = first;
         }
 
+        @Override
+        public LaunchOptionsStore.Document saveGlobalLaunchOptions(LaunchOptions options) throws IOException {
+            CountDownLatch gate = launchOptionsSaveGate;
+            if (gate != null) {
+                try {
+                    if (!gate.await(10, TimeUnit.SECONDS)) throw new IOException("save gate timed out");
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException(interrupted);
+                }
+            }
+            return super.saveGlobalLaunchOptions(options);
+        }
         @Override public void requireInstallationPresent(InstallationRecord record) {
             assertTrue(records.stream().anyMatch(candidate -> candidate.id().equals(record.id())));
         }
