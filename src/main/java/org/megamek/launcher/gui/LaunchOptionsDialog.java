@@ -44,9 +44,9 @@ import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.JSpinner;
+import javax.swing.JScrollPane;
 import javax.swing.JTextField;
-import javax.swing.SpinnerNumberModel;
+import javax.swing.Scrollable;
 import javax.swing.WindowConstants;
 import java.awt.BorderLayout;
 import java.awt.Component;
@@ -56,6 +56,7 @@ import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
+import java.awt.Rectangle;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -112,13 +113,13 @@ final class LaunchOptionsDialog {
         top.add(mutedLabel(explanation));
         body.add(top, BorderLayout.NORTH);
 
-        JPanel fields = new JPanel(new GridBagLayout());
-        fields.setOpaque(false);
-        megamekHeap = heapRow(fields, "MegaMek memory (MB)", "megamekHeap",
+        JPanel fields = new FieldsPanel(scale);
+        fields.setBackground(FirstLaunchPanel.BACKGROUND);
+        megamekHeap = heapRow(fields, "MegaMek memory", "megamekHeap",
                 current.megamekHeapMb(), inherited.megamekHeapMb(), inheritLabel);
-        mekhqHeap = heapRow(fields, "MekHQ memory (MB)", "mekhqHeap",
+        mekhqHeap = heapRow(fields, "MekHQ memory", "mekhqHeap",
                 current.mekhqHeapMb(), inherited.mekhqHeapMb(), inheritLabel);
-        labHeap = heapRow(fields, "MegaMekLab memory (MB)", "labHeap",
+        labHeap = heapRow(fields, "MegaMekLab memory", "labHeap",
                 current.labHeapMb(), inherited.labHeapMb(), inheritLabel);
 
         StyledComboBox<LaunchOptions.Renderer> rendererBox =
@@ -143,18 +144,19 @@ final class LaunchOptionsDialog {
                 ? current.userDirectory() : inherited.userDirectory(), "launchOptionsUserDirectory");
         this.userDirField = userDirField;
         userDirField.getAccessibleContext().setAccessibleName("User directory");
-        JPanel userDirEditor = new JPanel(new BorderLayout(scale.scaleForGUI(6), 0));
+        JPanel userDirEditor = new JPanel(new BorderLayout(0, scale.scaleForGUI(6)));
         userDirEditor.setOpaque(false);
         userDirEditor.add(userDirField, BorderLayout.CENTER);
-        JPanel userDirButtons = new JPanel(new FlowLayout(FlowLayout.RIGHT, scale.scaleForGUI(6), 0));
+        JPanel userDirButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
         userDirButtons.setOpaque(false);
         JButton browse = smallButton("Browse…", "launchOptionsBrowseUserDirectory");
         browse.addActionListener(event -> chooseUserDirectory(userDirField));
         JButton clear = smallButton("Clear", "launchOptionsClearUserDirectory");
         clear.addActionListener(event -> userDirField.setText(""));
         userDirButtons.add(browse);
+        userDirButtons.add(javax.swing.Box.createHorizontalStrut(scale.scaleForGUI(8)));
         userDirButtons.add(clear);
-        userDirEditor.add(userDirButtons, BorderLayout.EAST);
+        userDirEditor.add(userDirButtons, BorderLayout.SOUTH);
         userDirectory = row(fields, "User directory", "userDirectory", userDirEditor,
                 current.userDirectory() == null,
                 inheritLabel + " (" + describeText(inherited.userDirectory()) + ")",
@@ -168,7 +170,13 @@ final class LaunchOptionsDialog {
         filler.gridy = rows.size() * 3;
         filler.weighty = 1;
         fields.add(javax.swing.Box.createVerticalGlue(), filler);
-        body.add(LauncherTheme.scrollPane(fields), BorderLayout.CENTER);
+        JScrollPane scroll = LauncherTheme.scrollPane(fields, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
+                JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        scroll.setName("launchOptionsScrollPane");
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.setOpaque(false);
+        scroll.getViewport().setBackground(FirstLaunchPanel.BACKGROUND);
+        body.add(scroll, BorderLayout.CENTER);
 
         JPanel south = new JPanel(new BorderLayout(0, scale.scaleForGUI(8)));
         south.setOpaque(false);
@@ -202,7 +210,7 @@ final class LaunchOptionsDialog {
 
         dialog.setContentPane(body);
         dialog.getRootPane().setDefaultButton(save);
-        dialog.setSize(scale.scaleForGUI(720, 640));
+        dialog.setSize(scale.scaleForGUI(760, 720));
         dialog.setMinimumSize(scale.scaleForGUI(560, 420));
         dialog.setLocationRelativeTo(owner);
     }
@@ -228,27 +236,70 @@ final class LaunchOptionsDialog {
     }
 
     private static Integer heapValue(Row row) {
-        return row.followsDefault() ? null : ((Number) ((JSpinner) row.editor).getValue()).intValue();
+        if (row.followsDefault()) return null;
+        Object selected = ((StyledComboBox<?>) row.editor).getSelectedItem();
+        return selected instanceof HeapChoice choice ? choice.megabytes() : null;
     }
 
     private Row heapRow(JPanel fields, String label, String name, Integer own, Integer inheritedValue,
                         String inheritLabel) {
         int start = clampHeap(own != null ? own : inheritedValue);
-        JSpinner spinner = new JSpinner(new SpinnerNumberModel(start, LaunchOptions.MIN_HEAP_MB,
-                LaunchOptions.MAX_HEAP_MB, 256));
-        spinner.setName("launchOptions" + Character.toUpperCase(name.charAt(0)) + name.substring(1));
-        spinner.getAccessibleContext().setAccessibleName(label);
-        spinner.setPreferredSize(new Dimension(scale.scaleForGUI(120), spinner.getPreferredSize().height));
+        int inheritedHeap = clampHeap(inheritedValue);
+        StyledComboBox<HeapChoice> box = new StyledComboBox<>(HeapChoice.options(start, inheritedHeap), scale);
+        box.setName("launchOptions" + Character.toUpperCase(name.charAt(0)) + name.substring(1));
+        box.getAccessibleContext().setAccessibleName(label);
+        box.setSelectedItem(new HeapChoice(start));
+        box.setPreferredSize(new Dimension(scale.scaleForGUI(160), box.getPreferredSize().height));
         JPanel editor = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
         editor.setOpaque(false);
-        editor.add(spinner);
+        editor.add(box);
         Row row = row(fields, label, name, editor, own == null,
-                inheritLabel + " (" + inheritedValue + " MB)",
-                () -> spinner.setValue(clampHeap(inheritedValue)), null);
-        row.editor = spinner;
-        row.extraEditors = List.of(spinner);
+                inheritLabel + " (" + new HeapChoice(inheritedHeap) + ")",
+                () -> box.setSelectedItem(new HeapChoice(inheritedHeap)), null);
+        row.editor = box;
+        row.extraEditors = List.of(box);
         row.refresh();
         return row;
+    }
+
+    /** A maximum-memory choice; common sizes plus any existing value that is not one of them. */
+    record HeapChoice(int megabytes) {
+        private static final int[] PRESETS = {512, 1024, 1536, 2048, 3072, 4096, 6144, 8192, 12288, 16384,
+                24576, 32768, 49152, 65536};
+
+        static HeapChoice[] options(int... required) {
+            java.util.TreeSet<Integer> values = new java.util.TreeSet<>();
+            for (int preset : PRESETS) values.add(preset);
+            for (int value : required) values.add(value);
+            return values.stream().map(HeapChoice::new).toArray(HeapChoice[]::new);
+        }
+
+        @Override
+        public String toString() {
+            return megabytes % 1024 == 0 ? (megabytes / 1024) + " GB (" + megabytes + " MB)" : megabytes + " MB";
+        }
+    }
+
+    /** Fills the scroll pane's width so rows wrap to the dialog instead of scrolling sideways. */
+    private static final class FieldsPanel extends JPanel implements Scrollable {
+        private final GuiScale scale;
+
+        FieldsPanel(GuiScale scale) {
+            super(new GridBagLayout());
+            this.scale = scale;
+        }
+
+        @Override public Dimension getPreferredScrollableViewportSize() { return getPreferredSize(); }
+        @Override public int getScrollableUnitIncrement(Rectangle visible, int orientation, int direction) {
+            return scale.scaleForGUI(18);
+        }
+        @Override public int getScrollableBlockIncrement(Rectangle visible, int orientation, int direction) {
+            return Math.max(scale.scaleForGUI(18), visible.height - scale.scaleForGUI(18));
+        }
+        @Override public boolean getScrollableTracksViewportWidth() { return true; }
+        @Override public boolean getScrollableTracksViewportHeight() {
+            return getParent() != null && getParent().getHeight() >= getPreferredSize().height;
+        }
     }
 
     private static int clampHeap(Integer value) {
@@ -320,8 +371,13 @@ final class LaunchOptionsDialog {
         JTextField field = new JTextField(text == null ? "" : text);
         field.setName(name);
         field.setForeground(FirstLaunchPanel.TEXT);
-        field.setBackground(FirstLaunchPanel.PANEL);
+        field.setBackground(LauncherTheme.INPUT_BACKGROUND);
+        field.setDisabledTextColor(FirstLaunchPanel.MUTED);
         field.setCaretColor(FirstLaunchPanel.TEXT);
+        field.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(LauncherTheme.BORDER),
+                BorderFactory.createEmptyBorder(scale.scaleForGUI(6), scale.scaleForGUI(8),
+                        scale.scaleForGUI(6), scale.scaleForGUI(8))));
         field.setFont(scale.font(field.getFont(), Font.PLAIN, 14f));
         return field;
     }
