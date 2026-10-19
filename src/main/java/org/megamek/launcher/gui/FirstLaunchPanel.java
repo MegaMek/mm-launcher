@@ -81,6 +81,12 @@ final class FirstLaunchPanel extends JPanel {
 
     FirstLaunchPanel(BufferedImage image, GuiScale scale, FirstLaunchSplitButton download,
                      JButton useExisting, JLabel status) {
+        this(image, scale, download, useExisting, status, null);
+    }
+
+    /** @param links optional row shown centered below the status line, or {@code null} */
+    FirstLaunchPanel(BufferedImage image, GuiScale scale, FirstLaunchSplitButton download,
+                     JButton useExisting, JLabel status, JComponent links) {
         this.scale = scale;
         setName("firstLaunchPanel");
         setLayout(null);
@@ -134,6 +140,11 @@ final class FirstLaunchPanel extends JPanel {
         status.setName("homeStatusLabel");
         status.setVisible(true);
         controls.add(status);
+        if (links != null) {
+            controls.add(Box.createVerticalStrut(scale.scaleForGUI(14)));
+            links.setAlignmentX(CENTER_ALIGNMENT);
+            controls.add(links);
+        }
         verticalCenterAfter = flexibleSpace();
         controls.add(verticalCenterAfter);
 

@@ -239,10 +239,7 @@ class LauncherSwingSmokeTest {
             return new org.megamek.launcher.release.ReleaseTransport.Response(200, java.util.Map.of(),
                     new java.io.ByteArrayInputStream(xml.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         });
-        MegaMekServerList servers = new MegaMekServerList((uri, accept) ->
-                new org.megamek.launcher.release.ReleaseTransport.Response(503, java.util.Map.of(),
-                        new java.io.ByteArrayInputStream(new byte[0])));
-        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, feed, servers));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, feed));
         try {
             onEdt(() -> {
                 frame.showWindow();
@@ -268,6 +265,25 @@ class LauncherSwingSmokeTest {
                 assertInstanceOf(LauncherLink.class, find(frame, "allNewsButton"));
                 JPanel news = component(frame, "homeNewsPanel");
                 assertTrue(link.getX() + link.getWidth() <= news.getWidth() - news.getInsets().right);
+                JPanel deck = component(frame, "managedHomeDeck");
+                JPanel navigation = component(frame, "managedHomeNavigation");
+                java.awt.Rectangle nav = SwingUtilities.convertRectangle(navigation.getParent(),
+                        navigation.getBounds(), deck);
+                java.awt.Rectangle settingsBounds = SwingUtilities.convertRectangle(
+                        find(frame, "settingsButton").getParent(), find(frame, "settingsButton").getBounds(), deck);
+                java.awt.Rectangle manageBounds = SwingUtilities.convertRectangle(
+                        find(frame, "manageInstallationsButton").getParent(),
+                        find(frame, "manageInstallationsButton").getBounds(), deck);
+                int buttonsCenter = (manageBounds.x + settingsBounds.x + settingsBounds.width) / 2;
+                assertTrue(Math.abs(buttonsCenter - deck.getWidth() / 2) <= 2,
+                        "the navigation buttons stay centered beside the community links");
+                for (String name : new String[]{"openDiscordButton", "playOnlineButton"}) {
+                    LauncherLink community = assertInstanceOf(LauncherLink.class, find(frame, name));
+                    java.awt.Rectangle bounds = SwingUtilities.convertRectangle(community.getParent(),
+                            community.getBounds(), deck);
+                    assertTrue(bounds.x >= nav.x + nav.width, name + " sits right of the navigation");
+                    assertTrue(bounds.x + bounds.width <= deck.getWidth(), name + " stays inside the deck");
+                }
                 return null;
             });
             onEdt(() -> {
@@ -304,13 +320,11 @@ class LauncherSwingSmokeTest {
                     return null;
                 });
                 onEdt(() -> {
-                    assertInstanceOf(LauncherLink.class, find(frame, "openDiscordButton"));
-                    assertInstanceOf(LauncherLink.class, find(frame, "playOnlineButton"));
+                    assertNull(find(frame, "openDiscordButton"), "community links live on Home");
+                    assertNotNull(component(frame, "launchOptionsForm"));
                     JButton java = find(frame, "changeDefaultJavaButton");
                     JButton logs = find(frame, "viewOperationLogsButton");
-                    JButton launchOptions = find(frame, "editLaunchOptionsButton");
                     assertEquals(java.getSize(), logs.getSize());
-                    assertEquals(java.getSize(), launchOptions.getSize());
                     JButton update = find(frame, "checkLauncherUpdateButton");
                     if (update != null) assertEquals(java.getSize(), update.getSize());
                     return null;

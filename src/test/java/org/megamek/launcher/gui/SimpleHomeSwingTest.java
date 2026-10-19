@@ -132,6 +132,14 @@ class SimpleHomeSwingTest {
             assertFalse(options.isEnabled());
             assertFalse(options.isFocusable());
             assertTrue(existing.isEnabled());
+            onEdt(() -> {
+                Component links = find(frame, "communityLinks");
+                assertTrue(SwingUtilities.isDescendingFrom(links, find(frame, "firstLaunchPanel")),
+                        "first-run Home also offers the community links");
+                assertInstanceOf(LauncherLink.class, find(frame, "openDiscordButton"));
+                assertInstanceOf(LauncherLink.class, find(frame, "playOnlineButton"));
+                return null;
+            });
             SwingUtilities.invokeAndWait(() -> {
                 primary.doClick();
                 options.doClick();
@@ -1254,53 +1262,32 @@ class SimpleHomeSwingTest {
         FakeServices services = new FakeServices(temp.resolve("settings-layout.json"));
         services.installed = true;
         services.main = services.first;
-        CountDownLatch releaseServers = new CountDownLatch(1);
-        MegaMekServerList serverList = new MegaMekServerList((uri, accept) -> {
-            if (!releaseServers.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
-                throw new IOException("Test server list release timed out");
-            }
-            return new ReleaseTransport.Response(503, Map.of(),
-                    new ByteArrayInputStream(new byte[0]));
-        });
-        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, unavailableNews(), serverList));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, unavailableNews()));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
             assertNotNull(waitFor(() -> find(frame, "changeDefaultJavaButton")));
-            // The server list worker is still pending while settings finishes loading.
-            assertSettingsGeometryAtSize(frame, 1080, 760, true, "serversLoadingMessage");
-            assertSettingsGeometryAtSize(frame, 720, 600, false, "serversLoadingMessage");
-            releaseServers.countDown();
-            assertNotNull(waitFor(() -> find(frame, "serversUnavailableMessage")));
-            assertSettingsGeometryAtSize(frame, 1080, 760, true, "serversUnavailableMessage");
-            assertSettingsGeometryAtSize(frame, 720, 600, false, "serversUnavailableMessage");
+            assertSettingsGeometryAtSize(frame, 1080, 760, true);
+            assertSettingsGeometryAtSize(frame, 720, 600, false);
         } finally {
-            releaseServers.countDown();
             dispose(frame);
         }
     }
-
     private static LauncherNewsFeed unavailableNews() {
         return new LauncherNewsFeed((uri, accept) ->
                 new ReleaseTransport.Response(503, Map.of(), new ByteArrayInputStream(new byte[0])));
     }
 
-    private static MegaMekServerList unavailableServers() {
-        return new MegaMekServerList((uri, accept) ->
-                new ReleaseTransport.Response(503, Map.of(), new ByteArrayInputStream(new byte[0])));
-    }
-
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
-    void settingsLoadingAndErrorKeepResponsiveGroupsAndServerLink() throws Exception {
+    void settingsLoadingAndErrorKeepResponsiveGroups() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         FakeServices services = new FakeServices(temp.resolve("settings-error-layout.json"));
         services.installed = true;
         services.main = services.first;
         services.releaseSettings = new CountDownLatch(1);
         services.settingsFailure = new IOException("Unreadable test settings");
-        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, unavailableNews(),
-                unavailableServers()));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, unavailableNews()));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
@@ -1308,7 +1295,7 @@ class SimpleHomeSwingTest {
             onEdt(() -> {
                 assertEquals(0, ((JPanel) find(frame, "settingsRightColumn")).getY());
                 assertNotNull(find(frame, "settingsLoadingMessage"));
-                assertNotNull(find(frame, "playOnlineButton"));
+                assertNull(find(frame, "launchOptionsForm"));
                 return null;
             });
             services.releaseSettings.countDown();
@@ -1320,7 +1307,7 @@ class SimpleHomeSwingTest {
                 assertEquals(left.getWidth(), right.getWidth());
                 assertTrue(right.getY() >= left.getHeight());
                 assertNotNull(find(frame, "retrySettingsButton"));
-                assertNotNull(find(frame, "playOnlineButton"));
+                assertNull(find(frame, "launchOptionsForm"));
                 return null;
             });
         } finally {
@@ -1376,38 +1363,38 @@ class SimpleHomeSwingTest {
     }
 
     private static void assertSettingsGeometryAtSize(LauncherFrame frame, int width, int height,
-                                                     boolean wide, String newsState) throws Exception {
+                                                     boolean wide) throws Exception {
         resizeSettingsWindow(frame, width, height);
         onEdt(() -> {
-            assertSettingsGeometry(frame, wide, newsState);
+            assertSettingsGeometry(frame, wide);
             return null;
         });
     }
 
-    private static void assertSettingsGeometry(LauncherFrame frame, boolean wide, String serverState) {
+    private static void assertSettingsGeometry(LauncherFrame frame, boolean wide) {
         JPanel left = find(frame, "settingsLeftColumn");
         JPanel right = find(frame, "settingsRightColumn");
         javax.swing.JScrollPane scroll = find(frame, "settingsScrollPane");
         Component navigation = find(frame, "homeButton");
-        assertNotNull(find(frame, serverState));
-        assertNotNull(find(frame, "playOnlineButton"));
         assertNotNull(find(frame, "defaultJavaPath"));
         assertNotNull(find(frame, "viewOperationLogsButton"));
-        assertNotNull(find(frame, "editLaunchOptionsButton"));
-        Component serverAction = find(frame, serverState.equals("serverRow0")
-                ? "copyServerAddressButton0" : "playOnlineButton");
-        Rectangle actionBounds = SwingUtilities.convertRectangle(serverAction.getParent(),
-                serverAction.getBounds(), right);
-        assertTrue(actionBounds.x + actionBounds.width <= right.getWidth(),
-                "server action must fit inside its column");
+        assertNull(find(frame, "editLaunchOptionsButton"), "launcher-wide options are edited inline");
+        Component form = find(frame, "launchOptionsForm");
+        assertTrue(SwingUtilities.isDescendingFrom(form, right), "launch options live in the right column");
+        for (String name : List.of("launchOptionsForm", "launchOptionsJvmArguments",
+                "saveGlobalLaunchOptionsButton")) {
+            Component component = find(frame, name);
+            Rectangle bounds = SwingUtilities.convertRectangle(component.getParent(),
+                    component.getBounds(), right);
+            assertTrue(bounds.x >= 0 && bounds.x + bounds.width <= right.getWidth(),
+                    name + " must fit inside its column");
+        }
         assertEquals(0, left.getX());
         if (wide) {
             assertEquals(0, left.getY());
             assertEquals(0, right.getY());
             assertTrue(Math.abs(left.getWidth() - right.getWidth()) <= 1);
             assertTrue(right.getX() >= left.getX() + left.getWidth());
-            assertTrue(find(frame, "settingsCommunitySection").getY()
-                    < find(frame, "settingsOnlineserversSection").getY());
         } else {
             assertEquals(left.getWidth(), right.getWidth());
             assertEquals(0, right.getX());
@@ -1422,7 +1409,6 @@ class SimpleHomeSwingTest {
                 "bottom navigation stays outside and below the scrolling settings");
         assertTrue(nav.y + nav.height <= frame.getContentPane().getHeight());
     }
-
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
     void latestNewsLoadsOnHomeIndependentlyAndOnlyOncePerWindow() throws Exception {
@@ -1447,7 +1433,7 @@ class SimpleHomeSwingTest {
             return new ReleaseTransport.Response(200, Map.of(),
                     new ByteArrayInputStream(xml));
         });
-        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, feed, unavailableServers()));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, feed));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             assertTrue(newsStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
@@ -1513,8 +1499,7 @@ class SimpleHomeSwingTest {
         FakeServices services = new FakeServices(temp.resolve("news-unavailable.json"));
         services.installed = true;
         services.main = services.first;
-        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, unavailableNews(),
-                unavailableServers()));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, unavailableNews()));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             assertNotNull(waitFor(() -> find(frame, "newsUnavailableMessage")));
@@ -1527,45 +1512,70 @@ class SimpleHomeSwingTest {
 
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
-    void onlineServersListGroupsChannelsAndHidesDeprecated() throws Exception {
+    void inlineLaunchOptionsTrackChangesRevertSaveAndGuardNavigation() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
-        FakeServices services = new FakeServices(temp.resolve("servers.json"));
+        FakeServices services = new FakeServices(temp.resolve("inline-options.json"));
         services.installed = true;
         services.main = services.first;
-        byte[] json = ("{\"schemaVersion\":1,\"servers\":["
-                + "{\"host\":\"mm.example.org\",\"port\":2346,\"version\":\"0.50.07\",\"channel\":\"milestone\","
-                + "\"provider\":\"Example\"},"
-                + "{\"host\":\"dev.example.org\",\"port\":2347,\"version\":\"0.50.08\",\"channel\":\"development\"},"
-                + "{\"host\":\"old.example.org\",\"port\":2348,\"version\":\"0.49.0\",\"channel\":\"deprecated\"}"
-                + "]}").getBytes(StandardCharsets.UTF_8);
-        MegaMekServerList serverList = new MegaMekServerList((uri, accept) ->
-                new ReleaseTransport.Response(200, Map.of(), new ByteArrayInputStream(json)));
-        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, unavailableNews(), serverList));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, unavailableNews()));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
-            assertNotNull(waitFor(() -> find(frame, "changeDefaultJavaButton")));
-            assertNotNull(waitFor(() -> find(frame, "serverRow1")));
+            assertNotNull(waitFor(() -> find(frame, "launchOptionsForm")));
             onEdt(() -> {
-                assertEquals("mm.example.org:2346", ((JLabel) find(frame, "serverAddress0")).getText());
-                assertEquals("dev.example.org:2347", ((JLabel) find(frame, "serverAddress1")).getText());
-                assertNull(find(frame, "serverRow2"), "deprecated servers are not listed");
-                assertNotNull(find(frame, "serversMilestoneHeading"));
-                assertNotNull(find(frame, "serversDevelopmentHeading"));
-                assertTrue(((JLabel) find(frame, "serverDetails0")).getText().contains("Example"));
+                assertFalse(((JButton) find(frame, "saveGlobalLaunchOptionsButton")).isEnabled());
+                assertFalse(((JButton) find(frame, "revertLaunchOptionsButton")).isEnabled());
+                ((javax.swing.JCheckBox) find(frame, "launchOptionsJvmArgumentsInherit")).doClick();
+                ((javax.swing.JTextField) find(frame, "launchOptionsJvmArguments")).setText("-Dinline=1");
+                assertTrue(((JButton) find(frame, "saveGlobalLaunchOptionsButton")).isEnabled());
+                ((JButton) find(frame, "revertLaunchOptionsButton")).doClick();
                 return null;
             });
-            assertSettingsGeometryAtSize(frame, 1080, 760, true, "serverRow0");
-            assertSettingsGeometryAtSize(frame, 720, 600, false, "serverRow0");
+            onEdt(() -> {
+                assertTrue(((javax.swing.JCheckBox) find(frame, "launchOptionsJvmArgumentsInherit")).isSelected(),
+                        "Revert restores the saved values");
+                assertFalse(((JButton) find(frame, "saveGlobalLaunchOptionsButton")).isEnabled());
+                ((javax.swing.JCheckBox) find(frame, "launchOptionsJvmArgumentsInherit")).doClick();
+                ((javax.swing.JTextField) find(frame, "launchOptionsJvmArguments")).setText("-Dinline=1");
+                return null;
+            });
+
+            SwingUtilities.invokeLater(() -> ((JButton) find(frame, "homeButton")).doClick());
+            JDialog discard = waitDialog(frame, "Discard changes?");
+            invokeDialogEscape(discard);
+            SwingTestSupport.awaitCondition("discard prompt closed", () -> !discard.isShowing());
+            onEdt(() -> {
+                assertEquals("-Dinline=1",
+                        ((javax.swing.JTextField) find(frame, "launchOptionsJvmArguments")).getText(),
+                        "cancelling the prompt keeps the unsaved edit");
+                ((JButton) find(frame, "saveGlobalLaunchOptionsButton")).doClick();
+                return null;
+            });
+            SwingTestSupport.awaitCondition("launch options saved", () ->
+                    "-Dinline=1".equals(services.launchOptions().global().extraJvmArguments()));
+            assertNotNull(waitFor(() -> {
+                JButton save = find(frame, "saveGlobalLaunchOptionsButton");
+                return save != null && !save.isEnabled() ? save : null;
+            }));
+            SwingUtilities.invokeAndWait(waitButton(frame, "homeButton")::doClick);
+            assertNoShowingDialog(frame, "Discard changes?");
+            assertNotNull(waitButton(frame, "settingsButton"));
         } finally {
             dispose(frame);
         }
     }
-
     @Test
     void launcherTitleShowsPackagedVersionOrDevelopmentBuild() {
         assertEquals("MegaMek Launcher 0.14.0", LauncherFrame.titleFor("0.14.0"));
         assertEquals("MegaMek Launcher (development build)", LauncherFrame.titleFor(null));
+    }
+
+    @Test
+    void copiedLaunchCommandsQuoteArgumentsWithSpaces() {
+        assertEquals("-Da=1", LauncherFrame.quoteArgument("-Da=1"));
+        assertEquals("\"C:\\Program Files\\Java\\bin\\java.exe\"",
+                LauncherFrame.quoteArgument("C:\\Program Files\\Java\\bin\\java.exe"));
+        assertEquals("\"\"", LauncherFrame.quoteArgument(""));
     }
 
     private static final class FakeServices extends LauncherServices {
