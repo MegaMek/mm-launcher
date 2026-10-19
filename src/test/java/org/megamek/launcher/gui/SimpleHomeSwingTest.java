@@ -1254,45 +1254,53 @@ class SimpleHomeSwingTest {
         FakeServices services = new FakeServices(temp.resolve("settings-layout.json"));
         services.installed = true;
         services.main = services.first;
-        CountDownLatch releaseNews = new CountDownLatch(1);
-        LauncherNewsFeed feed = new LauncherNewsFeed((uri, accept) -> {
-            if (!releaseNews.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
-                throw new IOException("Test news release timed out");
+        CountDownLatch releaseServers = new CountDownLatch(1);
+        MegaMekServerList serverList = new MegaMekServerList((uri, accept) -> {
+            if (!releaseServers.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                throw new IOException("Test server list release timed out");
             }
             return new ReleaseTransport.Response(503, Map.of(),
                     new ByteArrayInputStream(new byte[0]));
         });
-        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, feed));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, unavailableNews(), serverList));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
             assertNotNull(waitFor(() -> find(frame, "changeDefaultJavaButton")));
-            // The news worker is still pending while settings finishes loading.
-            assertSettingsGeometryAtSize(frame, 1080, 760, true, "newsLoadingMessage");
-            assertSettingsGeometryAtSize(frame, 720, 600, false, "newsLoadingMessage");
-            releaseNews.countDown();
-            assertNotNull(waitFor(() -> find(frame, "newsUnavailableMessage")));
-            assertSettingsGeometryAtSize(frame, 1080, 760, true, "newsUnavailableMessage");
-            assertSettingsGeometryAtSize(frame, 720, 600, false, "newsUnavailableMessage");
+            // The server list worker is still pending while settings finishes loading.
+            assertSettingsGeometryAtSize(frame, 1080, 760, true, "serversLoadingMessage");
+            assertSettingsGeometryAtSize(frame, 720, 600, false, "serversLoadingMessage");
+            releaseServers.countDown();
+            assertNotNull(waitFor(() -> find(frame, "serversUnavailableMessage")));
+            assertSettingsGeometryAtSize(frame, 1080, 760, true, "serversUnavailableMessage");
+            assertSettingsGeometryAtSize(frame, 720, 600, false, "serversUnavailableMessage");
         } finally {
-            releaseNews.countDown();
+            releaseServers.countDown();
             dispose(frame);
         }
     }
 
+    private static LauncherNewsFeed unavailableNews() {
+        return new LauncherNewsFeed((uri, accept) ->
+                new ReleaseTransport.Response(503, Map.of(), new ByteArrayInputStream(new byte[0])));
+    }
+
+    private static MegaMekServerList unavailableServers() {
+        return new MegaMekServerList((uri, accept) ->
+                new ReleaseTransport.Response(503, Map.of(), new ByteArrayInputStream(new byte[0])));
+    }
+
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
-    void settingsLoadingAndErrorKeepResponsiveGroupsAndNewsActions() throws Exception {
+    void settingsLoadingAndErrorKeepResponsiveGroupsAndServerLink() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         FakeServices services = new FakeServices(temp.resolve("settings-error-layout.json"));
         services.installed = true;
         services.main = services.first;
         services.releaseSettings = new CountDownLatch(1);
         services.settingsFailure = new IOException("Unreadable test settings");
-        LauncherFrame frame = onEdt(() -> new LauncherFrame(services,
-                new LauncherNewsFeed((uri, accept) ->
-                        new ReleaseTransport.Response(503, Map.of(),
-                                new ByteArrayInputStream(new byte[0])))));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, unavailableNews(),
+                unavailableServers()));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
@@ -1300,7 +1308,7 @@ class SimpleHomeSwingTest {
             onEdt(() -> {
                 assertEquals(0, ((JPanel) find(frame, "settingsRightColumn")).getY());
                 assertNotNull(find(frame, "settingsLoadingMessage"));
-                assertNotNull(find(frame, "allNewsButton"));
+                assertNotNull(find(frame, "playOnlineButton"));
                 return null;
             });
             services.releaseSettings.countDown();
@@ -1312,7 +1320,7 @@ class SimpleHomeSwingTest {
                 assertEquals(left.getWidth(), right.getWidth());
                 assertTrue(right.getY() >= left.getHeight());
                 assertNotNull(find(frame, "retrySettingsButton"));
-                assertNotNull(find(frame, "allNewsButton"));
+                assertNotNull(find(frame, "playOnlineButton"));
                 return null;
             });
         } finally {
@@ -1376,31 +1384,22 @@ class SimpleHomeSwingTest {
         });
     }
 
-    private static void assertSettingsGeometry(LauncherFrame frame, boolean wide, String newsState) {
+    private static void assertSettingsGeometry(LauncherFrame frame, boolean wide, String serverState) {
         JPanel left = find(frame, "settingsLeftColumn");
         JPanel right = find(frame, "settingsRightColumn");
         javax.swing.JScrollPane scroll = find(frame, "settingsScrollPane");
         Component navigation = find(frame, "homeButton");
-        assertNotNull(find(frame, newsState));
-        assertNotNull(find(frame, "allNewsButton"));
+        assertNotNull(find(frame, serverState));
+        assertNotNull(find(frame, "playOnlineButton"));
         assertNotNull(find(frame, "defaultJavaPath"));
         assertNotNull(find(frame, "viewOperationLogsButton"));
-        Component newsAction = find(frame, newsState.equals("newsArticleButton0")
-                ? "newsArticleButton0" : "allNewsButton");
-        Rectangle actionBounds = SwingUtilities.convertRectangle(newsAction.getParent(),
-                newsAction.getBounds(), right);
+        assertNotNull(find(frame, "editLaunchOptionsButton"));
+        Component serverAction = find(frame, serverState.equals("serverRow0")
+                ? "copyServerAddressButton0" : "playOnlineButton");
+        Rectangle actionBounds = SwingUtilities.convertRectangle(serverAction.getParent(),
+                serverAction.getBounds(), right);
         assertTrue(actionBounds.x + actionBounds.width <= right.getWidth(),
-                "news action must fit inside its column");
-        if (newsState.equals("newsArticleButton0")) {
-            JPanel news = find(frame, "settingsLatestnewsSection");
-            java.awt.Insets insets = news.getInsets();
-            LauncherLink headline = assertInstanceOf(LauncherLink.class, newsAction);
-            assertEquals(Math.min(news.getWidth() - insets.left - insets.right,
-                            headline.getPreferredSize().width),
-                    headline.getWidth(), "headline link should use its natural width within the news column");
-            assertEquals(javax.swing.SwingConstants.LEFT, headline.getHorizontalAlignment(),
-                    "headline text should align with the other Settings content");
-        }
+                "server action must fit inside its column");
         assertEquals(0, left.getX());
         if (wide) {
             assertEquals(0, left.getY());
@@ -1408,7 +1407,7 @@ class SimpleHomeSwingTest {
             assertTrue(Math.abs(left.getWidth() - right.getWidth()) <= 1);
             assertTrue(right.getX() >= left.getX() + left.getWidth());
             assertTrue(find(frame, "settingsCommunitySection").getY()
-                    < find(frame, "settingsLatestnewsSection").getY());
+                    < find(frame, "settingsOnlineserversSection").getY());
         } else {
             assertEquals(left.getWidth(), right.getWidth());
             assertEquals(0, right.getX());
@@ -1426,7 +1425,7 @@ class SimpleHomeSwingTest {
 
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
-    void latestNewsLoadsIndependentlyOfSettingsAndOnlyOncePerWindow() throws Exception {
+    void latestNewsLoadsOnHomeIndependentlyAndOnlyOncePerWindow() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         FakeServices services = new FakeServices(temp.resolve("news.json"));
         services.installed = true;
@@ -1448,15 +1447,14 @@ class SimpleHomeSwingTest {
             return new ReleaseTransport.Response(200, Map.of(),
                     new ByteArrayInputStream(xml));
         });
-        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, feed));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, feed, unavailableServers()));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
-            SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
             assertTrue(newsStarted.await(5, java.util.concurrent.TimeUnit.SECONDS));
             assertNotNull(waitButton(frame, "allNewsButton"));
             assertNotNull(onEdt(() -> find(frame, "newsLoadingMessage")));
-            assertNotNull(onEdt(() -> find(frame, "homeButton")),
-                    "the news request does not block Settings navigation");
+            assertNotNull(onEdt(() -> find(frame, "settingsButton")),
+                    "the news request does not block home navigation");
             releaseNews.countDown();
             JButton headline = waitButton(frame, "newsArticleButton0");
             String title = "MegaMek update and improvements for players and campaign testers";
@@ -1465,8 +1463,6 @@ class SimpleHomeSwingTest {
             assertEquals(title, onEdt(headline::getText));
             JLabel date = onEdt(() -> assertInstanceOf(JLabel.class, find(frame, "newsArticleDate0")));
             assertEquals("Aug 14, 2026", onEdt(date::getText));
-            assertNotNull(waitFor(() -> find(frame, "defaultJavaPath")));
-            assertSettingsGeometryAtSize(frame, 2000, 760, true, "newsArticleButton0");
             onEdt(() -> {
                 assertEquals(datedTitle, headline.getToolTipText());
                 assertEquals(datedTitle,
@@ -1475,11 +1471,12 @@ class SimpleHomeSwingTest {
                         headline.getAccessibleContext().getAccessibleRole());
                 return null;
             });
-            assertSettingsGeometryAtSize(frame, 1080, 760, true, "newsArticleButton0");
-            assertSettingsGeometryAtSize(frame, 720, 600, false, "newsArticleButton0");
+            assertHomeNewsOverlay(frame);
             assertEquals(1, requests.get());
-            SwingUtilities.invokeAndWait(waitButton(frame, "homeButton")::doClick);
             SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
+            assertNotNull(waitButton(frame, "changeDefaultJavaButton"));
+            assertNull(onEdt(() -> find(frame, "homeNewsPanel")), "news no longer lives in Settings");
+            SwingUtilities.invokeAndWait(waitButton(frame, "homeButton")::doClick);
             assertNotNull(waitButton(frame, "newsArticleButton0"));
             assertEquals(1, requests.get());
         } finally {
@@ -1488,22 +1485,78 @@ class SimpleHomeSwingTest {
         }
     }
 
+    private static void assertHomeNewsOverlay(LauncherFrame frame) throws Exception {
+        SwingTestSupport.awaitCondition("home news overlay laid out", () -> {
+            JPanel news = find(frame, "homeNewsPanel");
+            return news != null && news.isShowing() && news.getWidth() > 0;
+        });
+        onEdt(() -> {
+            JPanel news = find(frame, "homeNewsPanel");
+            Component artwork = find(frame, "homeArtwork");
+            Rectangle plate = SwingUtilities.convertRectangle(news.getParent(), news.getBounds(),
+                    frame.getContentPane());
+            Rectangle art = SwingUtilities.convertRectangle(artwork.getParent(), artwork.getBounds(),
+                    frame.getContentPane());
+            assertTrue(art.contains(plate), "news backplate stays over the artwork, above the launch deck");
+            Component headline = find(frame, "newsArticleButton0");
+            Rectangle link = SwingUtilities.convertRectangle(headline.getParent(), headline.getBounds(), news);
+            assertTrue(link.x + link.width <= news.getWidth() && link.y + link.height <= news.getHeight(),
+                    "headline fits inside the backplate");
+            return null;
+        });
+    }
+
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
-    void unavailableNewsLeavesArchiveAndSettingsUsable() throws Exception {
+    void unavailableNewsLeavesArchiveAndHomeUsable() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         FakeServices services = new FakeServices(temp.resolve("news-unavailable.json"));
         services.installed = true;
         services.main = services.first;
-        LauncherNewsFeed feed = new LauncherNewsFeed((uri, accept) ->
-                new ReleaseTransport.Response(503, Map.of(), new ByteArrayInputStream(new byte[0])));
-        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, feed));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, unavailableNews(),
+                unavailableServers()));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            assertNotNull(waitFor(() -> find(frame, "newsUnavailableMessage")));
+            assertNotNull(waitButton(frame, "allNewsButton"));
+            assertNotNull(waitButton(frame, "settingsButton"));
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
+    void onlineServersListGroupsChannelsAndHidesDeprecated() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
+        FakeServices services = new FakeServices(temp.resolve("servers.json"));
+        services.installed = true;
+        services.main = services.first;
+        byte[] json = ("{\"schemaVersion\":1,\"servers\":["
+                + "{\"host\":\"mm.example.org\",\"port\":2346,\"version\":\"0.50.07\",\"channel\":\"milestone\","
+                + "\"provider\":\"Example\"},"
+                + "{\"host\":\"dev.example.org\",\"port\":2347,\"version\":\"0.50.08\",\"channel\":\"development\"},"
+                + "{\"host\":\"old.example.org\",\"port\":2348,\"version\":\"0.49.0\",\"channel\":\"deprecated\"}"
+                + "]}").getBytes(StandardCharsets.UTF_8);
+        MegaMekServerList serverList = new MegaMekServerList((uri, accept) ->
+                new ReleaseTransport.Response(200, Map.of(), new ByteArrayInputStream(json)));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, unavailableNews(), serverList));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
-            assertNotNull(waitFor(() -> find(frame, "newsUnavailableMessage")));
-            assertNotNull(waitButton(frame, "allNewsButton"));
-            assertNotNull(waitButton(frame, "changeDefaultJavaButton"));
+            assertNotNull(waitFor(() -> find(frame, "changeDefaultJavaButton")));
+            assertNotNull(waitFor(() -> find(frame, "serverRow1")));
+            onEdt(() -> {
+                assertEquals("mm.example.org:2346", ((JLabel) find(frame, "serverAddress0")).getText());
+                assertEquals("dev.example.org:2347", ((JLabel) find(frame, "serverAddress1")).getText());
+                assertNull(find(frame, "serverRow2"), "deprecated servers are not listed");
+                assertNotNull(find(frame, "serversMilestoneHeading"));
+                assertNotNull(find(frame, "serversDevelopmentHeading"));
+                assertTrue(((JLabel) find(frame, "serverDetails0")).getText().contains("Example"));
+                return null;
+            });
+            assertSettingsGeometryAtSize(frame, 1080, 760, true, "serverRow0");
+            assertSettingsGeometryAtSize(frame, 720, 600, false, "serverRow0");
         } finally {
             dispose(frame);
         }

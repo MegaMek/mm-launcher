@@ -224,7 +224,7 @@ class LauncherSwingSmokeTest {
 
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
-    void settingsUseWrappedDatedLinksAndMatchingUtilityButtonSizes() throws Exception {
+    void homeNewsUsesWrappedDatedLinksAndSettingsKeepMatchingUtilityButtonSizes() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "actual Swing controls require a display");
         PagingServices services = new PagingServices(temp.resolve("settings-links.json"));
         services.register("Main", createSuite(temp.resolve("settings-links-copy")));
@@ -239,83 +239,85 @@ class LauncherSwingSmokeTest {
             return new org.megamek.launcher.release.ReleaseTransport.Response(200, java.util.Map.of(),
                     new java.io.ByteArrayInputStream(xml.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
         });
-        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, feed));
+        MegaMekServerList servers = new MegaMekServerList((uri, accept) ->
+                new org.megamek.launcher.release.ReleaseTransport.Response(503, java.util.Map.of(),
+                        new java.io.ByteArrayInputStream(new byte[0])));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, feed, servers));
         try {
             onEdt(() -> {
                 frame.showWindow();
+                frame.setSize(1180, 820);
+                frame.validate();
                 return null;
             });
+            SwingTestSupport.awaitCondition("wrapped home headline layout", () -> {
+                if (!(find(frame, "newsArticleButton0") instanceof LauncherLink link)) return false;
+                return link.isShowing() && link.getWidth() > 0
+                        && link.getHeight() >= link.getPreferredSize().height;
+            });
+            onEdt(() -> {
+                LauncherLink link = assertInstanceOf(LauncherLink.class, find(frame, "newsArticleButton0"));
+                assertEquals(title, link.getText());
+                assertEquals(javax.accessibility.AccessibleRole.HYPERLINK,
+                        link.getAccessibleContext().getAccessibleRole());
+                assertTrue(link.getHeight() > link.getFontMetrics(link.getFont()).getHeight() * 2);
+                JLabel date = component(frame, "newsArticleDate0");
+                assertEquals(LauncherTheme.MUTED, date.getForeground());
+                assertTrue(date.getFont().getSize2D() < link.getFont().getSize2D());
+                assertTrue(link.getAccessibleContext().getAccessibleName().contains(date.getText()));
+                assertInstanceOf(LauncherLink.class, find(frame, "allNewsButton"));
+                JPanel news = component(frame, "homeNewsPanel");
+                assertTrue(link.getX() + link.getWidth() <= news.getWidth() - news.getInsets().right);
+                return null;
+            });
+            onEdt(() -> {
+                frame.toFront();
+                find(frame, "newsArticleButton0").requestFocusInWindow();
+                return null;
+            });
+            SwingTestSupport.awaitCondition("focused news link", () ->
+                    find(frame, "newsArticleButton0").isFocusOwner());
+            onEdt(() -> {
+                LauncherLink link = assertInstanceOf(LauncherLink.class, find(frame, "newsArticleButton0"));
+                BufferedImage image = new BufferedImage(link.getWidth(), link.getHeight(),
+                        BufferedImage.TYPE_INT_ARGB);
+                Graphics2D graphics = image.createGraphics();
+                try {
+                    link.paint(graphics);
+                } finally {
+                    graphics.dispose();
+                }
+                assertEquals(LauncherTheme.BUTTON_ICON.getRGB(), image.getRGB(0, link.getHeight() / 2),
+                        "keyboard focus has a visible cyan outline");
+                return null;
+            });
+            saveReviewImage("home-news-wide.png", frame);
+
             JButton settings = waitForButton(frame, "settingsButton");
             SwingUtilities.invokeAndWait(settings::doClick);
-            SwingTestSupport.awaitCondition("loaded settings and news", () -> find(frame, "newsArticleButton0") != null
-                    && find(frame, "changeDefaultJavaButton") != null);
+            SwingTestSupport.awaitCondition("loaded settings", () ->
+                    find(frame, "changeDefaultJavaButton") != null);
             for (int width : new int[]{1180, 680}) {
                 onEdt(() -> {
                     frame.setSize(width, width == 680 ? 470 : 760);
                     frame.validate();
                     return null;
                 });
-                SwingTestSupport.awaitCondition("wrapped settings headline layout", () -> {
-                    LauncherLink link = assertInstanceOf(LauncherLink.class, find(frame, "newsArticleButton0"));
-                    return link.getWidth() > 0 && link.getHeight() >= link.getPreferredSize().height;
-                });
                 onEdt(() -> {
-                    LauncherLink link = assertInstanceOf(LauncherLink.class, find(frame, "newsArticleButton0"));
-                    assertEquals(title, link.getText());
-                    assertEquals(javax.accessibility.AccessibleRole.HYPERLINK,
-                            link.getAccessibleContext().getAccessibleRole());
-                    assertTrue(link.getHeight() > link.getFontMetrics(link.getFont()).getHeight() * 2);
-                    JLabel date = component(frame, "newsArticleDate0");
-                    assertEquals(LauncherTheme.MUTED, date.getForeground());
-                    assertTrue(date.getFont().getSize2D() < link.getFont().getSize2D());
-                    assertTrue(link.getAccessibleContext().getAccessibleName().contains(date.getText()));
                     assertInstanceOf(LauncherLink.class, find(frame, "openDiscordButton"));
-                    assertInstanceOf(LauncherLink.class, find(frame, "allNewsButton"));
-                    JPanel news = component(frame, "settingsLatestnewsSection");
-                    assertTrue(link.getX() + link.getWidth() <= news.getWidth() - news.getInsets().right);
+                    assertInstanceOf(LauncherLink.class, find(frame, "playOnlineButton"));
                     JButton java = find(frame, "changeDefaultJavaButton");
                     JButton logs = find(frame, "viewOperationLogsButton");
+                    JButton launchOptions = find(frame, "editLaunchOptionsButton");
                     assertEquals(java.getSize(), logs.getSize());
+                    assertEquals(java.getSize(), launchOptions.getSize());
                     JButton update = find(frame, "checkLauncherUpdateButton");
                     if (update != null) assertEquals(java.getSize(), update.getSize());
                     return null;
                 });
-                onEdt(() -> {
-                    frame.toFront();
-                    find(frame, "changeDefaultJavaButton").requestFocusInWindow();
-                    return null;
-                });
-                SwingTestSupport.awaitCondition("focused utility button", () ->
-                        find(frame, "changeDefaultJavaButton").isFocusOwner());
-                onEdt(() -> {
-                    find(frame, "newsArticleButton0").requestFocusInWindow();
-                    return null;
-                });
-                SwingTestSupport.awaitCondition("focused news link", () ->
-                        find(frame, "newsArticleButton0").isFocusOwner());
-                onEdt(() -> {
-                    LauncherLink link = assertInstanceOf(LauncherLink.class, find(frame, "newsArticleButton0"));
-                    var viewport = assertInstanceOf(javax.swing.JViewport.class,
-                            javax.swing.SwingUtilities.getAncestorOfClass(javax.swing.JViewport.class, link));
-                    var bounds = javax.swing.SwingUtilities.convertRectangle(
-                            link.getParent(), link.getBounds(), viewport.getView());
-                    assertTrue(viewport.getViewRect().contains(bounds),
-                            "keyboard focus must scroll the full link into view");
-                    BufferedImage image = new BufferedImage(link.getWidth(), link.getHeight(),
-                            BufferedImage.TYPE_INT_ARGB);
-                    Graphics2D graphics = image.createGraphics();
-                    try {
-                        link.paint(graphics);
-                    } finally {
-                        graphics.dispose();
-                    }
-                    assertEquals(LauncherTheme.BUTTON_ICON.getRGB(), image.getRGB(0, link.getHeight() / 2),
-                            "keyboard focus has a visible cyan outline");
-                    return null;
-                });
                 saveReviewImage(width == 1180 ? "settings-links-wide.png" : "settings-links-compact.png", frame);
             }
-            assertEquals(1, requests.get(), "resizing and restyling must not fetch the feed again");
+            assertEquals(1, requests.get(), "resizing and navigating must not fetch the feed again");
         } finally {
             dispose(frame);
         }

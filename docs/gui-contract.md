@@ -108,23 +108,43 @@ authoritative value on failure. Imported, incomplete, corrupt, missing-channel, 
 ineligible records show no checkbox. The action menu has no update-check editor.
 
 The title bar shows the packaged launcher version (0.14.5) or identifies a development build. Settings
-uses equal-width, top-aligned columns at wide window sizes: Game Java, Diagnostics, and
-Launcher update (supported native installations) on the left; Community and Latest news on the right.
+uses equal-width, top-aligned columns at wide window sizes: Game Java, Launch options, Diagnostics, and
+Launcher update (supported native installations) on the left; Community and Online servers on the right.
 At narrow sizes these groups stack in that reading order, with the bottom navigation
 remaining visible and the sections scrolling vertically as needed. Settings utility buttons
-share the dimensions needed by their longest label. News titles, Join Discord, and All news
-are unboxed cyan links with underlines, keyboard activation, visible focus, and accessible link roles.
+share the dimensions needed by their longest label. News titles, Join Discord, All news, and
+Play MegaMek online are unboxed cyan links with underlines, keyboard activation, visible focus, and accessible link roles.
 Custom links and checkboxes explicitly repaint on both focus gain and loss. Checkboxes
 show a whole-control focus outline in checked and unchecked states, including high contrast;
 selection color never replaces the keyboard-focus cue.
-News dates are smaller muted labels, and full titles wrap within the available column width
-rather than being truncated; tooltips and accessible names retain the date and title. Loading and error
-states keep the same layout. Settings
-includes Game Java, Diagnostics, Launcher update on supported native installations, Community, and Latest news;
-there is no global automatic-check control. Latest news loads up to three dated headlines from
-MegaMek's official Atom feed in the background once per window, links to the full posts, and
-always offers the blog archive when offline. Remote article HTML is not rendered in the launcher
-and news loading never delays navigation.
+Loading and error states keep the same layout; there is no global automatic-check control.
+
+Latest news appears on the managed home page as a translucent backplate in the top-right corner
+of the artwork. It loads up to three dated headlines from MegaMek's official Atom feed in the
+background once per window, links to the full posts, and always offers the blog archive when
+offline. News dates are smaller muted labels, and full titles wrap within the plate width rather
+than being truncated; tooltips and accessible names retain the date and title. The plate is
+hidden when the window is too small for it to fit over the artwork. Remote article HTML is not
+rendered in the launcher and news loading never delays navigation.
+
+Online servers loads `https://megamek.games/servers.json` (schema version 1) in the background
+each time Settings opens. Current servers are grouped under Milestone and Development with their
+address, version (marked **(installed)** when a registered installation has that MegaMek version),
+provider, and size, plus a **Copy address** button. Deprecated, malformed, or unknown
+entries are ignored. When the list is loading, unavailable, or empty, the section still offers
+**Play MegaMek online**, which opens megamek.games.
+
+Launch options set per-application maximum memory (MegaMek, MekHQ, MegaMekLab), a graphics
+renderer (default, Disable Direct3D on Windows, or OpenGL), additional Java arguments, and the MegaMek user
+directory for every installation. **Edit launch options** in Settings edits the launcher-wide
+values; **Launch options…** in an installation's More menu edits overrides where each field can
+inherit the launcher-wide value, and **Copy launch commands** copies the resulting commands. Values are stored
+next to the registry in `<registry>.launch-options.json`, separate from launcher settings, and an
+unreadable file is reported and never overwritten. Imported installations adopt their existing
+`-Xmx` from the application's `.l4j.ini` as an override. Java arguments must be options starting
+with `-`; class path, module, `-jar`, `-Xmx`, argument-file, and informational flags are rejected.
+The user directory is passed as `-Dmegamek.userDir`, which MegaMek builds that support it treat as
+a launcher-managed override of the User Directory preference.
 
 The launcher-update confirmation on every supported platform says **Version \<version\> is available.** and
 **Close any running games before updating.**, with **Cancel** and **Update now** actions.

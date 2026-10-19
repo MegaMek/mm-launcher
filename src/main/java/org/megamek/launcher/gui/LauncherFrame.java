@@ -43,6 +43,8 @@ import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.channel.QuickInstallSnapshot;
 import org.megamek.launcher.channel.SelectedChannelReleaseCatalog;
 import org.megamek.launcher.diagnostics.SanitizedErrors;
+import org.megamek.launcher.launch.LaunchOptions;
+import org.megamek.launcher.launch.LaunchOptionsStore;
 import org.megamek.launcher.onboarding.ExistingImportService;
 import org.megamek.launcher.onboarding.NormalInstallService;
 import org.megamek.launcher.onboarding.Product;
@@ -174,6 +176,14 @@ public final class LauncherFrame extends JFrame {
     private boolean newsLoading;
     private List<LauncherNewsFeed.Article> newsArticles = List.of();
     private Throwable newsError;
+    private JPanel homeNewsPanel;
+    private final MegaMekServerList serverList;
+    private boolean serversRequested;
+    private boolean serversLoading;
+    private List<MegaMekServerList.Server> servers = List.of();
+    private Throwable serversError;
+    private LaunchOptionsStore.Document launchOptionsDocument;
+    private Throwable launchOptionsError;
     private String transientHomeMessage;
     private boolean launcherUpdateChecked;
     private final LauncherSelfUpdate launcherUpdater = new LauncherSelfUpdate();
@@ -195,17 +205,30 @@ public final class LauncherFrame extends JFrame {
     }
 
     LauncherFrame(LauncherServices services, LauncherNewsFeed newsFeed) {
+        this(services, newsFeed, new MegaMekServerList());
+    }
+
+    LauncherFrame(LauncherServices services, LauncherNewsFeed newsFeed, MegaMekServerList serverList) {
         this(services, new SwingExistingImportPrompts(),
-                new SwingNormalInstallLocationPrompts(), newsFeed);
+                new SwingNormalInstallLocationPrompts(), newsFeed, serverList);
     }
 
     private LauncherFrame(LauncherServices services,
                           ExistingImportPrompts existingImportPrompts,
                           NormalInstallLocationPrompts normalInstallLocationPrompts,
                           LauncherNewsFeed newsFeed) {
+        this(services, existingImportPrompts, normalInstallLocationPrompts, newsFeed,
+                new MegaMekServerList());
+    }
+
+    private LauncherFrame(LauncherServices services,
+                          ExistingImportPrompts existingImportPrompts,
+                          NormalInstallLocationPrompts normalInstallLocationPrompts,
+                          LauncherNewsFeed newsFeed, MegaMekServerList serverList) {
         super(titleFor(LauncherFrame.class.getPackage().getImplementationVersion()));
         this.services = services;
         this.newsFeed = newsFeed;
+        this.serverList = serverList;
         this.existingImportPrompts = existingImportPrompts;
         this.normalInstallLocationPrompts = normalInstallLocationPrompts;
         setName("launcherFrame");
@@ -373,10 +396,78 @@ public final class LauncherFrame extends JFrame {
         navigation.add(settings);
         center.add(navigation);
 
-        content.add(FirstLaunchPanel.managedHome(firstLaunchArtwork, guiScale, center),
+        homeNewsPanel = FirstLaunchPanel.backplate(guiScale);
+        homeNewsPanel.setName("homeNewsPanel");
+        homeNewsPanel.setLayout(new BoxLayout(homeNewsPanel, BoxLayout.Y_AXIS));
+        fillHomeNews();
+        content.add(FirstLaunchPanel.managedHome(firstLaunchArtwork, guiScale, center, homeNewsPanel),
                 BorderLayout.CENTER);
         content.revalidate();
         content.repaint();
+        loadNews();
+    }
+
+    private void fillHomeNews() {
+        JPanel news = homeNewsPanel;
+        if (news == null) return;
+        news.removeAll();
+        JLabel title = new JLabel("Latest news");
+        title.setName("homeNewsTitle");
+        title.setForeground(FirstLaunchPanel.ACCENT);
+        title.setFont(guiScale.font(title.getFont(), Font.BOLD, 15f));
+        title.setAlignmentX(Component.LEFT_ALIGNMENT);
+        news.add(title);
+        news.add(Box.createVerticalStrut(guiScale.scaleForGUI(6)));
+        if (newsLoading || !newsRequested) {
+            JLabel loading = new JLabel("Loading MegaMek news...");
+            loading.setName("newsLoadingMessage");
+            loading.setForeground(FirstLaunchPanel.MUTED);
+            loading.setAlignmentX(Component.LEFT_ALIGNMENT);
+            news.add(loading);
+            news.add(Box.createVerticalStrut(guiScale.scaleForGUI(6)));
+        } else if (newsError != null) {
+            JLabel unavailable = new JLabel("News is unavailable right now.");
+            unavailable.setName("newsUnavailableMessage");
+            unavailable.setForeground(FirstLaunchPanel.MUTED);
+            unavailable.setToolTipText(errorDetail(newsError));
+            unavailable.setAlignmentX(Component.LEFT_ALIGNMENT);
+            news.add(unavailable);
+            news.add(Box.createVerticalStrut(guiScale.scaleForGUI(6)));
+        } else {
+            for (int i = 0; i < newsArticles.size(); i++) {
+                LauncherNewsFeed.Article article = newsArticles.get(i);
+                String headline = NEWS_DATE.format(article.published())
+                        + " - " + article.title();
+                JLabel date = new JLabel(NEWS_DATE.format(article.published()));
+                date.setName("newsArticleDate" + i);
+                date.setFont(guiScale.font(date.getFont(), Font.PLAIN, 11f));
+                date.setForeground(LauncherTheme.highContrast()
+                        ? LauncherTheme.uiColor("Label.foreground", java.awt.Color.WHITE) : FirstLaunchPanel.MUTED);
+                date.setBorder(BorderFactory.createEmptyBorder(0, guiScale.scaleForGUI(3), 0, 0));
+                date.setAlignmentX(Component.LEFT_ALIGNMENT);
+                news.add(date);
+                JButton link = new LauncherLink(article.title(), "newsArticleButton" + i, guiScale);
+                link.setAlignmentX(Component.LEFT_ALIGNMENT);
+                link.setHorizontalAlignment(javax.swing.SwingConstants.LEFT);
+                link.setToolTipText(headline);
+                link.getAccessibleContext().setAccessibleName(headline);
+                link.addActionListener(event -> openWebsite(article.link(), "MegaMek news"));
+                news.add(link);
+                news.add(Box.createVerticalStrut(guiScale.scaleForGUI(6)));
+            }
+        }
+        JButton archive = new LauncherLink("All news", "allNewsButton", guiScale);
+        archive.setAlignmentX(Component.LEFT_ALIGNMENT);
+        archive.getAccessibleContext().setAccessibleDescription(
+                "Open the MegaMek blog archive in your browser");
+        archive.addActionListener(event -> openWebsite(LauncherNewsFeed.ARCHIVE, "news archive"));
+        news.add(archive);
+        news.revalidate();
+        news.repaint();
+        if (news.getParent() != null) {
+            news.getParent().revalidate();
+            news.getParent().repaint();
+        }
     }
 
     private void renderCurrentPage() {
@@ -398,7 +489,7 @@ public final class LauncherFrame extends JFrame {
             launcherSettings = null;
             launcherSettingsError = null;
             loadSettingsPage();
-            loadNews();
+            loadServers();
             return;
         }
         renderCurrentPage();
@@ -408,7 +499,7 @@ public final class LauncherFrame extends JFrame {
         if (newsRequested) return;
         newsRequested = true;
         newsLoading = true;
-        renderSettingsPage();
+        fillHomeNews();
         new SwingWorker<List<LauncherNewsFeed.Article>, Void>() {
             @Override protected List<LauncherNewsFeed.Article> doInBackground()
                     throws IOException, InterruptedException {
@@ -428,7 +519,33 @@ public final class LauncherFrame extends JFrame {
                 if (newsError != null) {
                     recordErrorAsync("Loading MegaMek news", newsError, ignored -> {});
                 }
-                if (isDisplayable() && page == Page.SETTINGS) renderSettingsPage();
+                if (isDisplayable() && page == Page.HOME) fillHomeNews();
+            }
+        }.execute();
+    }
+
+    private void loadServers() {
+        if (serversRequested) return;
+        serversRequested = true;
+        serversLoading = true;
+        new SwingWorker<List<MegaMekServerList.Server>, Void>() {
+            @Override protected List<MegaMekServerList.Server> doInBackground()
+                    throws IOException, InterruptedException {
+                return serverList.current();
+            }
+
+            @Override protected void done() {
+                serversLoading = false;
+                try {
+                    servers = get();
+                } catch (java.util.concurrent.ExecutionException error) {
+                    serversError = error.getCause();
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                    serversError = error;
+                }
+                // The list is optional; failures fall back to the website link without an error dialog.
+                if (isDisplayable() && page == Page.SETTINGS && !settingsLoading) renderSettingsPage();
             }
         }.execute();
     }
@@ -437,10 +554,23 @@ public final class LauncherFrame extends JFrame {
         if (settingsLoading) return;
         settingsLoading = true;
         renderSettingsPage();
-        run("Loading settings", services::settingsView, loaded -> {
+        run("Loading settings", () -> {
+            LauncherServices.SettingsView view = services.settingsView();
+            try {
+                return new SettingsLoad(view, services.launchOptions(), null);
+            } catch (IOException error) {
+                return new SettingsLoad(view, null, error);
+            }
+        }, loaded -> {
             settingsLoading = false;
-            launcherSettings = loaded;
+            launcherSettings = loaded.view();
             launcherSettingsError = null;
+            launchOptionsDocument = loaded.launchOptions();
+            launchOptionsError = loaded.launchOptionsError();
+            if (launchOptionsError != null) {
+                recordErrorAsync("Reading launch options", launchOptionsError, ignored -> {
+                });
+            }
             renderSettingsPage();
         }, error -> {
             settingsLoading = false;
@@ -1573,6 +1703,12 @@ public final class LauncherFrame extends JFrame {
         rename.setName("renameInstallation-" + record.id());
         rename.addActionListener(event -> renameInstallation(record));
         menu.add(rename);
+        JMenuItem launchOptions = installationMenuItem("Launch options…");
+        launchOptions.setName("launchOptions-" + record.id());
+        launchOptions.getAccessibleContext().setAccessibleDescription(
+                "Set memory, rendering, and other launch options for " + record.name());
+        launchOptions.addActionListener(event -> openInstallationLaunchOptions(record));
+        menu.add(launchOptions);
         JMenuItem resetPreferences = installationMenuItem("Reset preferences…");
         resetPreferences.setName("resetPreferences-" + record.id());
         resetPreferences.addActionListener(event -> resetPreferences(record));
@@ -2456,6 +2592,9 @@ public final class LauncherFrame extends JFrame {
             left.add(java);
             left.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
 
+            left.add(launchOptionsSection(utilityButtons));
+            left.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
+
             JPanel diagnostics = settingsSection("Diagnostics");
             JButton logs = homeButton("View logs", "viewOperationLogsButton");
             logs.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -2506,49 +2645,8 @@ public final class LauncherFrame extends JFrame {
         community.add(discord);
         right.add(community);
 
-        JPanel news = settingsSection("Latest news");
-        if (newsLoading || !newsRequested) {
-            JLabel loading = new JLabel("Loading MegaMek news...");
-            loading.setName("newsLoadingMessage");
-            loading.setForeground(FirstLaunchPanel.MUTED);
-            news.add(loading);
-        } else if (newsError != null) {
-            JLabel unavailable = new JLabel("News is unavailable right now.");
-            unavailable.setName("newsUnavailableMessage");
-            unavailable.setForeground(FirstLaunchPanel.MUTED);
-            unavailable.setToolTipText(errorDetail(newsError));
-            news.add(unavailable);
-        } else {
-            for (int i = 0; i < newsArticles.size(); i++) {
-                LauncherNewsFeed.Article article = newsArticles.get(i);
-                String headline = NEWS_DATE.format(article.published())
-                        + " - " + article.title();
-                JLabel date = new JLabel(NEWS_DATE.format(article.published()));
-                date.setName("newsArticleDate" + i);
-                date.setFont(guiScale.font(date.getFont(), Font.PLAIN, 11f));
-                date.setForeground(LauncherTheme.highContrast()
-                        ? LauncherTheme.uiColor("Label.foreground", java.awt.Color.WHITE) : FirstLaunchPanel.MUTED);
-                date.setBorder(BorderFactory.createEmptyBorder(0, guiScale.scaleForGUI(3), 0, 0));
-                date.setAlignmentX(Component.LEFT_ALIGNMENT);
-                news.add(date);
-                JButton link = new LauncherLink(article.title(), "newsArticleButton" + i, guiScale);
-                link.setAlignmentX(Component.LEFT_ALIGNMENT);
-                link.setHorizontalAlignment(javax.swing.SwingConstants.LEFT);
-                link.setToolTipText(headline);
-                link.getAccessibleContext().setAccessibleName(headline);
-                link.addActionListener(event -> openWebsite(article.link(), "MegaMek news"));
-                news.add(link);
-                news.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
-            }
-        }
-        JButton archive = new LauncherLink("All news", "allNewsButton", guiScale);
-        archive.setAlignmentX(Component.LEFT_ALIGNMENT);
-        archive.getAccessibleContext().setAccessibleDescription(
-                "Open the MegaMek blog archive in your browser");
-        archive.addActionListener(event -> openWebsite(LauncherNewsFeed.ARCHIVE, "news archive"));
-        news.add(archive);
         right.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
-        right.add(news);
+        right.add(onlineServersSection());
         JScrollPane scroll = LauncherTheme.scrollPane(center);
         scroll.setName("settingsScrollPane");
         scroll.setBorder(BorderFactory.createEmptyBorder());
@@ -2559,6 +2657,213 @@ public final class LauncherFrame extends JFrame {
         content.add(navigation, BorderLayout.SOUTH);
         content.revalidate();
         content.repaint();
+    }
+
+    private JPanel launchOptionsSection(List<JButton> utilityButtons) {
+        JPanel section = settingsSection("Launch options");
+        if (launchOptionsDocument == null) {
+            JLabel unavailable = new JLabel("Launch options could not be read and were not reset.");
+            unavailable.setName("launchOptionsErrorMessage");
+            unavailable.setForeground(LauncherTheme.SELECTED);
+            unavailable.setToolTipText(launchOptionsError == null ? null : errorDetail(launchOptionsError));
+            unavailable.setAlignmentX(Component.LEFT_ALIGNMENT);
+            section.add(unavailable);
+            return section;
+        }
+        LaunchOptions global = launchOptionsDocument.global().over(LaunchOptions.builtIn());
+        JLabel intro = mutedSettingsLabel("Used by every installation unless it sets its own.");
+        intro.setName("launchOptionsIntro");
+        section.add(intro);
+        section.add(Box.createVerticalStrut(guiScale.scaleForGUI(4)));
+        for (String line : launchOptionsSummary(global)) {
+            JLabel label = new JLabel(line);
+            label.setForeground(FirstLaunchPanel.TEXT);
+            label.setToolTipText(line);
+            label.setAlignmentX(Component.LEFT_ALIGNMENT);
+            section.add(label);
+        }
+        section.add(Box.createVerticalStrut(guiScale.scaleForGUI(6)));
+        JButton edit = homeButton("Edit launch options", "editLaunchOptionsButton");
+        edit.setAlignmentX(Component.LEFT_ALIGNMENT);
+        edit.addActionListener(event -> openGlobalLaunchOptions());
+        utilityButtons.add(edit);
+        section.add(edit);
+        return section;
+    }
+
+    static List<String> launchOptionsSummary(LaunchOptions resolved) {
+        return List.of(
+                "Memory: MegaMek " + resolved.megamekHeapMb() + " MB, MekHQ " + resolved.mekhqHeapMb()
+                        + " MB, MegaMekLab " + resolved.labHeapMb() + " MB",
+                "Rendering: " + resolved.renderer().label(),
+                "User directory: " + LaunchOptionsDialog.describeText(resolved.userDirectory()),
+                "Extra Java arguments: " + LaunchOptionsDialog.describeText(resolved.extraJvmArguments()));
+    }
+
+    private JLabel mutedSettingsLabel(String text) {
+        JLabel label = new JLabel(text);
+        label.setForeground(FirstLaunchPanel.MUTED);
+        label.setAlignmentX(Component.LEFT_ALIGNMENT);
+        return label;
+    }
+
+    private void openGlobalLaunchOptions() {
+        if (launchOptionsDocument == null) return;
+        new LaunchOptionsDialog(this, guiScale, "Launch options", "Launcher-wide launch options",
+                "These apply to every installation. Each installation can still set its own.",
+                LaunchOptions.builtIn(), launchOptionsDocument.global(), "Use built-in default",
+                List.of(), options -> run("Saving launch options",
+                        () -> services.saveGlobalLaunchOptions(options), saved -> {
+                            launchOptionsDocument = saved;
+                            launchOptionsError = null;
+                            status.setText("Saved launch options.");
+                            if (page == Page.SETTINGS) renderSettingsPage();
+                        })).show();
+    }
+
+    private void openInstallationLaunchOptions(InstallationRecord record) {
+        run("Reading launch options", services::launchOptions, document -> {
+            LaunchOptions inherited = document.global().over(LaunchOptions.builtIn());
+            JButton copy = homeButton("Copy launch commands", "copyLaunchCommandsButton");
+            copy.setToolTipText("Copies the commands the launcher uses with the saved options, for troubleshooting.");
+            copy.addActionListener(event -> copyLaunchCommands(record));
+            new LaunchOptionsDialog(this, guiScale, "Launch options",
+                    "Launch options for " + installationDisplayName(record),
+                    "Override the launcher-wide options for this installation only.",
+                    inherited, document.installation(record.id()), "Use launcher default",
+                    List.of(copy), options -> run("Saving launch options",
+                            () -> services.saveInstallationLaunchOptions(record, options), saved -> {
+                                launchOptionsDocument = saved;
+                                status.setText("Saved launch options for " + installationDisplayName(record) + ".");
+                            })).show();
+        });
+    }
+
+    private void copyLaunchCommands(InstallationRecord record) {
+        List<Product> products = record.products() == null ? List.of() : record.products();
+        run("Preparing launch commands", () -> {
+            StringBuilder commands = new StringBuilder();
+            for (Product product : products) {
+                List<String> command = services.preview(record, product.key());
+                commands.append(displayProduct(product.key())).append(':').append(System.lineSeparator());
+                commands.append(String.join(" ", command.stream().map(LauncherFrame::quoteArgument).toList()))
+                        .append(System.lineSeparator()).append(System.lineSeparator());
+            }
+            return commands.toString().strip();
+        }, text -> {
+            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(text), null);
+            status.setText("Copied launch commands.");
+        });
+    }
+
+    static String quoteArgument(String argument) {
+        if (!argument.isEmpty() && argument.chars().noneMatch(c -> Character.isWhitespace(c) || c == '"')) {
+            return argument;
+        }
+        return '"' + argument.replace("\"", "\\\"") + '"';
+    }
+
+    private JPanel onlineServersSection() {
+        JPanel section = settingsSection("Online servers");
+        if (serversLoading || !serversRequested) {
+            JLabel loading = mutedSettingsLabel("Loading public servers...");
+            loading.setName("serversLoadingMessage");
+            section.add(loading);
+        } else if (serversError != null || servers.isEmpty()) {
+            JLabel unavailable = mutedSettingsLabel(serversError != null
+                    ? "The server list is unavailable right now." : "No public servers are listed right now.");
+            unavailable.setName("serversUnavailableMessage");
+            if (serversError != null) unavailable.setToolTipText(errorDetail(serversError));
+            section.add(unavailable);
+        } else {
+            Set<String> installed = installedMegaMekVersions();
+            int index = 0;
+            for (MegaMekServerList.Channel channel : List.of(MegaMekServerList.Channel.MILESTONE,
+                    MegaMekServerList.Channel.DEVELOPMENT)) {
+                List<MegaMekServerList.Server> group = servers.stream()
+                        .filter(server -> server.channel() == channel).toList();
+                if (group.isEmpty()) continue;
+                JLabel heading = new JLabel(channel == MegaMekServerList.Channel.MILESTONE
+                        ? "Milestone" : "Development");
+                heading.setName("servers" + heading.getText() + "Heading");
+                heading.setForeground(FirstLaunchPanel.TEXT);
+                heading.setFont(guiScale.font(heading.getFont(), Font.BOLD, 13f));
+                heading.setAlignmentX(Component.LEFT_ALIGNMENT);
+                section.add(Box.createVerticalStrut(guiScale.scaleForGUI(4)));
+                section.add(heading);
+                for (MegaMekServerList.Server server : group) {
+                    section.add(serverRow(server, index++,
+                            installed.contains(normalizedVersion(server.version()))));
+                }
+            }
+        }
+        section.add(Box.createVerticalStrut(guiScale.scaleForGUI(6)));
+        JButton website = new LauncherLink("Play MegaMek online", "playOnlineButton", guiScale);
+        website.setAlignmentX(Component.LEFT_ALIGNMENT);
+        website.getAccessibleContext().setAccessibleDescription(
+                "Opens megamek.games in your browser");
+        website.addActionListener(event -> openWebsite(MegaMekServerList.WEBSITE, "megamek.games"));
+        section.add(website);
+        return section;
+    }
+
+    private JPanel serverRow(MegaMekServerList.Server server, int index, boolean matchesInstalled) {
+        JPanel row = new JPanel(new BorderLayout(guiScale.scaleForGUI(10), 0)) {
+            @Override public Dimension getMaximumSize() {
+                return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+            }
+        };
+        row.setName("serverRow" + index);
+        row.setOpaque(false);
+        row.setAlignmentX(Component.LEFT_ALIGNMENT);
+        row.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(4), 0, guiScale.scaleForGUI(4), 0));
+        JPanel text = new JPanel();
+        text.setLayout(new BoxLayout(text, BoxLayout.Y_AXIS));
+        text.setOpaque(false);
+        JLabel address = new JLabel(server.address());
+        address.setName("serverAddress" + index);
+        address.setForeground(FirstLaunchPanel.TEXT);
+        text.add(address);
+        StringBuilder details = new StringBuilder("Version ").append(server.version());
+        if (matchesInstalled) details.append(" (installed)");
+        if (!server.provider().isEmpty()) details.append(" · ").append(server.provider());
+        if (!server.size().isEmpty()) details.append(" · ").append(server.size());
+        JLabel detail = new JLabel(details.toString());
+        detail.setName("serverDetails" + index);
+        detail.setFont(guiScale.font(detail.getFont(), Font.PLAIN, 11f));
+        detail.setForeground(matchesInstalled ? FirstLaunchPanel.ACCENT : FirstLaunchPanel.MUTED);
+        text.add(detail);
+        row.add(text, BorderLayout.CENTER);
+        JButton copy = homeButton("Copy address", "copyServerAddressButton" + index);
+        copy.getAccessibleContext().setAccessibleDescription("Copy " + server.address() + " to the clipboard");
+        copy.addActionListener(event -> {
+            Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
+                    new StringSelection(server.address()), null);
+            status.setText("Copied " + server.address() + ". Paste it into MegaMek's Connect dialog.");
+        });
+        row.add(copy, BorderLayout.EAST);
+        return row;
+    }
+
+    private Set<String> installedMegaMekVersions() {
+        Set<String> versions = new HashSet<>();
+        if (state == null) return versions;
+        for (InstallationRecord record : state.registry().installations()) {
+            if (record.products() == null) continue;
+            for (Product product : record.products()) {
+                if ("megamek".equals(product.key()) && product.build() != null) {
+                    versions.add(normalizedVersion(product.build()));
+                }
+            }
+        }
+        return versions;
+    }
+
+    static String normalizedVersion(String version) {
+        String value = version.strip();
+        if (value.startsWith("v") || value.startsWith("V")) value = value.substring(1);
+        int suffix = value.indexOf('-');
+        return suffix < 0 ? value : value.substring(0, suffix);
     }
 
     private void openWebsite(java.net.URI address, String description) {
@@ -4555,6 +4860,11 @@ public final class LauncherFrame extends JFrame {
 
     private record HomeLoad(LauncherServices.HomeState state, Throwable error,
                             java.awt.image.BufferedImage artwork, Throwable artworkError) {
+    }
+
+    private record SettingsLoad(LauncherServices.SettingsView view,
+                                LaunchOptionsStore.Document launchOptions,
+                                Throwable launchOptionsError) {
     }
 
     private record CheckOnOpenSave(ChannelPreferenceStore.ReadResult authoritative,

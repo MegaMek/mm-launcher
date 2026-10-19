@@ -65,6 +65,12 @@ public final class ApplicationLauncher {
     public List<String> command(InstallationRecord record, String productKey,
                                 JavaRuntime.CurrentJava gameJava)
             throws IOException, InterruptedException {
+        return command(record, productKey, gameJava, LaunchOptions.builtIn());
+    }
+
+    public List<String> command(InstallationRecord record, String productKey,
+                                JavaRuntime.CurrentJava gameJava, LaunchOptions options)
+            throws IOException, InterruptedException {
         if (gameJava == null) {
             throw new IOException("effective Game Java was not resolved");
         }
@@ -91,12 +97,21 @@ public final class ApplicationLauncher {
         if (java.startsWith(root)) {
             throw new IOException("Game Java must be external to the application directory");
         }
+        LaunchOptions effective = options.over(LaunchOptions.builtIn());
+        List<String> extra;
+        try {
+            effective.validate();
+            extra = effective.jvmArguments();
+        } catch (IllegalArgumentException error) {
+            throw new IOException("launch options are invalid: " + error.getMessage(), error);
+        }
         List<String> command = new ArrayList<>();
         command.add(java.toString());
-        command.add("-Xmx" + InstallationInspector.heapMb(productKey) + "m");
+        command.add("-Xmx" + effective.heapMb(productKey) + "m");
         command.add("--add-opens=java.base/java.util=ALL-UNNAMED");
         command.add("--add-opens=java.base/java.util.concurrent=ALL-UNNAMED");
         command.add("-Dsun.awt.disablegrab=true");
+        command.addAll(extra);
         command.add("-cp");
         List<String> jars = new ArrayList<>();
         jars.add(product.jar());
@@ -109,10 +124,16 @@ public final class ApplicationLauncher {
     public int launch(InstallationRecord record, String product,
                       JavaRuntime.CurrentJava gameJava)
             throws IOException, InterruptedException {
+        return launch(record, product, gameJava, LaunchOptions.builtIn());
+    }
+
+    public int launch(InstallationRecord record, String product,
+                      JavaRuntime.CurrentJava gameJava, LaunchOptions options)
+            throws IOException, InterruptedException {
         Path root = Path.of(record.canonicalRoot());
         try (RootCoordinator.Lease lease = coordinator.acquireForLaunch(root)) {
             lease.requireNoPendingUpdate();
-            List<String> command = command(record, product, gameJava);
+            List<String> command = command(record, product, gameJava, options);
             lease.markLaunchStarting();
             boolean childCompleted = false;
             java.util.concurrent.atomic.AtomicReference<IOException> markerFailure =
