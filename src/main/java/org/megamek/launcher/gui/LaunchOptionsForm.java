@@ -145,7 +145,7 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
                 current.userDirectory() == null,
                 inheritLabel + " (" + describeText(inherited.userDirectory()) + ")",
                 () -> userDirField.setText(inherited.userDirectory()),
-                "Shared units, portraits, and camos. Needs a recent MegaMek.");
+                "Shared units and camos. Needs MegaMek 0.51.01 or later.");
         userDirectory.extraEditors = List.of(userDirField, browse, clear);
         userDirectory.refresh();
     }
@@ -189,9 +189,9 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         JPanel editor = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
         editor.setOpaque(false);
         editor.add(box);
-        Row row = row(label, name, editor, own == null,
-                inheritLabel + " (" + new HeapChoice(inheritedHeap) + ")",
-                () -> box.setSelectedItem(new HeapChoice(inheritedHeap)), null);
+        // The dropdown sits beside the checkbox and already shows the inherited size when following it.
+        Row row = row(label, name, editor, own == null, inheritLabel,
+                () -> box.setSelectedItem(new HeapChoice(inheritedHeap)), null, true);
         row.editor = box;
         row.extraEditors = List.of(box);
         row.refresh();
@@ -205,6 +205,11 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
 
     private Row row(String label, String name, JComponent editor, boolean followsDefault,
                     String inheritText, Runnable resetToInherited, String hintText) {
+        return row(label, name, editor, followsDefault, inheritText, resetToInherited, hintText, false);
+    }
+
+    private Row row(String label, String name, JComponent editor, boolean followsDefault,
+                    String inheritText, Runnable resetToInherited, String hintText, boolean inline) {
         int index = rows.size();
         String capitalized = Character.toUpperCase(name.charAt(0)) + name.substring(1);
         JLabel title = new JLabel(label);
@@ -223,19 +228,32 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         inheritConstraints.gridx = 1;
         inheritConstraints.gridy = index * 3;
         inheritConstraints.anchor = GridBagConstraints.WEST;
-        inheritConstraints.weightx = 1;
-        inheritConstraints.fill = GridBagConstraints.HORIZONTAL;
+        if (inline) {
+            inheritConstraints.gridwidth = 1;
+        } else {
+            inheritConstraints.gridwidth = GridBagConstraints.REMAINDER;
+            inheritConstraints.weightx = 1;
+            inheritConstraints.fill = GridBagConstraints.HORIZONTAL;
+        }
         inheritConstraints.insets = new Insets(index == 0 ? 0 : scale.scaleForGUI(12),
                 -inherit.getInsets().left, 0, 0);
         add(inherit, inheritConstraints);
 
         GridBagConstraints editorConstraints = new GridBagConstraints();
-        editorConstraints.gridx = 1;
-        editorConstraints.gridy = index * 3 + 1;
         editorConstraints.anchor = GridBagConstraints.WEST;
         editorConstraints.fill = GridBagConstraints.HORIZONTAL;
         editorConstraints.weightx = 1;
-        editorConstraints.insets = new Insets(scale.scaleForGUI(4), 0, 0, 0);
+        if (inline) {
+            editorConstraints.gridx = 2;
+            editorConstraints.gridy = index * 3;
+            editorConstraints.insets = new Insets(index == 0 ? 0 : scale.scaleForGUI(12),
+                    scale.scaleForGUI(10), 0, 0);
+        } else {
+            editorConstraints.gridx = 1;
+            editorConstraints.gridy = index * 3 + 1;
+            editorConstraints.gridwidth = GridBagConstraints.REMAINDER;
+            editorConstraints.insets = new Insets(scale.scaleForGUI(4), 0, 0, 0);
+        }
         add(editor, editorConstraints);
         if (hintText != null) {
             JLabel hint = new JLabel(hintText);
@@ -244,6 +262,7 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
             GridBagConstraints hintConstraints = new GridBagConstraints();
             hintConstraints.gridx = 1;
             hintConstraints.gridy = index * 3 + 2;
+            hintConstraints.gridwidth = GridBagConstraints.REMAINDER;
             hintConstraints.anchor = GridBagConstraints.WEST;
             hintConstraints.insets = new Insets(scale.scaleForGUI(3), 0, 0, 0);
             add(hint, hintConstraints);

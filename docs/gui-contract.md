@@ -143,7 +143,7 @@ next to the registry in `<registry>.launch-options.json`, separate from launcher
 unreadable file is reported and never overwritten. Imported installations adopt their existing
 `-Xmx` from the application's `.l4j.ini` as an override. Java arguments must be options starting
 with `-`; class path, module, `-jar`, `-Xmx`, argument-file, and informational flags are rejected.
-The user directory is passed as `-Dmegamek.userDir`, which MegaMek builds that support it treat as
+The user directory is passed as `-Dmegamek.userDir`, which MegaMek 0.51.01 and later treat as
 a launcher-managed override of the User Directory preference.
 
 The launcher-update confirmation on every supported platform says **Version \<version\> is available.** and

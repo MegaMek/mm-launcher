@@ -313,6 +313,17 @@ class LauncherSwingSmokeTest {
             SwingUtilities.invokeAndWait(settings::doClick);
             SwingTestSupport.awaitCondition("loaded settings", () ->
                     find(frame, "changeDefaultJavaButton") != null);
+            onEdt(() -> {
+                frame.setSize(1180, 820);
+                frame.validate();
+                return null;
+            });
+            onEdt(() -> {
+                javax.swing.JScrollPane scroll = (javax.swing.JScrollPane) component(frame, "settingsScrollPane");
+                assertFalse(scroll.getVerticalScrollBar().isVisible(),
+                        "Settings fits the default window without scrolling");
+                return null;
+            });
             for (int width : new int[]{1180, 680}) {
                 onEdt(() -> {
                     frame.setSize(width, width == 680 ? 470 : 760);
