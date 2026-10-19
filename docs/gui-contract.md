@@ -138,7 +138,7 @@ Launch options set per-application maximum memory (MegaMek, MekHQ, MegaMekLab), 
 renderer (default, Disable Direct3D on Windows, or OpenGL), additional Java arguments, and the MegaMek user
 directory for every installation. **Edit launch options** in Settings edits the launcher-wide
 values; **Launch options…** in an installation's More menu edits overrides where each field can
-inherit the launcher-wide value, and **Copy launch commands** copies the resulting commands. Values are stored
+inherit the launcher-wide value. **Copy launch commands** in the same menu copies the commands used to start each application with the saved options, for troubleshooting. Values are stored
 next to the registry in `<registry>.launch-options.json`, separate from launcher settings, and an
 unreadable file is reported and never overwritten. Imported installations adopt their existing
 `-Xmx` from the application's `.l4j.ini` as an override. Java arguments must be options starting

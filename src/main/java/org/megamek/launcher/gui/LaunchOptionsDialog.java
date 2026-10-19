@@ -86,11 +86,10 @@ final class LaunchOptionsDialog {
      * @param inherited     fully resolved options that apply when a field follows the lower layer
      * @param current       this layer's own values; {@code null} fields follow {@code inherited}
      * @param inheritLabel  checkbox text, e.g. "Use launcher default"
-     * @param extraActions  optional buttons shown at the bottom left
      */
     LaunchOptionsDialog(JFrame owner, GuiScale scale, String title, String heading, String explanation,
                         LaunchOptions inherited, LaunchOptions current, String inheritLabel,
-                        List<JButton> extraActions, Consumer<LaunchOptions> onSave) {
+                        Consumer<LaunchOptions> onSave) {
         this.scale = Objects.requireNonNull(scale, "scale");
         this.inherited = Objects.requireNonNull(inherited, "inherited");
         Objects.requireNonNull(current, "current");
@@ -183,10 +182,6 @@ final class LaunchOptionsDialog {
         message.setName("launchOptionsMessage");
         message.setForeground(LauncherTheme.SELECTED);
         south.add(message, BorderLayout.NORTH);
-        JPanel left = new JPanel(new FlowLayout(FlowLayout.LEFT, scale.scaleForGUI(8), 0));
-        left.setOpaque(false);
-        if (extraActions != null) extraActions.forEach(left::add);
-        south.add(left, BorderLayout.WEST);
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, scale.scaleForGUI(8), 0));
         actions.setOpaque(false);
         JButton cancel = smallButton("Cancel", "cancelLaunchOptionsButton");

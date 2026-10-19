@@ -1709,6 +1709,12 @@ public final class LauncherFrame extends JFrame {
                 "Set memory, rendering, and other launch options for " + record.name());
         launchOptions.addActionListener(event -> openInstallationLaunchOptions(record));
         menu.add(launchOptions);
+        JMenuItem copyCommands = installationMenuItem("Copy launch commands");
+        copyCommands.setName("copyLaunchCommands-" + record.id());
+        copyCommands.getAccessibleContext().setAccessibleDescription(
+                "Copy the commands used to start each application in " + record.name() + ", for troubleshooting");
+        copyCommands.addActionListener(event -> copyLaunchCommands(record));
+        menu.add(copyCommands);
         JMenuItem resetPreferences = installationMenuItem("Reset preferences…");
         resetPreferences.setName("resetPreferences-" + record.id());
         resetPreferences.addActionListener(event -> resetPreferences(record));
@@ -2712,7 +2718,7 @@ public final class LauncherFrame extends JFrame {
         new LaunchOptionsDialog(this, guiScale, "Launch options", "Launcher-wide launch options",
                 "These apply to every installation. Each installation can still set its own.",
                 LaunchOptions.builtIn(), launchOptionsDocument.global(), "Use built-in default",
-                List.of(), options -> run("Saving launch options",
+                options -> run("Saving launch options",
                         () -> services.saveGlobalLaunchOptions(options), saved -> {
                             launchOptionsDocument = saved;
                             launchOptionsError = null;
@@ -2724,14 +2730,11 @@ public final class LauncherFrame extends JFrame {
     private void openInstallationLaunchOptions(InstallationRecord record) {
         run("Reading launch options", services::launchOptions, document -> {
             LaunchOptions inherited = document.global().over(LaunchOptions.builtIn());
-            JButton copy = homeButton("Copy launch commands", "copyLaunchCommandsButton");
-            copy.setToolTipText("Copies the commands the launcher uses with the saved options, for troubleshooting.");
-            copy.addActionListener(event -> copyLaunchCommands(record));
             new LaunchOptionsDialog(this, guiScale, "Launch options",
                     "Launch options for " + installationDisplayName(record),
                     "Override the launcher-wide options for this installation only.",
                     inherited, document.installation(record.id()), "Use launcher default",
-                    List.of(copy), options -> run("Saving launch options",
+                    options -> run("Saving launch options",
                             () -> services.saveInstallationLaunchOptions(record, options), saved -> {
                                 launchOptionsDocument = saved;
                                 status.setText("Saved launch options for " + installationDisplayName(record) + ".");
