@@ -1389,6 +1389,13 @@ class SimpleHomeSwingTest {
             assertTrue(bounds.x >= 0 && bounds.x + bounds.width <= right.getWidth(),
                     name + " must fit inside its column");
         }
+        Component save = find(frame, "saveGlobalLaunchOptionsButton");
+        Component revert = find(frame, "revertLaunchOptionsButton");
+        Rectangle saveBounds = SwingUtilities.convertRectangle(save.getParent(), save.getBounds(), form);
+        Rectangle revertBounds = SwingUtilities.convertRectangle(revert.getParent(), revert.getBounds(), form);
+        assertTrue(Math.abs(saveBounds.x + saveBounds.width - form.getWidth()) <= 1,
+                "Save ends at the form's right edge");
+        assertTrue(revertBounds.x + revertBounds.width <= saveBounds.x, "Revert sits left of Save");
         assertEquals(0, left.getX());
         if (wide) {
             assertEquals(0, left.getY());

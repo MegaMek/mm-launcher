@@ -2698,7 +2698,7 @@ public final class LauncherFrame extends JFrame {
                 if (page == Page.SETTINGS) renderSettingsPage();
             });
         });
-        JPanel actions = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.LEFT, 0, 0));
+        JPanel actions = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT, 0, 0));
         actions.setName("launchOptionsActions");
         actions.setOpaque(false);
         actions.setAlignmentX(Component.LEFT_ALIGNMENT);
