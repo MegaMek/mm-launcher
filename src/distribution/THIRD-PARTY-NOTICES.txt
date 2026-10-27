@@ -1,11 +1,14 @@
 Third-party dependency material
 ===============================
 
-The lib directory contains the unmodified runtime dependency JARs resolved by
-the Gradle build. License, notice, and dependency files embedded by those
-artifacts remain available inside each JAR under META-INF. Copies of embedded
-META-INF/LICENSE*, META-INF/NOTICE*, and META-INF/DEPENDENCIES* files are also
-provided under third-party-licenses/<jar-name>/ for convenient review.
+The lib directory contains the runtime dependency JARs resolved by the Gradle
+build. They are unmodified except FlatLaf, whose macOS native libraries
+(com/formdev/flatlaf/natives/*macos*.dylib) are removed so macOS packages can be
+notarized; the launcher does not use them. License, notice, and dependency files
+embedded by those artifacts remain available inside each JAR under META-INF.
+Copies of embedded META-INF/LICENSE*, META-INF/NOTICE*, and
+META-INF/DEPENDENCIES* files are also provided under
+third-party-licenses/<jar-name>/ for convenient review.
 
 This notice describes dependency material only. MegaMek Launcher's source
 code license is in LICENSE.code; neither document grants trademark rights.

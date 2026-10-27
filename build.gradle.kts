@@ -34,6 +34,7 @@
 import java.io.File
 import java.nio.file.Files
 import java.security.MessageDigest
+import java.util.zip.ZipFile
 import javax.inject.Inject
 import org.gradle.api.DefaultTask
 import org.gradle.api.file.ArchiveOperations
@@ -755,6 +756,32 @@ val extractDependencyLicenses = tasks.register<ExtractDependencyLicenses>(
     outputDirectory.set(dependencyLicenseDirectory)
 }
 
+// FlatLaf embeds macOS dylibs that are not signed with a Developer ID, so Apple
+// notarization rejects any package containing them. The launcher uses none of
+// FlatLaf's macOS native features, so ship FlatLaf without them on every platform.
+val flatLafJar = runtimeClasspath.map { configuration ->
+    configuration.files.single { it.name.startsWith("flatlaf-") && it.name.endsWith(".jar") }
+}
+val repackageFlatLaf = tasks.register<Zip>("repackageFlatLaf") {
+    group = "distribution"
+    description = "Repackages FlatLaf without its unsigned macOS native libraries."
+    from(flatLafJar.map { zipTree(it) }) {
+        exclude("com/formdev/flatlaf/natives/*macos*.dylib")
+    }
+    archiveFileName.set(flatLafJar.map { it.name })
+    destinationDirectory.set(layout.buildDirectory.dir("packaging/repackaged-dependencies"))
+    duplicatesStrategy = DuplicatesStrategy.FAIL
+    val repackaged = archiveFile
+    doLast {
+        val dylibs = ZipFile(repackaged.get().asFile).use { zip ->
+            zip.entries().asSequence().map { it.name }.filter { it.endsWith(".dylib") }.toList()
+        }
+        if (dylibs.isNotEmpty()) {
+            throw GradleException("Repackaged FlatLaf still contains macOS libraries: $dylibs")
+        }
+    }
+}
+
 val stageCommonPayload = tasks.register<Sync>("stageCommonPayload") {
     group = "distribution"
     description = "Stages the shared Java application and dependency payload."
@@ -766,6 +793,10 @@ val stageCommonPayload = tasks.register<Sync>("stageCommonPayload") {
         into("lib")
     }
     from(runtimeClasspath) {
+        exclude("flatlaf-*.jar")
+        into("lib")
+    }
+    from(repackageFlatLaf) {
         into("lib")
     }
     from("src/distribution/README.txt")
