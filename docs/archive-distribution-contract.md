@@ -843,7 +843,9 @@ Windows ARM and Linux ARM are not qualified by this matrix.
 
 ## Licensing and signing limitations
 
-Dependency JARs stay unmodified and retain embedded `META-INF` legal material. Packaging also
+Dependency JARs stay unmodified and retain embedded `META-INF` legal material, except that FlatLaf
+is repackaged without its unsigned macOS native libraries (`com/formdev/flatlaf/natives/*macos*.dylib`),
+which Apple notarization rejects and the launcher does not use. Packaging also
 extracts available dependency `LICENSE`, `NOTICE`, and `DEPENDENCIES` files into the one common
 `third-party-licenses/` location. This is not a claim about MegaMek Launcher's own source license: the
 repository currently has no tracked root `LICENSE` or `NOTICE`, so a public licensing decision is
