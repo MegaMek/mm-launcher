@@ -243,7 +243,7 @@ class ExistingImportSwingTest {
                 frame.showIneligibleAdoption(new PreparedAdoption.Report(
                         false, "MekHQ", "0.50.7",
                         org.megamek.launcher.channel.FollowChannel.DEVELOPMENT,
-                        "Core application files differ from the official release. ".repeat(60)));
+                        "Core application files differ from the official release. ".repeat(400)));
                 return null;
             });
 
@@ -257,6 +257,14 @@ class ExistingImportSwingTest {
                         close.getParent(), close.getBounds(), dialog.getContentPane());
                 assertTrue(new java.awt.Rectangle(dialog.getContentPane().getSize()).contains(button),
                         "Close stays inside the dialog");
+                javax.swing.JScrollPane scroll = (javax.swing.JScrollPane) find(dialog, "adoptionResultScroll");
+                Component view = scroll.getViewport().getView();
+                assertTrue(view.getHeight() >= view.getPreferredSize().height,
+                        "the whole result is laid out inside the scroll pane");
+                assertTrue(scroll.getVerticalScrollBar().isVisible(),
+                        "overflowing text can be scrolled to");
+                assertFalse(javax.swing.SwingUtilities.isDescendingFrom(close, scroll),
+                        "actions stay outside the scrolling area");
                 return null;
             });
         } finally {

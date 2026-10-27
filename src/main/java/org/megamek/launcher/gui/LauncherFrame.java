@@ -2287,7 +2287,13 @@ public final class LauncherFrame extends JFrame {
         message.setFont(guiScale.font(message.getFont(), "body"));
         message.setAlignmentX(Component.LEFT_ALIGNMENT);
         summary.add(message);
-        body.add(summary, BorderLayout.CENTER);
+        JScrollPane scroll = new JScrollPane(summary);
+        scroll.setName("adoptionResultScroll");
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.setOpaque(false);
+        scroll.getViewport().setOpaque(false);
+        LauncherTheme.styleScrollPane(scroll, guiScale);
+        body.add(scroll, BorderLayout.CENTER);
         return body;
     }
 
