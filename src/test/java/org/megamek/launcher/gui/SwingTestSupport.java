@@ -159,6 +159,8 @@ final class SwingTestSupport {
     }
 
     static JPopupMenu installationMenu(Container root, String recordId) throws Exception {
+        java.awt.Window window = root instanceof java.awt.Window own ? own : SwingUtilities.getWindowAncestor(root);
+        if (window != null) awaitSettled(window);
         click(root, "installationMenuButton-" + recordId);
         return await("installation menu for " + recordId, () -> showingInstallationMenu(root, recordId));
     }
