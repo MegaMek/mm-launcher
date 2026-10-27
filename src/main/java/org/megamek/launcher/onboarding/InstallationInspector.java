@@ -225,7 +225,16 @@ public final class InstallationInspector {
                 if (major == null || minor == null || patch == null) continue;
                 String result = major + "." + minor + "." + patch;
                 String revision = base.getProperty("revision");
-                if (revision != null && !revision.isBlank()) result += "-" + revision.trim();
+                if (revision != null && !revision.isBlank()) {
+                    String trimmed = revision.trim();
+                    // MegaMek's numeric revision is the fourth version component (e.g. Weekly 0.51.00.2).
+                    if (trimmed.matches("[0-9]{1,18}")) {
+                        long number = Long.parseLong(trimmed);
+                        if (number > 0) result += "." + number;
+                    } else {
+                        result += "-" + trimmed;
+                    }
+                }
                 Properties extra = properties(zip, "megamek/extraVersion.properties");
                 if (extra == null) extra = properties(zip, "extraVersion.properties");
                 if (extra != null) {

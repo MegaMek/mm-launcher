@@ -41,6 +41,7 @@ import org.megamek.launcher.launch.ProcessRunner;
 import org.megamek.launcher.registry.InstallationRecord;
 import org.megamek.launcher.registry.RegistryData;
 import org.megamek.launcher.registry.RegistryStore;
+import org.megamek.launcher.release.VersionIdentity;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -77,6 +78,22 @@ class OnboardingTest {
         assertEquals(before, inventory(root));
         assertTrue(result.products().stream().allMatch(p -> !p.classPath().isEmpty()));
         assertEquals("recognized-packaging-optional-transitive-missing", result.confidence());
+    }
+
+    @Test
+    void numericVersionRevisionIsTheFourthComponentOfTheProductVersion() throws Exception {
+        Path root = layout("weekly");
+        jar(root.resolve("lib/dependency.jar"), null, null, null);
+        jar(root.resolve("MegaMek.jar"), "megamek.MegaMek", "lib/dependency.jar",
+                Map.of("Version.properties", "major=0\nminor=51\npatch=00\nrevision=2\n".getBytes(
+                        StandardCharsets.ISO_8859_1)));
+
+        Inspection result = new InstallationInspector().inspect(root);
+
+        assertEquals("0.51.00.2", result.observedBuild());
+        Product megamek = result.products().stream()
+                .filter(product -> product.key().equals("megamek")).findFirst().orElseThrow();
+        assertEquals(VersionIdentity.fromExact("v0.51.00.2"), VersionIdentity.fromExact(megamek.build()));
     }
 
     @Test
