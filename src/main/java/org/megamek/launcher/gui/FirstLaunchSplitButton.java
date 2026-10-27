@@ -40,7 +40,6 @@ import org.megamek.launcher.channel.QuickInstallSnapshot;
 import org.megamek.launcher.release.OfficialRepository;
 
 import javax.swing.AbstractAction;
-import javax.swing.BorderFactory;
 import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
@@ -56,7 +55,6 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
-import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Polygon;
@@ -82,6 +80,8 @@ final class FirstLaunchSplitButton extends JPanel {
     static final String PRIMARY_SUBJECT = "MekHQ Milestone";
     static final String PRIMARY_ACCESSIBLE_NAME =
             VersionDisplay.installLatest("MekHQ", "Milestone", null);
+    /** The first-run launch command's minimum width; the design tokens have no width for it. */
+    private static final int MINIMUM_WIDTH = 248;
     private static final String OPEN_POPUP_ACTION = "openFirstLaunchDownloadOptions";
     private static final String CLOSE_POPUP_ACTION = "closeFirstLaunchDownloadOptions";
 
@@ -177,9 +177,8 @@ final class FirstLaunchSplitButton extends JPanel {
     private JMenuItem menuItem(String text, String name, String description) {
         JMenuItem item = new JMenuItem(text);
         item.setName(name);
-        item.setFont(scale.font(item.getFont(), Font.PLAIN, 13f));
-        item.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(8),
-                scale.scaleForGUI(12), scale.scaleForGUI(8), scale.scaleForGUI(12)));
+        item.setFont(scale.font(item.getFont(), "body"));
+        item.setBorder(scale.padding("md", "lg"));
         item.getAccessibleContext().setAccessibleName(text);
         item.getAccessibleContext().setAccessibleDescription(description);
         return item;
@@ -335,7 +334,7 @@ final class FirstLaunchSplitButton extends JPanel {
             return;
         }
         int x = Math.max(0, getWidth() - popupMenu.getPreferredSize().width);
-        popupMenu.show(this, x, Math.max(0, getHeight() - scale.scaleForGUI(3)));
+        popupMenu.show(this, x, Math.max(0, getHeight() - scale.space("xs")));
         MenuElement[] items = popupMenu.getSubElements();
         MenuElement firstEnabled = null;
         for (MenuElement item : items) {
@@ -438,8 +437,8 @@ final class FirstLaunchSplitButton extends JPanel {
     public Dimension getPreferredSize() {
         Dimension primary = primaryButton.getPreferredSize();
         Dimension options = optionsButton.getPreferredSize();
-        return new Dimension(Math.max(primary.width + options.width, scale.scaleForGUI(248)),
-                Math.max(Math.max(primary.height, options.height), scale.scaleForGUI(46)));
+        return new Dimension(Math.max(primary.width + options.width, scale.scaleForGUI(MINIMUM_WIDTH)),
+                Math.max(Math.max(primary.height, options.height), scale.size("control.lg")));
     }
 
     @Override
@@ -465,8 +464,8 @@ final class FirstLaunchSplitButton extends JPanel {
             int separator = optionsButton.getX();
             Color divider = LauncherTheme.buttonText(true, enabled);
             canvas.setColor(new Color(divider.getRed(), divider.getGreen(), divider.getBlue(), 64));
-            canvas.drawLine(separator, scale.scaleForGUI(8),
-                    separator, getHeight() - scale.scaleForGUI(8));
+            canvas.drawLine(separator, scale.space("md"),
+                    separator, getHeight() - scale.space("md"));
         } finally {
             canvas.dispose();
         }
@@ -481,11 +480,8 @@ final class FirstLaunchSplitButton extends JPanel {
             this.arrow = arrow;
             setName(name);
             getAccessibleContext().setAccessibleName(text);
-            setFont(scale.font(getFont(), Font.BOLD, 16f));
-            int vertical = scale.scaleForGUI(12);
-            int horizontal = scale.scaleForGUI(arrow ? 10 : 24);
-            setBorder(BorderFactory.createEmptyBorder(
-                    vertical, horizontal, vertical, horizontal));
+            setFont(scale.font(getFont(), "title"));
+            setBorder(scale.padding("md", arrow ? "lg" : "xl"));
             setOpaque(false);
             setContentAreaFilled(false);
             setBorderPainted(false);
@@ -515,12 +511,13 @@ final class FirstLaunchSplitButton extends JPanel {
         @Override
         public Dimension getPreferredSize() {
             Dimension preferred = ButtonDetail.grow(this, scale, super.getPreferredSize());
+            int height = scale.size("control.lg");
             if (arrow) {
-                return new Dimension(Math.max(preferred.width, scale.scaleForGUI(46)),
-                        Math.max(preferred.height, scale.scaleForGUI(46)));
+                return new Dimension(Math.max(preferred.width, height), Math.max(preferred.height, height));
             }
-            return new Dimension(Math.max(preferred.width, scale.scaleForGUI(202)),
-                    Math.max(preferred.height, scale.scaleForGUI(46)));
+            // The primary segment fills the split button's minimum width beside the square arrow segment.
+            return new Dimension(Math.max(preferred.width, scale.scaleForGUI(MINIMUM_WIDTH) - height),
+                    Math.max(preferred.height, height));
         }
 
     }
@@ -530,8 +527,8 @@ final class FirstLaunchSplitButton extends JPanel {
         private final int height;
 
         private DownArrowIcon(GuiScale scale) {
-            width = scale.scaleForGUI(13);
-            height = scale.scaleForGUI(8);
+            width = scale.size("icon.sm");
+            height = width / 2;
         }
 
         @Override public int getIconWidth() {

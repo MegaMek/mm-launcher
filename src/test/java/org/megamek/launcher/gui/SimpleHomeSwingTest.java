@@ -771,7 +771,21 @@ class SimpleHomeSwingTest {
             JButton installations = waitButton(frame, "manageInstallationsButton");
             onEdt(() -> {
                 assertNull(find(frame, "resolveHomeBlockerButton"));
-                assertNotNull(find(frame, "homeActionRequiredMessage"));
+                java.awt.Component blocker = find(frame, "homeActionRequiredMessage");
+                assertNotNull(blocker);
+                frame.validate();
+                java.awt.Component deck = find(frame, "managedHomeDeck");
+                java.awt.Component launches = find(frame, "homeLaunchActions");
+                java.awt.Component navigation = find(frame, "managedHomeNavigationRow");
+                java.awt.Rectangle launchBounds = SwingUtilities.convertRectangle(
+                        launches.getParent(), launches.getBounds(), deck);
+                java.awt.Rectangle navigationBounds = SwingUtilities.convertRectangle(
+                        navigation.getParent(), navigation.getBounds(), deck);
+                java.awt.Rectangle blockerBounds = SwingUtilities.convertRectangle(
+                        blocker.getParent(), blocker.getBounds(), deck);
+                assertEquals(navigationBounds.getCenterX(), launchBounds.getCenterX(), 1.5,
+                        "the blocker message must not push the launch actions off center");
+                assertEquals(navigationBounds.getCenterX(), blockerBounds.getCenterX(), 3.0);
                 return null;
             });
             SwingUtilities.invokeAndWait(installations::doClick);
@@ -1293,6 +1307,13 @@ class SimpleHomeSwingTest {
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
+            onEdt(() -> {
+                assertNull(find(frame, "settingsLoadingMessage"),
+                        "a quick load must not flash the placeholder");
+                return null;
+            });
+            assertNotNull(waitFor(() -> find(frame, "settingsLoadingMessage")),
+                    "a slow load shows the placeholder");
             resizeSettingsWindow(frame, 1080, 760);
             onEdt(() -> {
                 assertEquals(0, ((JPanel) find(frame, "settingsRightColumn")).getY());

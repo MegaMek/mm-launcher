@@ -123,6 +123,15 @@ sentence case. Settings, Installations, progress, consent, error and other dialo
 app presentation with sentence-case labels. Game-mode caps are kept to short framing labels
 (**Launch MegaMek**, **Install latest**, **Installations**); channel, version, *Not found* and update
 counts render in sentence case on a detail line or badge, and the accessible name keeps the full sentence.
+Control heights, spacing, padding, corner radius, border widths, text sizes and dialog widths come
+from the shared design tokens (through `GuiScale.space`, `size`, `radius`, `padding` and
+`font(base, style)`), chosen by role rather than nearest value: buttons, combo boxes and text fields
+share `control.md`, the Home launch buttons use `control.lg`, page titles use `headline`, panel
+titles `title`, field labels `label` and helper text `small`. Dialogs either take a `dialog.*` width
+and pack to their content height or use `dialog.*` sizes outright. The launcher adds no per-program
+size tokens and does not alter the shared values; the only literal metrics left are the main window
+and its artwork geometry, minimum widths, layout breakpoints and scroll increments, which the tokens
+do not yet describe.
 Settings starts with **Appearance**: a Dark/Light theme select. A change applies immediately, re-renders the current page,
 and is saved off the event-dispatch thread; a failed save reports an error without reverting the
 visible appearance. High contrast is not offered until the design tokens define it.
@@ -153,6 +162,9 @@ next to the registry in `<registry>.launch-options.json`, separate from launcher
 unreadable file is reported and never overwritten. Imported installations adopt their existing
 `-Xmx` from the application's `.l4j.ini` as an override. Java arguments must be options starting
 with `-`; class path, module, `-jar`, `-Xmx`, argument-file, and informational flags are rejected.
+Every application starts with generational ZGC (`-XX:+UseZGC`, plus `-XX:+ZGenerational` on Java 21
+and 22 only, since it is the default and deprecated from Java 23). Choosing a collector (`-XX:±Use…GC`)
+in the Java arguments replaces this default, and an explicit `-XX:±ZGenerational` is kept as written.
 The user directory is passed as `-Dmegamek.userDir`, which MegaMek 0.51.01 and later treat as
 a launcher-managed override of the User Directory preference.
 

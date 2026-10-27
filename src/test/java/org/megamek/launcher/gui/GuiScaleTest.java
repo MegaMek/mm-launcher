@@ -57,6 +57,26 @@ class GuiScaleTest {
     }
 
     @Test
+    void tokenAccessorsScaleTheSharedDesignTokens() {
+        GuiScale scale = new GuiScale(1.5f);
+        org.megamek.launcher.design.DesignTokens tokens =
+                org.megamek.launcher.design.DesignTokens.shipped();
+        assertEquals(Math.round(Math.round(tokens.space().get("md")) * 1.5f), scale.space("md"));
+        assertEquals(Math.round(Math.round(tokens.size().get("control.md")) * 1.5f),
+                scale.size("control.md"));
+        assertEquals(Math.round(Math.round(tokens.radius().get("md")) * 1.5f), scale.radius("md"));
+        java.awt.Insets padding = scale.padding("sm", "xl").getBorderInsets(null);
+        assertEquals(new java.awt.Insets(scale.space("sm"), scale.space("xl"),
+                scale.space("sm"), scale.space("xl")), padding);
+        Font headline = scale.font(new Font("Roboto", Font.PLAIN, 12), "headline");
+        assertEquals(tokens.typeStyle("headline").size() * 1.5f, headline.getSize2D());
+        assertEquals("Roboto Medium", headline.getFamily());
+        assertEquals("Roboto", scale.font(new Font("Roboto", Font.BOLD, 12), "body").getFamily());
+        assertThrows(IllegalArgumentException.class, () -> scale.space("huge"));
+        assertThrows(IllegalArgumentException.class, () -> scale.size("control.xl"));
+    }
+
+    @Test
     void robotoFacesKeepSwingFontFallback() {
         // The look and feel's own Roboto falls back as far as the platform allows; derived faces must match it
         Font label = javax.swing.UIManager.getFont("Label.font");

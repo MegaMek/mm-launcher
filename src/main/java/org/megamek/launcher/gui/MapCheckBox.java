@@ -20,6 +20,6 @@ final class MapCheckBox extends JCheckBox {
         super(text, selected);
         setOpaque(false);
         setFont(getFont().deriveFont(Font.PLAIN));
-        setIconTextGap(scale.scaleForGUI(8));
+        setIconTextGap(scale.space("md"));
     }
 }

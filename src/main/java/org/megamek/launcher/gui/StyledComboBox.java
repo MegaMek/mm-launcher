@@ -42,7 +42,6 @@ import javax.swing.KeyStroke;
 import javax.swing.ListCellRenderer;
 import java.awt.Component;
 import java.awt.Dimension;
-import java.awt.Font;
 import java.awt.event.KeyEvent;
 import java.util.Objects;
 import java.util.function.Function;
@@ -76,7 +75,7 @@ final class StyledComboBox<E> extends JComboBox<E> {
     }
 
     private void applyStyle() {
-        setFont(scale.font(getFont(), Font.PLAIN, 13f));
+        setFont(scale.font(getFont(), "body"));
         ListCellRenderer<? super E> lookAndFeel = getRenderer();
         if (!(lookAndFeel instanceof StyledComboBox<?>.DisplayTextRenderer)) {
             setRenderer(new DisplayTextRenderer(lookAndFeel));
@@ -117,7 +116,7 @@ final class StyledComboBox<E> extends JComboBox<E> {
         Dimension preferred = super.getPreferredSize();
         if (scale == null) return preferred;
         return new Dimension(preferred.width,
-                Math.max(preferred.height, scale.scaleForGUI(LauncherTheme.CONTROL_HEIGHT)));
+                Math.max(preferred.height, scale.size("control.md")));
     }
 
     /**

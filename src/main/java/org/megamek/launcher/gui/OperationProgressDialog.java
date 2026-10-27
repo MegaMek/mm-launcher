@@ -61,7 +61,6 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.Font;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.text.NumberFormat;
@@ -90,15 +89,15 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
     private final JLabel loggingWarning = new JLabel();
     private final JProgressBar progress = new JProgressBar();
     private final Component beforeProgress =
-            Box.createVerticalStrut(scale.scaleForGUI(14));
+            Box.createVerticalStrut(scale.space("lg"));
     private final Component afterProgress =
-            Box.createVerticalStrut(scale.scaleForGUI(12));
+            Box.createVerticalStrut(scale.space("md"));
     private final JTextArea log;
     private final JButton cancel = control("Cancel", "operationCancelButton");
     private final JButton viewDetails =
             control("View details", "operationViewDetailsButton");
     private final JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT,
-            scale.scaleForGUI(8), 0));
+            scale.space("md"), 0));
     private final List<JButton> contextualActions = new ArrayList<>();
     private final AtomicReference<OperationProgress> pending = new AtomicReference<>();
     private final Timer updateTimer;
@@ -122,17 +121,17 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
 
         phase.setName("operationPhaseLabel");
         phase.setForeground(ACCENT);
-        phase.setFont(scale.font(phase.getFont(), Font.BOLD, 22f));
+        phase.setFont(scale.font(phase.getFont(), "headline"));
         phase.setAlignmentX(LEFT_ALIGNMENT);
 
         detail.setName("operationProgressDetail");
         detail.setForeground(MUTED);
-        detail.setFont(scale.font(detail.getFont(), Font.PLAIN, 13f));
+        detail.setFont(scale.font(detail.getFont(), "body"));
         detail.setAlignmentX(LEFT_ALIGNMENT);
 
         loggingWarning.setName("operationLoggingWarning");
         loggingWarning.setForeground(LauncherTheme.WARNING);
-        loggingWarning.setFont(scale.font(loggingWarning.getFont(), Font.PLAIN, 12f));
+        loggingWarning.setFont(scale.font(loggingWarning.getFont(), "small"));
         loggingWarning.setAlignmentX(LEFT_ALIGNMENT);
         loggingWarning.setVisible(false);
 
@@ -141,11 +140,9 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         progress.setBackground(TRACK);
         progress.setBorder(BorderFactory.createLineBorder(LauncherTheme.BORDER));
         progress.setStringPainted(true);
-        progress.setFont(scale.font(progress.getFont(), Font.BOLD, 13f));
+        progress.setFont(scale.font(progress.getFont(), "label"));
         progress.setIndeterminate(true);
         progress.setString("Starting…");
-        progress.setPreferredSize(scale.scaleForGUI(500, 22));
-        progress.setMaximumSize(new Dimension(Integer.MAX_VALUE, scale.scaleForGUI(22)));
         progress.setAlignmentX(LEFT_ALIGNMENT);
         progress.setUI(new BasicProgressBarUI() {
             @Override protected Color getSelectionBackground() {
@@ -156,6 +153,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
                 return BACKGROUND;
             }
         });
+        progress.setMaximumSize(new Dimension(Integer.MAX_VALUE, progress.getPreferredSize().height));
 
         log = LauncherFrame.textArea("");
         log.setName(logName);
@@ -180,16 +178,16 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         actions.add(viewDetails);
         actions.add(cancel);
 
-        JPanel panel = new JPanel(new BorderLayout(0, scale.scaleForGUI(14)));
+        JPanel panel = new JPanel(new BorderLayout(0, scale.space("xl")));
         panel.setName("operationProgressContent");
         panel.setBackground(BACKGROUND);
-        panel.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(18),
-                scale.scaleForGUI(18), scale.scaleForGUI(16), scale.scaleForGUI(18)));
+        panel.setBorder(scale.padding("xxl", "xxl"));
         panel.add(summary, BorderLayout.CENTER);
         panel.add(actions, BorderLayout.SOUTH);
         setContentPane(panel);
-        setSize(scale.scaleForGUI(560, 220));
-        setMinimumSize(scale.scaleForGUI(480, 205));
+        pack();
+        setSize(Math.max(getWidth(), scale.size("dialog.md")), getHeight());
+        setMinimumSize(new Dimension(Math.min(getWidth(), scale.size("dialog.sm")), getHeight()));
         setLocationRelativeTo(owner);
 
         cancel.addActionListener(event -> requestCancellation());
@@ -291,7 +289,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         phase.setText(getTitle() == null || getTitle().isBlank()
                 ? "Operation failed" : getTitle());
         detail.setBorder(BorderFactory.createEmptyBorder(
-                scale.scaleForGUI(8), 0, 0, 0));
+                scale.space("md"), 0, 0, 0));
         String summary = failureSummary != null
                 ? failureSummary
                 : simpleAdoptionResolution
@@ -303,7 +301,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
             loggingWarning.setText(
                     "Local diagnostics could not be saved. The original failure is unchanged.");
             loggingWarning.setBorder(BorderFactory.createEmptyBorder(
-                    scale.scaleForGUI(8), 0, 0, 0));
+                    scale.space("md"), 0, 0, 0));
             loggingWarning.setVisible(true);
         }
         for (JButton button : contextualActions) {
@@ -344,7 +342,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         afterProgress.setVisible(false);
         phase.setText(heading);
         detail.setBorder(BorderFactory.createEmptyBorder(
-                scale.scaleForGUI(8), 0, 0, 0));
+                scale.space("md"), 0, 0, 0));
         detail.setText(concise(message));
         loggingWarning.setVisible(false);
         for (JButton button : contextualActions) {
@@ -660,8 +658,6 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         button.setOpaque(true);
         button.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(ACCENT),
-                BorderFactory.createEmptyBorder(scale.scaleForGUI(6),
-                        scale.scaleForGUI(12), scale.scaleForGUI(6),
-                        scale.scaleForGUI(12))));
+                scale.padding("sm", "lg")));
     }
 }

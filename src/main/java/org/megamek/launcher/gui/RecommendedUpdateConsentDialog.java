@@ -90,51 +90,49 @@ final class RecommendedUpdateConsentDialog extends JDialog {
         summary.setBackground(FirstLaunchPanel.PANEL);
         summary.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(
-                        scale.scaleForGUI(1), 0, 0, 0, LauncherTheme.BORDER),
-                BorderFactory.createEmptyBorder(scale.scaleForGUI(17),
-                        scale.scaleForGUI(18), scale.scaleForGUI(17),
-                        scale.scaleForGUI(18))));
+                        scale.size("border"), 0, 0, 0, LauncherTheme.BORDER),
+                scale.padding("xl", "xl")));
 
         JLabel heading = label("Update this application?", "recommendedUpdateHeading",
-                scale.font(base, Font.BOLD, 23f), FirstLaunchPanel.TEXT);
+                scale.font(base, "headline"), FirstLaunchPanel.TEXT);
         JLabel operation = label("This will download, verify, plan, and apply the update.",
                 "recommendedUpdateOperation",
-                scale.font(base, Font.PLAIN, 14f), FirstLaunchPanel.TEXT);
+                scale.font(base, "body"), FirstLaunchPanel.TEXT);
         JLabel closeApplications = label(
                 "Close MegaMek, MekHQ, and MegaMekLab before continuing.",
                 "recommendedUpdateCloseApplications",
-                scale.font(base, Font.PLAIN, 14f), FirstLaunchPanel.TEXT);
+                scale.font(base, "body"), FirstLaunchPanel.TEXT);
         JLabel extraJars = label(
                 "Extra unowned JARs in lib, if present, are kept and may affect the game.",
                 "recommendedUpdateExtraJars",
-                scale.font(base, Font.PLAIN, 14f), FirstLaunchPanel.TEXT);
+                scale.font(base, "body"), FirstLaunchPanel.TEXT);
         JLabel product = label("Application: " + application,
                 "recommendedUpdateApplication",
-                scale.font(base, Font.BOLD, 14f), FirstLaunchPanel.TEXT);
+                scale.font(base, "body.strong"), FirstLaunchPanel.TEXT);
         JLabel current = label("Current version: " + displayVersion(currentVersion),
                 "recommendedUpdateCurrentVersion",
-                scale.font(base, Font.PLAIN, 14f), FirstLaunchPanel.TEXT);
+                scale.font(base, "body"), FirstLaunchPanel.TEXT);
         JLabel target = label("New version: " + displayVersion(newVersion),
                 "recommendedUpdateNewVersion",
-                scale.font(base, Font.PLAIN, 14f), FirstLaunchPanel.TEXT);
+                scale.font(base, "body"), FirstLaunchPanel.TEXT);
         JLabel size = label("Download size: " + BinarySizeFormat.mebibytes(downloadBytes),
                 "recommendedUpdateDownloadSize",
-                scale.font(base, Font.PLAIN, 14f), FirstLaunchPanel.TEXT);
+                scale.font(base, "body"), FirstLaunchPanel.TEXT);
 
         summary.add(heading);
-        summary.add(Box.createVerticalStrut(scale.scaleForGUI(13)));
+        summary.add(Box.createVerticalStrut(scale.space("lg")));
         summary.add(operation);
-        summary.add(Box.createVerticalStrut(scale.scaleForGUI(6)));
+        summary.add(Box.createVerticalStrut(scale.space("sm")));
         summary.add(closeApplications);
-        summary.add(Box.createVerticalStrut(scale.scaleForGUI(6)));
+        summary.add(Box.createVerticalStrut(scale.space("sm")));
         summary.add(extraJars);
-        summary.add(Box.createVerticalStrut(scale.scaleForGUI(13)));
+        summary.add(Box.createVerticalStrut(scale.space("lg")));
         summary.add(product);
-        summary.add(Box.createVerticalStrut(scale.scaleForGUI(6)));
+        summary.add(Box.createVerticalStrut(scale.space("sm")));
         summary.add(current);
-        summary.add(Box.createVerticalStrut(scale.scaleForGUI(6)));
+        summary.add(Box.createVerticalStrut(scale.space("sm")));
         summary.add(target);
-        summary.add(Box.createVerticalStrut(scale.scaleForGUI(6)));
+        summary.add(Box.createVerticalStrut(scale.space("sm")));
         summary.add(size);
 
         JButton cancel = button("Cancel", "cancelRecommendedUpdateButton", false);
@@ -151,14 +149,13 @@ final class RecommendedUpdateConsentDialog extends JDialog {
         actions.setLayout(new BoxLayout(actions, BoxLayout.X_AXIS));
         actions.add(Box.createHorizontalGlue());
         actions.add(cancel);
-        actions.add(Box.createHorizontalStrut(scale.scaleForGUI(10)));
+        actions.add(Box.createHorizontalStrut(scale.space("md")));
         actions.add(update);
 
-        JPanel content = new JPanel(new BorderLayout(0, scale.scaleForGUI(14)));
+        JPanel content = new JPanel(new BorderLayout(0, scale.space("xl")));
         content.setName("recommendedUpdateConsentContent");
         content.setBackground(FirstLaunchPanel.BACKGROUND);
-        content.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(20),
-                scale.scaleForGUI(22), scale.scaleForGUI(20), scale.scaleForGUI(22)));
+        content.setBorder(scale.padding("xxl", "xxl"));
         content.add(summary, BorderLayout.CENTER);
         content.add(actions, BorderLayout.SOUTH);
         setContentPane(content);
@@ -182,7 +179,7 @@ final class RecommendedUpdateConsentDialog extends JDialog {
         });
 
         pack();
-        resizeAndClamp(scale.scaleForGUI(560, 370));
+        resizeAndClamp(new Dimension(Math.max(getWidth(), scale.size("dialog.md")), getHeight()));
     }
 
     static boolean confirm(Frame owner, String application, String currentVersion,

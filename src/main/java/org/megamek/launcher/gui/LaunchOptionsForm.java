@@ -51,7 +51,6 @@ import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
-import java.awt.Font;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
@@ -128,7 +127,7 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         userDirField = textField(current.userDirectory() != null
                 ? current.userDirectory() : inherited.userDirectory(), "launchOptionsUserDirectory");
         userDirField.getAccessibleContext().setAccessibleName("User directory");
-        JPanel userDirEditor = new JPanel(new BorderLayout(0, scale.scaleForGUI(6)));
+        JPanel userDirEditor = new JPanel(new BorderLayout(0, scale.space("sm")));
         userDirEditor.setOpaque(false);
         userDirEditor.add(userDirField, BorderLayout.CENTER);
         JPanel userDirButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
@@ -138,7 +137,7 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         JButton clear = smallButton("Clear", "launchOptionsClearUserDirectory");
         clear.addActionListener(event -> userDirField.setText(""));
         userDirButtons.add(browse);
-        userDirButtons.add(Box.createHorizontalStrut(scale.scaleForGUI(8)));
+        userDirButtons.add(Box.createHorizontalStrut(scale.space("md")));
         userDirButtons.add(clear);
         userDirEditor.add(userDirButtons, BorderLayout.SOUTH);
         userDirectory = row("User directory", "userDirectory", userDirEditor,
@@ -214,12 +213,12 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         String capitalized = Character.toUpperCase(name.charAt(0)) + name.substring(1);
         JLabel title = new JLabel(label);
         title.setForeground(FirstLaunchPanel.TEXT);
-        title.setFont(scale.font(title.getFont(), Font.BOLD, 13f));
+        title.setFont(scale.font(title.getFont(), "label"));
         GridBagConstraints labelConstraints = new GridBagConstraints();
         labelConstraints.gridx = 0;
         labelConstraints.gridy = index * 3;
         labelConstraints.anchor = GridBagConstraints.WEST;
-        labelConstraints.insets = new Insets(index == 0 ? 0 : scale.scaleForGUI(12), 0, 0, scale.scaleForGUI(12));
+        labelConstraints.insets = new Insets(index == 0 ? 0 : scale.space("lg"), 0, 0, scale.space("lg"));
         add(title, labelConstraints);
 
         JCheckBox inherit = new MapCheckBox(inheritText, followsDefault, scale);
@@ -235,7 +234,7 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
             inheritConstraints.weightx = 1;
             inheritConstraints.fill = GridBagConstraints.HORIZONTAL;
         }
-        inheritConstraints.insets = new Insets(index == 0 ? 0 : scale.scaleForGUI(12),
+        inheritConstraints.insets = new Insets(index == 0 ? 0 : scale.space("lg"),
                 -inherit.getInsets().left, 0, 0);
         add(inherit, inheritConstraints);
 
@@ -246,13 +245,13 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         if (inline) {
             editorConstraints.gridx = 2;
             editorConstraints.gridy = index * 3;
-            editorConstraints.insets = new Insets(index == 0 ? 0 : scale.scaleForGUI(12),
-                    scale.scaleForGUI(10), 0, 0);
+            editorConstraints.insets = new Insets(index == 0 ? 0 : scale.space("lg"),
+                    scale.space("md"), 0, 0);
         } else {
             editorConstraints.gridx = 1;
             editorConstraints.gridy = index * 3 + 1;
             editorConstraints.gridwidth = GridBagConstraints.REMAINDER;
-            editorConstraints.insets = new Insets(scale.scaleForGUI(4), 0, 0, 0);
+            editorConstraints.insets = new Insets(scale.space("xs"), 0, 0, 0);
         }
         add(editor, editorConstraints);
         if (hintText != null) {
@@ -264,7 +263,7 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
             hintConstraints.gridy = index * 3 + 2;
             hintConstraints.gridwidth = GridBagConstraints.REMAINDER;
             hintConstraints.anchor = GridBagConstraints.WEST;
-            hintConstraints.insets = new Insets(scale.scaleForGUI(3), 0, 0, 0);
+            hintConstraints.insets = new Insets(scale.space("xs"), 0, 0, 0);
             add(hint, hintConstraints);
         }
 
@@ -280,7 +279,15 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
     }
 
     private JTextField textField(String text, String name) {
-        JTextField field = new JTextField(text == null ? "" : text);
+        // At least control.md high, so the field lines up with the buttons beside and below it
+        JTextField field = new JTextField(text == null ? "" : text) {
+            @Override
+            public Dimension getPreferredSize() {
+                Dimension preferred = super.getPreferredSize();
+                return new Dimension(preferred.width,
+                        Math.max(preferred.height, scale.size("control.md")));
+            }
+        };
         field.setName(name);
         field.setForeground(FirstLaunchPanel.TEXT);
         field.setBackground(LauncherTheme.INPUT_BACKGROUND);
@@ -288,9 +295,8 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         field.setCaretColor(FirstLaunchPanel.TEXT);
         field.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(LauncherTheme.BORDER),
-                BorderFactory.createEmptyBorder(scale.scaleForGUI(6), scale.scaleForGUI(8),
-                        scale.scaleForGUI(6), scale.scaleForGUI(8))));
-        field.setFont(scale.font(field.getFont(), Font.PLAIN, 14f));
+                scale.padding("sm", "md")));
+        field.setFont(scale.font(field.getFont(), "body"));
         field.getDocument().addDocumentListener(new DocumentListener() {
             @Override public void insertUpdate(DocumentEvent event) { onChange.run(); }
             @Override public void removeUpdate(DocumentEvent event) { onChange.run(); }
@@ -327,10 +333,11 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
 
     @Override public Dimension getPreferredScrollableViewportSize() { return getPreferredSize(); }
     @Override public int getScrollableUnitIncrement(Rectangle visible, int orientation, int direction) {
-        return scale.scaleForGUI(18);
+        return LauncherTheme.scrollLine(this, scale);
     }
     @Override public int getScrollableBlockIncrement(Rectangle visible, int orientation, int direction) {
-        return Math.max(scale.scaleForGUI(18), visible.height - scale.scaleForGUI(18));
+        int line = LauncherTheme.scrollLine(this, scale);
+        return Math.max(line, visible.height - line);
     }
     @Override public boolean getScrollableTracksViewportWidth() { return true; }
     @Override public boolean getScrollableTracksViewportHeight() {

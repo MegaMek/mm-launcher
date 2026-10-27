@@ -36,7 +36,6 @@ package org.megamek.launcher.gui;
 import org.megamek.launcher.design.swing.TokenPresentation;
 
 import javax.swing.AbstractAction;
-import javax.swing.BorderFactory;
 import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
@@ -74,9 +73,13 @@ import java.util.List;
  * selected-copy state.
  */
 final class HomeLaunchSplitButton extends JPanel {
+    /** Preferred and shrunk minimum widths of the Home launch control; the design tokens have no width for them. */
+    private static final int MINIMUM_WIDTH = 210;
+    private static final int MINIMUM_SHRUNK_WIDTH = 175;
     private static final String OPEN_POPUP_ACTION = "openAlternateInstallations";
     private static final String CLOSE_POPUP_ACTION = "closeAlternateInstallations";
-    private static final int ROW_SIDE = 14;
+    /** The popup rows' horizontal padding, a design-token space name. */
+    private static final String ROW_SIDE = "xl";
 
     private final GuiScale scale;
     private final SegmentButton primaryButton;
@@ -196,10 +199,9 @@ final class HomeLaunchSplitButton extends JPanel {
     private JLabel popupHeader() {
         JLabel header = new JLabel("Other installations");
         header.setName("launch-popup-header");
-        header.setFont(scale.font(header.getFont(), Font.PLAIN, 11f));
+        header.setFont(scale.font(header.getFont(), "caption"));
         header.setForeground(LauncherTheme.MUTED);
-        header.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(6),
-                scale.scaleForGUI(ROW_SIDE), scale.scaleForGUI(4), scale.scaleForGUI(ROW_SIDE)));
+        header.setBorder(scale.padding("sm", ROW_SIDE, "xs", ROW_SIDE));
         TokenPresentation.role(header, "overline");
         return header;
     }
@@ -257,7 +259,7 @@ final class HomeLaunchSplitButton extends JPanel {
 
     /** Opens below the control, or above it when the screen has no room below, as near the screen bottom. */
     private int popupY(int height) {
-        int gap = scale.scaleForGUI(4);
+        int gap = scale.space("xs");
         int below = getHeight() + gap;
         GraphicsConfiguration configuration = getGraphicsConfiguration();
         if (configuration == null) return below;
@@ -331,13 +333,13 @@ final class HomeLaunchSplitButton extends JPanel {
         Dimension primary = primaryButton.getPreferredSize();
         Dimension options = optionsButton.getPreferredSize();
         return new Dimension(Math.max(primary.width + (hasOptions ? options.width : 0),
-                scale.scaleForGUI(210)),
-                Math.max(Math.max(primary.height, options.height), scale.scaleForGUI(48)));
+                scale.scaleForGUI(MINIMUM_WIDTH)),
+                Math.max(Math.max(primary.height, options.height), scale.size("control.lg")));
     }
 
     @Override
     public Dimension getMinimumSize() {
-        return scale.scaleForGUI(175, 48);
+        return new Dimension(scale.scaleForGUI(MINIMUM_SHRUNK_WIDTH), scale.size("control.lg"));
     }
 
     @Override
@@ -360,8 +362,8 @@ final class HomeLaunchSplitButton extends JPanel {
                 int separator = optionsButton.getX();
                 Color divider = LauncherTheme.buttonText(true, enabled);
                 canvas.setColor(new Color(divider.getRed(), divider.getGreen(), divider.getBlue(), 64));
-                canvas.drawLine(separator, scale.scaleForGUI(8),
-                        separator, getHeight() - scale.scaleForGUI(8));
+                canvas.drawLine(separator, scale.space("md"),
+                        separator, getHeight() - scale.space("md"));
             }
         } finally {
             canvas.dispose();
@@ -395,14 +397,13 @@ final class HomeLaunchSplitButton extends JPanel {
             int split = label.indexOf(" · ");
             title = split < 0 ? label : label.substring(0, split);
             detail = split < 0 ? null : label.substring(split + 3);
-            setFont(scale.font(getFont(), Font.PLAIN, 13f));
+            setFont(scale.font(getFont(), "body"));
             setOpaque(false);
-            setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(7),
-                    scale.scaleForGUI(ROW_SIDE), scale.scaleForGUI(7), scale.scaleForGUI(ROW_SIDE)));
+            setBorder(scale.padding("md", ROW_SIDE));
         }
 
         private Font detailFont() {
-            return scale.font(getFont(), Font.PLAIN, 12f);
+            return scale.font(getFont(), "small");
         }
 
         @Override
@@ -414,7 +415,7 @@ final class HomeLaunchSplitButton extends JPanel {
             if (detail != null) {
                 FontMetrics detailMetrics = getFontMetrics(detailFont());
                 width = Math.max(width, detailMetrics.stringWidth(detail));
-                height += scale.scaleForGUI(1) + detailMetrics.getHeight();
+                height += scale.space("xs") + detailMetrics.getHeight();
             }
             return new Dimension(width + insets.left + insets.right,
                     height + insets.top + insets.bottom);
@@ -432,8 +433,8 @@ final class HomeLaunchSplitButton extends JPanel {
                 if (enabled && getModel().isArmed()) {
                     Color wash = javax.swing.UIManager.getColor("MenuItem.selectionBackground");
                     canvas.setColor(wash == null ? LauncherTheme.ACTIVE_BACKGROUND : wash);
-                    int inset = scale.scaleForGUI(4);
-                    int arc = scale.scaleForGUI(6);
+                    int inset = scale.space("xs");
+                    int arc = 2 * scale.radius("sm");
                     canvas.fillRoundRect(inset, 0, getWidth() - 2 * inset, getHeight(), arc, arc);
                 }
                 Insets insets = getInsets();
@@ -448,7 +449,7 @@ final class HomeLaunchSplitButton extends JPanel {
                     canvas.setFont(font);
                     canvas.setColor(enabled ? LauncherTheme.MUTED : LauncherTheme.DISABLED_TEXT);
                     canvas.drawString(detail, insets.left, y + titleMetrics.getDescent()
-                            + scale.scaleForGUI(1) + detailMetrics.getAscent());
+                            + scale.space("xs") + detailMetrics.getAscent());
                 }
             } finally {
                 canvas.dispose();
@@ -461,10 +462,8 @@ final class HomeLaunchSplitButton extends JPanel {
             super(text);
             setName(name);
             getAccessibleContext().setAccessibleName(text);
-            setFont(scale.font(getFont(), Font.BOLD, 14f));
-            int horizontal = scale.scaleForGUI(arrow ? 9 : 14);
-            setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(11),
-                    horizontal, scale.scaleForGUI(11), horizontal));
+            setFont(scale.font(getFont(), "title"));
+            setBorder(scale.padding("md", arrow ? "md" : "xl"));
             setOpaque(false);
             setContentAreaFilled(false);
             setBorderPainted(false);
@@ -502,8 +501,8 @@ final class HomeLaunchSplitButton extends JPanel {
         private final int height;
 
         private DownArrowIcon(GuiScale scale) {
-            width = scale.scaleForGUI(10);
-            height = scale.scaleForGUI(6);
+            width = scale.size("icon.sm");
+            height = width / 2;
         }
 
         @Override public int getIconWidth() {

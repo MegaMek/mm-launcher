@@ -48,6 +48,7 @@ import javax.swing.JScrollPane;
 import javax.swing.Scrollable;
 import javax.swing.SwingConstants;
 import javax.swing.UIManager;
+import javax.swing.border.Border;
 import java.awt.Color;
 import java.awt.BorderLayout;
 import java.awt.Component;
@@ -104,8 +105,7 @@ final class FirstLaunchPanel extends JPanel {
         controls = new ContentPanel();
         controls.setLayout(new BoxLayout(controls, BoxLayout.Y_AXIS));
         controls.setBackground(PANEL);
-        controls.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(26),
-                scale.scaleForGUI(25), scale.scaleForGUI(20), scale.scaleForGUI(25)));
+        controls.setBorder(deckPadding(false));
         Font base = UIManager.getFont("Label.font");
         verticalCenterBefore = flexibleSpace();
         controls.add(verticalCenterBefore);
@@ -113,11 +113,11 @@ final class FirstLaunchPanel extends JPanel {
         primaryAction.setOpaque(false);
         primaryAction.add(download, BorderLayout.CENTER);
 
-        existingAction = new JPanel(new BorderLayout(0, scale.scaleForGUI(5)));
+        existingAction = new JPanel(new BorderLayout(0, scale.space("xs")));
         existingAction.setOpaque(false);
         existingAction.add(useExisting, BorderLayout.CENTER);
         JLabel existingCaption = label("MegaMek, MekHQ, or MegaMekLab",
-                scale.font(base, Font.PLAIN, 12), MUTED);
+                scale.font(base, "small"), MUTED);
         existingCaption.setName("existingCopyCaption");
         existingCaption.setHorizontalAlignment(SwingConstants.CENTER);
         existingAction.add(existingCaption, BorderLayout.SOUTH);
@@ -134,9 +134,9 @@ final class FirstLaunchPanel extends JPanel {
         layoutActions(false);
         actionRow.setMaximumSize(actionRowMaximum());
         controls.add(actionRow);
-        controls.add(Box.createVerticalStrut(scale.scaleForGUI(12)));
+        controls.add(Box.createVerticalStrut(scale.space("lg")));
         status.setForeground(MUTED);
-        status.setFont(scale.font(base, Font.PLAIN, 11));
+        status.setFont(scale.font(base, "small"));
         status.setHorizontalAlignment(SwingConstants.CENTER);
         status.setAlignmentX(CENTER_ALIGNMENT);
         status.setMaximumSize(new Dimension(Integer.MAX_VALUE,
@@ -145,7 +145,7 @@ final class FirstLaunchPanel extends JPanel {
         status.setVisible(true);
         controls.add(status);
         if (links != null) {
-            controls.add(Box.createVerticalStrut(scale.scaleForGUI(14)));
+            controls.add(Box.createVerticalStrut(scale.space("xl")));
             links.setAlignmentX(CENTER_ALIGNMENT);
             controls.add(links);
         }
@@ -158,7 +158,6 @@ final class FirstLaunchPanel extends JPanel {
         scroller.setName("firstLaunchControlsScroller");
         scroller.setBorder(BorderFactory.createEmptyBorder());
         scroller.getViewport().setBackground(PANEL);
-        scroller.getVerticalScrollBar().setUnitIncrement(scale.scaleForGUI(18));
         add(scroller);
         TokenPresentation.setMode(this, Presentation.GAME);
     }
@@ -193,8 +192,8 @@ final class FirstLaunchPanel extends JPanel {
         return label;
     }
 
-    private Box.Filler gap(int height) {
-        Dimension size = scale.scaleForGUI(0, height);
+    private Box.Filler gap(String space) {
+        Dimension size = new Dimension(0, scale.space(space));
         return new Box.Filler(size, size, new Dimension(Short.MAX_VALUE, size.height));
     }
 
@@ -204,8 +203,8 @@ final class FirstLaunchPanel extends JPanel {
                 new Dimension(Short.MAX_VALUE, Short.MAX_VALUE));
     }
 
-    private void resizeGap(Box.Filler gap, int height) {
-        Dimension size = scale.scaleForGUI(0, height);
+    private void resizeGap(Box.Filler gap, String space) {
+        Dimension size = new Dimension(0, scale.space(space));
         gap.changeShape(size, size, new Dimension(Short.MAX_VALUE, size.height));
     }
 
@@ -217,8 +216,8 @@ final class FirstLaunchPanel extends JPanel {
         primary.weightx = 1;
         primary.fill = GridBagConstraints.HORIZONTAL;
         primary.anchor = GridBagConstraints.NORTH;
-        primary.insets = stacked ? new Insets(0, 0, scale.scaleForGUI(10), 0)
-                : new Insets(0, 0, 0, scale.scaleForGUI(7));
+        primary.insets = stacked ? new Insets(0, 0, scale.space("lg"), 0)
+                : new Insets(0, 0, 0, scale.space("md"));
         actionRow.add(primaryAction, primary);
 
         GridBagConstraints existing = new GridBagConstraints();
@@ -228,7 +227,7 @@ final class FirstLaunchPanel extends JPanel {
         existing.fill = GridBagConstraints.HORIZONTAL;
         existing.anchor = GridBagConstraints.NORTH;
         existing.insets = stacked ? new Insets(0, 0, 0, 0)
-                : new Insets(0, scale.scaleForGUI(7), 0, 0);
+                : new Insets(0, scale.space("md"), 0, 0);
         actionRow.add(existingAction, existing);
         actionRow.revalidate();
     }
@@ -236,7 +235,7 @@ final class FirstLaunchPanel extends JPanel {
     /** Each action is a button-sized column, side by side or stacked, centered in the deck. */
     private Dimension actionRowMaximum() {
         int column = scale.scaleForGUI(ACTION_WIDTH);
-        int width = compact ? column : 2 * column + scale.scaleForGUI(14);
+        int width = compact ? column : 2 * column + 2 * scale.space("md");
         return new Dimension(width, actionRow.getPreferredSize().height);
     }
 
@@ -254,9 +253,7 @@ final class FirstLaunchPanel extends JPanel {
             verticalCenterBefore.setVisible(!compact);
             layoutActions(compact);
             actionRow.setMaximumSize(actionRowMaximum());
-            controls.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(compact ? 18 : 26),
-                    scale.scaleForGUI(25), scale.scaleForGUI(compact ? 14 : 20),
-                    scale.scaleForGUI(25)));
+            controls.setBorder(deckPadding(compact));
             controls.revalidate();
         }
         int minimumDeck = scale.scaleForGUI(compact ? 260 : 150);
@@ -267,13 +264,19 @@ final class FirstLaunchPanel extends JPanel {
         scroller.setBounds(0, artHeight, getWidth(), deckHeight);
     }
 
+    /** The controls deck's page padding, tighter vertically when the window is compact. */
+    private Border deckPadding(boolean compact) {
+        return compact ? scale.padding("xl", "xxl") : scale.padding("xxl", "xxl");
+    }
+
     private final class ContentPanel extends JPanel implements Scrollable {
         @Override public Dimension getPreferredScrollableViewportSize() { return getPreferredSize(); }
         @Override public int getScrollableUnitIncrement(Rectangle visible, int orientation, int direction) {
-            return scale.scaleForGUI(18);
+            return LauncherTheme.scrollLine(this, scale);
         }
         @Override public int getScrollableBlockIncrement(Rectangle visible, int orientation, int direction) {
-            return Math.max(scale.scaleForGUI(18), visible.height - scale.scaleForGUI(18));
+            int line = LauncherTheme.scrollLine(this, scale);
+            return Math.max(line, visible.height - line);
         }
         @Override public boolean getScrollableTracksViewportWidth() { return true; }
         @Override public boolean getScrollableTracksViewportHeight() {
@@ -301,8 +304,7 @@ final class FirstLaunchPanel extends JPanel {
             artwork.getAccessibleContext().setAccessibleName("MegaMek launcher artwork");
             controls.setOpaque(true);
             controls.setBackground(PANEL);
-            controls.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(16),
-                    scale.scaleForGUI(20), scale.scaleForGUI(14), scale.scaleForGUI(20)));
+            controls.setBorder(scale.padding("xl", "xxl"));
             deck = new ManagedDeckPanel(scale);
             deck.setLayout(new BorderLayout());
             deck.add(controls, BorderLayout.CENTER);
@@ -313,7 +315,6 @@ final class FirstLaunchPanel extends JPanel {
             scroller.setBackground(PANEL);
             scroller.setBorder(BorderFactory.createEmptyBorder());
             scroller.getViewport().setBackground(PANEL);
-            scroller.getVerticalScrollBar().setUnitIncrement(scale.scaleForGUI(18));
             // Lower indexes paint on top, so the overlay goes before the artwork.
             if (overlay != null) add(overlay);
             add(artwork);
@@ -350,7 +351,7 @@ final class FirstLaunchPanel extends JPanel {
 
         private void layoutOverlay(int artHeight) {
             if (overlay == null) return;
-            int margin = scale.scaleForGUI(16);
+            int margin = scale.space("xl");
             int width = Math.min(scale.scaleForGUI(380), getWidth() - 2 * margin);
             if (width < scale.scaleForGUI(240)) {
                 overlay.setVisible(false);
@@ -381,12 +382,13 @@ final class FirstLaunchPanel extends JPanel {
 
         @Override public int getScrollableUnitIncrement(
                 Rectangle visible, int orientation, int direction) {
-            return scale.scaleForGUI(18);
+            return LauncherTheme.scrollLine(this, scale);
         }
 
         @Override public int getScrollableBlockIncrement(
                 Rectangle visible, int orientation, int direction) {
-            return Math.max(scale.scaleForGUI(18), visible.height - scale.scaleForGUI(18));
+            int line = LauncherTheme.scrollLine(this, scale);
+            return Math.max(line, visible.height - line);
         }
 
         @Override public boolean getScrollableTracksViewportWidth() {
@@ -414,7 +416,7 @@ final class FirstLaunchPanel extends JPanel {
             super.paintComponent(graphics);
             if (image == null) {
                 graphics.setColor(MUTED);
-                graphics.drawString("Artwork unavailable", scale.scaleForGUI(20), scale.scaleForGUI(30));
+                graphics.drawString("Artwork unavailable", scale.space("xxl"), scale.space("xxxl"));
                 return;
             }
             Graphics2D canvas = (Graphics2D) graphics.create();

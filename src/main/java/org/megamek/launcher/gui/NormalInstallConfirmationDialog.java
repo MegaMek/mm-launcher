@@ -120,14 +120,13 @@ final class NormalInstallConfirmationDialog extends JDialog {
         actions.setLayout(new BoxLayout(actions, BoxLayout.X_AXIS));
         actions.add(Box.createHorizontalGlue());
         actions.add(cancel);
-        actions.add(Box.createHorizontalStrut(scale.scaleForGUI(10)));
+        actions.add(Box.createHorizontalStrut(scale.space("md")));
         actions.add(install);
 
-        JPanel content = new JPanel(new BorderLayout(0, scale.scaleForGUI(12)));
+        JPanel content = new JPanel(new BorderLayout(0, scale.space("xl")));
         content.setName("normalInstallConfirmationContent");
         content.setBackground(BACKGROUND);
-        content.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(20),
-                scale.scaleForGUI(22), scale.scaleForGUI(20), scale.scaleForGUI(22)));
+        content.setBorder(scale.padding("xxl", "xxl"));
         content.add(summary, BorderLayout.NORTH);
         content.add(actions, BorderLayout.SOUTH);
         setContentPane(content);
@@ -151,7 +150,7 @@ final class NormalInstallConfirmationDialog extends JDialog {
             }
         });
         pack();
-        resizeAndClamp(scale.scaleForGUI(680, 360), true);
+        resizeAndClamp(new Dimension(Math.max(getWidth(), scale.size("dialog.md")), getHeight()), true);
     }
 
     private JPanel summary(NormalInstallService.Plan plan, String product,
@@ -161,21 +160,19 @@ final class NormalInstallConfirmationDialog extends JDialog {
         summary.setLayout(new BoxLayout(summary, BoxLayout.Y_AXIS));
         summary.setBackground(PANEL);
         summary.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(scale.scaleForGUI(1), 0, 0, 0, ACCENT),
-                BorderFactory.createEmptyBorder(scale.scaleForGUI(17),
-                        scale.scaleForGUI(18), scale.scaleForGUI(17),
-                        scale.scaleForGUI(18))));
+                BorderFactory.createMatteBorder(scale.size("border"), 0, 0, 0, ACCENT),
+                scale.padding("xl", "xl")));
 
         Font base = UIManager.getFont("Label.font");
         if (base == null) base = new Font(Font.DIALOG, Font.PLAIN, 12);
         JLabel heading = label(releaseLabel(plan, product),
-                "normalInstallHeading", scale.font(base, Font.BOLD, 23f), TEXT);
+                "normalInstallHeading", scale.font(base, "headline"), TEXT);
         JLabel includes = label("Includes: " + String.join(", ", programs),
-                "normalInstallIncludes", scale.font(base, Font.PLAIN, 14f), TEXT);
+                "normalInstallIncludes", scale.font(base, "body"), TEXT);
         JLabel size = label("Download: " + formatBinaryBytes(plan.asset().size()),
-                "normalInstallDownloadSize", scale.font(base, Font.PLAIN, 14f), TEXT);
+                "normalInstallDownloadSize", scale.font(base, "body"), TEXT);
         JLabel destinationLabel = label("Install location", "normalInstallDestinationLabel",
-                scale.font(base, Font.BOLD, 13f), MUTED);
+                scale.font(base, "label"), MUTED);
 
         String destinationText = plan.destination().toString();
         JTextArea destination = new JTextArea(destinationText, 3, 34);
@@ -184,34 +181,32 @@ final class NormalInstallConfirmationDialog extends JDialog {
         destination.setLineWrap(true);
         destination.setWrapStyleWord(false);
         destination.setCaretPosition(0);
-        destination.setFont(scale.font(base, Font.PLAIN, 13f));
+        destination.setFont(scale.font(base, "body"));
         destination.setBackground(FIELD_BACKGROUND);
         destination.setForeground(TEXT);
         destination.setCaretColor(TEXT);
         destination.setToolTipText(destinationText);
         destination.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(LauncherTheme.BORDER),
-                BorderFactory.createEmptyBorder(scale.scaleForGUI(7),
-                        scale.scaleForGUI(9), scale.scaleForGUI(7),
-                        scale.scaleForGUI(9))));
+                scale.padding("sm", "md")));
         destination.getAccessibleContext().setAccessibleName("Install location");
         destination.getAccessibleContext().setAccessibleDescription(
                 "Full selected install location. Read only and selectable for copying.");
 
-        JPanel destinationRow = new JPanel(new BorderLayout(scale.scaleForGUI(12), 0));
+        JPanel destinationRow = new JPanel(new BorderLayout(scale.space("md"), 0));
         destinationRow.setName("normalInstallDestinationRow");
         destinationRow.setOpaque(false);
         destinationRow.add(destination, BorderLayout.CENTER);
         destinationRow.add(changeLocation, BorderLayout.EAST);
 
         summary.add(heading);
-        summary.add(Box.createVerticalStrut(scale.scaleForGUI(10)));
+        summary.add(Box.createVerticalStrut(scale.space("lg")));
         summary.add(includes);
-        summary.add(Box.createVerticalStrut(scale.scaleForGUI(4)));
+        summary.add(Box.createVerticalStrut(scale.space("xs")));
         summary.add(size);
-        summary.add(Box.createVerticalStrut(scale.scaleForGUI(14)));
+        summary.add(Box.createVerticalStrut(scale.space("xl")));
         summary.add(destinationLabel);
-        summary.add(Box.createVerticalStrut(scale.scaleForGUI(5)));
+        summary.add(Box.createVerticalStrut(scale.space("xs")));
         summary.add(destinationRow);
         alignLeft(summary);
         return summary;
