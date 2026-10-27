@@ -433,21 +433,8 @@ class SimpleHomeSwingTest {
 
             int selections = services.selections.get();
             SwingTestSupport.awaitSettled(frame);
-            AtomicReference<Throwable> closed = new AtomicReference<>();
-            megamekSplit.popupMenu().addPopupMenuListener(new javax.swing.event.PopupMenuListener() {
-                @Override public void popupMenuWillBecomeVisible(javax.swing.event.PopupMenuEvent event) { }
-                @Override public void popupMenuWillBecomeInvisible(javax.swing.event.PopupMenuEvent event) {
-                    closed.compareAndSet(null, new Throwable("alternatives closed"));
-                }
-                @Override public void popupMenuCanceled(javax.swing.event.PopupMenuEvent event) { }
-            });
             SwingUtilities.invokeAndWait(megamekSplit.optionsButton()::doClick);
-            try {
-                waitUntil(() -> megamekSplit.popupMenu().isVisible());
-            } catch (AssertionError error) {
-                if (closed.get() != null) error.addSuppressed(closed.get());
-                throw error;
-            }
+            waitUntil(() -> megamekSplit.popupMenu().isVisible());
             invokeMenuSelection(megamekSplit.menuItems().get(0));
             waitUntil(() -> services.launched);
             assertEquals(services.second, services.launchedRecord);
