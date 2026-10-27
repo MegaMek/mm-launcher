@@ -465,8 +465,11 @@ class FirstLaunchPanelTest {
                     findComponent(frame, "homeStatusLabel"));
             assertEquals("", onEdt(status::getText));
             assertTrue(onEdt(status::isVisible));
-            Rectangle actionsBefore = onEdt(() ->
-                    findComponent(frame, "firstLaunchActions").getBounds());
+            SwingTestSupport.awaitSettled(frame);
+            Rectangle actionsBefore = onEdt(() -> {
+                frame.validate();
+                return findComponent(frame, "firstLaunchActions").getBounds();
+            });
             int centreBefore = onEdt(() -> centreOffset(findComponent(frame, "firstLaunchActions")));
             onEdt(() -> {
                 find(frame, "downloadOptionsButton").doClick();
@@ -490,13 +493,14 @@ class FirstLaunchPanelTest {
                     ((JMenuItem) split.popupMenu().getComponent(2)).getText()));
             assertEquals("", onEdt(status::getText));
             assertTrue(onEdt(status::isVisible));
-            Rectangle actionsAfter = onEdt(() ->
-                    findComponent(frame, "firstLaunchActions").getBounds());
+            Rectangle actionsAfter = onEdt(() -> {
+                frame.validate();
+                return findComponent(frame, "firstLaunchActions").getBounds();
+            });
             assertEquals(actionsBefore.y, actionsAfter.y,
                     "metadata completion must not move the action row vertically");
             assertEquals(actionsBefore.getSize(), actionsAfter.getSize());
             int centreAfter = onEdt(() -> centreOffset(findComponent(frame, "firstLaunchActions")));
-            // The row is centred, so measure from the centre: the window may still settle its width meanwhile
             assertTrue(Math.abs(centreBefore - centreAfter) <= 2,
                     "metadata completion must not shift the action row beyond layout rounding: "
                             + centreBefore + " -> " + centreAfter);
