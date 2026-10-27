@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 import launcher_release as release
 
@@ -88,6 +89,26 @@ def run(command, timeout=120):
     if result.returncode:
         raise release.ReleaseError(f"{Path(command[0]).name} failed: {result.stdout.strip()} {result.stderr.strip()}")
     return result.stdout + result.stderr
+
+
+STAPLE_ATTEMPTS = 5
+STAPLE_RETRY_SECONDS = 30
+
+
+def staple(package):
+    # Apple's ticket lookup (api.apple-cloudkit.com) intermittently drops connections right after notarization.
+    for attempt in range(1, STAPLE_ATTEMPTS + 1):
+        try:
+            run(["/usr/bin/xcrun", "stapler", "staple", str(package)], timeout=300)
+            run(["/usr/bin/xcrun", "stapler", "validate", str(package)])
+            return
+        except release.ReleaseError as error:
+            if attempt == STAPLE_ATTEMPTS:
+                raise
+            delay = STAPLE_RETRY_SECONDS * attempt
+            print(f"Stapling attempt {attempt} of {STAPLE_ATTEMPTS} failed; retrying in {delay} seconds: {error}",
+                  file=sys.stderr, flush=True)
+            time.sleep(delay)
 
 
 def check_notarization_status(environment, intel_submission_id, silicon_submission_id, output):
@@ -287,8 +308,7 @@ def complete(package, version, commit, platform, team, identity, key_id, issuer,
     if (submission.get("status") != "Accepted" or not isinstance(request_id, str)
             or not re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", request_id)):
         raise release.ReleaseError(f"Apple notarization was not accepted: {submission}")
-    run(["/usr/bin/xcrun", "stapler", "staple", str(package)], timeout=300)
-    run(["/usr/bin/xcrun", "stapler", "validate", str(package)])
+    staple(package)
     assessment = run(["/usr/sbin/spctl", "--assess", "--type", "install", "--verbose=2", str(package)])
     if not re.search(r"(?m)^.+: accepted$", assessment):
         raise release.ReleaseError("Gatekeeper did not accept the final installer")
