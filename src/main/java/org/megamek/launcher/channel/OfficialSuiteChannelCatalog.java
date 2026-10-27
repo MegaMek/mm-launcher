@@ -60,7 +60,8 @@ public final class OfficialSuiteChannelCatalog implements ChannelCatalog {
     public static final int MAX_PAGES = 100;
     public static final int MAX_RECORD_BYTES_TOTAL = 32 * 1024 * 1024;
     private static final String ASSET_SOURCE = SOURCE + "/assets/";
-    private static final Pattern RECORD_NAME = Pattern.compile("suite-record-([0-9]+\\.[0-9]+\\.[0-9]+)\\.json");
+    private static final Pattern RECORD_NAME =
+            Pattern.compile("suite-record-([0-9]+\\.[0-9]+\\.[0-9]+(?:\\.[0-9]+)?)\\.json");
     private final ReleaseTransport transport;
     private final String suppliedLauncherVersion;
 
