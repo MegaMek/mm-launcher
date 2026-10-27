@@ -55,6 +55,7 @@ class AppleReleaseTest(unittest.TestCase):
         self.architecture = None
         self.package_signature = True
         self.fail_stapling = False
+        self.transient_staple_failures = 0
         self.write_assets(VERSION)
         (self.root / "build.gradle.kts").write_text(f'version = "{VERSION}"\n', newline="\n")
 
@@ -104,6 +105,9 @@ class AppleReleaseTest(unittest.TestCase):
         if "stapler" in command:
             if self.fail_stapling:
                 raise release.ReleaseError("mock stapler failure")
+            if "validate" in command and self.transient_staple_failures:
+                self.transient_staple_failures -= 1
+                raise release.ReleaseError("mock network connection was lost")
             if "staple" in command:
                 with Path(command[-1]).open("ab") as file:
                     file.write(b"\nstapled-ticket")
@@ -116,7 +120,9 @@ class AppleReleaseTest(unittest.TestCase):
         self.current_platform = platform
         package = self.assets / f"MegaMek-Launcher-{version}-{platform}.pkg"
         proof = self.verification / (platform + ".json")
-        with patch("launcher_apple.run", side_effect=self.fake_run):
+        with patch("launcher_apple.run", side_effect=self.fake_run), patch("launcher_apple.time.sleep") as sleep, \
+                patch("builtins.print"):
+            self.sleeps = sleep
             apple.complete(package, version, commit, platform, TEAM, IDENTITY,
                            ENV["APPLE_NOTARY_KEY_ID"], REQUEST, self.root, proof, rehearsal=rehearsal)
         return json.loads(proof.read_text())
@@ -444,6 +450,20 @@ class AppleReleaseTest(unittest.TestCase):
                 setattr(self, attribute, previous)
                 if attribute != "fail_stapling":
                     self.assertEqual(before, (self.assets / f"MegaMek-Launcher-{VERSION}-macos-intel.pkg").read_bytes())
+
+    def test_transient_stapling_failures_are_retried_before_evidence_is_written(self):
+        self.transient_staple_failures = 2
+        self.complete()
+        self.assertTrue((self.verification / "macos-intel.json").exists())
+        self.assertEqual(3, sum(1 for command in self.calls if command[-2:-1] == ["staple"]))
+        self.assertEqual([30, 60], [call.args[0] for call in self.sleeps.call_args_list])
+
+    def test_persistent_stapling_failures_stop_after_the_last_attempt(self):
+        self.fail_stapling = True
+        with self.assertRaises(release.ReleaseError):
+            self.complete()
+        self.assertEqual(apple.STAPLE_ATTEMPTS, sum(1 for command in self.calls if command[-2:-1] == ["staple"]))
+        self.assertFalse((self.verification / "macos-intel.json").exists())
 
     def test_pkg_signature_requires_the_exact_trusted_leaf_not_a_similar_chain_name(self):
         valid = f"Status: signed by a certificate trusted by macOS\n  1. Developer ID Installer: {IDENTITY}\n"
