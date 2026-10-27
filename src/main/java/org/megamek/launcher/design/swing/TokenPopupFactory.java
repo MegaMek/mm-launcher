@@ -37,6 +37,7 @@ import java.awt.Component;
 import java.awt.GraphicsConfiguration;
 import java.awt.GraphicsDevice.WindowTranslucency;
 import java.awt.Window;
+import javax.swing.JPopupMenu;
 import javax.swing.JWindow;
 import javax.swing.Popup;
 import javax.swing.PopupFactory;
@@ -78,6 +79,10 @@ final class TokenPopupFactory extends PopupFactory {
 
     @Override
     public Popup getPopup(Component owner, Component contents, int x, int y) {
+        // JPopupMenu asks this wrapper, not the delegate, for a heavyweight popup; pass that on to FlatLaf.
+        if (contents instanceof JPopupMenu menu && !menu.isLightWeightPopupEnabled()) {
+            menu.putClientProperty("Popup.forceHeavyWeight", true);
+        }
         return new Fading(delegate.getPopup(owner, contents, x, y), contents);
     }
 

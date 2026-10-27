@@ -467,6 +467,7 @@ class FirstLaunchPanelTest {
             assertTrue(onEdt(status::isVisible));
             Rectangle actionsBefore = onEdt(() ->
                     findComponent(frame, "firstLaunchActions").getBounds());
+            int centreBefore = onEdt(() -> centreOffset(findComponent(frame, "firstLaunchActions")));
             onEdt(() -> {
                 find(frame, "downloadOptionsButton").doClick();
                 return null;
@@ -494,8 +495,11 @@ class FirstLaunchPanelTest {
             assertEquals(actionsBefore.y, actionsAfter.y,
                     "metadata completion must not move the action row vertically");
             assertEquals(actionsBefore.getSize(), actionsAfter.getSize());
-            assertTrue(Math.abs(actionsBefore.x - actionsAfter.x) <= 1,
-                    "metadata completion must not shift the action row beyond layout rounding");
+            int centreAfter = onEdt(() -> centreOffset(findComponent(frame, "firstLaunchActions")));
+            // The row is centred, so measure from the centre: the window may still settle its width meanwhile
+            assertTrue(Math.abs(centreBefore - centreAfter) <= 2,
+                    "metadata completion must not shift the action row beyond layout rounding: "
+                            + centreBefore + " -> " + centreAfter);
             onEdt(() -> {
                 split.closePopup();
                 return null;
@@ -802,6 +806,11 @@ class FirstLaunchPanelTest {
             }
         }
         return null;
+    }
+
+    /** Twice the distance of {@code component}'s centre from its parent's centre. */
+    private static int centreOffset(Component component) {
+        return 2 * component.getX() + component.getWidth() - component.getParent().getWidth();
     }
 
     private static Component findComponent(Container root, String name) {

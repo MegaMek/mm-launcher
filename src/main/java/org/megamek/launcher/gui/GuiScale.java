@@ -33,6 +33,7 @@
 
 package org.megamek.launcher.gui;
 
+import javax.swing.text.StyleContext;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.GraphicsConfiguration;
@@ -76,13 +77,15 @@ public final class GuiScale {
 
     /**
      * Derives {@code base} at {@code points}. The bundled Roboto has a real medium face, so bold
-     * Roboto text uses it instead of a synthesised bold.
+     * Roboto text uses it instead of a synthesised bold. Faces come from Swing's style context so
+     * characters Roboto lacks still fall back to a system font.
      */
     public Font font(Font base, int style, float points) {
         String family = base.getFamily();
         if (family.equals(REGULAR_FAMILY) || family.equals(MEDIUM_FAMILY)) {
             boolean strong = (style & Font.BOLD) != 0;
-            return new Font(strong ? MEDIUM_FAMILY : REGULAR_FAMILY, style & ~Font.BOLD, 1)
+            return StyleContext.getDefaultStyleContext()
+                    .getFont(strong ? MEDIUM_FAMILY : REGULAR_FAMILY, style & ~Font.BOLD, 1)
                     .deriveFont(scaleForGUI(points));
         }
         return base.deriveFont(style, scaleForGUI(points));

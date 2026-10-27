@@ -86,8 +86,9 @@ class HomeLaunchSplitButtonTest {
                 frame.setVisible(true);
             });
             HomeLaunchSplitButton split = holder[0];
+            SwingTestSupport.awaitSettled(frame);
             SwingUtilities.invokeAndWait(split::openPopup);
-            assertTrue(split.popupMenu().isVisible());
+            SwingTestSupport.awaitCondition("alternatives showing", () -> split.popupMenu().isShowing());
             int popupBottom = SwingTestSupport.onEdt(() -> split.popupMenu().getLocationOnScreen().y
                     + split.popupMenu().getHeight());
             int controlTop = SwingTestSupport.onEdt(() -> split.getLocationOnScreen().y);

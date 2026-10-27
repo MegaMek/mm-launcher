@@ -81,6 +81,22 @@ final class SwingTestSupport {
         await(description, () -> condition.call() ? Boolean.TRUE : null);
     }
 
+    /**
+     * Waits until {@code window} is showing and its screen bounds have stopped changing. Window managers on Linux
+     * and macOS apply moves and resizes after the call returns, and a late move closes any open popup menu.
+     */
+    static void awaitSettled(java.awt.Window window) throws Exception {
+        java.awt.Rectangle[] last = new java.awt.Rectangle[1];
+        int[] stable = new int[1];
+        awaitCondition("settled window", () -> {
+            java.awt.Rectangle now = window.isShowing()
+                    ? new java.awt.Rectangle(window.getLocationOnScreen(), window.getSize()) : null;
+            stable[0] = now != null && now.equals(last[0]) ? stable[0] + 1 : 0;
+            last[0] = now;
+            return stable[0] >= 10;
+        });
+    }
+
     static AbstractButton click(Container root, String name) throws Exception {
         PendingAction action = startAction(root, name, false);
         // Teardown must still be able to join a modal action after its caller times out.
