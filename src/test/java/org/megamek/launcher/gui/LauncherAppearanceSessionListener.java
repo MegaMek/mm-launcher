@@ -41,15 +41,12 @@ import javax.swing.SwingUtilities;
 /**
  * Installs the launcher appearance once per test JVM, as {@link GuiLauncher} does at startup, so
  * Swing tests see the shipped look and feel. The {@code mm.launcher.theme} ({@code dark} or
- * {@code light}) and {@code mm.launcher.palette} ({@code standard} or {@code colorblind}) system
- * properties select the appearance for graphical review images.
+ * {@code light}) system property selects the theme for graphical review images.
  */
 public final class LauncherAppearanceSessionListener implements LauncherSessionListener {
     static LauncherAppearance testAppearance() {
         return new LauncherAppearance(
-                LauncherAppearance.Theme.fromId(System.getProperty("mm.launcher.theme", "dark")),
-                LauncherAppearance.paletteFromId(System.getProperty("mm.launcher.palette", "standard")),
-                false);
+                LauncherAppearance.Theme.fromId(System.getProperty("mm.launcher.theme", "dark")));
     }
 
     @Override

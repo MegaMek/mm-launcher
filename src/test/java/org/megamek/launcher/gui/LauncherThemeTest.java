@@ -35,7 +35,6 @@ package org.megamek.launcher.gui;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.megamek.launcher.design.DesignTokens.Palette;
 
 import javax.swing.JButton;
 import javax.swing.JLabel;
@@ -90,23 +89,6 @@ class LauncherThemeTest {
             assertEquals(new Color(0x0A5C4C), LauncherTheme.ACCENT);
             assertEquals(new Color(0x1C2426), LauncherTheme.PRIMARY_BACKGROUND);
             assertEquals(LauncherTheme.TEXT.getRGB(), LauncherTheme.TEXT.hashCode());
-            return null;
-        });
-    }
-
-    @Test
-    void colourBlindPaletteChangesOnlyStatusColours() throws Exception {
-        SwingTestSupport.onEdt(() -> {
-            LauncherAppearance.install(DARK);
-            Color background = new Color(LauncherTheme.BACKGROUND.getRGB());
-            Color accent = new Color(LauncherTheme.ACCENT.getRGB());
-            Color danger = new Color(LauncherTheme.DANGER.getRGB());
-            Color success = new Color(LauncherTheme.SUCCESS.getRGB());
-            LauncherAppearance.install(DARK.withPalette(Palette.COLORBLIND));
-            assertEquals(background, LauncherTheme.BACKGROUND);
-            assertEquals(accent, LauncherTheme.ACCENT);
-            assertTrue(!danger.equals(LauncherTheme.DANGER) || !success.equals(LauncherTheme.SUCCESS),
-                    "the colour-blind palette separates danger and success");
             return null;
         });
     }

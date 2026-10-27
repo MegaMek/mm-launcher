@@ -2743,21 +2743,6 @@ public final class LauncherFrame extends JFrame {
             }
         });
         section.add(theme);
-        section.add(Box.createVerticalStrut(guiScale.scaleForGUI(8)));
-        MapCheckBox colorBlind = new MapCheckBox("Color-blind friendly status colors",
-                current.palette() == org.megamek.launcher.design.DesignTokens.Palette.COLORBLIND, guiScale);
-        colorBlind.setName("appearanceColorBlindCheckbox");
-        colorBlind.setAlignmentX(Component.LEFT_ALIGNMENT);
-        colorBlind.addActionListener(event -> applyAppearance(LauncherAppearance.current().withPalette(
-                colorBlind.isSelected() ? org.megamek.launcher.design.DesignTokens.Palette.COLORBLIND
-                        : org.megamek.launcher.design.DesignTokens.Palette.STANDARD)));
-        section.add(colorBlind);
-        MapCheckBox reduceMotion = new MapCheckBox("Reduce motion", current.reduceMotion(), guiScale);
-        reduceMotion.setName("appearanceReduceMotionCheckbox");
-        reduceMotion.setAlignmentX(Component.LEFT_ALIGNMENT);
-        reduceMotion.addActionListener(event -> applyAppearance(
-                LauncherAppearance.current().withReduceMotion(reduceMotion.isSelected())));
-        section.add(reduceMotion);
         return section;
     }
 

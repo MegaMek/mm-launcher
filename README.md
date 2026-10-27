@@ -399,14 +399,15 @@ and icons (see `src/distribution/THIRD-PARTY-NOTICES.txt` and
 `scripts/build_launcher_fonts.py`).
 
 `LauncherTheme` maps launcher roles (background, panel, text, accent, primary, focus, and
-status colors) to token roles and resolves them at paint time, so switching theme or palette
+status colors) to token roles and resolves them at paint time, so switching theme
 only needs a repaint. Launch actions and **Install latest** are primary buttons (the inverse
 surface); other buttons are raised secondary buttons, and keyboard focus draws the token
 focus ring. Combo boxes, check boxes, popups, scroll bars, and tooltips come from the look
 and feel.
 
-Settings → **Appearance** offers Dark or Light, a color-blind friendly status palette, and
-reduced motion. Changes apply immediately and are saved in the launcher settings file.
+Settings → **Appearance** offers Dark or Light. The change applies immediately and is saved in
+the launcher settings file. The launcher shows status through text rather than colour alone and
+uses only brief fades, so it does not offer a colour-blind palette or reduced motion.
 A high-contrast mode is deferred until the design tokens provide one.
 
 Home and the first-launch screen are tokens-v0 *game* screens: their buttons and the news
@@ -421,8 +422,7 @@ This styling applies to the Swing application, not native installer wizards or s
 pickers.
 
 Review screenshots and tests can run under a chosen appearance with the
-`mm.launcher.theme` (`dark`|`light`) and `mm.launcher.palette` (`standard`|`colorblind`) system
-properties, read by the test `LauncherAppearanceSessionListener`.
+`mm.launcher.theme` (`dark`|`light`) system property, read by the test `LauncherAppearanceSessionListener`.
 
 From the launcher checkout, run the source UI on Windows with Java 21 available:
 

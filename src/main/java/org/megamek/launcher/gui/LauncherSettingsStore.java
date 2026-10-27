@@ -118,9 +118,7 @@ final class LauncherSettingsStore {
             } else {
                 com.fasterxml.jackson.databind.JsonNode appearance = tree.get("appearance");
                 if (appearance == null || !appearance.isObject()
-                        || !appearance.path("theme").isTextual()
-                        || !appearance.path("palette").isTextual()
-                        || !appearance.path("reduceMotion").isBoolean()) {
+                        || !appearance.path("theme").isTextual()) {
                     throw new IOException("appearance settings have invalid types");
                 }
                 settings = mapper.treeToValue(tree, Settings.class);
@@ -271,18 +269,20 @@ final class LauncherSettingsStore {
         static final Settings DEFAULT = new Settings(SCHEMA, null, null, Appearance.DEFAULT);
     }
 
-    /** The stored form of {@link LauncherAppearance}, with stable lower-case identifiers. */
-    record Appearance(String theme, String palette, boolean reduceMotion) {
+    /**
+     * The stored form of {@link LauncherAppearance}, with stable lower-case identifiers. Development builds also
+     * stored a palette and reduce motion; those fields are ignored.
+     */
+    @com.fasterxml.jackson.annotation.JsonIgnoreProperties({"palette", "reduceMotion"})
+    record Appearance(String theme) {
         static final Appearance DEFAULT = of(LauncherAppearance.DEFAULT);
 
         static Appearance of(LauncherAppearance appearance) {
-            return new Appearance(appearance.theme().id(),
-                    LauncherAppearance.paletteId(appearance.palette()), appearance.reduceMotion());
+            return new Appearance(appearance.theme().id());
         }
 
         LauncherAppearance launcherAppearance() {
-            return new LauncherAppearance(LauncherAppearance.Theme.fromId(theme),
-                    LauncherAppearance.paletteFromId(palette), reduceMotion);
+            return new LauncherAppearance(LauncherAppearance.Theme.fromId(theme));
         }
     }
 

@@ -123,8 +123,7 @@ sentence case. Settings, Installations, progress, consent, error and other dialo
 app presentation with sentence-case labels. Game-mode caps are kept to short framing labels
 (**Launch MegaMek**, **Install latest**, **Installations**); channel, version, *Not found* and update
 counts render in sentence case on a detail line or badge, and the accessible name keeps the full sentence.
-Settings starts with **Appearance**: a Dark/Light theme select, **Color-blind friendly status
-colors**, and **Reduce motion**. Each change applies immediately, re-renders the current page,
+Settings starts with **Appearance**: a Dark/Light theme select. A change applies immediately, re-renders the current page,
 and is saved off the event-dispatch thread; a failed save reports an error without reverting the
 visible appearance. High contrast is not offered until the design tokens define it.
 Loading and error states keep the same layout; there is no global automatic-check control.

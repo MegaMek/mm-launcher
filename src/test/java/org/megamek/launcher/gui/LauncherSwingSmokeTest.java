@@ -459,8 +459,8 @@ class LauncherSwingSmokeTest {
             LauncherAppearance.Theme other = initial == LauncherAppearance.Theme.DARK
                     ? LauncherAppearance.Theme.LIGHT : LauncherAppearance.Theme.DARK;
             assertEquals(initial, onEdt(theme::getSelectedItem));
-            assertNotNull(component(frame, "appearanceColorBlindCheckbox"));
-            assertNotNull(component(frame, "appearanceReduceMotionCheckbox"));
+            assertNull(component(frame, "appearanceColorBlindCheckbox"));
+            assertNull(component(frame, "appearanceReduceMotionCheckbox"));
             Color initialBackground = new Color(LauncherTheme.BACKGROUND.getRGB());
             try {
                 SwingUtilities.invokeAndWait(() -> theme.setSelectedItem(other));

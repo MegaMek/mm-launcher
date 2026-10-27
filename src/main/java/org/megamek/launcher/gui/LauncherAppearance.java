@@ -36,7 +36,6 @@ package org.megamek.launcher.gui;
 import com.formdev.flatlaf.FlatLaf;
 import org.megamek.launcher.design.DesignTokens;
 import org.megamek.launcher.design.DesignTokens.Mode;
-import org.megamek.launcher.design.DesignTokens.Palette;
 import org.megamek.launcher.design.host.FontHandler;
 import org.megamek.launcher.design.swing.MegaMekDarkLaf;
 import org.megamek.launcher.design.swing.MegaMekLightLaf;
@@ -50,14 +49,13 @@ import java.util.Locale;
 import java.util.Objects;
 
 /**
- * The user's appearance preferences and the one place that applies them: the light or dark
- * MegaMek look and feel, the colour-blind safe palette and reduced motion. Launcher colours are
+ * The user's appearance preference and the one place that applies it: the light or dark MegaMek
+ * look and feel, always with the standard palette and full motion. Launcher colours are
  * token roles resolved while painting ({@link LauncherTheme}), so applying a change repaints every
  * window in the new look without rebuilding it.
  */
-record LauncherAppearance(Theme theme, Palette palette, boolean reduceMotion) {
-    static final LauncherAppearance DEFAULT =
-            new LauncherAppearance(Theme.DARK, Palette.STANDARD, false);
+record LauncherAppearance(Theme theme) {
+    static final LauncherAppearance DEFAULT = new LauncherAppearance(Theme.DARK);
 
     private static volatile LauncherAppearance current = DEFAULT;
 
@@ -96,31 +94,10 @@ record LauncherAppearance(Theme theme, Palette palette, boolean reduceMotion) {
 
     LauncherAppearance {
         Objects.requireNonNull(theme, "theme");
-        Objects.requireNonNull(palette, "palette");
-    }
-
-    static String paletteId(Palette palette) {
-        return palette == Palette.COLORBLIND ? "colorblind" : "standard";
-    }
-
-    static Palette paletteFromId(String id) {
-        return switch (id) {
-            case "standard" -> Palette.STANDARD;
-            case "colorblind" -> Palette.COLORBLIND;
-            default -> throw new IllegalArgumentException("unknown launcher palette: " + id);
-        };
     }
 
     LauncherAppearance withTheme(Theme value) {
-        return new LauncherAppearance(value, palette, reduceMotion);
-    }
-
-    LauncherAppearance withPalette(Palette value) {
-        return new LauncherAppearance(theme, value, reduceMotion);
-    }
-
-    LauncherAppearance withReduceMotion(boolean value) {
-        return new LauncherAppearance(theme, palette, value);
+        return new LauncherAppearance(value);
     }
 
     /** The appearance last installed, or the default before the first install. */
@@ -134,7 +111,7 @@ record LauncherAppearance(Theme theme, Palette palette, boolean reduceMotion) {
     }
 
     /**
-     * Installs {@code appearance}: registers the bundled fonts, selects the palette and motion,
+     * Installs {@code appearance}: registers the bundled fonts, selects the standard palette and motion,
      * sets the MegaMek look and feel and refreshes every open window. Call on the EDT.
      */
     static void install(LauncherAppearance appearance) {
@@ -143,8 +120,8 @@ record LauncherAppearance(Theme theme, Palette palette, boolean reduceMotion) {
             throw new IllegalStateException("Install the launcher appearance on the EDT");
         }
         FontHandler.initialize();
-        DesignTokens.setPalette(appearance.palette());
-        TokenMotion.setReduced(appearance.reduceMotion());
+        DesignTokens.setPalette(DesignTokens.Palette.STANDARD);
+        TokenMotion.setReduced(false);
         current = appearance;
         try {
             UIManager.setLookAndFeel(appearance.theme() == Theme.LIGHT

@@ -187,9 +187,7 @@ class LauncherSettingsStoreTest {
         assertEquals(legacy, Files.readString(store.path()), "reading never rewrites");
 
         LauncherAppearance light = LauncherAppearance.DEFAULT
-                .withTheme(LauncherAppearance.Theme.LIGHT)
-                .withPalette(org.megamek.launcher.design.DesignTokens.Palette.COLORBLIND)
-                .withReduceMotion(true);
+                .withTheme(LauncherAppearance.Theme.LIGHT);
         LauncherSettingsStore.Settings upgraded = store.writeAppearance(light);
 
         assertEquals(LauncherSettingsStore.SCHEMA, upgraded.schemaVersion());
@@ -197,7 +195,25 @@ class LauncherSettingsStoreTest {
         assertEquals(light, store.read().appearance().launcherAppearance());
         String json = Files.readString(store.path());
         assertTrue(json.contains("\"theme\" : \"light\""), json);
-        assertTrue(json.contains("\"palette\" : \"colorblind\""), json);
+        assertFalse(json.contains("palette"), json);
+        assertFalse(json.contains("reduceMotion"), json);
+    }
+
+    @Test
+    void developmentPaletteAndMotionFieldsAreIgnored() throws Exception {
+        LauncherSettingsStore store =
+                new LauncherSettingsStore(temp.resolve("registry.json"));
+        Files.writeString(store.path(), """
+                {
+                  "schemaVersion" : 4,
+                  "defaultJavaExecutable" : null,
+                  "defaultJavaFeature" : null,
+                  "appearance" : { "theme" : "light", "palette" : "colorblind", "reduceMotion" : true }
+                }
+                """);
+
+        assertEquals(LauncherAppearance.DEFAULT.withTheme(LauncherAppearance.Theme.LIGHT),
+                store.read().appearance().launcherAppearance());
     }
 
     @Test
@@ -221,7 +237,7 @@ class LauncherSettingsStoreTest {
                   "schemaVersion" : 4,
                   "defaultJavaExecutable" : null,
                   "defaultJavaFeature" : null,
-                  "appearance" : { "theme" : "sepia", "palette" : "standard", "reduceMotion" : false }
+                  "appearance" : { "theme" : "sepia" }
                 }
                 """;
         Files.writeString(store.path(), malformed);

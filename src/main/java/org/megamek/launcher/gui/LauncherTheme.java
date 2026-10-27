@@ -57,8 +57,7 @@ import java.awt.geom.RoundRectangle2D;
 /**
  * The launcher's colours and control painting, expressed in MegaMek design-token roles.
  * Every colour resolves its role in the installed {@link LauncherAppearance} each time it is
- * painted, so switching between the light and dark looks or the colour-blind palette needs only a
- * repaint.
+ * painted, so switching between the light and dark looks needs only a repaint.
  */
 final class LauncherTheme {
     static final Color BACKGROUND = role("surface.base");
