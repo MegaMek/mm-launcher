@@ -128,7 +128,7 @@ and is saved off the event-dispatch thread; a failed save reports an error witho
 visible appearance. High contrast is not offered until the design tokens define it.
 Loading and error states keep the same layout; there is no global automatic-check control.
 
-Latest news appears on the managed home page as a corner-ticked tokens-v0 panel (titled
+Latest news appears on the managed home page as a corner-ticked panel (titled
 **Latest news**) in the top-right corner of the artwork. It loads up to three dated headlines from MegaMek's official Atom feed in the
 background once per window, links to the full posts, and always offers the blog archive when
 offline. News dates are smaller muted labels, and full titles wrap within the panel width rather

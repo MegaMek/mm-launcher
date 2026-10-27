@@ -388,13 +388,11 @@ processed files below the bar.
 
 ## Developer CLI and graphical review
 
-The launcher uses the MegaMek `tokens-v0` design system: semantic color, typography, spacing,
-radius, and motion tokens with **MegaMek Dark** and **MegaMek Light** FlatLaf looks. A
-snapshot of the token set and its Swing components is vendored in
-`org.megamek.launcher.design` (with small stand-ins in `design.host` for the services it
-normally borrows from MegaMek), so the launcher keeps no MegaMek runtime dependency. The
-snapshot is updated by hand; keep token names and values identical to the source when
-refreshing it. Roboto and a Material Symbols subset are bundled for the tokens' typography
+The launcher uses the MekBay look and feel for the MegaMek Launcher: semantic color, typography,
+spacing, radius, and motion tokens with **MegaMek Dark** and **MegaMek Light** FlatLaf looks.
+The token set and its Swing components live in `org.megamek.launcher.design`, with the few
+services they need (fonts, strings, scaling) in `design.host`, so the launcher keeps no MegaMek
+runtime dependency. Roboto and a Material Symbols subset are bundled for the tokens' typography
 and icons (see `src/distribution/THIRD-PARTY-NOTICES.txt` and
 `scripts/build_launcher_fonts.py`).
 
@@ -410,12 +408,12 @@ the launcher settings file. The launcher shows status through text rather than c
 uses only brief fades, so it does not offer a colour-blind palette or reduced motion.
 A high-contrast mode is deferred until the design tokens provide one.
 
-Home and the first-launch screen are tokens-v0 *game* screens: their buttons and the news
+Home and the first-launch screen are *game* screens: their buttons and the news
 title are shown upper-cased in Roboto Condensed, while body text, links and accessible names
 stay sentence case. Upper case is kept to short framing labels such as **Launch MegaMek**,
 **Install latest** or **Installations**; the values they frame (channel, version, *Not found*,
 an update count) appear in sentence case on a detail line or badge, and the accessible name
-keeps the full sentence. Latest news sits in a corner-ticked tokens-v0 panel. Every other page and dialog is an *app* screen and keeps sentence-case
+keeps the full sentence. Latest news sits in a corner-ticked panel. Every other page and dialog is an *app* screen and keeps sentence-case
 labels at regular width. Launcher buttons always carry the token `button` text role, so a
 button follows the screen it is placed on.
 This styling applies to the Swing application, not native installer wizards or system file

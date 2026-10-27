@@ -192,7 +192,7 @@ paint at the original aspect ratio with a centered cover treatment: no stretchin
 with only the crop required by the viewport shape. The PNG is still a finite-resolution bitmap; a
 high-DPI display does not create extra image detail.
 
-Buttons use the `tokens-v0` design-token surfaces: rounded raised secondary buttons with a control
+Buttons use the MekBay look and feel's design-token surfaces: rounded raised secondary buttons with a control
 border and hover/pressed washes, inverse-surface primary actions, and the token focus ring.
 Check boxes, scroll bars, and combo boxes come from the MegaMek Dark/Light look and feel; combo
 boxes retain the launcher keyboard behavior. The split segments share one outline and separator, so

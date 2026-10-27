@@ -1,6 +1,6 @@
 {
   "version": "0.1",
-  "about": "MegaMek suite design tokens: the one source of truth for the Swing theme. Colors are #RRGGBB or #RRGGBBAA in sRGB. 'overlay' is the translucent value a surface uses when it is drawn over other content; opaque Swing surfaces use 'dark'. 'colorblind' holds the dark and light values of the color-blind safe palette where they differ from the standard ones. Sizes are logical pixels at scale 1.",
+  "about": "MekBay look and feel for the MegaMek Launcher design tokens: the one source of truth for the Swing theme. Colors are #RRGGBB or #RRGGBBAA in sRGB. 'overlay' is the translucent value a surface uses when it is drawn over other content; opaque Swing surfaces use 'dark'. 'colorblind' holds the dark and light values of the color-blind safe palette where they differ from the standard ones. Sizes are logical pixels at scale 1.",
   "color": {
     "surface.base": { "dark": "#0E1314", "light": "#ECEFEE", "use": "Window and app background." },
     "surface.panel": { "dark": "#141A1C", "light": "#FFFFFF", "overlay": "#12181AEB", "use": "Panels, dialogs, cards." },

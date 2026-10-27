@@ -225,7 +225,7 @@ final class SwingTestSupport {
     }
 
     /**
-     * The label the launcher gave {@code button}. On a game screen (Home and first launch) tokens-v0 shows button
+     * The label the launcher gave {@code button}. On a game screen (Home and first launch) the look and feel shows button
      * text upper-cased and keeps the label that was set as the text source.
      */
     static String label(AbstractButton button) {
