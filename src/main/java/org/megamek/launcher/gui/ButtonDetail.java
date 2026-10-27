@@ -92,7 +92,7 @@ final class ButtonDetail {
             FontMetrics metrics = button.getFontMetrics(detailFont(button, scale));
             Insets insets = button.getInsets();
             // The second line takes part of the vertical padding, keeping two-line buttons compact
-            int spare = Math.max(0, insets.top + insets.bottom - 2 * scale.scaleForGUI(6));
+            int spare = Math.max(0, insets.top + insets.bottom - 2 * scale.space("sm"));
             height += Math.max(0, metrics.getHeight() + gap(scale) - spare);
             width = Math.max(width, metrics.stringWidth(detail) + insets.left + insets.right);
         }
@@ -132,7 +132,7 @@ final class ButtonDetail {
         if (badge != null) {
             Font badgeFont = badgeFont(button, scale);
             FontMetrics badgeMetrics = button.getFontMetrics(badgeFont);
-            int badgeHeight = badgeMetrics.getHeight() + scale.scaleForGUI(2);
+            int badgeHeight = badgeMetrics.getHeight() + scale.space("xxs");
             int badgeX = x + textRectangle.width + badgeGap(scale);
             int badgeY = y + (textRectangle.height - badgeHeight) / 2;
             Color accent = button.isEnabled() ? LauncherTheme.ACCENT : color;
@@ -153,11 +153,11 @@ final class ButtonDetail {
     }
 
     private static Font detailFont(AbstractButton button, GuiScale scale) {
-        return scale.font(baseFont(button), Font.PLAIN, 12f);
+        return scale.font(baseFont(button), "small");
     }
 
     private static Font badgeFont(AbstractButton button, GuiScale scale) {
-        return scale.font(baseFont(button), Font.PLAIN, 11f);
+        return scale.font(baseFont(button), "caption");
     }
 
     private static Font baseFont(AbstractButton button) {
@@ -167,14 +167,14 @@ final class ButtonDetail {
 
     private static int badgeWidth(AbstractButton button, GuiScale scale, String badge) {
         return button.getFontMetrics(badgeFont(button, scale)).stringWidth(badge)
-                + scale.scaleForGUI(14);
+                + 2 * scale.space("md");
     }
 
     private static int gap(GuiScale scale) {
-        return scale.scaleForGUI(2);
+        return scale.space("xs");
     }
 
     private static int badgeGap(GuiScale scale) {
-        return scale.scaleForGUI(8);
+        return scale.space("md");
     }
 }

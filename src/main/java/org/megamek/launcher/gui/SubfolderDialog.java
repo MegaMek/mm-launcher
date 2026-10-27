@@ -66,13 +66,14 @@ import java.nio.file.Path;
 final class SubfolderDialog extends JDialog {
     private static final String CANCEL_ACTION = "cancelSubfolder";
     private final GuiScale scale;
-    private final JTextField folderName = new JTextField(30);
+    private final JTextField folderName;
     private final JLabel error = new JLabel(" ");
     private Path result;
 
     SubfolderDialog(Window owner, String suggestion, GuiScale scale) {
         super(owner, "Choose install folder", Dialog.ModalityType.APPLICATION_MODAL);
         this.scale = scale;
+        folderName = controlField(scale, 30);
         setName("subfolderDialog");
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         getAccessibleContext().setAccessibleName("Choose install folder");
@@ -84,37 +85,35 @@ final class SubfolderDialog extends JDialog {
         JLabel heading = new JLabel("New install folder");
         heading.setName("subfolderHeading");
         heading.setForeground(FirstLaunchPanel.ACCENT);
-        heading.setFont(scale.font(base, Font.BOLD, 22f));
+        heading.setFont(scale.font(base, "headline"));
         heading.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         JLabel prompt = new JLabel("Folder name");
         prompt.setName("subfolderNameLabel");
         prompt.setForeground(FirstLaunchPanel.TEXT);
-        prompt.setFont(scale.font(base, Font.BOLD, 13f));
+        prompt.setFont(scale.font(base, "label"));
         prompt.setLabelFor(folderName);
         prompt.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         folderName.setName("subfolderNameField");
         folderName.setText(suggestion == null ? "" : suggestion);
         folderName.selectAll();
-        folderName.setFont(scale.font(base, Font.PLAIN, 14f));
+        folderName.setFont(scale.font(base, "body"));
         folderName.setBackground(NormalInstallConfirmationDialog.FIELD_BACKGROUND);
         folderName.setForeground(FirstLaunchPanel.TEXT);
         folderName.setCaretColor(FirstLaunchPanel.TEXT);
         folderName.setSelectionColor(LauncherTheme.SELECTION_BACKGROUND);
         folderName.setSelectedTextColor(LauncherTheme.TEXT);
         folderName.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(LauncherTheme.BORDER, scale.scaleForGUI(1)),
-                BorderFactory.createEmptyBorder(scale.scaleForGUI(7),
-                        scale.scaleForGUI(9), scale.scaleForGUI(7),
-                        scale.scaleForGUI(9))));
+                BorderFactory.createLineBorder(LauncherTheme.BORDER, scale.size("border")),
+                scale.padding("sm", "md")));
         folderName.getAccessibleContext().setAccessibleName("Folder name");
         folderName.getAccessibleContext().setAccessibleDescription(
                 "Name of the new subfolder. It must not be a path.");
 
         error.setName("subfolderValidationError");
         error.setForeground(new java.awt.Color(255, 176, 163));
-        error.setFont(scale.font(base, Font.PLAIN, 12f));
+        error.setFont(scale.font(base, "small"));
         error.setAlignmentX(Component.LEFT_ALIGNMENT);
         error.getAccessibleContext().setAccessibleName("Folder name validation");
 
@@ -129,14 +128,14 @@ final class SubfolderDialog extends JDialog {
         fields.setOpaque(false);
         fields.setLayout(new BoxLayout(fields, BoxLayout.Y_AXIS));
         fields.add(heading);
-        fields.add(Box.createVerticalStrut(scale.scaleForGUI(15)));
+        fields.add(Box.createVerticalStrut(scale.space("lg")));
         fields.add(prompt);
-        fields.add(Box.createVerticalStrut(scale.scaleForGUI(6)));
+        fields.add(Box.createVerticalStrut(scale.space("xs")));
         folderName.setAlignmentX(Component.LEFT_ALIGNMENT);
         folderName.setMaximumSize(new Dimension(Integer.MAX_VALUE,
                 folderName.getPreferredSize().height));
         fields.add(folderName);
-        fields.add(Box.createVerticalStrut(scale.scaleForGUI(5)));
+        fields.add(Box.createVerticalStrut(scale.space("xs")));
         fields.add(error);
 
         JPanel actions = new JPanel();
@@ -144,14 +143,13 @@ final class SubfolderDialog extends JDialog {
         actions.setLayout(new BoxLayout(actions, BoxLayout.X_AXIS));
         actions.add(Box.createHorizontalGlue());
         actions.add(cancel);
-        actions.add(Box.createHorizontalStrut(scale.scaleForGUI(10)));
+        actions.add(Box.createHorizontalStrut(scale.space("md")));
         actions.add(continueButton);
 
-        JPanel content = new JPanel(new BorderLayout(0, scale.scaleForGUI(14)));
+        JPanel content = new JPanel(new BorderLayout(0, scale.space("xl")));
         content.setName("subfolderDialogContent");
         content.setBackground(FirstLaunchPanel.BACKGROUND);
-        content.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(20),
-                scale.scaleForGUI(22), scale.scaleForGUI(18), scale.scaleForGUI(22)));
+        content.setBorder(scale.padding("xxl", "xxl"));
         content.add(fields, BorderLayout.CENTER);
         content.add(actions, BorderLayout.SOUTH);
         setContentPane(content);
@@ -177,9 +175,10 @@ final class SubfolderDialog extends JDialog {
 
         pack();
         Rectangle available = GuiScale.usableBounds(getGraphicsConfiguration());
-        Dimension fitted = GuiScale.fitWindow(scale.scaleForGUI(520, 245), available);
-        setMinimumSize(new Dimension(Math.min(scale.scaleForGUI(400), fitted.width),
-                Math.min(scale.scaleForGUI(220), fitted.height)));
+        Dimension fitted = GuiScale.fitWindow(new Dimension(
+                Math.max(getWidth(), scale.size("dialog.sm")), getHeight()), available);
+        setMinimumSize(new Dimension(Math.min(scale.size("dialog.sm"), fitted.width),
+                fitted.height));
         setSize(fitted);
         setLocationRelativeTo(owner);
         Rectangle placed = getBounds();
@@ -216,6 +215,18 @@ final class SubfolderDialog extends JDialog {
     private void cancel() {
         result = null;
         dispose();
+    }
+
+    /** A text field at least {@code control.md} high, so it lines up with the dialog's buttons. */
+    private static JTextField controlField(GuiScale scale, int columns) {
+        return new JTextField(columns) {
+            @Override
+            public Dimension getPreferredSize() {
+                Dimension preferred = super.getPreferredSize();
+                return new Dimension(preferred.width,
+                        Math.max(preferred.height, scale.size("control.md")));
+            }
+        };
     }
 
     private JButton button(String text, String name, boolean primary) {

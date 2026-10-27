@@ -59,6 +59,10 @@ import java.util.Objects;
  * remains usable while diagnostics are being saved in the background.
  */
 final class LauncherErrorDialog extends JDialog {
+    /** Lines of details shown initially, and kept visible when the dialog is shrunk. */
+    private static final int DETAIL_LINES = 12;
+    private static final int MINIMUM_DETAIL_LINES = 4;
+
     private final JLabel logging;
 
     private LauncherErrorDialog(Window owner, String title, String details, String loggingStatus,
@@ -75,30 +79,31 @@ final class LauncherErrorDialog extends JDialog {
         JLabel heading = new JLabel(title);
         heading.setName("launcherErrorHeading");
         heading.setForeground(FirstLaunchPanel.ACCENT);
-        heading.setFont(scale.font(base, Font.BOLD, 20f));
+        heading.setFont(scale.font(base, "headline"));
         heading.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         JTextArea area = LauncherFrame.textArea(details);
         area.setName("errorDetails");
-        area.setFont(scale.font(base, Font.PLAIN, 13f));
+        area.setFont(scale.font(base, "body"));
         area.setBackground(NormalInstallConfirmationDialog.FIELD_BACKGROUND);
         area.setForeground(FirstLaunchPanel.TEXT);
         area.setCaretColor(FirstLaunchPanel.TEXT);
         area.setSelectionColor(LauncherTheme.SELECTION_BACKGROUND);
         area.setSelectedTextColor(LauncherTheme.TEXT);
-        area.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(7),
-                scale.scaleForGUI(9), scale.scaleForGUI(7), scale.scaleForGUI(9)));
+        area.setBorder(scale.padding("sm", "md"));
         JScrollPane scroll = new JScrollPane(area);
         LauncherTheme.styleScrollPane(scroll, scale);
         scroll.setBorder(BorderFactory.createLineBorder(LauncherTheme.BORDER));
-        scroll.setPreferredSize(scale.scaleForGUI(640, 220));
+        scroll.setPreferredSize(new Dimension(scale.size("dialog.md"),
+                DETAIL_LINES * area.getFontMetrics(area.getFont()).getHeight()
+                        + area.getInsets().top + area.getInsets().bottom));
         scroll.getViewport().setBackground(NormalInstallConfirmationDialog.FIELD_BACKGROUND);
         scroll.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         logging = new JLabel(loggingStatus);
         logging.setName("errorLoggingStatus");
         logging.setForeground(FirstLaunchPanel.MUTED);
-        logging.setFont(scale.font(base, Font.PLAIN, 12f));
+        logging.setFont(scale.font(base, "small"));
         logging.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         JPanel fields = new JPanel();
@@ -106,9 +111,9 @@ final class LauncherErrorDialog extends JDialog {
         fields.setOpaque(false);
         fields.setLayout(new BoxLayout(fields, BoxLayout.Y_AXIS));
         fields.add(heading);
-        fields.add(Box.createVerticalStrut(scale.scaleForGUI(10)));
+        fields.add(Box.createVerticalStrut(scale.space("md")));
         fields.add(logging);
-        fields.add(Box.createVerticalStrut(scale.scaleForGUI(10)));
+        fields.add(Box.createVerticalStrut(scale.space("md")));
         fields.add(scroll);
 
         JButton copy = new FirstLaunchButton("Copy sanitized details", "copyErrorDetailsButton",
@@ -126,16 +131,15 @@ final class LauncherErrorDialog extends JDialog {
         actions.setOpaque(false);
         actions.setLayout(new BoxLayout(actions, BoxLayout.X_AXIS));
         actions.add(copy);
-        actions.add(Box.createHorizontalStrut(scale.scaleForGUI(10)));
+        actions.add(Box.createHorizontalStrut(scale.space("md")));
         actions.add(logs);
         actions.add(Box.createHorizontalGlue());
         actions.add(close);
 
-        JPanel content = new JPanel(new BorderLayout(0, scale.scaleForGUI(18)));
+        JPanel content = new JPanel(new BorderLayout(0, scale.space("xl")));
         content.setName("launcherErrorContent");
         content.setBackground(FirstLaunchPanel.BACKGROUND);
-        content.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(20),
-                scale.scaleForGUI(22), scale.scaleForGUI(18), scale.scaleForGUI(22)));
+        content.setBorder(scale.padding("xxl", "xxl"));
         content.add(fields, BorderLayout.CENTER);
         content.add(actions, BorderLayout.SOUTH);
         setContentPane(content);
@@ -145,8 +149,11 @@ final class LauncherErrorDialog extends JDialog {
         pack();
         Rectangle available = GuiScale.usableBounds(getGraphicsConfiguration());
         Dimension fitted = GuiScale.fitWindow(getSize(), available);
-        setMinimumSize(new Dimension(Math.min(scale.scaleForGUI(520), fitted.width),
-                Math.min(scale.scaleForGUI(340), fitted.height)));
+        // Shrinking takes height from the details, keeping a few lines of them visible.
+        int shrinkable = scroll.getPreferredSize().height
+                - MINIMUM_DETAIL_LINES * area.getFontMetrics(area.getFont()).getHeight();
+        setMinimumSize(new Dimension(Math.min(scale.size("dialog.sm"), fitted.width),
+                Math.max(1, fitted.height - Math.max(0, shrinkable))));
         setSize(fitted);
         setLocationRelativeTo(owner);
     }

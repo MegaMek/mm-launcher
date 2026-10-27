@@ -35,12 +35,10 @@ package org.megamek.launcher.gui;
 
 import org.megamek.launcher.design.swing.TokenPresentation;
 
-import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.plaf.basic.BasicButtonUI;
 import java.awt.Dimension;
-import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
@@ -64,10 +62,8 @@ final class FirstLaunchButton extends JButton {
         this.size = size;
         setName(name);
         getAccessibleContext().setAccessibleName(text);
-        setFont(scale.font(getFont(), Font.BOLD, size == Size.REGULAR ? 16f : 13f));
-        int vertical = scale.scaleForGUI(size == Size.REGULAR ? 12 : size == Size.SMALL ? 8 : 4);
-        int horizontal = scale.scaleForGUI(size == Size.REGULAR ? 24 : size == Size.SMALL ? 16 : 12);
-        setBorder(BorderFactory.createEmptyBorder(vertical, horizontal, vertical, horizontal));
+        setFont(scale.font(getFont(), size == Size.REGULAR ? "title" : "label"));
+        setBorder(size == Size.COMPACT ? scale.padding("xs", "md") : scale.padding("md", "xl"));
         setOpaque(false);
         setContentAreaFilled(false);
         setBorderPainted(false);
@@ -99,9 +95,9 @@ final class FirstLaunchButton extends JButton {
     public Dimension getPreferredSize() {
         Dimension preferred = ButtonDetail.grow(this, scale, super.getPreferredSize());
         int minimumWidth = size == Size.REGULAR ? 248 : size == Size.SMALL ? 160 : 0;
-        int minimumHeight = size == Size.REGULAR ? 46 : size == Size.SMALL ? 36 : LauncherTheme.CONTROL_HEIGHT;
+        int minimumHeight = scale.size(size == Size.REGULAR ? "control.lg" : "control.md");
         return new Dimension(Math.max(preferred.width, scale.scaleForGUI(minimumWidth)),
-                Math.max(preferred.height, scale.scaleForGUI(minimumHeight)));
+                Math.max(preferred.height, minimumHeight));
     }
 
     @Override

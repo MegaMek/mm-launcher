@@ -142,7 +142,8 @@ public final class LauncherFrame extends JFrame {
     private final NormalInstallLocationPrompts normalInstallLocationPrompts;
     private final BusyGate gate = new BusyGate();
     private final Map<Component, Boolean> enabledBeforeWork = new IdentityHashMap<>();
-    private final JPanel content = new JPanel(new BorderLayout(12, 12));
+    private final JPanel content = new JPanel(new BorderLayout(
+            GuiScale.DEFAULT.space("lg"), GuiScale.DEFAULT.space("lg")));
     private final JLabel status = new JLabel("Loading installations…");
     private final Set<String> checkedOnOpen =
             java.util.Collections.synchronizedSet(new HashSet<>());
@@ -176,6 +177,9 @@ public final class LauncherFrame extends JFrame {
     private LauncherServices.SettingsView launcherSettings;
     private Throwable launcherSettingsError;
     private boolean settingsLoading;
+    /** How long Settings may load behind the previous page before its placeholder is shown. */
+    private static final int SETTINGS_PLACEHOLDER_DELAY_MS = 400;
+    private javax.swing.Timer settingsPlaceholderTimer;
     private boolean newsRequested;
     private boolean newsLoading;
     private List<LauncherNewsFeed.Article> newsArticles = List.of();
@@ -224,7 +228,7 @@ public final class LauncherFrame extends JFrame {
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         setMinimumSize(guiScale.scaleForGUI(680, 470));
         setPreferredSize(guiScale.scaleForGUI(1180, 820));
-        content.setBorder(BorderFactory.createEmptyBorder(20, 24, 18, 24));
+        content.setBorder(guiScale.padding("xxl", "xxl", "xl", "xxl"));
         setContentPane(content);
         addWindowListener(new WindowAdapter() {
             @Override public void windowClosing(WindowEvent event) {
@@ -350,14 +354,14 @@ public final class LauncherFrame extends JFrame {
         homeInformationLabel.setOpaque(false);
         homeInformationLabel.setForeground(LauncherTheme.ACCENT);
         homeInformationLabel.setFont(guiScale.font(
-                homeInformationLabel.getFont(), Font.PLAIN, 12f));
+                homeInformationLabel.getFont(), "small"));
         homeInformationLabel.setHorizontalAlignment(javax.swing.SwingConstants.LEFT);
         homeInformationRow = new JPanel(new BorderLayout());
         homeInformationRow.setName("homeInformationRow");
         homeInformationRow.setOpaque(false);
         homeInformationRow.setBorder(BorderFactory.createEmptyBorder(0,
-                guiScale.scaleForGUI(8), guiScale.scaleForGUI(12),
-                guiScale.scaleForGUI(8)));
+                guiScale.space("md"), guiScale.space("lg"),
+                guiScale.space("md")));
         homeInformationRow.setAlignmentX(Component.CENTER_ALIGNMENT);
         homeInformationRow.add(homeInformationLabel, BorderLayout.WEST);
         homeInformationRow.setMaximumSize(new Dimension(Integer.MAX_VALUE,
@@ -366,7 +370,7 @@ public final class LauncherFrame extends JFrame {
         updateHomeInformationMessage();
         renderApplicationLaunches(center);
 
-        center.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
+        center.add(Box.createVerticalStrut(guiScale.space("lg")));
 
         JButton manage = homeButton("Installations", "manageInstallationsButton");
         manage.setMnemonic(java.awt.event.KeyEvent.VK_I);
@@ -377,7 +381,7 @@ public final class LauncherFrame extends JFrame {
         settings.setMnemonic(java.awt.event.KeyEvent.VK_S);
         settings.addActionListener(event -> navigateTo(Page.SETTINGS));
         JPanel navigation = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.CENTER,
-                guiScale.scaleForGUI(8), 0));
+                guiScale.space("md"), 0));
         navigation.setName("managedHomeNavigation");
         navigation.setOpaque(false);
         navigation.setAlignmentX(Component.CENTER_ALIGNMENT);
@@ -386,7 +390,7 @@ public final class LauncherFrame extends JFrame {
         JPanel links = new JPanel(new java.awt.GridBagLayout());
         links.setOpaque(false);
         links.add(communityLinks());
-        JPanel navigationRow = new NavigationRow(navigation, links, guiScale.scaleForGUI(8));
+        JPanel navigationRow = new NavigationRow(navigation, links, guiScale.space("md"));
         navigationRow.setName("managedHomeNavigationRow");
         navigationRow.setAlignmentX(Component.CENTER_ALIGNMENT);
         center.add(navigationRow);
@@ -415,7 +419,7 @@ public final class LauncherFrame extends JFrame {
             loading.setForeground(FirstLaunchPanel.MUTED);
             loading.setAlignmentX(Component.LEFT_ALIGNMENT);
             news.add(loading);
-            news.add(Box.createVerticalStrut(guiScale.scaleForGUI(6)));
+            news.add(Box.createVerticalStrut(guiScale.space("sm")));
         } else if (newsError != null) {
             JLabel unavailable = new JLabel("News is unavailable right now.");
             unavailable.setName("newsUnavailableMessage");
@@ -423,7 +427,7 @@ public final class LauncherFrame extends JFrame {
             unavailable.setToolTipText(errorDetail(newsError));
             unavailable.setAlignmentX(Component.LEFT_ALIGNMENT);
             news.add(unavailable);
-            news.add(Box.createVerticalStrut(guiScale.scaleForGUI(6)));
+            news.add(Box.createVerticalStrut(guiScale.space("sm")));
         } else {
             for (int i = 0; i < newsArticles.size(); i++) {
                 LauncherNewsFeed.Article article = newsArticles.get(i);
@@ -431,9 +435,9 @@ public final class LauncherFrame extends JFrame {
                         + " - " + article.title();
                 JLabel date = new JLabel(NEWS_DATE.format(article.published()));
                 date.setName("newsArticleDate" + i);
-                date.setFont(guiScale.font(date.getFont(), Font.PLAIN, 11f));
+                date.setFont(guiScale.font(date.getFont(), "caption"));
                 date.setForeground(FirstLaunchPanel.MUTED);
-                date.setBorder(BorderFactory.createEmptyBorder(0, guiScale.scaleForGUI(3), 0, 0));
+                date.setBorder(BorderFactory.createEmptyBorder(0, guiScale.space("xs"), 0, 0));
                 date.setAlignmentX(Component.LEFT_ALIGNMENT);
                 news.add(date);
                 JButton link = new LauncherLink(article.title(), "newsArticleButton" + i, guiScale);
@@ -443,7 +447,7 @@ public final class LauncherFrame extends JFrame {
                 link.getAccessibleContext().setAccessibleName(headline);
                 link.addActionListener(event -> openWebsite(article.link(), "MegaMek news"));
                 news.add(link);
-                news.add(Box.createVerticalStrut(guiScale.scaleForGUI(6)));
+                news.add(Box.createVerticalStrut(guiScale.space("sm")));
             }
         }
         JButton archive = new LauncherLink("All news", "allNewsButton", guiScale);
@@ -528,7 +532,12 @@ public final class LauncherFrame extends JFrame {
     private void loadSettingsPage() {
         if (settingsLoading) return;
         settingsLoading = true;
-        renderSettingsPage();
+        // A quick load swaps straight to the finished page instead of flashing a placeholder.
+        settingsPlaceholderTimer = new javax.swing.Timer(SETTINGS_PLACEHOLDER_DELAY_MS, event -> {
+            if (settingsLoading && page == Page.SETTINGS) renderSettingsPage();
+        });
+        settingsPlaceholderTimer.setRepeats(false);
+        settingsPlaceholderTimer.start();
         run("Loading settings", () -> {
             LauncherServices.SettingsView view = services.settingsView();
             try {
@@ -538,6 +547,7 @@ public final class LauncherFrame extends JFrame {
             }
         }, loaded -> {
             settingsLoading = false;
+            settingsPlaceholderTimer.stop();
             launcherSettings = loaded.view();
             launcherSettingsError = null;
             launchOptionsDocument = loaded.launchOptions();
@@ -549,6 +559,7 @@ public final class LauncherFrame extends JFrame {
             renderSettingsPage();
         }, error -> {
             settingsLoading = false;
+            settingsPlaceholderTimer.stop();
             launcherSettings = null;
             launcherSettingsError = error;
             recordErrorAsync("Reading launcher settings", error, ignored -> {
@@ -566,9 +577,9 @@ public final class LauncherFrame extends JFrame {
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
         JLabel heading = new JLabel("Launcher registry could not be loaded");
         heading.setName("registryErrorTitle");
-        heading.setFont(heading.getFont().deriveFont(Font.BOLD, 20f));
+        heading.setFont(guiScale.font(heading.getFont(), "headline"));
         panel.add(heading);
-        panel.add(Box.createVerticalStrut(10));
+        panel.add(Box.createVerticalStrut(guiScale.space("lg")));
         JTextArea details = textArea(errorDetail(error));
         details.setName("registryErrorDetails");
         panel.add(details);
@@ -576,7 +587,7 @@ public final class LauncherFrame extends JFrame {
         logging.setName("registryErrorLoggingStatus");
         panel.add(logging);
         recordErrorAsync("Launcher registry could not be loaded", error, logging::setText);
-        panel.add(Box.createVerticalStrut(10));
+        panel.add(Box.createVerticalStrut(guiScale.space("lg")));
         JButton retry = button("Retry", "retryRegistryButton");
         retry.addActionListener(event -> reload());
         panel.add(retry);
@@ -595,8 +606,7 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void restoreStandardChrome() {
-        content.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(20),
-                guiScale.scaleForGUI(24), guiScale.scaleForGUI(18), guiScale.scaleForGUI(24)));
+        content.setBorder(guiScale.padding("xxl", "xxl", "xl", "xxl"));
         content.setBackground(javax.swing.UIManager.getColor("Panel.background"));
         status.setFont(javax.swing.UIManager.getFont("Label.font"));
         status.setForeground(javax.swing.UIManager.getColor("Label.foreground"));
@@ -966,7 +976,7 @@ public final class LauncherFrame extends JFrame {
         }
         panel.add(launches);
         if (pending || pendingUninstall || unavailable) {
-            panel.add(Box.createVerticalStrut(guiScale.scaleForGUI(7)));
+            panel.add(Box.createVerticalStrut(guiScale.space("md")));
             String message = pendingUninstall
                     ? "Uninstall recovery required."
                     : pending
@@ -975,6 +985,8 @@ public final class LauncherFrame extends JFrame {
             JLabel blocker = homeStatusLabel(message);
             blocker.setName("homeActionRequiredMessage");
             blocker.setForeground(LauncherTheme.WARNING);
+            // BoxLayout offsets the whole column when one child keeps JLabel's default left alignment.
+            blocker.setAlignmentX(Component.CENTER_ALIGNMENT);
             panel.add(blocker);
         }
     }
@@ -1073,7 +1085,7 @@ public final class LauncherFrame extends JFrame {
     private JLabel homeStatusLabel(String text) {
         JLabel label = new JLabel(text);
         label.setForeground(FirstLaunchPanel.ACCENT);
-        label.setFont(guiScale.font(label.getFont(), Font.BOLD, 12f));
+        label.setFont(guiScale.font(label.getFont(), "body.strong"));
         return label;
     }
 
@@ -1271,18 +1283,16 @@ public final class LauncherFrame extends JFrame {
     private void renderInstallationsPage() {
         installationMenuButtons.clear();
         content.removeAll();
-        content.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(18),
-                guiScale.scaleForGUI(22), guiScale.scaleForGUI(14),
-                guiScale.scaleForGUI(22)));
+        content.setBorder(guiScale.padding("xxl", "xxl", "xl", "xxl"));
         content.setBackground(FirstLaunchPanel.BACKGROUND);
         JPanel header = new JPanel(new BorderLayout());
         header.setBackground(FirstLaunchPanel.BACKGROUND);
         header.setBorder(BorderFactory.createEmptyBorder(0, 0,
-                guiScale.scaleForGUI(12), 0));
+                guiScale.space("lg"), 0));
         JLabel title = new JLabel("Installations", javax.swing.SwingConstants.CENTER);
         title.setName("pageTitle");
         title.setForeground(FirstLaunchPanel.TEXT);
-        title.setFont(guiScale.font(title.getFont(), Font.BOLD, 24f));
+        title.setFont(guiScale.font(title.getFont(), "headline"));
         header.add(title, BorderLayout.NORTH);
         JPanel topActions = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT,
                 0, 0));
@@ -1295,7 +1305,7 @@ public final class LauncherFrame extends JFrame {
                 "manageAddExistingButton");
         importExisting.addActionListener(event -> chooseExisting());
         topActions.add(install);
-        topActions.add(Box.createHorizontalStrut(guiScale.scaleForGUI(8)));
+        topActions.add(Box.createHorizontalStrut(guiScale.space("md")));
         topActions.add(importExisting);
         header.add(topActions, BorderLayout.SOUTH);
         content.add(header, BorderLayout.NORTH);
@@ -1307,13 +1317,12 @@ public final class LauncherFrame extends JFrame {
         cards.setBackground(FirstLaunchPanel.BACKGROUND);
         for (InstallationRecord record : data.installations()) {
             cards.add(installationCard(record));
-            cards.add(Box.createVerticalStrut(guiScale.scaleForGUI(9)));
+            cards.add(Box.createVerticalStrut(guiScale.space("md")));
         }
         JScrollPane scroll = LauncherTheme.scrollPane(cards);
         scroll.setName("installationCardsScrollPane");
         scroll.setBorder(BorderFactory.createEmptyBorder());
         scroll.getViewport().setBackground(FirstLaunchPanel.BACKGROUND);
-        scroll.getVerticalScrollBar().setUnitIncrement(guiScale.scaleForGUI(16));
         scroll.getViewport().addChangeListener(event -> {
             int rightInset = scroll.getWidth() - scroll.getViewport().getX()
                     - scroll.getViewport().getWidth();
@@ -1331,8 +1340,8 @@ public final class LauncherFrame extends JFrame {
     }
 
     private JPanel installationCard(InstallationRecord record) {
-        JPanel card = new JPanel(new BorderLayout(guiScale.scaleForGUI(12),
-                guiScale.scaleForGUI(8))) {
+        JPanel card = new JPanel(new BorderLayout(guiScale.space("lg"),
+                guiScale.space("md"))) {
             @Override
             public Dimension getMaximumSize() {
                 Dimension preferred = getPreferredSize();
@@ -1343,9 +1352,7 @@ public final class LauncherFrame extends JFrame {
         card.setBackground(FirstLaunchPanel.PANEL);
         card.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(LauncherTheme.BORDER),
-                BorderFactory.createEmptyBorder(guiScale.scaleForGUI(12),
-                        guiScale.scaleForGUI(14), guiScale.scaleForGUI(12),
-                        guiScale.scaleForGUI(14))));
+                guiScale.padding("lg", "xl")));
         card.setAlignmentX(Component.CENTER_ALIGNMENT);
         LauncherServices.InstallationStatus local = installationLocalStatus(record);
         String version = knownInstallationVersion(record);
@@ -1365,20 +1372,20 @@ public final class LauncherFrame extends JFrame {
         JLabel name = new JLabel(displayName);
         name.setName("installationName-" + record.id());
         name.setForeground(FirstLaunchPanel.TEXT);
-        name.setFont(guiScale.font(name.getFont(), Font.BOLD, 18f));
+        name.setFont(guiScale.font(name.getFont(), "title"));
         titleRow.add(name);
         if (version != null || channel != null) {
-            titleRow.add(Box.createHorizontalStrut(guiScale.scaleForGUI(10)));
+            titleRow.add(Box.createHorizontalStrut(guiScale.space("md")));
             JLabel details = new JLabel((version == null ? "" : version)
                     + (version != null && channel != null ? " · " : "")
                     + (channel == null ? "" : channel));
             details.setName("installationDetails-" + record.id());
             details.setForeground(FirstLaunchPanel.MUTED);
-            details.setFont(guiScale.font(details.getFont(), Font.PLAIN, 14f));
+            details.setFont(guiScale.font(details.getFont(), "body"));
             titleRow.add(details);
         }
         summary.add(titleRow);
-        summary.add(Box.createVerticalStrut(guiScale.scaleForGUI(5)));
+        summary.add(Box.createVerticalStrut(guiScale.space("xs")));
         boolean missing = local != null && local.missing();
         boolean ownershipProvenance = !missing && hasOwnershipProvenance(local);
         boolean fixedChannel = hasFixedChannel(local);
@@ -1445,13 +1452,13 @@ public final class LauncherFrame extends JFrame {
             checkOnOpen.setEnabled(pendingSelection == null);
             checkOnOpen.addActionListener(event -> saveCheckOnOpen(
                     record, expectedPreference, checkOnOpen));
-            summary.add(Box.createVerticalStrut(guiScale.scaleForGUI(4)));
+            summary.add(Box.createVerticalStrut(guiScale.space("xs")));
             summary.add(checkOnOpen);
         }
         card.add(summary, BorderLayout.CENTER);
 
         JPanel actions = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT,
-                guiScale.scaleForGUI(7), 0));
+                guiScale.space("md"), 0));
         actions.setOpaque(false);
         InstallationCheck checked = installationChecks.get(record.id());
         boolean updateAvailable = checked != null && checked.result() != null
@@ -1462,7 +1469,7 @@ public final class LauncherFrame extends JFrame {
             actions.add(recover);
         } else if (updateAvailable && updateManaged) {
             JButton update = homeButton("Update", "applyUpdateButton");
-            update.setFont(guiScale.font(update.getFont(), Font.BOLD, 14f));
+            update.setFont(guiScale.font(update.getFont(), "label"));
             ChannelUpdateChecker.Result captured = checked.result();
             UpdatePreviewService.Eligibility eligibility = local.previewEligibility();
             update.addActionListener(event ->
@@ -1743,16 +1750,14 @@ public final class LauncherFrame extends JFrame {
         // items don't need. Zero it so only the explicit border below
         // controls spacing.
         item.setMargin(new java.awt.Insets(0, 0, 0, 0));
-        item.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(9),
-                guiScale.scaleForGUI(12), guiScale.scaleForGUI(9),
-                guiScale.scaleForGUI(12)));
+        item.setBorder(guiScale.padding("md", "lg"));
         item.getAccessibleContext().setAccessibleName(text);
         return item;
     }
 
     private JPanel installationMenuSeparator() {
-        int height = guiScale.scaleForGUI(11);
-        int inset = guiScale.scaleForGUI(12);
+        int height = guiScale.space("lg");
+        int inset = guiScale.space("lg");
         JPanel separator = new JPanel() {
             @Override
             protected void paintComponent(java.awt.Graphics graphics) {
@@ -1855,15 +1860,13 @@ public final class LauncherFrame extends JFrame {
         details.setName("adoptionCandidateContent");
         details.setLayout(new BoxLayout(details, BoxLayout.Y_AXIS));
         details.setBackground(FirstLaunchPanel.BACKGROUND);
-        details.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(14),
-                guiScale.scaleForGUI(18), guiScale.scaleForGUI(8),
-                guiScale.scaleForGUI(20)));
-        int detailGap = guiScale.scaleForGUI(8);
+        details.setBorder(guiScale.padding("xl", "xxl", "md", "xxl"));
+        int detailGap = guiScale.space("md");
 
         JLabel heading = new JLabel("Enable managed updates");
         heading.setName("adoptionCandidateHeading");
         heading.setForeground(FirstLaunchPanel.ACCENT);
-        heading.setFont(guiScale.font(heading.getFont(), Font.BOLD, 22f));
+        heading.setFont(guiScale.font(heading.getFont(), "headline"));
         heading.setAlignmentX(Component.LEFT_ALIGNMENT);
         details.add(heading);
         details.add(Box.createVerticalStrut(detailGap));
@@ -1912,14 +1915,13 @@ public final class LauncherFrame extends JFrame {
         dialog.setName("adoptionCandidateDialog");
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         JPanel actions = new JPanel(new java.awt.FlowLayout(
-                java.awt.FlowLayout.RIGHT, guiScale.scaleForGUI(8), 0));
+                java.awt.FlowLayout.RIGHT, guiScale.space("md"), 0));
         actions.setBackground(FirstLaunchPanel.BACKGROUND);
         actions.setBorder(BorderFactory.createEmptyBorder(
-                0, 0, guiScale.scaleForGUI(12), 0));
+                0, 0, guiScale.space("lg"), 0));
         JButton cancel = homeButton("Cancel", "cancelAdoptionButton");
         JButton continueButton = homeButton("Continue", "continueAdoptionButton");
-        continueButton.setFont(guiScale.font(
-                continueButton.getFont(), Font.BOLD, 14f));
+        continueButton.setFont(guiScale.font(continueButton.getFont(), "label"));
         continueButton.setMnemonic(KeyEvent.VK_C);
         continueButton.getAccessibleContext().setAccessibleDescription(
                 "Find the matching official version and verify this copy without changing it.");
@@ -1928,13 +1930,13 @@ public final class LauncherFrame extends JFrame {
                 "Close without contacting the release service.");
         actions.add(cancel);
         actions.add(continueButton);
-        JPanel body = new JPanel(new BorderLayout(0, guiScale.scaleForGUI(12)));
+        JPanel body = new JPanel(new BorderLayout(0, guiScale.space("xl")));
         body.setBackground(FirstLaunchPanel.BACKGROUND);
         body.add(details, BorderLayout.CENTER);
         body.add(actions, BorderLayout.SOUTH);
         dialog.setContentPane(body);
-        Dimension requested = guiScale.scaleForGUI(560, 235);
-        dialog.setSize(GuiScale.fitWindow(requested,
+        packToWidth(dialog, "dialog.md");
+        dialog.setSize(GuiScale.fitWindow(dialog.getSize(),
                 GuiScale.usableBounds(getGraphicsConfiguration())));
         dialog.setLocationRelativeTo(this);
 
@@ -1996,7 +1998,7 @@ public final class LauncherFrame extends JFrame {
         heading.setLayout(new BoxLayout(heading, BoxLayout.Y_AXIS));
         JLabel title = new JLabel("Choose the matching official version");
         title.setForeground(FirstLaunchPanel.ACCENT);
-        title.setFont(guiScale.font(title.getFont(), Font.BOLD, 21f));
+        title.setFont(guiScale.font(title.getFont(), "headline"));
         title.setAlignmentX(Component.LEFT_ALIGNMENT);
         JLabel explanation = new JLabel("<html>Use this list when the detected version could "
                 + "not be resolved automatically. The selected package must still match the "
@@ -2004,29 +2006,27 @@ public final class LauncherFrame extends JFrame {
         explanation.setForeground(FirstLaunchPanel.MUTED);
         explanation.setAlignmentX(Component.LEFT_ALIGNMENT);
         heading.add(title);
-        heading.add(Box.createVerticalStrut(guiScale.scaleForGUI(6)));
+        heading.add(Box.createVerticalStrut(guiScale.space("xs")));
         heading.add(explanation);
-        heading.add(Box.createVerticalStrut(guiScale.scaleForGUI(8)));
+        heading.add(Box.createVerticalStrut(guiScale.space("md")));
         heading.add(fetch);
 
-        JPanel actions = new JPanel(new BorderLayout(guiScale.scaleForGUI(8), 0));
+        JPanel actions = new JPanel(new BorderLayout(guiScale.space("md"), 0));
         actions.setOpaque(false);
         actions.add(status, BorderLayout.CENTER);
         JPanel buttons = new JPanel(new java.awt.FlowLayout(
-                java.awt.FlowLayout.RIGHT, guiScale.scaleForGUI(8), 0));
+                java.awt.FlowLayout.RIGHT, guiScale.space("md"), 0));
         buttons.setOpaque(false);
         buttons.add(next);
         buttons.add(cancel);
         buttons.add(continueButton);
         actions.add(buttons, BorderLayout.EAST);
 
-        JPanel body = new JPanel(new BorderLayout(guiScale.scaleForGUI(10),
-                guiScale.scaleForGUI(10)));
+        JPanel body = new JPanel(new BorderLayout(guiScale.space("lg"),
+                guiScale.space("lg")));
         body.setName("adoptionReleaseBrowserContent");
         body.setBackground(FirstLaunchPanel.BACKGROUND);
-        body.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(16),
-                guiScale.scaleForGUI(18), guiScale.scaleForGUI(14),
-                guiScale.scaleForGUI(18)));
+        body.setBorder(guiScale.padding("xxl", "xxl"));
         body.add(heading, BorderLayout.NORTH);
         body.add(LauncherTheme.scrollPane(releases), BorderLayout.CENTER);
         body.add(actions, BorderLayout.SOUTH);
@@ -2034,7 +2034,7 @@ public final class LauncherFrame extends JFrame {
         dialog.setName("adoptionReleaseBrowser");
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         dialog.setContentPane(body);
-        dialog.setSize(guiScale.scaleForGUI(720, 450));
+        dialog.setSize(guiScale.size("dialog.lg"), guiScale.size("dialog.sm"));
         dialog.setLocationRelativeTo(this);
 
         Consumer<Integer> load = requested -> {
@@ -2202,7 +2202,7 @@ public final class LauncherFrame extends JFrame {
                         + "<br><br>No files were changed. You can keep using this installation, "
                         + "or install a separate managed copy for updates.");
         JPanel actions = new JPanel(new java.awt.FlowLayout(
-                java.awt.FlowLayout.RIGHT, guiScale.scaleForGUI(8), 0));
+                java.awt.FlowLayout.RIGHT, guiScale.space("md"), 0));
         actions.setOpaque(false);
         JButton close = homeButton("Close", "closeAdoptionResultButton");
         actions.add(close);
@@ -2230,12 +2230,12 @@ public final class LauncherFrame extends JFrame {
                         + mismatch.requiredChannel()
                         + " to verify this copy and enable managed updates.");
         JPanel actions = new JPanel(new java.awt.FlowLayout(
-                java.awt.FlowLayout.RIGHT, guiScale.scaleForGUI(8), 0));
+                java.awt.FlowLayout.RIGHT, guiScale.space("md"), 0));
         actions.setOpaque(false);
         JButton close = homeButton("Close", "closeAdoptionResultButton");
         JButton retry = homeButton("Try " + mismatch.requiredChannel(),
                 "retrySuggestedAdoptionButton");
-        retry.setFont(guiScale.font(retry.getFont(), Font.BOLD, 14f));
+        retry.setFont(guiScale.font(retry.getFont(), "label"));
         actions.add(close);
         actions.add(retry);
         body.add(actions, BorderLayout.SOUTH);
@@ -2265,12 +2265,10 @@ public final class LauncherFrame extends JFrame {
     }
 
     private JPanel adoptionResultBody(String headingText, String result) {
-        JPanel body = new JPanel(new BorderLayout(0, guiScale.scaleForGUI(14)));
+        JPanel body = new JPanel(new BorderLayout(0, guiScale.space("xl")));
         body.setName("adoptionResultContent");
         body.setBackground(FirstLaunchPanel.BACKGROUND);
-        body.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(18),
-                guiScale.scaleForGUI(20), guiScale.scaleForGUI(14),
-                guiScale.scaleForGUI(20)));
+        body.setBorder(guiScale.padding("xl", "xxl"));
 
         JPanel summary = new JPanel();
         summary.setOpaque(false);
@@ -2278,15 +2276,15 @@ public final class LauncherFrame extends JFrame {
         JLabel heading = new JLabel(headingText);
         heading.setName("adoptionResultHeading");
         heading.setForeground(FirstLaunchPanel.ACCENT);
-        heading.setFont(guiScale.font(heading.getFont(), Font.BOLD, 22f));
+        heading.setFont(guiScale.font(heading.getFont(), "headline"));
         heading.setAlignmentX(Component.LEFT_ALIGNMENT);
         summary.add(heading);
-        summary.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
+        summary.add(Box.createVerticalStrut(guiScale.space("lg")));
 
         JLabel message = new JLabel("<html>" + result + "</html>");
         message.setName("adoptionResultMessage");
         message.setForeground(FirstLaunchPanel.TEXT);
-        message.setFont(guiScale.font(message.getFont(), Font.PLAIN, 14f));
+        message.setFont(guiScale.font(message.getFont(), "body"));
         message.setAlignmentX(Component.LEFT_ALIGNMENT);
         summary.add(message);
         body.add(summary, BorderLayout.CENTER);
@@ -2298,10 +2296,19 @@ public final class LauncherFrame extends JFrame {
         dialog.setName("adoptionResultDialog");
         dialog.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         dialog.setContentPane(body);
-        dialog.setSize(guiScale.scaleForGUI(640, 275));
+        packToWidth(dialog, "dialog.md");
         dialog.setResizable(false);
         dialog.setLocationRelativeTo(this);
         return dialog;
+    }
+
+    /** Sizes {@code dialog} to its content, at least as wide as the design token {@code widthToken}. */
+    private void packToWidth(JDialog dialog, String widthToken) {
+        dialog.pack();
+        dialog.setSize(Math.max(dialog.getWidth(), guiScale.size(widthToken)), dialog.getHeight());
+        dialog.validate();
+        dialog.setSize(dialog.getWidth(), Math.max(dialog.getHeight(),
+                dialog.getPreferredSize().height));
     }
 
     private void renameInstallation(InstallationRecord record) {
@@ -2309,15 +2316,13 @@ public final class LauncherFrame extends JFrame {
         dialog.setName("renameInstallationDialog");
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         dialog.setResizable(false);
-        JPanel body = new JPanel(new BorderLayout(guiScale.scaleForGUI(12),
-                guiScale.scaleForGUI(12)));
+        JPanel body = new JPanel(new BorderLayout(guiScale.space("lg"),
+                guiScale.space("lg")));
         body.setBackground(FirstLaunchPanel.BACKGROUND);
-        body.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(20),
-                guiScale.scaleForGUI(22), guiScale.scaleForGUI(18),
-                guiScale.scaleForGUI(22)));
+        body.setBorder(guiScale.padding("xl", "xxl"));
         JLabel heading = new JLabel("Name this installation");
         heading.setForeground(FirstLaunchPanel.ACCENT);
-        heading.setFont(guiScale.font(heading.getFont(), Font.BOLD, 20f));
+        heading.setFont(guiScale.font(heading.getFont(), "headline"));
         body.add(heading, BorderLayout.NORTH);
 
         JPanel fields = new JPanel();
@@ -2328,17 +2333,17 @@ public final class LauncherFrame extends JFrame {
         name.setForeground(FirstLaunchPanel.TEXT);
         name.setBackground(FirstLaunchPanel.PANEL);
         name.setCaretColor(FirstLaunchPanel.TEXT);
-        name.setFont(guiScale.font(name.getFont(), Font.PLAIN, 15f));
+        name.setFont(guiScale.font(name.getFont(), "body"));
         name.getAccessibleContext().setAccessibleName("Installation name");
         fields.add(name);
-        fields.add(Box.createVerticalStrut(guiScale.scaleForGUI(7)));
+        fields.add(Box.createVerticalStrut(guiScale.space("xs")));
         JLabel hint = new JLabel("Only the launcher label changes, not the installation folder.");
         hint.setForeground(FirstLaunchPanel.MUTED);
         fields.add(hint);
         body.add(fields, BorderLayout.CENTER);
 
         JPanel actions = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT,
-                guiScale.scaleForGUI(8), 0));
+                guiScale.space("md"), 0));
         actions.setOpaque(false);
         JButton cancel = homeButton("Cancel", "cancelRenameButton");
         cancel.addActionListener(event -> dialog.dispose());
@@ -2365,7 +2370,7 @@ public final class LauncherFrame extends JFrame {
         body.add(actions, BorderLayout.SOUTH);
         dialog.setContentPane(body);
         dialog.getRootPane().setDefaultButton(save);
-        dialog.setSize(guiScale.scaleForGUI(530, 190));
+        packToWidth(dialog, "dialog.md");
         dialog.setLocationRelativeTo(this);
         dialog.setVisible(true);
         name.selectAll();
@@ -2485,7 +2490,7 @@ public final class LauncherFrame extends JFrame {
         JPanel header = new JPanel();
         header.setLayout(new BoxLayout(header, BoxLayout.Y_AXIS));
         JLabel title = new JLabel(titleText);
-        title.setFont(title.getFont().deriveFont(Font.BOLD, 24f));
+        title.setFont(guiScale.font(title.getFont(), "headline"));
         title.setName("pageTitle");
         header.add(title);
         header.add(new JLabel(subtitle));
@@ -2514,9 +2519,7 @@ public final class LauncherFrame extends JFrame {
             launchOptionsDraft = launchOptionsDirty() ? launchOptionsForm.values() : null;
         }
         content.removeAll();
-        content.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(18),
-                guiScale.scaleForGUI(22), guiScale.scaleForGUI(16),
-                guiScale.scaleForGUI(22)));
+        content.setBorder(guiScale.padding("xxl", "xxl", "xl", "xxl"));
         content.setBackground(FirstLaunchPanel.BACKGROUND);
         JPanel heading = pageHeader("Settings",
                 "Launcher preferences and local diagnostics.");
@@ -2544,15 +2547,15 @@ public final class LauncherFrame extends JFrame {
             left.add(loading);
         } else if (launcherSettings != null) {
             left.add(appearanceSection());
-            left.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
+            left.add(Box.createVerticalStrut(guiScale.space("lg")));
             JPanel java = settingsSection("Game Java");
             JLabel runtime = new JLabel("Java " + launcherSettings.defaultJavaFeature());
             runtime.setName("defaultJavaStatus");
             runtime.setForeground(FirstLaunchPanel.TEXT);
             runtime.setAlignmentX(Component.LEFT_ALIGNMENT);
             java.add(runtime);
-            java.add(Box.createVerticalStrut(guiScale.scaleForGUI(4)));
-            JPanel javaRow = new JPanel(new BorderLayout(guiScale.scaleForGUI(10), 0));
+            java.add(Box.createVerticalStrut(guiScale.space("xs")));
+            JPanel javaRow = new JPanel(new BorderLayout(guiScale.space("lg"), 0));
             javaRow.setName("defaultJavaRow");
             javaRow.setOpaque(false);
             javaRow.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -2563,7 +2566,7 @@ public final class LauncherFrame extends JFrame {
             javaPath.setEditable(false);
             javaPath.setBorder(BorderFactory.createEmptyBorder());
             javaPath.setOpaque(false);
-            javaPath.setFont(guiScale.font(javaPath.getFont(), Font.PLAIN, 12f));
+            javaPath.setFont(guiScale.font(javaPath.getFont(), "small"));
             javaPath.setForeground(FirstLaunchPanel.MUTED);
             javaPath.setCaretPosition(0);
             javaPath.getAccessibleContext().setAccessibleName("Game Java path");
@@ -2576,10 +2579,10 @@ public final class LauncherFrame extends JFrame {
             javaRow.setMaximumSize(new Dimension(Integer.MAX_VALUE,
                     javaPath.getPreferredSize().height));
             java.add(javaRow);
-            java.add(Box.createVerticalStrut(guiScale.scaleForGUI(6)));
+            java.add(Box.createVerticalStrut(guiScale.space("sm")));
             java.add(changeJava);
             left.add(java);
-            left.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
+            left.add(Box.createVerticalStrut(guiScale.space("lg")));
 
             JPanel diagnostics = settingsSection("Diagnostics");
             JButton logs = homeButton("View logs", "viewOperationLogsButton");
@@ -2589,7 +2592,7 @@ public final class LauncherFrame extends JFrame {
             diagnostics.add(logs);
             left.add(diagnostics);
             if (LauncherSelfUpdate.available()) {
-                left.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
+                left.add(Box.createVerticalStrut(guiScale.space("lg")));
                 JPanel updater = settingsSection("Launcher update");
                 JButton check = homeButton("Check for launcher update", "checkLauncherUpdateButton");
                 check.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -2649,7 +2652,7 @@ public final class LauncherFrame extends JFrame {
         JLabel intro = mutedSettingsLabel("Used by every installation unless it sets its own.");
         intro.setName("launchOptionsIntro");
         section.add(intro);
-        section.add(Box.createVerticalStrut(guiScale.scaleForGUI(8)));
+        section.add(Box.createVerticalStrut(guiScale.space("md")));
         JLabel message = new JLabel(" ");
         message.setName("settingsLaunchOptionsMessage");
         message.setForeground(LauncherTheme.WARNING);
@@ -2667,9 +2670,9 @@ public final class LauncherFrame extends JFrame {
         form.setAlignmentX(Component.LEFT_ALIGNMENT);
         launchOptionsForm = form;
         section.add(form);
-        section.add(Box.createVerticalStrut(guiScale.scaleForGUI(6)));
+        section.add(Box.createVerticalStrut(guiScale.space("sm")));
         section.add(message);
-        section.add(Box.createVerticalStrut(guiScale.scaleForGUI(6)));
+        section.add(Box.createVerticalStrut(guiScale.space("sm")));
         boolean dirty = launchOptionsDirty();
         revert.setEnabled(dirty);
         save.setEnabled(dirty);
@@ -2702,7 +2705,7 @@ public final class LauncherFrame extends JFrame {
         actions.setOpaque(false);
         actions.setAlignmentX(Component.LEFT_ALIGNMENT);
         actions.add(revert);
-        actions.add(Box.createHorizontalStrut(guiScale.scaleForGUI(8)));
+        actions.add(Box.createHorizontalStrut(guiScale.space("md")));
         actions.add(save);
         actions.setMaximumSize(new Dimension(Integer.MAX_VALUE, actions.getPreferredSize().height));
         section.add(actions);
@@ -2725,7 +2728,7 @@ public final class LauncherFrame extends JFrame {
         LauncherAppearance current = LauncherAppearance.current();
         JLabel themeLabel = mutedSettingsLabel("Theme");
         section.add(themeLabel);
-        section.add(Box.createVerticalStrut(guiScale.scaleForGUI(4)));
+        section.add(Box.createVerticalStrut(guiScale.space("xs")));
         StyledComboBox<LauncherAppearance.Theme> theme =
                 new StyledComboBox<>(LauncherAppearance.Theme.values(), guiScale);
         theme.setName("appearanceThemeCombo");
@@ -2920,7 +2923,7 @@ public final class LauncherFrame extends JFrame {
         online.addActionListener(event -> openWebsite(
                 java.net.URI.create(PLAY_ONLINE_URL), "megamek.games"));
         JPanel links = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.CENTER,
-                guiScale.scaleForGUI(12), 0));
+                guiScale.space("lg"), 0));
         links.setName("communityLinks");
         links.setOpaque(false);
         links.setAlignmentX(Component.CENTER_ALIGNMENT);
@@ -2953,16 +2956,14 @@ public final class LauncherFrame extends JFrame {
         section.setName("settings" + titleText.replace(" ", "") + "Section");
         section.setLayout(new BoxLayout(section, BoxLayout.Y_AXIS));
         section.setOpaque(false);
-        section.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(10),
-                guiScale.scaleForGUI(14), guiScale.scaleForGUI(12),
-                guiScale.scaleForGUI(14)));
+        section.setBorder(guiScale.padding("lg", "xl"));
         section.setAlignmentX(Component.LEFT_ALIGNMENT);
         JLabel title = new JLabel(titleText);
         title.setForeground(FirstLaunchPanel.ACCENT);
-        title.setFont(guiScale.font(title.getFont(), Font.BOLD, 17f));
+        title.setFont(guiScale.font(title.getFont(), "title"));
         title.setAlignmentX(Component.LEFT_ALIGNMENT);
         section.add(title);
-        section.add(Box.createVerticalStrut(guiScale.scaleForGUI(7)));
+        section.add(Box.createVerticalStrut(guiScale.space("md")));
         return section;
     }
 
@@ -2976,7 +2977,7 @@ public final class LauncherFrame extends JFrame {
                 private final int breakpoint;
 
                 private ResponsiveSettingsSections(GuiScale scale) {
-                    gap = scale.scaleForGUI(12);
+                    gap = scale.space("lg");
                     breakpoint = scale.scaleForGUI(800);
                     setLayout(null);
                 }
@@ -3144,21 +3145,19 @@ public final class LauncherFrame extends JFrame {
         JDialog dialog = new JDialog(this, title, false);
         dialog.setName("javaSelectionDialog");
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-        JPanel body = new JPanel(new BorderLayout(guiScale.scaleForGUI(10),
-                guiScale.scaleForGUI(12)));
+        JPanel body = new JPanel(new BorderLayout(guiScale.space("lg"),
+                guiScale.space("lg")));
         body.setName("javaSelectionDialogContent");
         body.setBackground(FirstLaunchPanel.BACKGROUND);
-        body.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(18),
-                guiScale.scaleForGUI(20), guiScale.scaleForGUI(16),
-                guiScale.scaleForGUI(20)));
+        body.setBorder(guiScale.padding("xl", "xxl"));
         JLabel heading = new JLabel("Choose Java 21 or newer");
         heading.setForeground(FirstLaunchPanel.ACCENT);
-        heading.setFont(guiScale.font(heading.getFont(), Font.BOLD, 20f));
+        heading.setFont(guiScale.font(heading.getFont(), "headline"));
         body.add(heading, BorderLayout.NORTH);
         body.add(choices, BorderLayout.CENTER);
 
         JPanel actions = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT,
-                guiScale.scaleForGUI(8), 0));
+                guiScale.space("md"), 0));
         actions.setOpaque(false);
         JButton cancel = homeButton("Cancel", "cancelJavaSelectionButton");
         cancel.addActionListener(event -> dialog.dispose());
@@ -3182,7 +3181,7 @@ public final class LauncherFrame extends JFrame {
         body.add(actions, BorderLayout.SOUTH);
         dialog.setContentPane(body);
         dialog.getRootPane().setDefaultButton(use);
-        dialog.setSize(guiScale.scaleForGUI(720, 190));
+        packToWidth(dialog, "dialog.lg");
         dialog.setLocationRelativeTo(this);
         dialog.setVisible(true);
         choices.requestFocusInWindow();
@@ -3535,11 +3534,9 @@ public final class LauncherFrame extends JFrame {
             releases.setSelectionBackground(LauncherTheme.SELECTION_BACKGROUND);
             releases.setSelectionForeground(
                     LauncherTheme.TEXT);
-            releases.setFixedCellHeight(guiScale.scaleForGUI(42));
-            releases.setFont(guiScale.font(releases.getFont(), Font.PLAIN, 13f));
-            releases.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(5),
-                    guiScale.scaleForGUI(5), guiScale.scaleForGUI(5),
-                    guiScale.scaleForGUI(5)));
+            releases.setFixedCellHeight(guiScale.size("control.sm"));
+            releases.setFont(guiScale.font(releases.getFont(), "body"));
+            releases.setBorder(guiScale.padding("sm", "sm"));
             releases.getAccessibleContext().setAccessibleName("Available official releases");
             releases.getAccessibleContext().setAccessibleDescription(
                     "The selected current channel release and historical releases whose channel "
@@ -3548,10 +3545,8 @@ public final class LauncherFrame extends JFrame {
                 JLabel label = new JLabel(value == null ? "" : value.toString());
                 label.setOpaque(true);
                 label.setEnabled(value != null && value.assessment().eligible());
-                label.setFont(guiScale.font(label.getFont(), Font.PLAIN, 13f));
-                label.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(8),
-                        guiScale.scaleForGUI(10), guiScale.scaleForGUI(8),
-                        guiScale.scaleForGUI(10)));
+                label.setFont(guiScale.font(label.getFont(), "body"));
+                label.setBorder(guiScale.padding("xs", "lg"));
                 label.setBackground(selected
                         ? LauncherTheme.SELECTION_BACKGROUND : FirstLaunchPanel.PANEL);
                 label.setForeground(selected
@@ -3584,7 +3579,7 @@ public final class LauncherFrame extends JFrame {
             selectors.setOpaque(false);
             java.awt.GridBagConstraints selectorCell = new java.awt.GridBagConstraints();
             selectorCell.gridy = 0;
-            selectorCell.insets = new java.awt.Insets(0, 0, 0, guiScale.scaleForGUI(7));
+            selectorCell.insets = new java.awt.Insets(0, 0, 0, guiScale.space("md"));
             selectorCell.anchor = java.awt.GridBagConstraints.LINE_START;
             JLabel productLabel = styledPickerLabel("Product:");
             productLabel.setLabelFor(product);
@@ -3618,11 +3613,11 @@ public final class LauncherFrame extends JFrame {
             JLabel title = styledPickerLabel("Install another version");
             title.setName("installAnotherVersionHeading");
             title.setForeground(FirstLaunchPanel.ACCENT);
-            title.setFont(guiScale.font(title.getFont(), Font.BOLD, 22f));
+            title.setFont(guiScale.font(title.getFont(), "headline"));
             title.setAlignmentX(Component.LEFT_ALIGNMENT);
             selectors.setAlignmentX(Component.LEFT_ALIGNMENT);
             heading.add(title);
-            heading.add(Box.createVerticalStrut(guiScale.scaleForGUI(12)));
+            heading.add(Box.createVerticalStrut(guiScale.space("lg")));
             heading.add(selectors);
 
             JScrollPane scroll = LauncherTheme.scrollPane(releases);
@@ -3632,36 +3627,33 @@ public final class LauncherFrame extends JFrame {
             scroll.getViewport().setBackground(FirstLaunchPanel.PANEL);
 
             JPanel resultActions = new JPanel(new java.awt.FlowLayout(
-                    java.awt.FlowLayout.RIGHT, guiScale.scaleForGUI(8), 0));
+                    java.awt.FlowLayout.RIGHT, guiScale.space("md"), 0));
             resultActions.setOpaque(false);
             resultActions.add(previous);
             pageIndicator.setName("releasePageIndicator");
             pageIndicator.setForeground(FirstLaunchPanel.TEXT);
-            pageIndicator.setFont(guiScale.font(
-                    pageIndicator.getFont(), Font.BOLD, 12f));
+            pageIndicator.setFont(guiScale.font(pageIndicator.getFont(), "label"));
             pageIndicator.getAccessibleContext().setAccessibleName("Release page");
             resultActions.add(pageIndicator);
             resultActions.add(next);
             resultActions.add(install);
             requestStatus.setName("releasePickerStatus");
             requestStatus.setForeground(FirstLaunchPanel.MUTED);
-            requestStatus.setFont(guiScale.font(
-                    requestStatus.getFont(), Font.PLAIN, 12f));
+            requestStatus.setFont(guiScale.font(requestStatus.getFont(), "small"));
             requestStatus.getAccessibleContext().setAccessibleName("Release picker status");
-            requestStatus.setPreferredSize(new Dimension(1, guiScale.scaleForGUI(20)));
-            JPanel bottom = new JPanel(new BorderLayout(guiScale.scaleForGUI(8),
-                    guiScale.scaleForGUI(3)));
+            requestStatus.setPreferredSize(new Dimension(1,
+                    requestStatus.getFontMetrics(requestStatus.getFont()).getHeight()));
+            JPanel bottom = new JPanel(new BorderLayout(guiScale.space("md"),
+                    guiScale.space("xs")));
             bottom.setOpaque(false);
             bottom.add(requestStatus, BorderLayout.NORTH);
             bottom.add(resultActions, BorderLayout.CENTER);
 
-            JPanel body = new JPanel(new BorderLayout(guiScale.scaleForGUI(12),
-                    guiScale.scaleForGUI(12)));
+            JPanel body = new JPanel(new BorderLayout(guiScale.space("lg"),
+                    guiScale.space("lg")));
             body.setName("releasePickerContent");
             body.setBackground(FirstLaunchPanel.BACKGROUND);
-            body.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(18),
-                    guiScale.scaleForGUI(20), guiScale.scaleForGUI(18),
-                    guiScale.scaleForGUI(20)));
+            body.setBorder(guiScale.padding("xxl", "xxl"));
             body.add(heading, BorderLayout.NORTH);
             body.add(scroll, BorderLayout.CENTER);
             body.add(bottom, BorderLayout.SOUTH);
@@ -3673,8 +3665,10 @@ public final class LauncherFrame extends JFrame {
             dialog.setContentPane(body);
             Rectangle available = GuiScale.usableBounds(
                     LauncherFrame.this.getGraphicsConfiguration());
-            Dimension minimum = guiScale.scaleForGUI(680, 420);
-            Dimension requested = guiScale.scaleForGUI(940, 540);
+            Dimension minimum = new Dimension(guiScale.size("dialog.md"),
+                    guiScale.size("dialog.sm"));
+            Dimension requested = new Dimension(guiScale.size("dialog.lg"),
+                    guiScale.size("dialog.md"));
             Dimension fitted = GuiScale.fitWindow(requested, available);
             dialog.setMinimumSize(new Dimension(
                     Math.min(minimum.width, fitted.width),
@@ -3730,7 +3724,7 @@ public final class LauncherFrame extends JFrame {
         private JLabel styledPickerLabel(String text) {
             JLabel label = new JLabel(text);
             label.setForeground(FirstLaunchPanel.TEXT);
-            label.setFont(guiScale.font(label.getFont(), Font.BOLD, 13f));
+            label.setFont(guiScale.font(label.getFont(), "label"));
             return label;
         }
 
@@ -3968,12 +3962,12 @@ public final class LauncherFrame extends JFrame {
         bottom.add(pageLabel);
         bottom.add(next);
         bottom.add(inspect);
-        JPanel body = new JPanel(new BorderLayout(8, 8));
+        JPanel body = new JPanel(new BorderLayout(guiScale.space("md"), guiScale.space("md")));
         body.add(top, BorderLayout.NORTH);
         body.add(LauncherTheme.scrollPane(releases), BorderLayout.CENTER);
         body.add(bottom, BorderLayout.SOUTH);
         JDialog dialog = dialog("Choose update", body, null,
-                new Dimension(780, 460));
+                new Dimension(guiScale.size("dialog.lg"), guiScale.size("dialog.sm")));
         Consumer<Integer> load = requested -> {
             next.setEnabled(false);
             run("Fetching official releases", () -> services.releases(repository, requested),
@@ -4267,7 +4261,7 @@ public final class LauncherFrame extends JFrame {
         JTextArea details = textArea(text.toString());
         details.setName("updatePreviewResults");
         JDialog dialog = dialog("Read-only update preview", LauncherTheme.scrollPane(details), null,
-                new Dimension(900, 620));
+                new Dimension(guiScale.size("dialog.lg"), guiScale.size("dialog.md")));
         dialog.setVisible(true);
     }
 
@@ -4633,8 +4627,7 @@ public final class LauncherFrame extends JFrame {
         area.setCaretColor(FirstLaunchPanel.ACCENT);
         area.setSelectionColor(LauncherTheme.SELECTION_BACKGROUND);
         area.setSelectedTextColor(LauncherTheme.TEXT);
-        area.setFont(guiScale.font(new Font(Font.MONOSPACED, Font.PLAIN, 12),
-                Font.PLAIN, 12f));
+        area.setFont(guiScale.font(new Font(Font.MONOSPACED, Font.PLAIN, 12), "small"));
         JScrollPane scroll = LauncherTheme.scrollPane(area);
         scroll.setName("operationLogScrollPane");
         scroll.setBorder(BorderFactory.createLineBorder(LauncherTheme.BORDER));
@@ -4642,16 +4635,14 @@ public final class LauncherFrame extends JFrame {
 
         JDialog viewer = new JDialog(this, "Local operation logs", false);
         viewer.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-        JPanel body = new JPanel(new BorderLayout(guiScale.scaleForGUI(8),
-                guiScale.scaleForGUI(8)));
+        JPanel body = new JPanel(new BorderLayout(guiScale.space("md"),
+                guiScale.space("md")));
         body.setName("operationLogDialogContent");
         body.setBackground(FirstLaunchPanel.BACKGROUND);
-        body.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(16),
-                guiScale.scaleForGUI(18), guiScale.scaleForGUI(14),
-                guiScale.scaleForGUI(18)));
+        body.setBorder(guiScale.padding("xxl", "xxl"));
         JLabel heading = new JLabel("Local operation logs");
         heading.setForeground(FirstLaunchPanel.ACCENT);
-        heading.setFont(guiScale.font(heading.getFont(), Font.BOLD, 20f));
+        heading.setFont(guiScale.font(heading.getFont(), "headline"));
         body.add(heading, BorderLayout.NORTH);
         body.add(scroll, BorderLayout.CENTER);
 
@@ -4665,7 +4656,7 @@ public final class LauncherFrame extends JFrame {
         actions.add(close);
         body.add(actions, BorderLayout.SOUTH);
         viewer.setContentPane(body);
-        viewer.setSize(guiScale.scaleForGUI(850, 600));
+        viewer.setSize(guiScale.size("dialog.lg"), guiScale.size("dialog.md"));
         viewer.setLocationRelativeTo(this);
         viewer.setVisible(true);
         new SwingWorker<String, Void>() {
@@ -4700,8 +4691,8 @@ public final class LauncherFrame extends JFrame {
     private JDialog dialog(String title, Component center, Component south, Dimension size) {
         JDialog dialog = new JDialog(this, title, false);
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-        JPanel panel = new JPanel(new BorderLayout(8, 8));
-        panel.setBorder(BorderFactory.createEmptyBorder(12, 12, 12, 12));
+        JPanel panel = new JPanel(new BorderLayout(guiScale.space("md"), guiScale.space("md")));
+        panel.setBorder(guiScale.padding("xxl", "xxl"));
         panel.add(center instanceof JScrollPane ? center : LauncherTheme.scrollPane(center),
                 BorderLayout.CENTER);
         if (south != null) panel.add(south, BorderLayout.SOUTH);
@@ -4943,7 +4934,7 @@ public final class LauncherFrame extends JFrame {
 
         private ResponsiveHomeActions(GuiScale scale) {
             this.scale = scale;
-            gap = scale.scaleForGUI(8);
+            gap = scale.space("md");
             setLayout(new java.awt.GridLayout(0, columns, gap, gap));
         }
 

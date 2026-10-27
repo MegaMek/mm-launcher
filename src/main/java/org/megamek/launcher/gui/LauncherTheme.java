@@ -47,6 +47,7 @@ import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.Shape;
@@ -86,14 +87,22 @@ final class LauncherTheme {
     static final Color BUTTON_ICON = role("border.strong");
     static final Color BUTTON_BORDER = role("border.control");
     static final Color POPUP_BACKGROUND = role("surface.popover");
-    static final int CONTROL_HEIGHT = 30;
+    /** Dialog and form controls (selects, buttons) share the design system's control.md height. */
+    static final int CONTROL_HEIGHT = tokenSize("control.md");
+    /** Primary launch-sized buttons use control.lg. */
+    static final int LARGE_CONTROL_HEIGHT = tokenSize("control.lg");
 
     private LauncherTheme() {
     }
 
+    private static int tokenSize(String key) {
+        Float size = DesignTokens.shipped().size().get(key);
+        if (size == null) throw new IllegalStateException("Missing design token size " + key);
+        return Math.round(size);
+    }
+
     static int radius(GuiScale scale) {
-        return Math.max(1, Math.round(scale.scaleForGUI(
-                DesignTokens.shipped().radius().getOrDefault("md", 3f))));
+        return Math.max(1, scale.radius("md"));
     }
 
     static void paintButton(Graphics2D graphics, int width, int height, GuiScale scale,
@@ -120,7 +129,7 @@ final class LauncherTheme {
     }
 
     static void paintOutline(Graphics2D graphics, int width, int height, GuiScale scale, Color border) {
-        float stroke = Math.max(1f, scale.scaleForGUI(1f));
+        float stroke = Math.max(1f, scale.size("border"));
         graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         graphics.setPaint(border);
         graphics.setStroke(new BasicStroke(stroke));
@@ -129,7 +138,7 @@ final class LauncherTheme {
 
     /** The focus ring, drawn just inside the control edge so it never clips. */
     static void paintFocus(Graphics2D graphics, int width, int height, GuiScale scale) {
-        float stroke = Math.max(1f, scale.scaleForGUI(2f));
+        float stroke = Math.max(1f, scale.size("focus.width"));
         graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         graphics.setPaint(FOCUS);
         graphics.setStroke(new BasicStroke(stroke));
@@ -173,12 +182,20 @@ final class LauncherTheme {
     }
 
     static void styleScrollPane(JScrollPane pane, GuiScale scale) {
+        int line = scrollLine(pane, scale);
         if (pane.getVerticalScrollBar() != null) {
-            pane.getVerticalScrollBar().setUnitIncrement(scale.scaleForGUI(16));
+            pane.getVerticalScrollBar().setUnitIncrement(line);
         }
         if (pane.getHorizontalScrollBar() != null) {
-            pane.getHorizontalScrollBar().setUnitIncrement(scale.scaleForGUI(16));
+            pane.getHorizontalScrollBar().setUnitIncrement(line);
         }
+    }
+
+    /** One scroll step: a line of the design system's body text. */
+    static int scrollLine(Component component, GuiScale scale) {
+        Font base = javax.swing.UIManager.getFont("Label.font");
+        if (base == null) base = component.getFont();
+        return component.getFontMetrics(scale.font(base, "body")).getHeight();
     }
 
     static void styleContent(Component component, GuiScale scale) {
@@ -186,7 +203,7 @@ final class LauncherTheme {
             styleScrollPane(pane, scale);
             pane.getViewport().setBackground(PANEL);
             if (pane.getBorder() == null || pane.getBorder() instanceof UIResource) {
-                pane.setBorder(BorderFactory.createLineBorder(BORDER, scale.scaleForGUI(1)));
+                pane.setBorder(BorderFactory.createLineBorder(BORDER, scale.size("border")));
             }
         }
         // Preserve explicit warning and status colours; replace only look-and-feel defaults.

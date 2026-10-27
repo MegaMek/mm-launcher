@@ -582,6 +582,10 @@ class LauncherSwingSmokeTest {
                     controlLayout.getConstraints(channel).gridy);
             assertEquals(controlLayout.getConstraints(product).gridy,
                     controlLayout.getConstraints(fetch).gridy);
+            int fetchHeight = onEdt(() -> fetch.getPreferredSize().height);
+            assertEquals(fetchHeight, (int) onEdt(() -> product.getPreferredSize().height),
+                    "selects and buttons in one row share the control.md height");
+            assertEquals(fetchHeight, (int) onEdt(() -> channel.getPreferredSize().height));
             SwingUtilities.invokeAndWait(fetch::doClick);
             waitFor(() -> {
                 JList<?> found = findList(dialog, "releaseList");

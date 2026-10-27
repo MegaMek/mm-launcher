@@ -111,6 +111,7 @@ public final class ApplicationLauncher {
         command.add("--add-opens=java.base/java.util=ALL-UNNAMED");
         command.add("--add-opens=java.base/java.util.concurrent=ALL-UNNAMED");
         command.add("-Dsun.awt.disablegrab=true");
+        command.addAll(garbageCollectorOptions(gameJava.feature(), extra));
         command.addAll(extra);
         command.add("-cp");
         List<String> jars = new ArrayList<>();
@@ -126,6 +127,32 @@ public final class ApplicationLauncher {
             throws IOException, InterruptedException {
         return launch(record, product, gameJava, LaunchOptions.builtIn());
     }
+
+    /**
+     * The suite's garbage collector defaults: generational ZGC. Java 21 and 22 need
+     * {@code -XX:+ZGenerational} to select it; from Java 23 it is ZGC's only behaviour and the flag
+     * just prints a deprecation or obsolete-option warning. A player who picks a collector or ZGC mode
+     * in the additional Java options keeps that choice, since the JVM refuses to start with two
+     * collectors.
+     */
+    static List<String> garbageCollectorOptions(int javaFeature, List<String> userArguments) {
+        boolean collectorChosen = false;
+        boolean modeChosen = false;
+        for (String argument : userArguments) {
+            if (COLLECTOR_CHOICE.matcher(argument).matches()) collectorChosen = true;
+            if (argument.startsWith("-XX:+ZGenerational") || argument.startsWith("-XX:-ZGenerational")) {
+                modeChosen = true;
+            }
+        }
+        if (collectorChosen) return List.of();
+        List<String> options = new ArrayList<>();
+        options.add("-XX:+UseZGC");
+        if (javaFeature < 23 && !modeChosen) options.add("-XX:+ZGenerational");
+        return List.copyOf(options);
+    }
+
+    private static final java.util.regex.Pattern COLLECTOR_CHOICE =
+            java.util.regex.Pattern.compile("-XX:[+-]Use\\w*GC");
 
     public int launch(InstallationRecord record, String product,
                       JavaRuntime.CurrentJava gameJava, LaunchOptions options)

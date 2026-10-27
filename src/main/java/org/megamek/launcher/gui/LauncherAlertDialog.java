@@ -34,7 +34,6 @@
 package org.megamek.launcher.gui;
 
 import javax.swing.AbstractAction;
-import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
@@ -84,19 +83,19 @@ final class LauncherAlertDialog extends JDialog {
         JLabel heading = new JLabel(title);
         heading.setName("launcherAlertHeading");
         heading.setForeground(FirstLaunchPanel.ACCENT);
-        heading.setFont(scale.font(base, Font.BOLD, 20f));
+        heading.setFont(scale.font(base, "headline"));
         heading.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         JLabel body = wrappedLabel(message, "launcherAlertMessage",
-                scale.font(base, Font.PLAIN, 14f), FirstLaunchPanel.TEXT,
-                scale.scaleForGUI(420));
+                scale.font(base, "body"), FirstLaunchPanel.TEXT,
+                scale.size("dialog.sm"));
 
         JPanel fields = new JPanel();
         fields.setName("launcherAlertFields");
         fields.setOpaque(false);
         fields.setLayout(new BoxLayout(fields, BoxLayout.Y_AXIS));
         fields.add(heading);
-        fields.add(Box.createVerticalStrut(scale.scaleForGUI(14)));
+        fields.add(Box.createVerticalStrut(scale.space("lg")));
         fields.add(body);
 
         JPanel actions = new JPanel();
@@ -114,16 +113,15 @@ final class LauncherAlertDialog extends JDialog {
                 result = label;
                 dispose();
             });
-            if (i > 0) actions.add(Box.createHorizontalStrut(scale.scaleForGUI(10)));
+            if (i > 0) actions.add(Box.createHorizontalStrut(scale.space("md")));
             actions.add(button);
             if (primary) defaultButton = button;
         }
 
-        JPanel content = new JPanel(new BorderLayout(0, scale.scaleForGUI(18)));
+        JPanel content = new JPanel(new BorderLayout(0, scale.space("xl")));
         content.setName("launcherAlertContent");
         content.setBackground(FirstLaunchPanel.BACKGROUND);
-        content.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(20),
-                scale.scaleForGUI(22), scale.scaleForGUI(18), scale.scaleForGUI(22)));
+        content.setBorder(scale.padding("xxl", "xxl"));
         content.add(fields, BorderLayout.CENTER);
         content.add(actions, BorderLayout.SOUTH);
         setContentPane(content);
@@ -142,8 +140,8 @@ final class LauncherAlertDialog extends JDialog {
         pack();
         Rectangle available = GuiScale.usableBounds(getGraphicsConfiguration());
         Dimension fitted = GuiScale.fitWindow(getSize(), available);
-        setMinimumSize(new Dimension(Math.min(scale.scaleForGUI(360), fitted.width),
-                Math.min(scale.scaleForGUI(160), fitted.height)));
+        setMinimumSize(new Dimension(Math.min(scale.size("dialog.sm"), fitted.width),
+                fitted.height));
         setSize(fitted);
         setLocationRelativeTo(owner);
     }

@@ -33,6 +33,10 @@
 
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.design.DesignTokens;
+
+import javax.swing.BorderFactory;
+import javax.swing.border.Border;
 import javax.swing.text.StyleContext;
 import java.awt.Dimension;
 import java.awt.Font;
@@ -40,6 +44,7 @@ import java.awt.GraphicsConfiguration;
 import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.Toolkit;
+import java.util.Map;
 
 /**
  * Scales application metrics in Swing's logical coordinate space. Java's per-monitor transform
@@ -73,6 +78,50 @@ public final class GuiScale {
     public Insets insets(int top, int left, int bottom, int right) {
         return new Insets(scaleForGUI(top), scaleForGUI(left),
                 scaleForGUI(bottom), scaleForGUI(right));
+    }
+
+    /** The scaled design token {@code space.<name>}, such as "md". */
+    public int space(String name) {
+        return scaleForGUI(Math.round(token(DesignTokens.shipped().space(), "space", name)));
+    }
+
+    /** The scaled design token {@code size.<name>}, such as "control.md" or "dialog.sm". */
+    public int size(String name) {
+        return scaleForGUI(Math.round(token(DesignTokens.shipped().size(), "size", name)));
+    }
+
+    /** The scaled design token {@code radius.<name>}. */
+    public int radius(String name) {
+        return scaleForGUI(Math.round(token(DesignTokens.shipped().radius(), "radius", name)));
+    }
+
+    /** Scaled insets from {@code space} tokens. */
+    public Insets spaceInsets(String top, String left, String bottom, String right) {
+        return new Insets(space(top), space(left), space(bottom), space(right));
+    }
+
+    /** An empty border from {@code space} tokens. */
+    public Border padding(String top, String left, String bottom, String right) {
+        return BorderFactory.createEmptyBorder(space(top), space(left), space(bottom), space(right));
+    }
+
+    /** An empty border of {@code vertical} above and below and {@code horizontal} on the sides. */
+    public Border padding(String vertical, String horizontal) {
+        return padding(vertical, horizontal, vertical, horizontal);
+    }
+
+    /** {@code base} in the design system's text style {@code styleName}, such as "body" or "headline". */
+    public Font font(Font base, String styleName) {
+        DesignTokens.TypeStyle style = DesignTokens.shipped().typeStyle(styleName);
+        return font(base, style.weight() >= 500 ? Font.BOLD : Font.PLAIN, style.size());
+    }
+
+    private static float token(Map<String, Float> group, String groupName, String name) {
+        Float value = group.get(name);
+        if (value == null) {
+            throw new IllegalArgumentException("Unknown design token " + groupName + "." + name);
+        }
+        return value;
     }
 
     /**

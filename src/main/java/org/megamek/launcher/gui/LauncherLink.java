@@ -13,7 +13,6 @@ package org.megamek.launcher.gui;
 
 import javax.accessibility.AccessibleContext;
 import javax.accessibility.AccessibleRole;
-import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.KeyStroke;
@@ -22,7 +21,6 @@ import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Cursor;
 import java.awt.Dimension;
-import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Insets;
@@ -49,10 +47,9 @@ final class LauncherLink extends JButton {
         putClientProperty("html.disable", Boolean.TRUE);
         setText(Objects.requireNonNull(text, "text"));
         setName(name);
-        setFont(scale.font(getFont(), Font.PLAIN, 13f));
+        setFont(scale.font(getFont(), "body"));
         setForeground(LauncherTheme.ACCENT);
-        setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(4), scale.scaleForGUI(3),
-                scale.scaleForGUI(4), scale.scaleForGUI(3)));
+        setBorder(scale.padding("xs", "xs"));
         setOpaque(false);
         setContentAreaFilled(false);
         setBorderPainted(false);
@@ -109,7 +106,7 @@ final class LauncherLink extends JButton {
                 - insets.left - insets.right;
         float height = insets.top + insets.bottom;
         for (TextLayout line : lines(textWidth)) {
-            height += line.getAscent() + line.getDescent() + line.getLeading() + scale.scaleForGUI(2f);
+            height += line.getAscent() + line.getDescent() + line.getLeading() + scale.space("xxs");
         }
         return new Dimension(naturalWidth, (int) Math.ceil(height));
     }
@@ -129,7 +126,7 @@ final class LauncherLink extends JButton {
         Graphics2D canvas = (Graphics2D) graphics.create();
         try {
             canvas.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-            canvas.setStroke(new BasicStroke(Math.max(1f, scale.scaleForGUI(1f))));
+            canvas.setStroke(new BasicStroke(Math.max(1f, scale.size("border"))));
             Color text = !isEnabled() ? LauncherTheme.DISABLED_TEXT
                     : getModel().isRollover() ? LauncherTheme.TEXT : LauncherTheme.ACCENT;
             canvas.setColor(text);
@@ -138,10 +135,10 @@ final class LauncherLink extends JButton {
             for (TextLayout line : lines(getWidth() - insets.left - insets.right)) {
                 y += line.getAscent();
                 line.draw(canvas, insets.left, y);
-                float underline = y + scale.scaleForGUI(1f);
+                float underline = y + scale.size("border");
                 canvas.draw(new Line2D.Float(insets.left, underline,
                         insets.left + line.getAdvance(), underline));
-                y += line.getDescent() + line.getLeading() + scale.scaleForGUI(2f);
+                y += line.getDescent() + line.getLeading() + scale.space("xxs");
             }
             if (isFocusOwner()) {
                 LauncherTheme.paintFocus(canvas, getWidth(), getHeight(), scale);
