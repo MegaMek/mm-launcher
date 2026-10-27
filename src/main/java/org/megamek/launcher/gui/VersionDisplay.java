@@ -48,6 +48,17 @@ final class VersionDisplay {
         return label.toString();
     }
 
+    /** Sentence-case value line under a short game-mode label, e.g. "Milestone · 0.51.0". */
+    static String channelVersion(String channel, String version) {
+        StringBuilder value = new StringBuilder();
+        if (channel != null && !channel.isBlank()) value.append(channel);
+        if (version != null && !version.isBlank()) {
+            if (!value.isEmpty()) value.append(" · ");
+            value.append(version);
+        }
+        return value.toString();
+    }
+
     static String installLatest(String program, String channel, String version) {
         return "Install latest " + programChannelVersion(program, channel, version);
     }

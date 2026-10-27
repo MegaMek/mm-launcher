@@ -207,7 +207,7 @@ final class SwingTestSupport {
 
     static int countButtonText(Container root, String text) throws Exception {
         return onEdt(() -> count(root, child ->
-                child instanceof JButton button && text.equals(button.getText())));
+                child instanceof JButton button && text.equals(label(button))));
     }
 
     private static int count(Container root, Predicate<Component> matches) {
@@ -219,9 +219,22 @@ final class SwingTestSupport {
         return count;
     }
 
+    /** The full sentence a screen reader announces, including any detail line or badge. */
+    static String spoken(AbstractButton button) {
+        return button.getAccessibleContext().getAccessibleName();
+    }
+
+    /**
+     * The label the launcher gave {@code button}. On a game screen (Home and first launch) tokens-v0 shows button
+     * text upper-cased and keeps the label that was set as the text source.
+     */
+    static String label(AbstractButton button) {
+        return button.getClientProperty("MegaMek.textSource") instanceof String source ? source : button.getText();
+    }
+
     private static AbstractButton buttonText(Container root, String text) {
         for (Component child : root.getComponents()) {
-            if (child instanceof AbstractButton button && text.equals(button.getText())) return button;
+            if (child instanceof AbstractButton button && text.equals(label(button))) return button;
             if (child instanceof Container nested) {
                 AbstractButton found = buttonText(nested, text);
                 if (found != null) return found;

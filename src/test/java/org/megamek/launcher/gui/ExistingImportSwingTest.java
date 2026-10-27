@@ -252,7 +252,7 @@ class ExistingImportSwingTest {
             onEdt(() -> {
                 assertEquals(1, countNamed(frame, "useExistingCopyButton"));
                 assertEquals("Use existing installation",
-                        findButton(frame, "useExistingCopyButton").getText());
+                        SwingTestSupport.label(findButton(frame, "useExistingCopyButton")));
                 JLabel caption = (JLabel) find(frame, "existingCopyCaption");
                 assertNotNull(caption);
                 assertEquals("MegaMek, MekHQ, or MegaMekLab", caption.getText());

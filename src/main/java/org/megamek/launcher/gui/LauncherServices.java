@@ -279,6 +279,19 @@ public class LauncherServices {
         return normalInstalls.install(plan, progress, context);
     }
 
+    /** The saved appearance; unreadable settings fall back to the default look. */
+    LauncherAppearance appearance() {
+        try {
+            return settings.read().appearance().launcherAppearance();
+        } catch (IOException | RuntimeException error) {
+            return LauncherAppearance.DEFAULT;
+        }
+    }
+
+    void saveAppearance(LauncherAppearance appearance) throws IOException {
+        settings.writeAppearance(appearance);
+    }
+
     public SettingsView settingsView() throws IOException, InterruptedException {
         LauncherSettingsStore.Settings current = settings.read();
         if (current.defaultJavaExecutable() == null) {

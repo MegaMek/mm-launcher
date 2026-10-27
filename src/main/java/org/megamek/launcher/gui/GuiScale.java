@@ -46,6 +46,8 @@ import java.awt.Toolkit;
  */
 public final class GuiScale {
     public static final GuiScale DEFAULT = new GuiScale(1f);
+    private static final String REGULAR_FAMILY = "Roboto";
+    private static final String MEDIUM_FAMILY = "Roboto Medium";
     private final float factor;
 
     public GuiScale(float factor) {
@@ -72,7 +74,17 @@ public final class GuiScale {
                 scaleForGUI(bottom), scaleForGUI(right));
     }
 
+    /**
+     * Derives {@code base} at {@code points}. The bundled Roboto has a real medium face, so bold
+     * Roboto text uses it instead of a synthesised bold.
+     */
     public Font font(Font base, int style, float points) {
+        String family = base.getFamily();
+        if (family.equals(REGULAR_FAMILY) || family.equals(MEDIUM_FAMILY)) {
+            boolean strong = (style & Font.BOLD) != 0;
+            return new Font(strong ? MEDIUM_FAMILY : REGULAR_FAMILY, style & ~Font.BOLD, 1)
+                    .deriveFont(scaleForGUI(points));
+        }
         return base.deriveFont(style, scaleForGUI(points));
     }
 

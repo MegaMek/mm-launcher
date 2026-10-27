@@ -7,17 +7,40 @@
  * it under the terms of the GNU General Public License (GPL),
  * version 3 or (at your option) any later version,
  * as published by the Free Software Foundation.
+ *
+ * MegaMek Launcher is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty
+ * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details.
+ *
+ * A copy of the GPL should have been included with this project;
+ * if not, see <https://www.gnu.org/licenses/>.
+ *
+ * NOTICE: The MegaMek organization is a non-profit group of volunteers
+ * creating free software for the BattleTech community.
+ *
+ * MechWarrior, BattleMech, `Mech and AeroTech are registered trademarks
+ * of The Topps Company, Inc. All Rights Reserved.
+ *
+ * Catalyst Game Labs and the Catalyst Game Labs logo are trademarks of
+ * InMediaRes Productions, LLC.
+ *
+ * MechWarrior Copyright Microsoft Corporation. MegaMek was created under
+ * Microsoft's "Game Content Usage Rules"
+ * <https://www.xbox.com/en-US/developers/rules> and it is not endorsed by or
+ * affiliated with Microsoft.
  */
 
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.design.DesignTokens;
+
+import javax.swing.BorderFactory;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
-import javax.swing.JToolTip;
-import javax.swing.UIManager;
 import javax.swing.plaf.UIResource;
 import javax.swing.text.JTextComponent;
 import java.awt.BasicStroke;
@@ -25,68 +48,103 @@ import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
 import java.awt.Graphics2D;
-import java.awt.HeadlessException;
-import java.awt.Toolkit;
+import java.awt.RenderingHints;
+import java.awt.Shape;
 import java.awt.event.FocusAdapter;
 import java.awt.event.FocusEvent;
-import java.awt.geom.Rectangle2D;
+import java.awt.geom.RoundRectangle2D;
 
 /**
- * Presentation primitives copied from MekHQ's Interstellar Map and ImmersiveControlStyle.
- * No campaign, game installation, or MegaMek preference dependencies belong here.
+ * The launcher's colours and control painting, expressed in MegaMek design-token roles.
+ * Every colour resolves its role in the installed {@link LauncherAppearance} each time it is
+ * painted, so switching between the light and dark looks or the colour-blind palette needs only a
+ * repaint.
  */
 final class LauncherTheme {
-    static final Color BACKGROUND = new Color(5, 12, 21);
-    static final Color PANEL = new Color(5, 13, 23);
-    static final Color TEXT = new Color(218, 231, 235);
-    static final Color MUTED = new Color(132, 153, 161);
-    static final Color ACCENT = new Color(65, 210, 224);
-    static final Color SELECTED = new Color(235, 166, 66);
-    static final Color BORDER = new Color(35, 66, 82);
-    static final Color CONTROL_BACKGROUND = new Color(12, 29, 42);
-    static final Color INPUT_BACKGROUND = new Color(17, 64, 78);
-    static final Color DISABLED_BACKGROUND = new Color(19, 29, 34);
-    static final Color ACTIVE_BACKGROUND = new Color(18, 45, 56);
-    static final Color PRESSED_BACKGROUND = new Color(33, 73, 82);
-    static final Color BUTTON_BACKGROUND = new Color(15, 30, 43);
-    static final Color BUTTON_ICON = new Color(125, 230, 238);
-    static final Color BUTTON_BORDER = new Color(65, 210, 224, 105);
-    static final Color POPUP_BACKGROUND = new Color(7, 16, 27);
-    static final Color SCROLLBAR_THUMB = new Color(54, 101, 113);
+    static final Color BACKGROUND = role("surface.base");
+    static final Color PANEL = role("surface.panel");
+    static final Color TEXT = role("text.primary");
+    static final Color SECONDARY_TEXT = role("text.secondary");
+    static final Color MUTED = role("text.muted");
+    static final Color DISABLED_TEXT = role("text.disabled");
+    static final Color ACCENT = role("accent.primary");
+    static final Color FOCUS = role("focus.ring");
+    static final Color WARNING = role("status.warning");
+    static final Color DANGER = role("status.danger");
+    static final Color SUCCESS = role("status.success");
+    static final Color BORDER = role("border.subtle");
+    static final Color CONTROL_BACKGROUND = role("surface.raised");
+    static final Color INPUT_BACKGROUND = role("surface.input");
+    static final Color DISABLED_BACKGROUND = role("surface.panel");
+    static final Color ACTIVE_BACKGROUND = washed("surface.raised", 1);
+    static final Color PRESSED_BACKGROUND = washed("surface.raised", 2);
+    static final Color SELECTION_BACKGROUND = layered("surface.panel", "selected.background");
+    static final Color BUTTON_BACKGROUND = role("surface.raised");
+    static final Color PRIMARY_BACKGROUND = role("surface.inverse");
+    static final Color PRIMARY_ACTIVE_BACKGROUND = layered("surface.inverse", "surface.hover");
+    static final Color PRIMARY_DISABLED_BACKGROUND = layered("surface.raised", "surface.inverseDisabled");
+    static final Color ON_PRIMARY = role("text.onInverse");
+    static final Color BUTTON_ICON = role("border.strong");
+    static final Color BUTTON_BORDER = role("border.control");
+    static final Color POPUP_BACKGROUND = role("surface.popover");
     static final int CONTROL_HEIGHT = 30;
 
     private LauncherTheme() {
     }
 
+    static int radius(GuiScale scale) {
+        return Math.max(1, Math.round(scale.scaleForGUI(
+                DesignTokens.shipped().radius().getOrDefault("md", 3f))));
+    }
+
     static void paintButton(Graphics2D graphics, int width, int height, GuiScale scale,
                             boolean enabled, boolean pressed, boolean hovered, boolean focused) {
-        Color background = !enabled ? DISABLED_BACKGROUND
+        paintButton(graphics, width, height, scale, false, enabled, pressed, hovered, focused);
+    }
+
+    static void paintButton(Graphics2D graphics, int width, int height, GuiScale scale, boolean primary,
+                            boolean enabled, boolean pressed, boolean hovered, boolean focused) {
+        Color background = primary && !enabled ? PRIMARY_DISABLED_BACKGROUND
+                : !enabled ? DISABLED_BACKGROUND
+                : primary ? (pressed || hovered ? PRIMARY_ACTIVE_BACKGROUND : PRIMARY_BACKGROUND)
                 : pressed ? PRESSED_BACKGROUND : hovered ? ACTIVE_BACKGROUND : BUTTON_BACKGROUND;
-        Color border = hovered || focused ? BUTTON_ICON : BUTTON_BORDER;
-        if (highContrast()) {
-            background = uiColor(pressed || hovered ? "Button.select" : "Button.background", Color.BLACK);
-            border = uiColor(focused ? "Focus.color" : "Button.foreground", Color.WHITE);
-        }
+        Color border = primary ? (enabled ? PRIMARY_BACKGROUND : PRIMARY_DISABLED_BACKGROUND)
+                : !enabled ? BORDER
+                : hovered || pressed ? BUTTON_ICON : BUTTON_BORDER;
+        graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         graphics.setPaint(background);
-        graphics.fillRect(0, 0, width, height);
+        graphics.fill(shape(width, height, scale, 0));
         paintOutline(graphics, width, height, scale, border);
+        if (focused && enabled) {
+            paintFocus(graphics, width, height, scale);
+        }
     }
 
     static void paintOutline(Graphics2D graphics, int width, int height, GuiScale scale, Color border) {
+        float stroke = Math.max(1f, scale.scaleForGUI(1f));
+        graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         graphics.setPaint(border);
-        float strokeWidth = Math.max(1f, scale.scaleForGUI(1f));
-        double inset = strokeWidth / 2.0;
-        graphics.setStroke(new BasicStroke(strokeWidth));
-        graphics.draw(new Rectangle2D.Double(inset, inset,
-                Math.max(0, width - strokeWidth), Math.max(0, height - strokeWidth)));
+        graphics.setStroke(new BasicStroke(stroke));
+        graphics.draw(shape(width, height, scale, stroke / 2f));
+    }
+
+    /** The focus ring, drawn just inside the control edge so it never clips. */
+    static void paintFocus(Graphics2D graphics, int width, int height, GuiScale scale) {
+        float stroke = Math.max(1f, scale.scaleForGUI(2f));
+        graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        graphics.setPaint(FOCUS);
+        graphics.setStroke(new BasicStroke(stroke));
+        graphics.draw(shape(width, height, scale, stroke / 2f));
+    }
+
+    private static Shape shape(int width, int height, GuiScale scale, float inset) {
+        float arc = 2f * radius(scale);
+        return new RoundRectangle2D.Float(inset, inset, Math.max(0, width - 2 * inset),
+                Math.max(0, height - 2 * inset), arc, arc);
     }
 
     static Color buttonText(boolean primary, boolean enabled) {
-        if (highContrast()) {
-            return uiColor(enabled ? "Button.foreground" : "Button.disabledText",
-                    enabled ? Color.WHITE : Color.LIGHT_GRAY);
-        }
-        return !enabled ? MUTED : TEXT;
+        return primary ? ON_PRIMARY : enabled ? TEXT : DISABLED_TEXT;
     }
 
     static void repaintOwnerOnFocusChange(JComponent component, JComponent owner) {
@@ -116,82 +174,96 @@ final class LauncherTheme {
     }
 
     static void styleScrollPane(JScrollPane pane, GuiScale scale) {
-        if (!highContrast()) {
-            if (pane.getVerticalScrollBar() != null) {
-                MapScrollBarStyle.apply(pane.getVerticalScrollBar(), scale);
-            }
-            if (pane.getHorizontalScrollBar() != null) {
-                MapScrollBarStyle.apply(pane.getHorizontalScrollBar(), scale);
-            }
+        if (pane.getVerticalScrollBar() != null) {
+            pane.getVerticalScrollBar().setUnitIncrement(scale.scaleForGUI(16));
         }
-    }
-
-    static JToolTip toolTip(JComponent component, GuiScale scale) {
-        JToolTip tooltip = new JToolTip();
-        tooltip.setComponent(component);
-        tooltip.setOpaque(true);
-        tooltip.setBackground(highContrast() ? uiColor("ToolTip.background", Color.BLACK) : POPUP_BACKGROUND);
-        tooltip.setForeground(highContrast() ? uiColor("ToolTip.foreground", Color.WHITE) : TEXT);
-        tooltip.setFont(component.getFont());
-        tooltip.setBorder(javax.swing.BorderFactory.createCompoundBorder(
-                javax.swing.BorderFactory.createLineBorder(
-                        highContrast() ? uiColor("ToolTip.foreground", Color.WHITE) : BUTTON_BORDER,
-                        Math.max(1, scale.scaleForGUI(1))),
-                javax.swing.BorderFactory.createEmptyBorder(scale.scaleForGUI(5), scale.scaleForGUI(8),
-                        scale.scaleForGUI(5), scale.scaleForGUI(8))));
-        return tooltip;
+        if (pane.getHorizontalScrollBar() != null) {
+            pane.getHorizontalScrollBar().setUnitIncrement(scale.scaleForGUI(16));
+        }
     }
 
     static void styleContent(Component component, GuiScale scale) {
         if (component instanceof JScrollPane pane) {
             styleScrollPane(pane, scale);
-            if (!highContrast()) {
-                pane.getViewport().setBackground(PANEL);
-                if (pane.getBorder() instanceof UIResource) {
-                    pane.setBorder(javax.swing.BorderFactory.createLineBorder(BORDER, scale.scaleForGUI(1)));
-                }
+            pane.getViewport().setBackground(PANEL);
+            if (pane.getBorder() == null || pane.getBorder() instanceof UIResource) {
+                pane.setBorder(BorderFactory.createLineBorder(BORDER, scale.scaleForGUI(1)));
             }
         }
-        if (!highContrast()) {
-            // Preserve explicit selection/warning colors; replace only look-and-feel defaults.
-            if (component instanceof JPanel && component.getBackground() instanceof UIResource) {
-                component.setBackground(BACKGROUND);
-            }
-            if (component instanceof JLabel && component.getForeground() instanceof UIResource) {
-                component.setForeground(TEXT);
-            }
-            if (component instanceof JList<?> list) {
-                list.setBackground(PANEL);
-                list.setForeground(TEXT);
-                list.setSelectionBackground(ACTIVE_BACKGROUND);
-                list.setSelectionForeground(ACCENT);
-            }
-            if (component instanceof JTextComponent text) {
-                if (text.getBackground() instanceof UIResource) text.setBackground(INPUT_BACKGROUND);
-                if (text.getForeground() instanceof UIResource) text.setForeground(TEXT);
-                text.setCaretColor(ACCENT);
-                text.setSelectionColor(ACTIVE_BACKGROUND);
-                text.setSelectedTextColor(ACCENT);
-            }
+        // Preserve explicit warning and status colours; replace only look-and-feel defaults.
+        if (component instanceof JPanel && component.getBackground() instanceof UIResource) {
+            component.setBackground(BACKGROUND);
+        }
+        if (component instanceof JLabel && component.getForeground() instanceof UIResource) {
+            component.setForeground(TEXT);
+        }
+        if (component instanceof JList<?> list) {
+            list.setBackground(PANEL);
+            list.setForeground(TEXT);
+            list.setSelectionBackground(SELECTION_BACKGROUND);
+            list.setSelectionForeground(TEXT);
+        }
+        if (component instanceof JTextComponent text) {
+            if (text.getBackground() instanceof UIResource) text.setBackground(INPUT_BACKGROUND);
+            if (text.getForeground() instanceof UIResource) text.setForeground(TEXT);
         }
         if (component instanceof Container container) {
             for (Component child : container.getComponents()) styleContent(child, scale);
         }
     }
 
-    static boolean highContrast() {
-        if (UIManager.getBoolean("Theme.highContrast") || UIManager.getBoolean("win.highContrast.on")) {
-            return true;
-        }
-        try {
-            return Boolean.TRUE.equals(Toolkit.getDefaultToolkit().getDesktopProperty("win.highContrast.on"));
-        } catch (HeadlessException ignored) {
-            return false;
-        }
+    private static Color role(String name) {
+        return new RoleColor(() -> DesignTokens.shipped().color(name, LauncherAppearance.mode()));
     }
 
-    static Color uiColor(String key, Color fallback) {
-        Color color = UIManager.getColor(key);
-        return color == null ? fallback : color;
+    private static Color layered(String base, String over) {
+        return new RoleColor(() -> over(DesignTokens.shipped().color(base, LauncherAppearance.mode()),
+                DesignTokens.shipped().color(over, LauncherAppearance.mode())));
+    }
+
+    private static Color washed(String base, int washes) {
+        return new RoleColor(() -> {
+            int color = DesignTokens.shipped().color(base, LauncherAppearance.mode());
+            int hover = DesignTokens.shipped().color("surface.hover", LauncherAppearance.mode());
+            for (int i = 0; i < washes; i++) color = over(color, hover);
+            return color;
+        });
+    }
+
+    /** {@code top} composited over the opaque {@code bottom}. */
+    static int over(int bottom, int top) {
+        int alpha = top >>> 24;
+        int red = blend((bottom >> 16) & 0xFF, (top >> 16) & 0xFF, alpha);
+        int green = blend((bottom >> 8) & 0xFF, (top >> 8) & 0xFF, alpha);
+        int blue = blend(bottom & 0xFF, top & 0xFF, alpha);
+        return 0xFF000000 | red << 16 | green << 8 | blue;
+    }
+
+    private static int blend(int bottom, int top, int alpha) {
+        return (top * alpha + bottom * (255 - alpha) + 127) / 255;
+    }
+
+    /**
+     * A colour whose value is a token role in the current appearance. {@link Color} derives its
+     * channels, equality and paint context from {@link #getRGB()}, so Swing and Java2D see the
+     * current value wherever the constant is used.
+     */
+    private static final class RoleColor extends Color {
+        private final java.util.function.IntSupplier value;
+
+        private RoleColor(java.util.function.IntSupplier value) {
+            super(value.getAsInt(), true);
+            this.value = value;
+        }
+
+        @Override
+        public int getRGB() {
+            return value.getAsInt();
+        }
+
+        @Override
+        public int hashCode() {
+            return getRGB();
+        }
     }
 }

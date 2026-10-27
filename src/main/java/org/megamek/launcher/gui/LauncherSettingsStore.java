@@ -58,7 +58,8 @@ import java.util.function.UnaryOperator;
  * Per-copy automatic-check choices live solely in ChannelPreferenceStore.
  */
 final class LauncherSettingsStore {
-    static final int SCHEMA = 3;
+    static final int SCHEMA = 4;
+    private static final int APPEARANCE_FREE_SCHEMA = 3;
     private static final int MAX_BYTES = 4096;
     private final Path registry;
     private final ObjectMapper mapper = JsonMapper.builder()
@@ -94,7 +95,7 @@ final class LauncherSettingsStore {
             if (version == null || !version.canConvertToInt()) {
                 throw new IOException("unsupported launcher settings schema");
             }
-            if (version.intValue() != SCHEMA) {
+            if (version.intValue() != SCHEMA && version.intValue() != APPEARANCE_FREE_SCHEMA) {
                 throw new IOException("unsupported launcher settings schema");
             }
             com.fasterxml.jackson.databind.JsonNode java =
@@ -106,7 +107,24 @@ final class LauncherSettingsStore {
                     || !(feature.isNull() || feature.isIntegralNumber())) {
                 throw new IOException("default Java settings have invalid types");
             }
-            Settings settings = mapper.treeToValue(tree, Settings.class);
+            Settings settings;
+            if (version.intValue() == APPEARANCE_FREE_SCHEMA) {
+                // Schema 3 predates appearance; it reads as the default look and is rewritten as
+                // the current schema on the next change.
+                AppearanceFreeSettings previous =
+                        mapper.treeToValue(tree, AppearanceFreeSettings.class);
+                settings = new Settings(SCHEMA, previous.defaultJavaExecutable(),
+                        previous.defaultJavaFeature(), Appearance.DEFAULT);
+            } else {
+                com.fasterxml.jackson.databind.JsonNode appearance = tree.get("appearance");
+                if (appearance == null || !appearance.isObject()
+                        || !appearance.path("theme").isTextual()
+                        || !appearance.path("palette").isTextual()
+                        || !appearance.path("reduceMotion").isBoolean()) {
+                    throw new IOException("appearance settings have invalid types");
+                }
+                settings = mapper.treeToValue(tree, Settings.class);
+            }
             validate(settings);
             return settings;
         } catch (IOException error) {
@@ -123,7 +141,14 @@ final class LauncherSettingsStore {
         if (!canonical.toString().equals(executable.toString())) {
             throw new IOException("default Java executable must be canonical");
         }
-        return update(settings -> new Settings(SCHEMA, canonical.toString(), feature));
+        return update(settings -> new Settings(SCHEMA, canonical.toString(), feature,
+                settings.appearance()));
+    }
+
+    Settings writeAppearance(LauncherAppearance appearance) throws IOException {
+        Appearance stored = Appearance.of(appearance);
+        return update(settings -> new Settings(SCHEMA, settings.defaultJavaExecutable(),
+                settings.defaultJavaFeature(), stored));
     }
 
     private Settings update(UnaryOperator<Settings> change) throws IOException {
@@ -173,6 +198,14 @@ final class LauncherSettingsStore {
                 || (settings.defaultJavaExecutable() == null)
                 != (settings.defaultJavaFeature() == null)) {
             throw new IOException("unsupported launcher settings schema");
+        }
+        if (settings.appearance() == null) {
+            throw new IOException("appearance settings are missing");
+        }
+        try {
+            settings.appearance().launcherAppearance();
+        } catch (RuntimeException error) {
+            throw new IOException("invalid appearance setting", error);
         }
 
         if (settings.defaultJavaExecutable() == null) return;
@@ -234,7 +267,26 @@ final class LauncherSettingsStore {
     }
 
     record Settings(int schemaVersion, String defaultJavaExecutable,
-                    Integer defaultJavaFeature) {
-        static final Settings DEFAULT = new Settings(SCHEMA, null, null);
+                    Integer defaultJavaFeature, Appearance appearance) {
+        static final Settings DEFAULT = new Settings(SCHEMA, null, null, Appearance.DEFAULT);
+    }
+
+    /** The stored form of {@link LauncherAppearance}, with stable lower-case identifiers. */
+    record Appearance(String theme, String palette, boolean reduceMotion) {
+        static final Appearance DEFAULT = of(LauncherAppearance.DEFAULT);
+
+        static Appearance of(LauncherAppearance appearance) {
+            return new Appearance(appearance.theme().id(),
+                    LauncherAppearance.paletteId(appearance.palette()), appearance.reduceMotion());
+        }
+
+        LauncherAppearance launcherAppearance() {
+            return new LauncherAppearance(LauncherAppearance.Theme.fromId(theme),
+                    LauncherAppearance.paletteFromId(palette), reduceMotion);
+        }
+    }
+
+    private record AppearanceFreeSettings(int schemaVersion, String defaultJavaExecutable,
+                                          Integer defaultJavaFeature) {
     }
 }

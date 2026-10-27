@@ -57,7 +57,7 @@ import java.util.Objects;
 
 /**
  * Themed replacement for raw {@link javax.swing.JOptionPane} confirm/message/option dialogs, so
- * these surfaces match the map background / cyan heading / {@link FirstLaunchButton} styling
+ * these surfaces match the design-token background / accent heading / {@link FirstLaunchButton} styling
  * used everywhere else in the launcher. Buttons are laid out left to right with the least
  * committal action (typically "Cancel") on the left and the recommended action rightmost,
  * styled primary, and bound as the default button — the same ordering convention already used

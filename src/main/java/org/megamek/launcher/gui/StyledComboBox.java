@@ -33,48 +33,27 @@
 
 package org.megamek.launcher.gui;
 
-import javax.swing.BorderFactory;
 import javax.swing.AbstractAction;
-import javax.swing.DefaultListCellRenderer;
-import javax.swing.JButton;
 import javax.swing.JComboBox;
 import javax.swing.JComponent;
-import javax.swing.KeyStroke;
+import javax.swing.JLabel;
 import javax.swing.JList;
-import javax.swing.UIManager;
-import javax.swing.plaf.basic.BasicButtonUI;
-import javax.swing.plaf.basic.BasicComboBoxUI;
-import javax.swing.plaf.basic.BasicComboPopup;
-import javax.swing.plaf.basic.ComboPopup;
-import java.awt.BasicStroke;
-import java.awt.Color;
+import javax.swing.KeyStroke;
+import javax.swing.ListCellRenderer;
 import java.awt.Component;
+import java.awt.Dimension;
 import java.awt.Font;
-import java.awt.Graphics;
-import java.awt.Graphics2D;
-import java.awt.HeadlessException;
-import java.awt.Polygon;
-import java.awt.RenderingHints;
-import java.awt.Toolkit;
-import java.awt.event.FocusAdapter;
-import java.awt.event.FocusEvent;
 import java.awt.event.KeyEvent;
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
+import java.util.Objects;
 import java.util.function.Function;
 
 /**
- * Launcher-local combo treatment that retains Swing's combo model, popup, keyboard actions, and
- * accessibility while avoiding an operating-system-painted white arrow segment.
+ * A design-token select: the MegaMek look and feel paints the field, arrow, focus ring and popup,
+ * while this keeps Swing's combo model, keyboard actions and accessibility and adds a display-text
+ * mapping and the launcher control height.
  */
 final class StyledComboBox<E> extends JComboBox<E> {
-    static final Color FIELD_BACKGROUND = LauncherTheme.INPUT_BACKGROUND;
-    static final Color ARROW_BACKGROUND = LauncherTheme.CONTROL_BACKGROUND;
-    static final Color BORDER = LauncherTheme.BORDER;
-    static final Color FOCUS = LauncherTheme.ACCENT;
     private final GuiScale scale;
-    private Palette palette;
-    private boolean focusListenerInstalled;
     private Function<? super E, String> displayText = value ->
             value == null ? "" : value.toString();
 
@@ -97,33 +76,13 @@ final class StyledComboBox<E> extends JComboBox<E> {
     }
 
     private void applyStyle() {
-        palette = palette();
-        setUI(new StyledComboBoxUI());
-        setOpaque(true);
-        setBackground(palette.background());
-        setForeground(palette.foreground());
         setFont(scale.font(getFont(), Font.PLAIN, 13f));
-        setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(palette.border(), scale.scaleForGUI(1)),
-                BorderFactory.createEmptyBorder(scale.scaleForGUI(1),
-                        scale.scaleForGUI(2), scale.scaleForGUI(1), 0)));
-        setRenderer(new StyledRenderer());
+        ListCellRenderer<? super E> lookAndFeel = getRenderer();
+        if (!(lookAndFeel instanceof StyledComboBox<?>.DisplayTextRenderer)) {
+            setRenderer(new DisplayTextRenderer(lookAndFeel));
+        }
         setFocusable(true);
         installMissingArrowBindings();
-        if (!focusListenerInstalled) {
-            addFocusListener(new FocusAdapter() {
-                @Override
-                public void focusGained(FocusEvent event) {
-                    updateBorder();
-                }
-
-                @Override
-                public void focusLost(FocusEvent event) {
-                    updateBorder();
-                }
-            });
-            focusListenerInstalled = true;
-        }
     }
 
     private void installMissingArrowBindings() {
@@ -149,205 +108,38 @@ final class StyledComboBox<E> extends JComboBox<E> {
     }
 
     void setDisplayText(Function<? super E, String> displayText) {
-        this.displayText = java.util.Objects.requireNonNull(displayText, "displayText");
+        this.displayText = Objects.requireNonNull(displayText, "displayText");
         repaint();
     }
 
     @Override
-    public void setEnabled(boolean enabled) {
-        super.setEnabled(enabled);
-        if (palette != null) setBackground(fieldBackground());
-    }
-
-    @Override
-    public java.awt.Dimension getPreferredSize() {
-        java.awt.Dimension preferred = super.getPreferredSize();
+    public Dimension getPreferredSize() {
+        Dimension preferred = super.getPreferredSize();
         if (scale == null) return preferred;
-        return new java.awt.Dimension(preferred.width,
+        return new Dimension(preferred.width,
                 Math.max(preferred.height, scale.scaleForGUI(LauncherTheme.CONTROL_HEIGHT)));
     }
 
-    @Override
-    public javax.swing.JToolTip createToolTip() {
-        return LauncherTheme.toolTip(this, scale);
-    }
+    /**
+     * Shows each value's display text through the look and feel's renderer, so popup rows keep
+     * their check mark, wash and row height. A look-and-feel change replaces the delegate.
+     */
+    private final class DisplayTextRenderer implements ListCellRenderer<E>, javax.swing.plaf.UIResource {
+        private final ListCellRenderer<? super E> delegate;
 
-    private Color fieldBackground() {
-        return isEnabled() || highContrast() ? palette.background() : LauncherTheme.DISABLED_BACKGROUND;
-    }
+        private DisplayTextRenderer(ListCellRenderer<? super E> delegate) {
+            this.delegate = delegate;
+        }
 
-    private void updateBorder() {
-        if (palette == null) return;
-        setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createLineBorder(isFocusOwner()
-                        ? palette.focus() : palette.border(),
-                        scale.scaleForGUI(isFocusOwner() ? 2 : 1)),
-                BorderFactory.createEmptyBorder(
-                        scale.scaleForGUI(isFocusOwner() ? 0 : 1),
-                        scale.scaleForGUI(isFocusOwner() ? 1 : 2),
-                        scale.scaleForGUI(isFocusOwner() ? 0 : 1), 0)));
-        repaint();
-    }
-
-    private final class StyledRenderer extends DefaultListCellRenderer {
         @Override
-        public Component getListCellRendererComponent(JList<?> list, Object value, int index,
+        public Component getListCellRendererComponent(JList<? extends E> list, E value, int index,
                                                       boolean selected, boolean focused) {
-            super.getListCellRendererComponent(list, value, index, selected, focused);
-            @SuppressWarnings("unchecked")
-            E typedValue = (E) value;
-            setText(displayText.apply(typedValue));
-            setOpaque(true);
-            setFont(scale.font(getFont(), Font.PLAIN, 13f));
-            setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(5),
-                    scale.scaleForGUI(10), scale.scaleForGUI(5),
-                    scale.scaleForGUI(10)));
-            boolean popupSelection = index >= 0 && selected;
-            setBackground(popupSelection ? palette.selection() : fieldBackground());
-            setForeground(!StyledComboBox.this.isEnabled()
-                    ? palette.disabled()
-                    : popupSelection ? palette.selectionForeground() : palette.foreground());
-            return this;
-        }
-    }
-
-    private final class StyledComboBoxUI extends BasicComboBoxUI {
-        @Override
-        protected ComboPopup createPopup() {
-            return new BasicComboPopup(comboBox) {
-                @Override
-                protected void configureScroller() {
-                    super.configureScroller();
-                    LauncherTheme.styleScrollPane(scroller, scale);
-                }
-            };
-        }
-
-        @Override
-        protected JButton createArrowButton() {
-            return new ArrowButton();
-        }
-
-        @Override
-        public void paintCurrentValue(Graphics graphics, java.awt.Rectangle bounds, boolean hasFocus) {
-            Component value = comboBox.getRenderer().getListCellRendererComponent(
-                    listBox, comboBox.getSelectedItem(), -1, false, false);
-            value.setFont(comboBox.getFont());
-            currentValuePane.paintComponent(graphics, value, comboBox,
-                    bounds.x, bounds.y, bounds.width, bounds.height, true);
-        }
-
-        @Override
-        public void paintCurrentValueBackground(Graphics graphics,
-                                                java.awt.Rectangle bounds,
-                                                boolean hasFocus) {
-            graphics.setColor(fieldBackground());
-            graphics.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
-        }
-    }
-
-    private final class ArrowButton extends JButton {
-        private boolean hovered;
-
-        private ArrowButton() {
-            setName("styledComboArrowButton");
-            setUI(new BasicButtonUI());
-            setOpaque(false);
-            setContentAreaFilled(false);
-            setBorderPainted(false);
-            setFocusPainted(false);
-            setFocusable(false);
-            setRolloverEnabled(true);
-            setPreferredSize(scale.scaleForGUI(28, LauncherTheme.CONTROL_HEIGHT));
-            getAccessibleContext().setAccessibleName("Open choices");
-            MouseAdapter hover = new MouseAdapter() {
-                @Override
-                public void mouseEntered(MouseEvent event) {
-                    hovered = true;
-                    repaint();
-                }
-
-                @Override
-                public void mouseExited(MouseEvent event) {
-                    hovered = false;
-                    repaint();
-                }
-            };
-            addMouseListener(hover);
-        }
-
-        @Override
-        protected void paintComponent(Graphics graphics) {
-            Graphics2D canvas = (Graphics2D) graphics.create();
-            try {
-                canvas.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
-                        RenderingHints.VALUE_ANTIALIAS_ON);
-                Color fill = !isEnabled() ? fieldBackground()
-                        : getModel().isPressed() ? palette.border()
-                        : hovered ? palette.selection() : palette.arrowBackground();
-                canvas.setColor(fill);
-                canvas.fillRect(0, 0, getWidth(), getHeight());
-                canvas.setColor(palette.border());
-                canvas.drawLine(0, 0, 0, getHeight());
-                int width = scale.scaleForGUI(8);
-                int height = scale.scaleForGUI(4);
-                int x = (getWidth() - width) / 2;
-                int y = (getHeight() - height) / 2;
-                Color arrow = getModel().isPressed() || hovered
-                        ? palette.selectionForeground() : palette.foreground();
-                if (!isEnabled()) arrow = palette.disabled();
-                canvas.setColor(arrow);
-                canvas.fill(new Polygon(new int[]{x, x + width, x + width / 2},
-                        new int[]{y, y, y + height}, 3));
-                if (StyledComboBox.this.isFocusOwner()) {
-                    canvas.setColor(palette.focus());
-                    canvas.setStroke(new BasicStroke(scale.scaleForGUI(1f)));
-                    canvas.drawLine(1, 1, getWidth() - 2, 1);
-                    canvas.drawLine(1, getHeight() - 2, getWidth() - 2, getHeight() - 2);
-                }
-            } finally {
-                canvas.dispose();
+            Component component = delegate.getListCellRendererComponent(
+                    list, value, index, selected, focused);
+            if (component instanceof JLabel label && value != null) {
+                label.setText(displayText.apply(value));
             }
+            return component;
         }
-    }
-
-    private static Palette palette() {
-        if (!highContrast()) {
-            return new Palette(FIELD_BACKGROUND, FirstLaunchPanel.TEXT,
-                    FirstLaunchPanel.MUTED, ARROW_BACKGROUND,
-                    HomeLaunchSplitButton.POPUP_SELECTION,
-                    HomeLaunchSplitButton.POPUP_SELECTION_FOREGROUND, BORDER, FOCUS);
-        }
-        Color background = uiColor("ComboBox.background", Color.BLACK);
-        Color foreground = uiColor("ComboBox.foreground", Color.WHITE);
-        return new Palette(background, foreground,
-                uiColor("ComboBox.disabledForeground", Color.LIGHT_GRAY), background,
-                uiColor("ComboBox.selectionBackground", Color.WHITE),
-                uiColor("ComboBox.selectionForeground", Color.BLACK),
-                uiColor("ComboBox.foreground", Color.WHITE),
-                uiColor("Focus.color", foreground));
-    }
-
-    private static boolean highContrast() {
-        if (UIManager.getBoolean("Theme.highContrast")
-                || UIManager.getBoolean("win.highContrast.on")) {
-            return true;
-        }
-        try {
-            return Boolean.TRUE.equals(
-                    Toolkit.getDefaultToolkit().getDesktopProperty("win.highContrast.on"));
-        } catch (HeadlessException ignored) {
-            return false;
-        }
-    }
-
-    private static Color uiColor(String key, Color fallback) {
-        Color color = UIManager.getColor(key);
-        return color == null ? fallback : color;
-    }
-
-    private record Palette(Color background, Color foreground, Color disabled,
-                           Color arrowBackground, Color selection,
-                           Color selectionForeground, Color border, Color focus) {
     }
 }

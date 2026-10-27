@@ -33,19 +33,19 @@
 
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.design.swing.TokenPresentation;
+
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JComponent;
 import javax.swing.plaf.basic.BasicButtonUI;
-import javax.swing.plaf.basic.BasicGraphicsUtils;
 import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
-import java.awt.RenderingHints;
 
-/** A map-style command button, independent of the suite's texture and skin dependencies. */
+/** A design-token command button: a cream primary face or a raised secondary face. */
 final class FirstLaunchButton extends JButton {
     enum Size { REGULAR, SMALL, COMPACT }
 
@@ -64,27 +64,30 @@ final class FirstLaunchButton extends JButton {
         this.size = size;
         setName(name);
         getAccessibleContext().setAccessibleName(text);
-        setFont(scale.font(getFont(), Font.BOLD, size == Size.REGULAR ? 16f : 12f));
-        int vertical = scale.scaleForGUI(size == Size.REGULAR ? 14 : size == Size.SMALL ? 8 : 5);
-        int horizontal = scale.scaleForGUI(size == Size.REGULAR ? 18 : size == Size.SMALL ? 14 : 10);
+        setFont(scale.font(getFont(), Font.BOLD, size == Size.REGULAR ? 16f : 13f));
+        int vertical = scale.scaleForGUI(size == Size.REGULAR ? 12 : size == Size.SMALL ? 8 : 4);
+        int horizontal = scale.scaleForGUI(size == Size.REGULAR ? 24 : size == Size.SMALL ? 16 : 12);
         setBorder(BorderFactory.createEmptyBorder(vertical, horizontal, vertical, horizontal));
         setOpaque(false);
         setContentAreaFilled(false);
         setBorderPainted(false);
         setFocusPainted(false);
         setRolloverEnabled(true);
+        // Upper-cased and condensed only on a game screen; app screens keep the sentence-case label
+        TokenPresentation.role(this, "button");
+    }
+
+    @Override
+    public void updateUI() {
+        // The look and feel paints nothing here; a theme change keeps the token painting.
         setUI(new BasicButtonUI() {
             @Override
             protected void paintText(Graphics graphics, JComponent component,
                                      Rectangle textRectangle, String value) {
                 Graphics2D text = (Graphics2D) graphics.create();
                 try {
-                    text.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
-                            RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-                    text.setColor(LauncherTheme.buttonText(primary, isEnabled()));
-                    BasicGraphicsUtils.drawStringUnderlineCharAt(text, value,
-                            getDisplayedMnemonicIndex(), textRectangle.x,
-                            textRectangle.y + text.getFontMetrics().getAscent());
+                    ButtonDetail.paint(text, FirstLaunchButton.this, scale, textRectangle, value,
+                            LauncherTheme.buttonText(primary, isEnabled()));
                 } finally {
                     text.dispose();
                 }
@@ -94,9 +97,9 @@ final class FirstLaunchButton extends JButton {
 
     @Override
     public Dimension getPreferredSize() {
-        Dimension preferred = super.getPreferredSize();
+        Dimension preferred = ButtonDetail.grow(this, scale, super.getPreferredSize());
         int minimumWidth = size == Size.REGULAR ? 248 : size == Size.SMALL ? 160 : 0;
-        int minimumHeight = size == Size.REGULAR ? 54 : size == Size.SMALL ? 36 : LauncherTheme.CONTROL_HEIGHT;
+        int minimumHeight = size == Size.REGULAR ? 46 : size == Size.SMALL ? 36 : LauncherTheme.CONTROL_HEIGHT;
         return new Dimension(Math.max(preferred.width, scale.scaleForGUI(minimumWidth)),
                 Math.max(preferred.height, scale.scaleForGUI(minimumHeight)));
     }
@@ -105,18 +108,11 @@ final class FirstLaunchButton extends JButton {
     protected void paintComponent(Graphics graphics) {
         Graphics2D canvas = (Graphics2D) graphics.create();
         try {
-            canvas.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
-                    RenderingHints.VALUE_ANTIALIAS_ON);
-            LauncherTheme.paintButton(canvas, getWidth(), getHeight(), scale, isEnabled(),
+            LauncherTheme.paintButton(canvas, getWidth(), getHeight(), scale, primary, isEnabled(),
                     getModel().isPressed() && getModel().isArmed(), getModel().isRollover(), isFocusOwner());
         } finally {
             canvas.dispose();
         }
         super.paintComponent(graphics);
-    }
-
-    @Override
-    public javax.swing.JToolTip createToolTip() {
-        return LauncherTheme.toolTip(this, scale);
     }
 }

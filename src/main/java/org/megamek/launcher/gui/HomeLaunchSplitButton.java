@@ -33,11 +33,14 @@
 
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.design.swing.TokenPresentation;
+
 import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JComponent;
+import javax.swing.JLabel;
 import javax.swing.JMenuItem;
 import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
@@ -45,19 +48,18 @@ import javax.swing.KeyStroke;
 import javax.swing.MenuElement;
 import javax.swing.MenuSelectionManager;
 import javax.swing.SwingConstants;
-import javax.swing.UIManager;
 import javax.swing.plaf.basic.BasicButtonUI;
-import javax.swing.plaf.basic.BasicGraphicsUtils;
-import javax.swing.plaf.basic.BasicMenuItemUI;
-import javax.swing.plaf.basic.BasicPopupMenuUI;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Font;
+import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
-import java.awt.HeadlessException;
+import java.awt.GraphicsConfiguration;
+import java.awt.Insets;
+import java.awt.Point;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Toolkit;
@@ -72,14 +74,9 @@ import java.util.List;
  * selected-copy state.
  */
 final class HomeLaunchSplitButton extends JPanel {
-    static final Color POPUP_BACKGROUND = LauncherTheme.POPUP_BACKGROUND;
-    static final Color POPUP_FOREGROUND = LauncherTheme.TEXT;
-    static final Color POPUP_SELECTION = LauncherTheme.ACTIVE_BACKGROUND;
-    static final Color POPUP_SELECTION_FOREGROUND = LauncherTheme.ACCENT;
-    static final Color POPUP_BORDER = LauncherTheme.BORDER;
-    private static final Color POPUP_DISABLED = LauncherTheme.MUTED;
     private static final String OPEN_POPUP_ACTION = "openAlternateInstallations";
     private static final String CLOSE_POPUP_ACTION = "closeAlternateInstallations";
+    private static final int ROW_SIDE = 14;
 
     private final GuiScale scale;
     private final SegmentButton primaryButton;
@@ -120,10 +117,12 @@ final class HomeLaunchSplitButton extends JPanel {
                 + ", or choose another registered installation."
                 : "Launch preferred " + productName + ".");
 
-        String primaryLabel =
-                VersionDisplay.launch(productName, preferredChannel, preferredVersion);
-        primaryButton = new SegmentButton(primaryLabel,
+        primaryButton = new SegmentButton("Launch " + productName,
                 "launch-" + productKey + "-button", false);
+        ButtonDetail.setDetail(primaryButton,
+                VersionDisplay.channelVersion(preferredChannel, preferredVersion));
+        primaryButton.getAccessibleContext().setAccessibleName(
+                VersionDisplay.launch(productName, preferredChannel, preferredVersion));
         primaryButton.getAccessibleContext().setAccessibleDescription(
                 "Launch " + productName + " from its preferred installation"
                         + (preferredVersion == null || preferredVersion.isBlank()
@@ -146,15 +145,17 @@ final class HomeLaunchSplitButton extends JPanel {
                         + ". This does not change the preferred installation.");
         optionsButton.addActionListener(event -> openPopup());
 
-        Palette palette = palette();
-        popupMenu = new StyledPopupMenu(palette, scale);
+        popupMenu = new JPopupMenu();
         popupMenu.setName("launch-" + productKey + "-popup");
+        // A native window keeps the community links and other home content from painting over the open list
+        popupMenu.setLightWeightPopupEnabled(false);
         popupMenu.getAccessibleContext().setAccessibleName(
                 "Other " + productName + " installations");
         popupMenu.getAccessibleContext().setAccessibleDescription(
                 "Launch a captured registered copy without changing the preference.");
+        if (hasOptions) popupMenu.add(popupHeader());
         optionItems = capturedOptions.stream().map(option -> {
-            JMenuItem item = menuItem(option.label(), palette);
+            JMenuItem item = menuItem(option.label());
             item.addActionListener(event -> invokeOption(option));
             popupMenu.add(item);
             return item;
@@ -191,15 +192,20 @@ final class HomeLaunchSplitButton extends JPanel {
         updateOptionAvailability();
     }
 
-    private JMenuItem menuItem(String label, Palette palette) {
-        JMenuItem item = new JMenuItem(label);
-        item.setUI(new StyledMenuItemUI(palette));
-        item.setOpaque(true);
-        item.setBackground(palette.background());
-        item.setForeground(palette.foreground());
-        item.setFont(scale.font(item.getFont(), Font.BOLD, 13f));
-        item.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(9),
-                scale.scaleForGUI(12), scale.scaleForGUI(9), scale.scaleForGUI(12)));
+    /** A short caps frame over the rows; the rows themselves are values and stay sentence case. */
+    private JLabel popupHeader() {
+        JLabel header = new JLabel("Other installations");
+        header.setName("launch-popup-header");
+        header.setFont(scale.font(header.getFont(), Font.PLAIN, 11f));
+        header.setForeground(LauncherTheme.MUTED);
+        header.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(6),
+                scale.scaleForGUI(ROW_SIDE), scale.scaleForGUI(4), scale.scaleForGUI(ROW_SIDE)));
+        TokenPresentation.role(header, "overline");
+        return header;
+    }
+
+    private JMenuItem menuItem(String label) {
+        JMenuItem item = new AlternativeItem(label);
         item.getAccessibleContext().setAccessibleName(label);
         item.getAccessibleContext().setAccessibleDescription(
                 label + ". Launch this registered copy without changing the preference.");
@@ -236,13 +242,33 @@ final class HomeLaunchSplitButton extends JPanel {
                 || popupMenu.isVisible() || !isShowing()) {
             return;
         }
-        int x = Math.max(0, getWidth() - popupMenu.getPreferredSize().width);
-        popupMenu.show(this, x, Math.max(0, getHeight() - scale.scaleForGUI(3)));
+        // At least as wide as the control, with both right edges lined up under the arrow
+        popupMenu.setPreferredSize(null);
+        Dimension natural = popupMenu.getPreferredSize();
+        int width = Math.max(natural.width, getWidth());
+        popupMenu.setPreferredSize(new Dimension(width, natural.height));
+        popupMenu.show(this, getWidth() - width, popupY(natural.height));
         JMenuItem selected = optionItems.stream().filter(JMenuItem::isEnabled)
                 .findFirst().orElse(null);
         MenuSelectionManager.defaultManager().setSelectedPath(selected == null
                 ? new MenuElement[]{popupMenu}
                 : new MenuElement[]{popupMenu, selected});
+    }
+
+    /** Opens below the control, or above it when the screen has no room below, as near the screen bottom. */
+    private int popupY(int height) {
+        int gap = scale.scaleForGUI(4);
+        int below = getHeight() + gap;
+        GraphicsConfiguration configuration = getGraphicsConfiguration();
+        if (configuration == null) return below;
+        Rectangle screen = configuration.getBounds();
+        Insets reserved = Toolkit.getDefaultToolkit().getScreenInsets(configuration);
+        int top = screen.y + reserved.top;
+        int bottom = screen.y + screen.height - reserved.bottom;
+        Point origin = getLocationOnScreen();
+        int roomBelow = bottom - (origin.y + below);
+        int roomAbove = origin.y - gap - top;
+        return height > roomBelow && roomAbove > roomBelow ? -gap - height : below;
     }
 
     void closePopup() {
@@ -267,6 +293,11 @@ final class HomeLaunchSplitButton extends JPanel {
 
     JPopupMenu popupMenu() {
         return popupMenu;
+    }
+
+    /** The alternative rows, in order, without the popup's header. */
+    List<JMenuItem> menuItems() {
+        return optionItems;
     }
 
     boolean hasOptions() {
@@ -323,14 +354,14 @@ final class HomeLaunchSplitButton extends JPanel {
                     || hasOptions && optionsButton.getModel().isRollover();
             boolean enabled = isEnabled() && (primaryButton.isEnabled()
                     || hasOptions && optionsButton.isEnabled());
-            LauncherTheme.paintButton(canvas, getWidth(), getHeight(), scale, enabled, pressed, hover,
+            LauncherTheme.paintButton(canvas, getWidth(), getHeight(), scale, true, enabled, pressed, hover,
                     primaryButton.isFocusOwner() || hasOptions && optionsButton.isFocusOwner());
             if (hasOptions) {
                 int separator = optionsButton.getX();
-                canvas.setColor(LauncherTheme.highContrast()
-                        ? LauncherTheme.uiColor("Button.foreground", Color.WHITE) : LauncherTheme.BORDER);
-                canvas.drawLine(separator, scale.scaleForGUI(4),
-                        separator, getHeight() - scale.scaleForGUI(4));
+                Color divider = LauncherTheme.buttonText(true, enabled);
+                canvas.setColor(new Color(divider.getRed(), divider.getGreen(), divider.getBlue(), 64));
+                canvas.drawLine(separator, scale.scaleForGUI(8),
+                        separator, getHeight() - scale.scaleForGUI(8));
             }
         } finally {
             canvas.dispose();
@@ -351,6 +382,80 @@ final class HomeLaunchSplitButton extends JPanel {
         }
     }
 
+    /**
+     * One alternative: its name, then the version, channel and state on a muted second line. The item text keeps
+     * the full label for screen readers and keyboard search.
+     */
+    private final class AlternativeItem extends JMenuItem {
+        private final String title;
+        private final String detail;
+
+        private AlternativeItem(String label) {
+            super(label);
+            int split = label.indexOf(" · ");
+            title = split < 0 ? label : label.substring(0, split);
+            detail = split < 0 ? null : label.substring(split + 3);
+            setFont(scale.font(getFont(), Font.PLAIN, 13f));
+            setOpaque(false);
+            setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(7),
+                    scale.scaleForGUI(ROW_SIDE), scale.scaleForGUI(7), scale.scaleForGUI(ROW_SIDE)));
+        }
+
+        private Font detailFont() {
+            return scale.font(getFont(), Font.PLAIN, 12f);
+        }
+
+        @Override
+        public Dimension getPreferredSize() {
+            Insets insets = getInsets();
+            FontMetrics titleMetrics = getFontMetrics(getFont());
+            int width = titleMetrics.stringWidth(title);
+            int height = titleMetrics.getHeight();
+            if (detail != null) {
+                FontMetrics detailMetrics = getFontMetrics(detailFont());
+                width = Math.max(width, detailMetrics.stringWidth(detail));
+                height += scale.scaleForGUI(1) + detailMetrics.getHeight();
+            }
+            return new Dimension(width + insets.left + insets.right,
+                    height + insets.top + insets.bottom);
+        }
+
+        @Override
+        protected void paintComponent(Graphics graphics) {
+            Graphics2D canvas = (Graphics2D) graphics.create();
+            try {
+                canvas.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                        RenderingHints.VALUE_ANTIALIAS_ON);
+                canvas.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
+                        RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+                boolean enabled = isEnabled();
+                if (enabled && getModel().isArmed()) {
+                    Color wash = javax.swing.UIManager.getColor("MenuItem.selectionBackground");
+                    canvas.setColor(wash == null ? LauncherTheme.ACTIVE_BACKGROUND : wash);
+                    int inset = scale.scaleForGUI(4);
+                    int arc = scale.scaleForGUI(6);
+                    canvas.fillRoundRect(inset, 0, getWidth() - 2 * inset, getHeight(), arc, arc);
+                }
+                Insets insets = getInsets();
+                FontMetrics titleMetrics = canvas.getFontMetrics(getFont());
+                canvas.setFont(getFont());
+                canvas.setColor(enabled ? LauncherTheme.TEXT : LauncherTheme.DISABLED_TEXT);
+                int y = insets.top + titleMetrics.getAscent();
+                canvas.drawString(title, insets.left, y);
+                if (detail != null) {
+                    Font font = detailFont();
+                    FontMetrics detailMetrics = canvas.getFontMetrics(font);
+                    canvas.setFont(font);
+                    canvas.setColor(enabled ? LauncherTheme.MUTED : LauncherTheme.DISABLED_TEXT);
+                    canvas.drawString(detail, insets.left, y + titleMetrics.getDescent()
+                            + scale.scaleForGUI(1) + detailMetrics.getAscent());
+                }
+            } finally {
+                canvas.dispose();
+            }
+        }
+    }
+
     private final class SegmentButton extends JButton {
         private SegmentButton(String text, String name, boolean arrow) {
             super(text);
@@ -366,18 +471,19 @@ final class HomeLaunchSplitButton extends JPanel {
             setFocusPainted(false);
             LauncherTheme.repaintOwnerOnFocusChange(this, HomeLaunchSplitButton.this);
             setRolloverEnabled(true);
+            TokenPresentation.role(this, "button");
+        }
+
+        @Override
+        public void updateUI() {
             setUI(new BasicButtonUI() {
                 @Override
                 protected void paintText(Graphics graphics, JComponent component,
                                          Rectangle textRectangle, String value) {
                     Graphics2D text = (Graphics2D) graphics.create();
                     try {
-                        text.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
-                                RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-                        text.setColor(LauncherTheme.buttonText(true, isEnabled()));
-                        BasicGraphicsUtils.drawStringUnderlineCharAt(text, value,
-                                getDisplayedMnemonicIndex(), textRectangle.x,
-                                textRectangle.y + text.getFontMetrics().getAscent());
+                        ButtonDetail.paint(text, SegmentButton.this, scale, textRectangle, value,
+                                LauncherTheme.buttonText(true, isEnabled()));
                     } finally {
                         text.dispose();
                     }
@@ -386,75 +492,8 @@ final class HomeLaunchSplitButton extends JPanel {
         }
 
         @Override
-        public javax.swing.JToolTip createToolTip() {
-            return LauncherTheme.toolTip(this, scale);
-        }
-    }
-
-    private static Palette palette() {
-        if (!highContrast()) {
-            return new Palette(POPUP_BACKGROUND, POPUP_FOREGROUND, POPUP_DISABLED,
-                    POPUP_SELECTION, POPUP_SELECTION_FOREGROUND, POPUP_BORDER);
-        }
-        return new Palette(uiColor("MenuItem.background", Color.BLACK),
-                uiColor("MenuItem.foreground", Color.WHITE),
-                uiColor("MenuItem.disabledForeground", Color.LIGHT_GRAY),
-                uiColor("MenuItem.selectionBackground", Color.WHITE),
-                uiColor("MenuItem.selectionForeground", Color.BLACK),
-                uiColor("MenuItem.foreground", Color.WHITE));
-    }
-
-    private static boolean highContrast() {
-        if (UIManager.getBoolean("Theme.highContrast")
-                || UIManager.getBoolean("win.highContrast.on")) {
-            return true;
-        }
-        try {
-            return Boolean.TRUE.equals(
-                    Toolkit.getDefaultToolkit().getDesktopProperty("win.highContrast.on"));
-        } catch (HeadlessException ignored) {
-            return false;
-        }
-    }
-
-    private static Color uiColor(String key, Color fallback) {
-        Color color = UIManager.getColor(key);
-        return color == null ? fallback : color;
-    }
-
-    private record Palette(Color background, Color foreground, Color disabled,
-                           Color selection, Color selectionForeground, Color border) {
-    }
-
-    private static final class StyledPopupMenu extends JPopupMenu {
-        private StyledPopupMenu(Palette palette, GuiScale scale) {
-            setUI(new BasicPopupMenuUI());
-            setOpaque(true);
-            setBackground(palette.background());
-            setForeground(palette.foreground());
-            setBorder(BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(palette.border(), scale.scaleForGUI(1)),
-                    BorderFactory.createEmptyBorder(scale.scaleForGUI(3),
-                            scale.scaleForGUI(3), scale.scaleForGUI(3),
-                            scale.scaleForGUI(3))));
-        }
-    }
-
-    private static final class StyledMenuItemUI extends BasicMenuItemUI {
-        private final Palette palette;
-
-        private StyledMenuItemUI(Palette palette) {
-            this.palette = palette;
-        }
-
-        @Override
-        protected void installDefaults() {
-            super.installDefaults();
-            selectionBackground = palette.selection();
-            selectionForeground = palette.selectionForeground();
-            disabledForeground = palette.disabled();
-            acceleratorForeground = palette.foreground();
-            acceleratorSelectionForeground = palette.selectionForeground();
+        public Dimension getPreferredSize() {
+            return ButtonDetail.grow(this, scale, super.getPreferredSize());
         }
     }
 
@@ -481,7 +520,7 @@ final class HomeLaunchSplitButton extends JPanel {
             try {
                 canvas.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                         RenderingHints.VALUE_ANTIALIAS_ON);
-                canvas.setColor(LauncherTheme.buttonText(false, component.isEnabled()));
+                canvas.setColor(LauncherTheme.buttonText(true, component.isEnabled()));
                 canvas.fillPolygon(new int[]{x, x + width, x + width / 2},
                         new int[]{y, y, y + height}, 3);
             } finally {

@@ -60,6 +60,7 @@ class LauncherSettingsStoreTest {
         assertEquals(LauncherSettingsStore.SCHEMA, initial.schemaVersion());
         assertNull(initial.defaultJavaExecutable());
         assertNull(initial.defaultJavaFeature());
+        assertEquals(LauncherAppearance.DEFAULT, initial.appearance().launcherAppearance());
         assertFalse(Files.exists(store.path()), "reading the default is side-effect free");
         assertFalse(Files.exists(registry));
     }
@@ -77,7 +78,7 @@ class LauncherSettingsStoreTest {
         assertEquals(java.toString(), saved.defaultJavaExecutable());
         assertEquals(21, saved.defaultJavaFeature());
         assertEquals(saved, store.read());
-        assertTrue(json.contains("\"schemaVersion\" : 3"));
+        assertTrue(json.contains("\"schemaVersion\" : 4"));
         assertFalse(json.contains("checkInstalledVersionsOnOpen"));
         assertFalse(json.contains("checkNewInstallsOnOpen"));
     }
@@ -155,6 +156,89 @@ class LauncherSettingsStoreTest {
                   "schemaVersion" : 3,
                   "defaultJavaExecutable" : false,
                   "defaultJavaFeature" : 21
+                }
+                """;
+        Files.writeString(store.path(), malformed);
+
+        assertThrows(IOException.class, store::read);
+        assertEquals(malformed, Files.readString(store.path()));
+    }
+
+    @Test
+    void appearanceFreeSchemaReadsWithTheDefaultAppearanceAndUpgradesOnWrite() throws Exception {
+        LauncherSettingsStore store =
+                new LauncherSettingsStore(temp.resolve("registry.json"));
+        Path java = temp.resolve("jdk").resolve("bin").resolve("java.exe")
+                .toAbsolutePath().normalize();
+        String legacy = """
+                {
+                  "schemaVersion" : 3,
+                  "defaultJavaExecutable" : %s,
+                  "defaultJavaFeature" : 21
+                }
+                """.formatted(new com.fasterxml.jackson.databind.ObjectMapper()
+                .writeValueAsString(java.toString()));
+        Files.writeString(store.path(), legacy);
+
+        LauncherSettingsStore.Settings read = store.read();
+
+        assertEquals(java.toString(), read.defaultJavaExecutable());
+        assertEquals(LauncherAppearance.DEFAULT, read.appearance().launcherAppearance());
+        assertEquals(legacy, Files.readString(store.path()), "reading never rewrites");
+
+        LauncherAppearance light = LauncherAppearance.DEFAULT
+                .withTheme(LauncherAppearance.Theme.LIGHT)
+                .withPalette(org.megamek.launcher.design.DesignTokens.Palette.COLORBLIND)
+                .withReduceMotion(true);
+        LauncherSettingsStore.Settings upgraded = store.writeAppearance(light);
+
+        assertEquals(LauncherSettingsStore.SCHEMA, upgraded.schemaVersion());
+        assertEquals(java.toString(), upgraded.defaultJavaExecutable(), "the Java choice is preserved");
+        assertEquals(light, store.read().appearance().launcherAppearance());
+        String json = Files.readString(store.path());
+        assertTrue(json.contains("\"theme\" : \"light\""), json);
+        assertTrue(json.contains("\"palette\" : \"colorblind\""), json);
+    }
+
+    @Test
+    void changingDefaultJavaKeepsTheChosenAppearance() throws Exception {
+        LauncherSettingsStore store =
+                new LauncherSettingsStore(temp.resolve("registry.json"));
+        LauncherAppearance light = LauncherAppearance.DEFAULT.withTheme(LauncherAppearance.Theme.LIGHT);
+        store.writeAppearance(light);
+
+        store.writeDefaultJava(temp.resolve("java.exe").toAbsolutePath().normalize(), 21);
+
+        assertEquals(light, store.read().appearance().launcherAppearance());
+    }
+
+    @Test
+    void unknownAppearanceValuesAreRejectedWithoutReset() throws Exception {
+        LauncherSettingsStore store =
+                new LauncherSettingsStore(temp.resolve("registry.json"));
+        String malformed = """
+                {
+                  "schemaVersion" : 4,
+                  "defaultJavaExecutable" : null,
+                  "defaultJavaFeature" : null,
+                  "appearance" : { "theme" : "sepia", "palette" : "standard", "reduceMotion" : false }
+                }
+                """;
+        Files.writeString(store.path(), malformed);
+
+        assertThrows(IOException.class, store::read);
+        assertEquals(malformed, Files.readString(store.path()));
+    }
+
+    @Test
+    void currentSchemaRequiresTheAppearanceObject() throws Exception {
+        LauncherSettingsStore store =
+                new LauncherSettingsStore(temp.resolve("registry.json"));
+        String malformed = """
+                {
+                  "schemaVersion" : 4,
+                  "defaultJavaExecutable" : null,
+                  "defaultJavaFeature" : null
                 }
                 """;
         Files.writeString(store.path(), malformed);

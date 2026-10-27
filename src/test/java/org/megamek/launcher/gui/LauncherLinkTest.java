@@ -16,7 +16,6 @@ import org.junit.jupiter.api.Test;
 import javax.accessibility.AccessibleRole;
 import javax.swing.JComponent;
 import javax.swing.KeyStroke;
-import javax.swing.UIManager;
 import javax.swing.plaf.basic.BasicHTML;
 import java.awt.Color;
 import java.awt.Cursor;
@@ -110,25 +109,7 @@ class LauncherLinkTest {
         });
     }
 
-    @Test
-    void highContrastUsesSystemLinkTextInsteadOfForcingCyan() throws Exception {
-        SwingTestSupport.onEdt(() -> {
-            Object contrast = UIManager.get("Theme.highContrast");
-            Object foreground = UIManager.get("Button.foreground");
-            try {
-                UIManager.put("Theme.highContrast", true);
-                UIManager.put("Button.foreground", Color.WHITE);
-                LauncherLink link = new LauncherLink("All news", "contrastLink", GuiScale.DEFAULT);
-                link.setSize(link.getPreferredSize());
-                assertEquals(Color.WHITE, link.getForeground());
-                assertTrue(hasColor(render(link), Color.WHITE));
-            } finally {
-                UIManager.put("Theme.highContrast", contrast);
-                UIManager.put("Button.foreground", foreground);
-            }
-            return null;
-        });
-    }
+
 
     private static void activate(LauncherLink link, int key) {
         for (boolean released : new boolean[]{false, true}) {

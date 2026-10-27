@@ -88,7 +88,7 @@ class UpdatePreviewSwingTest {
             assertNotNull(waitForButton(frame, "launch-megamek-button"));
             JButton installations = waitForButton(frame, "manageInstallationsButton");
             assertNotNull(installations);
-            assertTrue(installations.getText().equals("Installations"));
+            assertTrue(SwingTestSupport.label(installations).equals("Installations"));
             assertTrue(findButton(frame, "recoverUpdateButton") == null,
                     "an imported copy without a pending update has no Home recovery action");
             SwingUtilities.invokeAndWait(installations::doClick);

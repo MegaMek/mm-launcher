@@ -101,8 +101,8 @@ final class SubfolderDialog extends JDialog {
         folderName.setBackground(NormalInstallConfirmationDialog.FIELD_BACKGROUND);
         folderName.setForeground(FirstLaunchPanel.TEXT);
         folderName.setCaretColor(FirstLaunchPanel.TEXT);
-        folderName.setSelectionColor(HomeLaunchSplitButton.POPUP_SELECTION);
-        folderName.setSelectedTextColor(HomeLaunchSplitButton.POPUP_SELECTION_FOREGROUND);
+        folderName.setSelectionColor(LauncherTheme.SELECTION_BACKGROUND);
+        folderName.setSelectedTextColor(LauncherTheme.TEXT);
         folderName.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createLineBorder(LauncherTheme.BORDER, scale.scaleForGUI(1)),
                 BorderFactory.createEmptyBorder(scale.scaleForGUI(7),

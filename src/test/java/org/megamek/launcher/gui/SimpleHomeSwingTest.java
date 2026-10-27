@@ -161,7 +161,7 @@ class SimpleHomeSwingTest {
             JButton ready = waitFor(() -> {
                 JButton button = find(frame, "downloadAndInstallButton");
                 return button != null && button.isEnabled()
-                        && button.getText().endsWith("(1.2.3)") ? button : null;
+                        && SwingTestSupport.spoken(button).endsWith("(1.2.3)") ? button : null;
             });
             assertTrue(ready.isFocusable());
             assertEquals(1, services.catalogRequests.get());
@@ -169,7 +169,7 @@ class SimpleHomeSwingTest {
             waitFor(() -> {
                 JButton button = find(frame, "downloadAndInstallButton");
                 return button != null && button.isEnabled()
-                        && button.getText().endsWith("(1.2.3)") ? button : null;
+                        && SwingTestSupport.spoken(button).endsWith("(1.2.3)") ? button : null;
             });
             assertEquals(1, services.catalogRequests.get(),
                     "READY is rebound without another snapshot");
@@ -191,7 +191,7 @@ class SimpleHomeSwingTest {
             SwingUtilities.invokeAndWait(frame::showWindow);
             JButton primary = waitFor(() -> {
                 JButton button = find(frame, "downloadAndInstallButton");
-                return button != null && button.getText().endsWith("(Unavailable)")
+                return button != null && SwingTestSupport.spoken(button).endsWith("(Unavailable)")
                         ? button : null;
             });
             JButton options = waitButton(frame, "downloadOptionsButton");
@@ -216,7 +216,7 @@ class SimpleHomeSwingTest {
             waitUntil(() -> {
                 JButton button = find(frame, "downloadAndInstallButton");
                 return button != null && button.isEnabled()
-                        && button.getText().endsWith("(1.2.3)");
+                        && SwingTestSupport.spoken(button).endsWith("(1.2.3)");
             });
             assertEquals(2, services.catalogRequests.get());
             assertEquals(0, services.plans.get());
@@ -248,9 +248,9 @@ class SimpleHomeSwingTest {
             waitUntil(() -> {
                 JButton button = find(frame, "downloadAndInstallButton");
                 return button != null
-                        && button.getText().endsWith("(1.2.3)");
+                        && SwingTestSupport.spoken(button).endsWith("(1.2.3)");
             });
-            assertEquals("Install latest MekHQ Milestone (1.2.3)", primary.getText());
+            assertEquals("Install latest MekHQ Milestone (1.2.3)", SwingTestSupport.spoken(primary));
             assertEquals(QuickInstallSnapshot.DEFAULT_KEY,
                     new QuickInstallOption.Key(OfficialRepository.MEKHQ, FollowChannel.MILESTONE));
             assertEquals(List.of(
@@ -333,7 +333,7 @@ class SimpleHomeSwingTest {
             assertEquals("", ((JLabel) find(frame, "homeStatusLabel")).getText());
             waitUntil(() -> {
                 JButton button = find(frame, "downloadAndInstallButton");
-                return button != null && button.getText().endsWith("(1.2.3)");
+                return button != null && SwingTestSupport.spoken(button).endsWith("(1.2.3)");
             });
             assertEquals(0, services.releaseFetches.get());
             assertFalse(Files.exists(temp.resolve("registry.json")));
@@ -407,9 +407,7 @@ class SimpleHomeSwingTest {
             for (int index = 0; index < launchControls.size(); index++) {
                 assertEquals(List.of("Other copy · " + productNames.get(index)
                                 + " (1.2.3)"),
-                        java.util.Arrays.stream(launchControls.get(index)
-                                        .popupMenu().getComponents())
-                                .map(JMenuItem.class::cast).map(JMenuItem::getText).toList(),
+                        launchControls.get(index).menuItems().stream().map(JMenuItem::getText).toList(),
                         "every actual Main product gets its matching alternate menu");
             }
             SwingUtilities.invokeAndWait(() -> {
@@ -436,7 +434,7 @@ class SimpleHomeSwingTest {
             int selections = services.selections.get();
             SwingUtilities.invokeAndWait(megamekSplit.optionsButton()::doClick);
             waitUntil(() -> megamekSplit.popupMenu().isVisible());
-            invokeMenuSelection((JMenuItem) megamekSplit.popupMenu().getComponent(0));
+            invokeMenuSelection(megamekSplit.menuItems().get(0));
             waitUntil(() -> services.launched);
             assertEquals(services.second, services.launchedRecord);
             assertEquals("megamek", services.launchedProduct);
@@ -673,7 +671,7 @@ class SimpleHomeSwingTest {
             assertNoDisplayableProgress(frame);
 
             assertEquals("Launch MekHQ Development (1.2.4)",
-                    waitButton(frame, "launch-mekhq-button").getText());
+                    SwingTestSupport.spoken(waitButton(frame, "launch-mekhq-button")));
             assertEquals(FollowChannel.DEVELOPMENT, services.lastPlannedChannel);
             assertEquals(FollowChannel.DEVELOPMENT, services.installedChannel);
             assertEquals(1, services.plans.get());
@@ -1046,11 +1044,11 @@ class SimpleHomeSwingTest {
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             assertEquals("Launch MegaMek (1.2.3)",
-                    waitButton(frame, "launch-megamek-button").getText());
+                    SwingTestSupport.spoken(waitButton(frame, "launch-megamek-button")));
             assertEquals("Launch MekHQ (1.2.3)",
-                    waitButton(frame, "launch-mekhq-button").getText());
+                    SwingTestSupport.spoken(waitButton(frame, "launch-mekhq-button")));
             assertEquals("Launch MegaMekLab (1.2.3)",
-                    waitButton(frame, "launch-lab-button").getText());
+                    SwingTestSupport.spoken(waitButton(frame, "launch-lab-button")));
             HomeLaunchSplitButton split = find(frame, "launch-megamek-split-button");
             assertTrue(split.hasOptions(),
                     "matching alternate copies remain one-off launch choices");
@@ -1358,8 +1356,8 @@ class SimpleHomeSwingTest {
             java.awt.Insets insets = frame.getInsets();
             javax.swing.JScrollPane scroll = find(frame, "settingsScrollPane");
             return frame.getWidth() == target.width && frame.getHeight() == target.height
-                    && frame.getContentPane().getWidth() == target.width - insets.left - insets.right
-                    && frame.getContentPane().getHeight() == target.height - insets.top - insets.bottom
+                    && frame.getRootPane().getWidth() == target.width - insets.left - insets.right
+                    && frame.getRootPane().getHeight() == target.height - insets.top - insets.bottom
                     && scroll != null && scroll.getViewport().getView() != null
                     && scroll.getViewport().getView().getWidth() == scroll.getViewport().getExtentSize().width;
         });
@@ -2198,7 +2196,7 @@ class SimpleHomeSwingTest {
 
     private static JButton findByText(Container root, String text) {
         for (Component child : root.getComponents()) {
-            if (child instanceof JButton button && text.equals(button.getText())) return button;
+            if (child instanceof JButton button && text.equals(SwingTestSupport.label(button))) return button;
             if (child instanceof Container nested) {
                 JButton found = findByText(nested, text);
                 if (found != null) return found;

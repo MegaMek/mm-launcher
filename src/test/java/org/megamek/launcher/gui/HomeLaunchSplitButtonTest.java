@@ -62,6 +62,44 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class HomeLaunchSplitButtonTest {
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
+    void alternativesOpenAboveWhenTheScreenHasNoRoomBelow() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
+        JFrame frame = new JFrame();
+        HomeLaunchSplitButton[] holder = new HomeLaunchSplitButton[1];
+        try {
+            SwingUtilities.invokeAndWait(() -> {
+                List<HomeLaunchSplitButton.Option> options = new java.util.ArrayList<>();
+                for (int index = 0; index < 4; index++) {
+                    options.add(new HomeLaunchSplitButton.Option("Copy " + index + " · MegaMek (1.0." + index + ")",
+                            () -> { }));
+                }
+                holder[0] = new HomeLaunchSplitButton(GuiScale.DEFAULT, "megamek", "MegaMek",
+                        "1.0.0", "Milestone", () -> { }, options);
+                frame.setUndecorated(true);
+                frame.setContentPane(holder[0]);
+                frame.pack();
+                java.awt.GraphicsConfiguration configuration = frame.getGraphicsConfiguration();
+                java.awt.Rectangle screen = configuration.getBounds();
+                java.awt.Insets reserved = java.awt.Toolkit.getDefaultToolkit().getScreenInsets(configuration);
+                frame.setLocation(screen.x + 400,
+                        screen.y + screen.height - reserved.bottom - frame.getHeight() - 10);
+                frame.setVisible(true);
+            });
+            HomeLaunchSplitButton split = holder[0];
+            SwingUtilities.invokeAndWait(split::openPopup);
+            assertTrue(split.popupMenu().isVisible());
+            int popupBottom = SwingTestSupport.onEdt(() -> split.popupMenu().getLocationOnScreen().y
+                    + split.popupMenu().getHeight());
+            int controlTop = SwingTestSupport.onEdt(() -> split.getLocationOnScreen().y);
+            assertTrue(popupBottom <= controlTop, "the list opens upward instead of covering the control");
+            SwingUtilities.invokeAndWait(split::closePopup);
+        } finally {
+            SwingUtilities.invokeAndWait(frame::dispose);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void joinedControlKeepsPerApplicationPreferenceAndRoutesOrderedCapturedAlternates()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
@@ -86,25 +124,37 @@ class HomeLaunchSplitButtonTest {
                                 () -> launched.set(development))));
                 frame.setContentPane(holder[0]);
                 frame.pack();
+                frame.setLocation(400, 200);
                 frame.setVisible(true);
             });
             HomeLaunchSplitButton split = holder[0];
+            assertEquals("Launch MegaMek", split.primaryButton().getText());
+            assertEquals("Milestone · 1.0.0", ButtonDetail.detail(split.primaryButton()));
             assertEquals("Launch MegaMek Milestone (1.0.0)",
-                    split.primaryButton().getText());
+                    split.primaryButton().getAccessibleContext().getAccessibleName());
             assertFalse(split.primaryButton().isContentAreaFilled());
             assertFalse(split.optionsButton().isContentAreaFilled());
             assertEquals(List.of("Campaign copy · MegaMek Milestone (0.49.20)",
                             "Development · MegaMek Development (0.51.0)"),
-                    java.util.Arrays.stream(split.popupMenu().getComponents())
-                            .map(JMenuItem.class::cast).map(JMenuItem::getText).toList());
-            assertEquals(HomeLaunchSplitButton.POPUP_BACKGROUND,
+                    split.menuItems().stream().map(JMenuItem::getText).toList());
+            assertEquals(UIManager.getColor("PopupMenu.background"),
                     split.popupMenu().getBackground());
             assertNotEquals(Color.WHITE, split.popupMenu().getBackground());
 
             invokeKeyBinding(split.primaryButton(), KeyStroke.getKeyStroke(
                     KeyEvent.VK_DOWN, InputEvent.ALT_DOWN_MASK));
             assertTrue(split.popupMenu().isVisible());
-            JMenuItem selected = (JMenuItem) split.popupMenu().getComponent(1);
+            assertEquals("Other installations",
+                    ((javax.swing.JLabel) split.popupMenu().getComponent(0)).getAccessibleContext()
+                            .getAccessibleName());
+            assertFalse(split.popupMenu().isLightWeightPopupEnabled(),
+                    "home content cannot paint over the alternatives");
+            assertTrue(split.popupMenu().getWidth() >= split.getWidth(),
+                    "the alternatives are at least as wide as the control");
+            assertEquals(split.getLocationOnScreen().x + split.getWidth(),
+                    split.popupMenu().getLocationOnScreen().x + split.popupMenu().getWidth(),
+                    "the alternatives line up with the control's right edge");
+            JMenuItem selected = split.menuItems().get(1);
             SwingUtilities.invokeAndWait(selected::doClick);
             assertSame(development, launched.get(),
                     "the row invokes its exact captured record");
@@ -116,7 +166,7 @@ class HomeLaunchSplitButtonTest {
             SwingUtilities.invokeAndWait(() -> split.setEnabled(false));
             assertFalse(split.primaryButton().isEnabled());
             assertFalse(split.optionsButton().isEnabled());
-            assertFalse(((JMenuItem) split.popupMenu().getComponent(0)).isEnabled());
+            assertFalse((split.menuItems().get(0)).isEnabled());
         } finally {
             SwingUtilities.invokeAndWait(frame::dispose);
         }
@@ -133,8 +183,8 @@ class HomeLaunchSplitButtonTest {
                     new HomeLaunchSplitButton.Option("Available",
                             () -> launched.set("available"))));
             split.setPrimaryAvailable(false);
-            JMenuItem missing = (JMenuItem) split.popupMenu().getComponent(0);
-            JMenuItem available = (JMenuItem) split.popupMenu().getComponent(1);
+            JMenuItem missing = split.menuItems().get(0);
+            JMenuItem available = split.menuItems().get(1);
             assertFalse(split.primaryButton().isEnabled());
             assertTrue(split.optionsButton().isEnabled());
             assertFalse(missing.isEnabled());
@@ -168,32 +218,10 @@ class HomeLaunchSplitButtonTest {
         assertFalse(split.optionsButton().isVisible());
         assertFalse(split.optionsButton().isEnabled());
         assertFalse(split.optionsButton().isFocusable());
-        assertEquals(0, split.popupMenu().getComponentCount());
+        assertEquals(0, split.popupMenu().getComponentCount(), "no header without alternatives");
     }
 
-    @Test
-    void popupUsesSystemMenuContrastWhenHighContrastIsRequested() throws Exception {
-        Object prior = UIManager.get("Theme.highContrast");
-        Color priorBackground = UIManager.getColor("MenuItem.background");
-        Color priorForeground = UIManager.getColor("MenuItem.foreground");
-        try {
-            UIManager.put("Theme.highContrast", true);
-            UIManager.put("MenuItem.background", Color.BLACK);
-            UIManager.put("MenuItem.foreground", Color.WHITE);
-            HomeLaunchSplitButton split = new HomeLaunchSplitButton(GuiScale.DEFAULT,
-                    "mekhq", "MekHQ", () -> {
-                    }, List.of(new HomeLaunchSplitButton.Option(
-                    "Other · 1.0.0", () -> {
-                    })));
-            assertEquals(Color.BLACK, split.popupMenu().getBackground());
-            assertEquals(Color.WHITE,
-                    ((JMenuItem) split.popupMenu().getComponent(0)).getForeground());
-        } finally {
-            restoreUiValue("Theme.highContrast", prior);
-            restoreUiValue("MenuItem.background", priorBackground);
-            restoreUiValue("MenuItem.foreground", priorForeground);
-        }
-    }
+
 
     private static InstallationRecord record(String id, String name, String version,
                                              Product product) {
@@ -211,10 +239,5 @@ class HomeLaunchSplitButtonTest {
             button.getActionMap().get(key).actionPerformed(
                     new ActionEvent(button, ActionEvent.ACTION_PERFORMED, key.toString()));
         });
-    }
-
-    private static void restoreUiValue(String key, Object value) {
-        if (value == null) UIManager.getDefaults().remove(key);
-        else UIManager.put(key, value);
     }
 }

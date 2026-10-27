@@ -33,6 +33,8 @@
 
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.design.swing.TokenPanel;
+
 import org.megamek.launcher.gui.AutomaticInstallationChecks.InstallationCheck;
 
 import org.megamek.launcher.channel.ChannelPreference;
@@ -134,6 +136,7 @@ public final class LauncherFrame extends JFrame {
     static final String DISCORD_INVITE_URL = "https://discord.gg/megamek";
     static final String PLAY_ONLINE_URL = "https://megamek.games/";
     private final LauncherServices services;
+    private final Object appearanceSaveLock = new Object();
     private final LauncherNewsFeed newsFeed;
     private final ExistingImportPrompts existingImportPrompts;
     private final NormalInstallLocationPrompts normalInstallLocationPrompts;
@@ -178,6 +181,7 @@ public final class LauncherFrame extends JFrame {
     private List<LauncherNewsFeed.Article> newsArticles = List.of();
     private Throwable newsError;
     private JPanel homeNewsPanel;
+    private JPanel homeNewsBody;
     private LaunchOptionsStore.Document launchOptionsDocument;
     private LaunchOptionsForm launchOptionsForm;
     private LaunchOptions launchOptionsDraft;
@@ -387,9 +391,12 @@ public final class LauncherFrame extends JFrame {
         navigationRow.setAlignmentX(Component.CENTER_ALIGNMENT);
         center.add(navigationRow);
 
-        homeNewsPanel = FirstLaunchPanel.backplate(guiScale);
-        homeNewsPanel.setName("homeNewsPanel");
-        homeNewsPanel.setLayout(new BoxLayout(homeNewsPanel, BoxLayout.Y_AXIS));
+        homeNewsBody = new JPanel();
+        homeNewsBody.setName("homeNewsBody");
+        homeNewsBody.setLayout(new BoxLayout(homeNewsBody, BoxLayout.Y_AXIS));
+        TokenPanel newsPanel = new TokenPanel("Latest news").body(homeNewsBody);
+        newsPanel.setName("homeNewsPanel");
+        homeNewsPanel = newsPanel;
         fillHomeNews();
         content.add(FirstLaunchPanel.managedHome(firstLaunchArtwork, guiScale, center, homeNewsPanel),
                 BorderLayout.CENTER);
@@ -399,16 +406,9 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void fillHomeNews() {
-        JPanel news = homeNewsPanel;
+        JPanel news = homeNewsBody;
         if (news == null) return;
         news.removeAll();
-        JLabel title = new JLabel("Latest news");
-        title.setName("homeNewsTitle");
-        title.setForeground(FirstLaunchPanel.ACCENT);
-        title.setFont(guiScale.font(title.getFont(), Font.BOLD, 15f));
-        title.setAlignmentX(Component.LEFT_ALIGNMENT);
-        news.add(title);
-        news.add(Box.createVerticalStrut(guiScale.scaleForGUI(6)));
         if (newsLoading || !newsRequested) {
             JLabel loading = new JLabel("Loading MegaMek news...");
             loading.setName("newsLoadingMessage");
@@ -432,8 +432,7 @@ public final class LauncherFrame extends JFrame {
                 JLabel date = new JLabel(NEWS_DATE.format(article.published()));
                 date.setName("newsArticleDate" + i);
                 date.setFont(guiScale.font(date.getFont(), Font.PLAIN, 11f));
-                date.setForeground(LauncherTheme.highContrast()
-                        ? LauncherTheme.uiColor("Label.foreground", java.awt.Color.WHITE) : FirstLaunchPanel.MUTED);
+                date.setForeground(FirstLaunchPanel.MUTED);
                 date.setBorder(BorderFactory.createEmptyBorder(0, guiScale.scaleForGUI(3), 0, 0));
                 date.setAlignmentX(Component.LEFT_ALIGNMENT);
                 news.add(date);
@@ -455,9 +454,10 @@ public final class LauncherFrame extends JFrame {
         news.add(archive);
         news.revalidate();
         news.repaint();
-        if (news.getParent() != null) {
-            news.getParent().revalidate();
-            news.getParent().repaint();
+        Container plate = news.getParent();
+        if (plate != null && plate.getParent() != null) {
+            plate.getParent().revalidate();
+            plate.getParent().repaint();
         }
     }
 
@@ -808,10 +808,11 @@ public final class LauncherFrame extends JFrame {
         long updates = installationChecks.values().stream()
                 .filter(check -> check.result() != null && check.result().updateAvailable())
                 .count();
-        String text = updates == 0 ? "Installations"
-                : "Installations (" + updates + (updates == 1 ? " update)" : " updates)");
-        homeInstallationsButton.setText(text);
-        homeInstallationsButton.getAccessibleContext().setAccessibleName(text);
+        String count = updates == 0 ? null
+                : updates + (updates == 1 ? " update" : " updates");
+        ButtonDetail.setBadge(homeInstallationsButton, count);
+        homeInstallationsButton.getAccessibleContext().setAccessibleName(
+                count == null ? "Installations" : "Installations (" + count + ")");
         homeInstallationsButton.getAccessibleContext().setAccessibleDescription(
                 updates == 0 ? "Open installation management."
                         : "Open installation management for " + updates
@@ -944,10 +945,12 @@ public final class LauncherFrame extends JFrame {
                     homeLaunchAlternatives(record, productKey));
             LauncherServices.InstallationStatus local = installationLocalStatus(record);
             if (local != null && local.missing()) {
-                launch.primaryButton().setText(VersionDisplay.programChannelVersion(
-                        displayProduct(productKey), channel, record.observedBuild()) + " · Not found");
+                String value = VersionDisplay.channelVersion(channel, record.observedBuild());
+                ButtonDetail.setDetail(launch.primaryButton(),
+                        value.isEmpty() ? "Not found" : "Not found · " + value);
                 launch.primaryButton().getAccessibleContext().setAccessibleName(
-                        launch.primaryButton().getText());
+                        VersionDisplay.programChannelVersion(displayProduct(productKey), channel,
+                                record.observedBuild()) + " · Not found");
                 launch.primaryButton().getAccessibleContext().setAccessibleDescription(
                         "Preferred installation folder not found.");
                 launch.getAccessibleContext().setAccessibleDescription(
@@ -971,7 +974,7 @@ public final class LauncherFrame extends JFrame {
                     : "An installation changed or is unavailable.";
             JLabel blocker = homeStatusLabel(message);
             blocker.setName("homeActionRequiredMessage");
-            blocker.setForeground(LauncherTheme.SELECTED);
+            blocker.setForeground(LauncherTheme.WARNING);
             panel.add(blocker);
         }
     }
@@ -1406,7 +1409,7 @@ public final class LauncherFrame extends JFrame {
         if (!markers.isBlank()) {
             JLabel preferred = new JLabel(markers);
             preferred.setName("preferredApplicationMarkers");
-            preferred.setForeground(LauncherTheme.SELECTED);
+            preferred.setForeground(LauncherTheme.WARNING);
             preferred.setAlignmentX(Component.LEFT_ALIGNMENT);
             summary.add(preferred);
         }
@@ -1417,7 +1420,7 @@ public final class LauncherFrame extends JFrame {
             updateStatus.setName("installationStatus-" + record.id());
             updateStatus.setForeground(local != null
                     && (local.pendingUpdate() || local.pendingUninstall())
-                    ? LauncherTheme.SELECTED : FirstLaunchPanel.MUTED);
+                    ? LauncherTheme.WARNING : FirstLaunchPanel.MUTED);
             updateStatus.setAlignmentX(Component.LEFT_ALIGNMENT);
             summary.add(updateStatus);
         }
@@ -1642,8 +1645,8 @@ public final class LauncherFrame extends JFrame {
                                         boolean ownershipProvenance) {
         JPopupMenu menu = new JPopupMenu();
         menu.setName("installationMenu-" + record.id());
-        menu.setBackground(HomeLaunchSplitButton.POPUP_BACKGROUND);
-        menu.setBorder(BorderFactory.createLineBorder(HomeLaunchSplitButton.POPUP_BORDER));
+        menu.setBackground(LauncherTheme.POPUP_BACKGROUND);
+        menu.setBorder(BorderFactory.createLineBorder(LauncherTheme.BORDER));
         for (Product product : record.products()) {
             JMenuItem preferred = installationMenuItem(
                     "Use as preferred for " + displayProduct(product.key()));
@@ -1723,14 +1726,14 @@ public final class LauncherFrame extends JFrame {
                 checkIcon = null;
                 arrowIcon = null;
                 defaultTextIconGap = 0;
-                selectionBackground = HomeLaunchSplitButton.POPUP_SELECTION;
-                selectionForeground = HomeLaunchSplitButton.POPUP_SELECTION_FOREGROUND;
+                selectionBackground = LauncherTheme.SELECTION_BACKGROUND;
+                selectionForeground = LauncherTheme.TEXT;
                 disabledForeground = FirstLaunchPanel.MUTED;
             }
         });
         item.setOpaque(true);
-        item.setBackground(HomeLaunchSplitButton.POPUP_BACKGROUND);
-        item.setForeground(HomeLaunchSplitButton.POPUP_FOREGROUND);
+        item.setBackground(LauncherTheme.POPUP_BACKGROUND);
+        item.setForeground(LauncherTheme.TEXT);
         item.setIconTextGap(0);
         // BasicMenuItemUI.installDefaults() also pulls the active look and
         // feel's "MenuItem.margin" onto every item, independent of the
@@ -1761,7 +1764,7 @@ public final class LauncherFrame extends JFrame {
         };
         separator.setName("installationMenuSeparator");
         separator.setOpaque(true);
-        separator.setBackground(HomeLaunchSplitButton.POPUP_BACKGROUND);
+        separator.setBackground(LauncherTheme.POPUP_BACKGROUND);
         separator.setMinimumSize(new Dimension(1, height));
         separator.setPreferredSize(new Dimension(1, height));
         separator.setMaximumSize(new Dimension(Integer.MAX_VALUE, height));
@@ -1971,8 +1974,8 @@ public final class LauncherFrame extends JFrame {
         releases.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         releases.setBackground(FirstLaunchPanel.PANEL);
         releases.setForeground(FirstLaunchPanel.TEXT);
-        releases.setSelectionBackground(HomeLaunchSplitButton.POPUP_SELECTION);
-        releases.setSelectionForeground(HomeLaunchSplitButton.POPUP_SELECTION_FOREGROUND);
+        releases.setSelectionBackground(LauncherTheme.SELECTION_BACKGROUND);
+        releases.setSelectionForeground(LauncherTheme.TEXT);
         releases.getAccessibleContext().setAccessibleName("Official releases");
 
         JLabel status = new JLabel("Select Fetch versions to view official releases.");
@@ -2345,7 +2348,7 @@ public final class LauncherFrame extends JFrame {
             if (requested.isEmpty() || requested.length() > 120
                     || requested.chars().anyMatch(Character::isISOControl)) {
                 hint.setText("Use a name of 1–120 printable characters.");
-                hint.setForeground(LauncherTheme.SELECTED);
+                hint.setForeground(LauncherTheme.WARNING);
                 name.requestFocusInWindow();
                 return;
             }
@@ -2540,6 +2543,8 @@ public final class LauncherFrame extends JFrame {
             loading.setForeground(FirstLaunchPanel.MUTED);
             left.add(loading);
         } else if (launcherSettings != null) {
+            left.add(appearanceSection());
+            left.add(Box.createVerticalStrut(guiScale.scaleForGUI(10)));
             JPanel java = settingsSection("Game Java");
             JLabel runtime = new JLabel("Java " + launcherSettings.defaultJavaFeature());
             runtime.setName("defaultJavaStatus");
@@ -2596,7 +2601,7 @@ public final class LauncherFrame extends JFrame {
         } else {
             JLabel unavailable = new JLabel("Settings could not be read and were not reset.");
             unavailable.setName("settingsErrorMessage");
-            unavailable.setForeground(LauncherTheme.SELECTED);
+            unavailable.setForeground(LauncherTheme.WARNING);
             unavailable.setToolTipText(launcherSettingsError == null ? null
                     : errorDetail(launcherSettingsError));
             left.add(unavailable);
@@ -2635,7 +2640,7 @@ public final class LauncherFrame extends JFrame {
         if (launchOptionsDocument == null) {
             JLabel unavailable = new JLabel("Launch options could not be read and were not reset.");
             unavailable.setName("launchOptionsErrorMessage");
-            unavailable.setForeground(LauncherTheme.SELECTED);
+            unavailable.setForeground(LauncherTheme.WARNING);
             unavailable.setToolTipText(launchOptionsError == null ? null : errorDetail(launchOptionsError));
             unavailable.setAlignmentX(Component.LEFT_ALIGNMENT);
             section.add(unavailable);
@@ -2647,7 +2652,7 @@ public final class LauncherFrame extends JFrame {
         section.add(Box.createVerticalStrut(guiScale.scaleForGUI(8)));
         JLabel message = new JLabel(" ");
         message.setName("settingsLaunchOptionsMessage");
-        message.setForeground(LauncherTheme.SELECTED);
+        message.setForeground(LauncherTheme.WARNING);
         message.setAlignmentX(Component.LEFT_ALIGNMENT);
         JButton revert = homeButton("Revert", "revertLaunchOptionsButton");
         JButton save = homeButton("Save launch options", "saveGlobalLaunchOptionsButton");
@@ -2713,6 +2718,73 @@ public final class LauncherFrame extends JFrame {
         label.setForeground(FirstLaunchPanel.MUTED);
         label.setAlignmentX(Component.LEFT_ALIGNMENT);
         return label;
+    }
+
+    private JPanel appearanceSection() {
+        JPanel section = settingsSection("Appearance");
+        LauncherAppearance current = LauncherAppearance.current();
+        JLabel themeLabel = mutedSettingsLabel("Theme");
+        section.add(themeLabel);
+        section.add(Box.createVerticalStrut(guiScale.scaleForGUI(4)));
+        StyledComboBox<LauncherAppearance.Theme> theme =
+                new StyledComboBox<>(LauncherAppearance.Theme.values(), guiScale);
+        theme.setName("appearanceThemeCombo");
+        theme.setSelectedItem(current.theme());
+        theme.getAccessibleContext().setAccessibleName("Theme");
+        themeLabel.setLabelFor(theme);
+        theme.setAlignmentX(Component.LEFT_ALIGNMENT);
+        Dimension themeSize = theme.getPreferredSize();
+        themeSize.width = Math.max(themeSize.width, guiScale.scaleForGUI(180));
+        theme.setPreferredSize(themeSize);
+        theme.setMaximumSize(themeSize);
+        theme.addActionListener(event -> {
+            if (theme.getSelectedItem() instanceof LauncherAppearance.Theme selected) {
+                applyAppearance(LauncherAppearance.current().withTheme(selected));
+            }
+        });
+        section.add(theme);
+        section.add(Box.createVerticalStrut(guiScale.scaleForGUI(8)));
+        MapCheckBox colorBlind = new MapCheckBox("Color-blind friendly status colors",
+                current.palette() == org.megamek.launcher.design.DesignTokens.Palette.COLORBLIND, guiScale);
+        colorBlind.setName("appearanceColorBlindCheckbox");
+        colorBlind.setAlignmentX(Component.LEFT_ALIGNMENT);
+        colorBlind.addActionListener(event -> applyAppearance(LauncherAppearance.current().withPalette(
+                colorBlind.isSelected() ? org.megamek.launcher.design.DesignTokens.Palette.COLORBLIND
+                        : org.megamek.launcher.design.DesignTokens.Palette.STANDARD)));
+        section.add(colorBlind);
+        MapCheckBox reduceMotion = new MapCheckBox("Reduce motion", current.reduceMotion(), guiScale);
+        reduceMotion.setName("appearanceReduceMotionCheckbox");
+        reduceMotion.setAlignmentX(Component.LEFT_ALIGNMENT);
+        reduceMotion.addActionListener(event -> applyAppearance(
+                LauncherAppearance.current().withReduceMotion(reduceMotion.isSelected())));
+        section.add(reduceMotion);
+        return section;
+    }
+
+    private void applyAppearance(LauncherAppearance requested) {
+        if (requested.equals(LauncherAppearance.current())) return;
+        LauncherAppearance.install(requested);
+        renderCurrentPage();
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                synchronized (appearanceSaveLock) {
+                    services.saveAppearance(LauncherAppearance.current());
+                }
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    get();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                } catch (java.util.concurrent.ExecutionException failure) {
+                    if (isDisplayable()) showError("Appearance was not saved", failure.getCause());
+                }
+            }
+        }.execute();
     }
 
     private void openInstallationLaunchOptions(InstallationRecord record) {
@@ -3475,9 +3547,9 @@ public final class LauncherFrame extends JFrame {
             releases.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
             releases.setBackground(FirstLaunchPanel.PANEL);
             releases.setForeground(FirstLaunchPanel.TEXT);
-            releases.setSelectionBackground(HomeLaunchSplitButton.POPUP_SELECTION);
+            releases.setSelectionBackground(LauncherTheme.SELECTION_BACKGROUND);
             releases.setSelectionForeground(
-                    HomeLaunchSplitButton.POPUP_SELECTION_FOREGROUND);
+                    LauncherTheme.TEXT);
             releases.setFixedCellHeight(guiScale.scaleForGUI(42));
             releases.setFont(guiScale.font(releases.getFont(), Font.PLAIN, 13f));
             releases.setBorder(BorderFactory.createEmptyBorder(guiScale.scaleForGUI(5),
@@ -3496,9 +3568,9 @@ public final class LauncherFrame extends JFrame {
                         guiScale.scaleForGUI(10), guiScale.scaleForGUI(8),
                         guiScale.scaleForGUI(10)));
                 label.setBackground(selected
-                        ? HomeLaunchSplitButton.POPUP_SELECTION : FirstLaunchPanel.PANEL);
+                        ? LauncherTheme.SELECTION_BACKGROUND : FirstLaunchPanel.PANEL);
                 label.setForeground(selected
-                        ? HomeLaunchSplitButton.POPUP_SELECTION_FOREGROUND
+                        ? LauncherTheme.TEXT
                         : value != null && !value.assessment().eligible()
                         ? FirstLaunchPanel.MUTED : FirstLaunchPanel.TEXT);
                 if (value != null && !value.assessment().eligible()) {
@@ -3571,7 +3643,7 @@ public final class LauncherFrame extends JFrame {
             JScrollPane scroll = LauncherTheme.scrollPane(releases);
             scroll.setName("releaseListScrollPane");
             scroll.setBorder(BorderFactory.createLineBorder(
-                    HomeLaunchSplitButton.POPUP_BORDER));
+                    LauncherTheme.BORDER));
             scroll.getViewport().setBackground(FirstLaunchPanel.PANEL);
 
             JPanel resultActions = new JPanel(new java.awt.FlowLayout(
@@ -4574,8 +4646,8 @@ public final class LauncherFrame extends JFrame {
         area.setBackground(FirstLaunchPanel.PANEL);
         area.setForeground(FirstLaunchPanel.TEXT);
         area.setCaretColor(FirstLaunchPanel.ACCENT);
-        area.setSelectionColor(HomeLaunchSplitButton.POPUP_SELECTION);
-        area.setSelectedTextColor(HomeLaunchSplitButton.POPUP_SELECTION_FOREGROUND);
+        area.setSelectionColor(LauncherTheme.SELECTION_BACKGROUND);
+        area.setSelectedTextColor(LauncherTheme.TEXT);
         area.setFont(guiScale.font(new Font(Font.MONOSPACED, Font.PLAIN, 12),
                 Font.PLAIN, 12f));
         JScrollPane scroll = LauncherTheme.scrollPane(area);
@@ -4879,6 +4951,7 @@ public final class LauncherFrame extends JFrame {
     }
 
     private static final class ResponsiveHomeActions extends JPanel {
+        private static final int MAX_CELL = 380;
         private final GuiScale scale;
         private final int gap;
         private int columns = 3;
@@ -4948,7 +5021,15 @@ public final class LauncherFrame extends JFrame {
 
         @Override
         public Dimension getMaximumSize() {
-            return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+            // Each launch button stops growing at a comfortable width; the deck centres the group
+            int count = Math.max(1, getComponentCount());
+            int used = columnsForWidth(availableWidth(), count);
+            int widest = 0;
+            for (Component child : getComponents()) {
+                widest = Math.max(widest, child.getPreferredSize().width);
+            }
+            int cell = Math.max(scale.scaleForGUI(MAX_CELL), widest);
+            return new Dimension(cell * used + gap * (used - 1), getPreferredSize().height);
         }
     }
 
