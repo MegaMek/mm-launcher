@@ -87,7 +87,7 @@ class ChannelSwingIntegrationTest {
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             assertEquals("Launch MegaMek Milestone (0.51.0)",
-                    waitFor(() -> find(frame, "launch-megamek-button")).getText());
+                    SwingTestSupport.spoken(waitFor(() -> find(frame, "launch-megamek-button"))));
             JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
             SwingUtilities.invokeAndWait(installations::doClick);
             JLabel provenance = waitFor(() -> (JLabel) findNamed(frame,
@@ -173,10 +173,10 @@ class ChannelSwingIntegrationTest {
             services.release.countDown();
             JButton installations = waitFor(() -> {
                 JButton found = find(frame, "manageInstallationsButton");
-                return found != null && "Installations".equals(found.getText())
+                return found != null && "Installations".equals(SwingTestSupport.label(found))
                         ? found : null;
             });
-            assertEquals("Installations", installations.getText());
+            assertEquals("Installations", SwingTestSupport.label(installations));
             assertNull(onEdt(() -> find(frame, "checkUpdatesButton")),
                     "Home has no per-installation Check again action");
             assertNull(onEdt(() -> find(frame, "recoverUpdateButton")),
@@ -284,7 +284,7 @@ class ChannelSwingIntegrationTest {
                 return component instanceof JLabel label && message.equals(label.getText()) ? label : null;
             });
             assertEquals(message, onEdt(home::getText));
-            assertEquals("Installations", onEdt(() -> find(frame, "manageInstallationsButton").getText()));
+            assertEquals("Installations", onEdt(() -> SwingTestSupport.label(find(frame, "manageInstallationsButton"))));
             JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
             SwingUtilities.invokeAndWait(installations::doClick);
             JLabel status = waitFor(() -> {
@@ -337,7 +337,7 @@ class ChannelSwingIntegrationTest {
             SwingUtilities.invokeAndWait(frame::showWindow);
             assertTrue(services.started.await(30, TimeUnit.SECONDS));
             JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
-            assertEquals("Installations", onEdt(installations::getText));
+            assertEquals("Installations", onEdt(() -> SwingTestSupport.label(installations)));
             SwingUtilities.invokeAndWait(installations::doClick);
             JButton initial = waitFor(() -> find(frame, "checkUpdatesButton"));
             assertEquals("Check", onEdt(initial::getText));
@@ -413,7 +413,7 @@ class ChannelSwingIntegrationTest {
 
     private static JButton findByText(Container root, String text) {
         for (Component child : root.getComponents()) {
-            if (child instanceof JButton button && text.equals(button.getText())) return button;
+            if (child instanceof JButton button && text.equals(SwingTestSupport.label(button))) return button;
             if (child instanceof Container nested) {
                 JButton found = findByText(nested, text);
                 if (found != null) return found;

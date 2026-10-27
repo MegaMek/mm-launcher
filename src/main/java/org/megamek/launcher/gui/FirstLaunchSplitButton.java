@@ -33,6 +33,8 @@
 
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.design.swing.TokenPresentation;
+
 import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.channel.QuickInstallSnapshot;
 import org.megamek.launcher.release.OfficialRepository;
@@ -49,11 +51,7 @@ import javax.swing.MenuElement;
 import javax.swing.MenuSelectionManager;
 import javax.swing.JPanel;
 import javax.swing.SwingConstants;
-import javax.swing.UIManager;
 import javax.swing.plaf.basic.BasicButtonUI;
-import javax.swing.plaf.basic.BasicGraphicsUtils;
-import javax.swing.plaf.basic.BasicMenuItemUI;
-import javax.swing.plaf.basic.BasicPopupMenuUI;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -61,11 +59,9 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
-import java.awt.HeadlessException;
 import java.awt.Polygon;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
-import java.awt.Toolkit;
 import java.awt.event.ActionEvent;
 import java.awt.event.InputEvent;
 import java.awt.event.KeyEvent;
@@ -82,14 +78,10 @@ import java.util.function.Consumer;
 final class FirstLaunchSplitButton extends JPanel {
     static final String PRIMARY_NAME = "downloadAndInstallButton";
     static final String OPTIONS_NAME = "downloadOptionsButton";
-    static final String PRIMARY_LABEL =
+    static final String PRIMARY_LABEL = "Install latest";
+    static final String PRIMARY_SUBJECT = "MekHQ Milestone";
+    static final String PRIMARY_ACCESSIBLE_NAME =
             VersionDisplay.installLatest("MekHQ", "Milestone", null);
-    static final Color POPUP_BACKGROUND = LauncherTheme.POPUP_BACKGROUND;
-    static final Color POPUP_FOREGROUND = LauncherTheme.TEXT;
-    static final Color POPUP_MUTED = LauncherTheme.MUTED;
-    static final Color POPUP_SELECTION = LauncherTheme.ACTIVE_BACKGROUND;
-    static final Color POPUP_SELECTION_FOREGROUND = LauncherTheme.ACCENT;
-    static final Color POPUP_BORDER = LauncherTheme.BORDER;
     private static final String OPEN_POPUP_ACTION = "openFirstLaunchDownloadOptions";
     private static final String CLOSE_POPUP_ACTION = "closeFirstLaunchDownloadOptions";
 
@@ -120,7 +112,8 @@ final class FirstLaunchSplitButton extends JPanel {
 
         primaryButton = new SegmentButton(PRIMARY_LABEL, PRIMARY_NAME, false);
         primaryButton.setMnemonic(KeyEvent.VK_D);
-        primaryButton.getAccessibleContext().setAccessibleName(PRIMARY_LABEL);
+        ButtonDetail.setDetail(primaryButton, PRIMARY_SUBJECT);
+        primaryButton.getAccessibleContext().setAccessibleName(PRIMARY_ACCESSIBLE_NAME);
         primaryButton.getAccessibleContext().setAccessibleDescription(
                 "Review and install the latest official Milestone MekHQ bundle containing "
                         + "MegaMek, MekHQ, and MegaMekLab.");
@@ -139,7 +132,7 @@ final class FirstLaunchSplitButton extends JPanel {
                 "Open the eight-choice quick-install menu. Opening it performs no network request.");
         optionsButton.addActionListener(event -> openPopup());
 
-        popupMenu = new StyledPopupMenu(palette(), scale);
+        popupMenu = new JPopupMenu();
         popupMenu.setName("downloadOptionsPopup");
         popupMenu.getAccessibleContext().setAccessibleName("Latest application choices");
         popupMenu.getAccessibleContext().setAccessibleDescription(
@@ -147,14 +140,14 @@ final class FirstLaunchSplitButton extends JPanel {
                         + "Opening this menu performs no network request.");
         for (QuickInstallOption.Key key : QuickInstallSnapshot.MENU_KEYS) {
             JMenuItem item = menuItem(menuLabel(key, "Loading…"), menuItemName(key),
-                    menuLabel(key) + " version metadata is loading.", palette());
+                    menuLabel(key) + " version metadata is loading.");
             item.setEnabled(false);
             item.addActionListener(event -> invokeMenuAction(key, optionAction));
             optionItems.put(key, item);
             popupMenu.add(item);
         }
         retryItem = menuItem("Retry version check", "retryQuickInstallMetadataMenuItem",
-                "Retry loading the nine official current install choices.", palette());
+                "Retry loading the nine official current install choices.");
         retryItem.addActionListener(event -> {
             closePopup();
             if (!disposed && isEnabled() && (optionState == OptionState.FAILED
@@ -181,16 +174,12 @@ final class FirstLaunchSplitButton extends JPanel {
         setOptionsLoading();
     }
 
-    private JMenuItem menuItem(String text, String name, String description, Palette palette) {
+    private JMenuItem menuItem(String text, String name, String description) {
         JMenuItem item = new JMenuItem(text);
-        item.setUI(new StyledMenuItemUI(palette));
         item.setName(name);
-        item.setOpaque(true);
-        item.setBackground(palette.background());
-        item.setForeground(palette.foreground());
-        item.setFont(scale.font(item.getFont(), Font.BOLD, 13f));
-        item.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(9),
-                scale.scaleForGUI(12), scale.scaleForGUI(9), scale.scaleForGUI(12)));
+        item.setFont(scale.font(item.getFont(), Font.PLAIN, 13f));
+        item.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(8),
+                scale.scaleForGUI(12), scale.scaleForGUI(8), scale.scaleForGUI(12)));
         item.getAccessibleContext().setAccessibleName(text);
         item.getAccessibleContext().setAccessibleDescription(description);
         return item;
@@ -223,8 +212,7 @@ final class FirstLaunchSplitButton extends JPanel {
     void setOptions(QuickInstallSnapshot snapshot) {
         if (disposed) return;
         QuickInstallOption primary = snapshot.option(QuickInstallSnapshot.DEFAULT_KEY);
-        setPrimaryLabel(menuLabel(QuickInstallSnapshot.DEFAULT_KEY,
-                primary.available() ? primary.version() : "Unavailable"));
+        setPrimaryValue(primary.available() ? primary.version() : "Unavailable");
         optionState = OptionState.READY;
         popupMenu.remove(retryItem);
         primaryButton.getAccessibleContext().setAccessibleDescription(
@@ -260,7 +248,7 @@ final class FirstLaunchSplitButton extends JPanel {
 
     void setOptionsLoading() {
         if (disposed) return;
-        setPrimaryLabel(menuLabel(QuickInstallSnapshot.DEFAULT_KEY, "Loading…"));
+        setPrimaryValue("Loading…");
         optionState = OptionState.LOADING;
         popupMenu.remove(retryItem);
         primaryButton.getAccessibleContext().setAccessibleDescription(
@@ -294,7 +282,7 @@ final class FirstLaunchSplitButton extends JPanel {
     void setOptionsUnavailable(String detail) {
         if (disposed) return;
         closePopup();
-        setPrimaryLabel(menuLabel(QuickInstallSnapshot.DEFAULT_KEY, "Unavailable"));
+        setPrimaryValue("Unavailable");
         optionState = OptionState.FAILED;
         primaryButton.getAccessibleContext().setAccessibleDescription(
                 "Install version metadata is unavailable. This action is unavailable.");
@@ -332,9 +320,11 @@ final class FirstLaunchSplitButton extends JPanel {
         popupMenu.repaint();
     }
 
-    private void setPrimaryLabel(String label) {
-        primaryButton.setText(label);
-        primaryButton.getAccessibleContext().setAccessibleName(label);
+    /** The caps label stays "Install latest"; the version or state shows as sentence-case detail. */
+    private void setPrimaryValue(String value) {
+        ButtonDetail.setDetail(primaryButton, PRIMARY_SUBJECT + " · " + value);
+        primaryButton.getAccessibleContext().setAccessibleName(
+                menuLabel(QuickInstallSnapshot.DEFAULT_KEY, value));
         revalidate();
         repaint();
     }
@@ -444,79 +434,12 @@ final class FirstLaunchSplitButton extends JPanel {
         return "latest" + productName(key) + key.channel() + "MenuItem";
     }
 
-    private static Palette palette() {
-        if (!highContrast()) {
-            return new Palette(POPUP_BACKGROUND, POPUP_FOREGROUND, POPUP_MUTED,
-                    POPUP_SELECTION, POPUP_SELECTION_FOREGROUND, POPUP_BORDER);
-        }
-        return new Palette(uiColor("MenuItem.background", Color.BLACK),
-                uiColor("MenuItem.foreground", Color.WHITE),
-                uiColor("MenuItem.disabledForeground", Color.LIGHT_GRAY),
-                uiColor("MenuItem.selectionBackground", Color.WHITE),
-                uiColor("MenuItem.selectionForeground", Color.BLACK),
-                uiColor("MenuItem.foreground", Color.WHITE));
-    }
-
-    private static boolean highContrast() {
-        if (UIManager.getBoolean("Theme.highContrast")
-                || UIManager.getBoolean("win.highContrast.on")) {
-            return true;
-        }
-        try {
-            return Boolean.TRUE.equals(
-                    Toolkit.getDefaultToolkit().getDesktopProperty("win.highContrast.on"));
-        } catch (HeadlessException ignored) {
-            return false;
-        }
-    }
-
-    private static Color uiColor(String key, Color fallback) {
-        Color color = UIManager.getColor(key);
-        return color == null ? fallback : color;
-    }
-
-    private record Palette(Color background, Color foreground, Color disabled,
-                           Color selection, Color selectionForeground, Color border) {
-    }
-
-    private static final class StyledPopupMenu extends JPopupMenu {
-        private StyledPopupMenu(Palette palette, GuiScale scale) {
-            setUI(new BasicPopupMenuUI());
-            setOpaque(true);
-            setBackground(palette.background());
-            setForeground(palette.foreground());
-            setBorder(BorderFactory.createCompoundBorder(
-                    BorderFactory.createLineBorder(palette.border(), scale.scaleForGUI(1)),
-                    BorderFactory.createEmptyBorder(scale.scaleForGUI(3),
-                            scale.scaleForGUI(3), scale.scaleForGUI(3),
-                            scale.scaleForGUI(3))));
-        }
-    }
-
-    private static final class StyledMenuItemUI extends BasicMenuItemUI {
-        private final Palette palette;
-
-        private StyledMenuItemUI(Palette palette) {
-            this.palette = palette;
-        }
-
-        @Override
-        protected void installDefaults() {
-            super.installDefaults();
-            selectionBackground = palette.selection();
-            selectionForeground = palette.selectionForeground();
-            disabledForeground = palette.disabled();
-            acceleratorForeground = palette.foreground();
-            acceleratorSelectionForeground = palette.selectionForeground();
-        }
-    }
-
     @Override
     public Dimension getPreferredSize() {
         Dimension primary = primaryButton.getPreferredSize();
         Dimension options = optionsButton.getPreferredSize();
         return new Dimension(Math.max(primary.width + options.width, scale.scaleForGUI(248)),
-                Math.max(Math.max(primary.height, options.height), scale.scaleForGUI(54)));
+                Math.max(Math.max(primary.height, options.height), scale.scaleForGUI(46)));
     }
 
     @Override
@@ -537,13 +460,13 @@ final class FirstLaunchSplitButton extends JPanel {
             boolean hover = primaryButton.getModel().isRollover()
                     || optionsButton.getModel().isRollover();
             boolean enabled = isEnabled() && (primaryButton.isEnabled() || optionsButton.isEnabled());
-            LauncherTheme.paintButton(canvas, getWidth(), getHeight(), scale, enabled, pressed, hover,
+            LauncherTheme.paintButton(canvas, getWidth(), getHeight(), scale, true, enabled, pressed, hover,
                     primaryButton.isFocusOwner() || optionsButton.isFocusOwner());
             int separator = optionsButton.getX();
-            canvas.setColor(LauncherTheme.highContrast()
-                    ? LauncherTheme.uiColor("Button.foreground", Color.WHITE) : LauncherTheme.BORDER);
-            canvas.drawLine(separator, scale.scaleForGUI(4),
-                    separator, getHeight() - scale.scaleForGUI(4));
+            Color divider = LauncherTheme.buttonText(true, enabled);
+            canvas.setColor(new Color(divider.getRed(), divider.getGreen(), divider.getBlue(), 64));
+            canvas.drawLine(separator, scale.scaleForGUI(8),
+                    separator, getHeight() - scale.scaleForGUI(8));
         } finally {
             canvas.dispose();
         }
@@ -559,8 +482,8 @@ final class FirstLaunchSplitButton extends JPanel {
             setName(name);
             getAccessibleContext().setAccessibleName(text);
             setFont(scale.font(getFont(), Font.BOLD, 16f));
-            int vertical = scale.scaleForGUI(14);
-            int horizontal = scale.scaleForGUI(arrow ? 10 : 18);
+            int vertical = scale.scaleForGUI(12);
+            int horizontal = scale.scaleForGUI(arrow ? 10 : 24);
             setBorder(BorderFactory.createEmptyBorder(
                     vertical, horizontal, vertical, horizontal));
             setOpaque(false);
@@ -569,18 +492,19 @@ final class FirstLaunchSplitButton extends JPanel {
             setFocusPainted(false);
             LauncherTheme.repaintOwnerOnFocusChange(this, FirstLaunchSplitButton.this);
             setRolloverEnabled(true);
+            TokenPresentation.role(this, "button");
+        }
+
+        @Override
+        public void updateUI() {
             setUI(new BasicButtonUI() {
                 @Override
                 protected void paintText(Graphics graphics, JComponent component,
                                          Rectangle textRectangle, String value) {
                     Graphics2D textGraphics = (Graphics2D) graphics.create();
                     try {
-                        textGraphics.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
-                                RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-                        textGraphics.setColor(LauncherTheme.buttonText(true, isEnabled()));
-                        BasicGraphicsUtils.drawStringUnderlineCharAt(textGraphics, value,
-                                getDisplayedMnemonicIndex(), textRectangle.x,
-                                textRectangle.y + textGraphics.getFontMetrics().getAscent());
+                        ButtonDetail.paint(textGraphics, SegmentButton.this, scale, textRectangle,
+                                value, LauncherTheme.buttonText(true, isEnabled()));
                     } finally {
                         textGraphics.dispose();
                     }
@@ -589,19 +513,14 @@ final class FirstLaunchSplitButton extends JPanel {
         }
 
         @Override
-        public javax.swing.JToolTip createToolTip() {
-            return LauncherTheme.toolTip(this, scale);
-        }
-
-        @Override
         public Dimension getPreferredSize() {
-            Dimension preferred = super.getPreferredSize();
+            Dimension preferred = ButtonDetail.grow(this, scale, super.getPreferredSize());
             if (arrow) {
                 return new Dimension(Math.max(preferred.width, scale.scaleForGUI(46)),
-                        Math.max(preferred.height, scale.scaleForGUI(54)));
+                        Math.max(preferred.height, scale.scaleForGUI(46)));
             }
             return new Dimension(Math.max(preferred.width, scale.scaleForGUI(202)),
-                    Math.max(preferred.height, scale.scaleForGUI(54)));
+                    Math.max(preferred.height, scale.scaleForGUI(46)));
         }
 
     }
@@ -629,7 +548,7 @@ final class FirstLaunchSplitButton extends JPanel {
             try {
                 canvas.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                         RenderingHints.VALUE_ANTIALIAS_ON);
-                canvas.setColor(LauncherTheme.buttonText(false, component.isEnabled()));
+                canvas.setColor(LauncherTheme.buttonText(true, component.isEnabled()));
                 int middle = x + width / 2;
                 Polygon arrow = new Polygon(
                         new int[]{x, x + width, middle},

@@ -19,8 +19,8 @@ preferred `InstallationRecord`, displays **Program Channel (Version)**, and uses
 static reinspection, Java, coordinator, and launch validation without a GUI preview or confirmation.
 Alternate rows are deterministic,
 launch-only exact-record actions and never mutate a preference or fall back at click time.
-Missing preferred folders show **Program (Version) · Not found** inline instead of a recovery
-banner. Their primary launch segment is disabled, but usable alternate installations remain
+Missing preferred folders show **Not found** on the launch button's detail line (accessible name
+**Program (Version) · Not found**) instead of a recovery banner. Their primary launch segment is disabled, but usable alternate installations remain
 available; known blocked alternatives are disabled. Genuine recovery/unavailable messages remain
 distinct and use the existing **Installations** navigation, without an extra navigation button.
 
@@ -113,17 +113,26 @@ Launcher update (supported native installations) on the left; the launcher-wide 
 form on the right. At narrow sizes these groups stack in that reading order, with the bottom navigation
 remaining visible and the sections scrolling vertically as needed. Settings utility buttons
 share the dimensions needed by their longest label. News titles, All news, Join Discord, and
-Play online are unboxed cyan links with underlines, keyboard activation, visible focus, and accessible link roles.
-Custom links and checkboxes explicitly repaint on both focus gain and loss. Checkboxes
-show a whole-control focus outline in checked and unchecked states, including high contrast;
-selection color never replaces the keyboard-focus cue.
+Play online are unboxed accent-color links with underlines, keyboard activation, visible focus, and accessible link roles.
+Custom links explicitly repaint on both focus gain and loss and draw the token focus ring around
+the whole link. Check boxes use the look and feel's focus indication in checked and unchecked
+states; selection color never replaces the keyboard-focus cue.
+Home and the first-launch screen use the design tokens' game presentation: button labels and
+the news title are drawn upper-cased in the condensed face, and their accessible names stay
+sentence case. Settings, Installations, progress, consent, error and other dialogs keep the
+app presentation with sentence-case labels. Game-mode caps are kept to short framing labels
+(**Launch MegaMek**, **Install latest**, **Installations**); channel, version, *Not found* and update
+counts render in sentence case on a detail line or badge, and the accessible name keeps the full sentence.
+Settings starts with **Appearance**: a Dark/Light theme select. A change applies immediately, re-renders the current page,
+and is saved off the event-dispatch thread; a failed save reports an error without reverting the
+visible appearance. High contrast is not offered until the design tokens define it.
 Loading and error states keep the same layout; there is no global automatic-check control.
 
-Latest news appears on the managed home page as a translucent backplate in the top-right corner
-of the artwork. It loads up to three dated headlines from MegaMek's official Atom feed in the
+Latest news appears on the managed home page as a corner-ticked panel (titled
+**Latest news**) in the top-right corner of the artwork. It loads up to three dated headlines from MegaMek's official Atom feed in the
 background once per window, links to the full posts, and always offers the blog archive when
-offline. News dates are smaller muted labels, and full titles wrap within the plate width rather
-than being truncated; tooltips and accessible names retain the date and title. The plate is
+offline. News dates are smaller muted labels, and full titles wrap within the panel width rather
+than being truncated; tooltips and accessible names retain the date and title. The panel is
 hidden when the window is too small for it to fit over the artwork. Remote article HTML is not
 rendered in the launcher and news loading never delays navigation.
 
@@ -170,8 +179,8 @@ selector uses the same launcher styling. No Java download, installation,
 bundle, or generic Save settings action exists; Java acquisition remains deferred.
 
 Home's Installations label is derived from installation-level in-memory results. It remains
-**Installations** unless one or more checked records have a known update, when it becomes
-**Installations (N updates)**. Unknown is never counted as an update. Late workers are
+**Installations** unless one or more checked records have a known update, when it shows an
+**N updates** badge (accessible name **Installations (N updates)**). Unknown is never counted as an update. Late workers are
 generation-bound and update that button on the EDT without replacing Home. Home offers no normal
 Check/Retry/Update buttons or redundant status navigation. Pending recovery and launch
 blockers remain exact-record actions in Installations. One top-left Home information area displays
@@ -189,19 +198,19 @@ still say **Could not check**.
 Download bars paint percentage only, with localized human-readable byte detail below. Extraction
 is indeterminate with processed-file detail and no bar string.
 
-The empty first-launch screen uses the supplied artwork, a responsive dark action panel, and
-Interstellar Map-style outlined controls. Its joined split control keeps
+The empty first-launch screen uses the supplied artwork, a responsive token-surface action panel,
+and design-token controls. Its joined split control keeps
 **Install latest MekHQ Milestone** as the
 large primary action for the fixed current Milestone MekHQ all-three-program suite. A distinct
-arrow opens a map-color popup with exactly **Install latest MegaMek Milestone**,
+arrow opens a look-and-feel popover with exactly **Install latest MegaMek Milestone**,
 **Install latest MegaMekLab Milestone**, **Install latest MekHQ Development**,
 **Install latest MegaMek Development**, **Install latest MegaMekLab Development**,
 **Install latest MekHQ Weekly**, **Install latest MegaMek Weekly**, and
 **Install latest MegaMekLab Weekly**, in that order. Each
 available row shows its validated version. The popup contains neither a redundant MekHQ Milestone
 row nor the full exact-release picker. It preserves ordinary menu actions, keyboard opening,
-Escape, accessible names/descriptions, opaque selection contrast, and a system high-contrast
-fallback rather than inheriting plain white OS rows.
+Escape, accessible names/descriptions, and opaque token selection contrast rather than plain OS
+rows.
 Successful rows need no validation tooltip; unavailable rows retain concise diagnostic details.
 On initial empty Home, one frame-scoped background snapshot loads all nine choices. Until it
 succeeds, both install segments are disabled and unfocusable while **Use existing installation**
@@ -210,7 +219,8 @@ activation is deduplicated. READY labels and exact options survive Home reloads,
 confirmation cancellation/close, Change location, and repeated quote opens without another
 current-channel request or loading flicker.
 First-launch artwork uses a centered cover treatment without side bars. The bottom control deck
-has no repeated application title; equal-width actions are horizontally centered and top-aligned.
+has no repeated application title; equal-width actions, each capped at the same
+about-380 px (scaled) column as Home, are horizontally centered and top-aligned.
 Compact layouts stack those actions and remain top-aligned and scrollable. Focus on either split
 segment outlines the complete joined control, not only the arrow segment.
 
@@ -248,14 +258,19 @@ compact vertical scrolling as first launch. It has no duplicate launcher header/
 art rail, raw registry path, or permanently reserved empty region. The deck contains the optional
 process-local notice, application launch row, aggregate update state, and compact
 Installations/Settings navigation. Three product controls share equal widths when they fit and
-wrap/stack as the viewport narrows. Deck height is measured from the incoming width before
+wrap/stack as the viewport narrows. Each column is capped at about 380 px (scaled), so a single
+launch control stays centered at a button size instead of spanning the window. Deck height is measured from the incoming width before
 laying out the responsive controls, including transitions back to a wider window. All row-size
 requirements use that same width before grid layout. Launch controls
 retain their minimum heights, with navigation visible without scrolling when the deck fits;
 smaller viewports scroll rather than compressing the controls. Each primary passes its preferred
 exact record/product to the existing launch backend. Its arrow lists the other matching records in registry order as
 **name · observed version** plus already-held status. Menu construction performs no filesystem or
-network read on the EDT. A row never persists a temporary target or falls back at click time.
+network read on the EDT. The list opens in its own native popup window, below the control or above it
+when the screen has no room below, under a caps **Other
+installations** header, is at least as wide as the control with both right edges aligned, and
+shows each row as the sentence-case name over a muted version/status line; the row's text and
+accessible name remain the full label. A row never persists a temporary target or falls back at click time.
 Layout/recovery failures disable the affected primary. Missing saved Java does not. With no alternate, the arrow is absent
 and unfocusable.
 
@@ -269,8 +284,8 @@ iconified with no foreground request. Nonzero exit or launch/start exception dei
 the frame visible/front, and shows the existing explicit error. BusyGate refusal does not
 iconify and retains **Please wait**. No path disposes, exits, detaches, or uses a system tray.
 
-The primary label gains the validated MekHQ Milestone version, for example
-**Install latest MekHQ Milestone (0.51.00)**. There is no separate caption. A single background
+The primary segment reads **Install latest** with a detail line carrying the validated version, for
+example **MekHQ Milestone · 0.51.00** (accessible name **Install latest MekHQ Milestone (0.51.00)**). There is no separate caption. A single background
 metadata-only snapshot discovers bounded complete records and validates all nine
 repository/channel targets. Repeated product release IDs are cached within the attempt.
 The main label and eight labels update atomically only on the current panel.
@@ -320,10 +335,10 @@ no migration or filesystem write.
 Installations contains import, exact-release download, independent per-application preference,
 launcher removal, safe uninstall, location, channel/check, Update, and recovery actions on exact
 cards. Merely viewing/focusing a card mutates nothing. **Install another version** defaults to
-MekHQ/Milestone and uses map-colored content, list, viewport, labels, outlined buttons, and
+MekHQ/Milestone and uses token-colored content, list, viewport, labels, buttons, and
 product/channel combos. The same combo class is used by the Game Java selector;
-it retains native Swing popup, keyboard, selection, and accessibility behavior while painting the
-field and arrow segment locally, with a system high-contrast palette fallback.
+it retains native Swing popup, keyboard, selection, and accessibility behavior, and the look and
+feel paints the field and arrow.
 
 One top row contains, in order, styled **Product**, styled **Channel**, and styled
 **Fetch releases** controls. It defaults to MekHQ/Milestone; there is no separate Browse mode.
@@ -549,7 +564,7 @@ terminology. Technical causes are retained only in sanitized local diagnostics. 
 metadata/package work runs in a worker under `BusyGate`, with exact record, selected channel,
 dialog generation, and cancellation guards.
 
-The typed opposite-current result replaces the progress surface before package download. Its cyan
+The typed opposite-current result replaces the progress surface before package download. Its accent
 heading names **Use Milestone**, **Use Development**, or **Use Weekly for this installation**,
 plain copy identifies the version's current canonical channel and confirms that no files changed,
 and its only actions are a direct styled **Try Milestone** / **Try Development** / **Try Weekly** retry and
@@ -571,7 +586,7 @@ channel without a second confirmation. This includes read-only reconstruction of
 case-only managed data/docs/licenses prefixes (with any modified-file history); excluded
 `bin/*.bat` scripts remain outside managed ownership even when local bytes differ.
 Case-only runtime paths and structural conflicts still block adoption. An ineligible result uses
-the standard cyan heading **Updates can't be enabled** and explains the
+the standard accent heading **Updates can't be enabled** and explains the
 actual blocking category in plain language: version mismatch, a file/folder
 conflict, or modified core application files. It confirms that no files changed, directs the user
 toward a separate managed installation, and offers only **Close**. Detailed

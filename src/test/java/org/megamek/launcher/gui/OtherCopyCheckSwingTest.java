@@ -87,7 +87,7 @@ class OtherCopyCheckSwingTest {
             waitUntil(() -> services.calls.get() == 1);
             JButton installations = waitFor(
                     () -> find(frame, "manageInstallationsButton"));
-            waitUntil(() -> "Installations (1 update)".equals(installations.getText()));
+            waitUntil(() -> "Installations (1 update)".equals(SwingTestSupport.spoken(installations)));
             JLabel information = waitFor(() -> find(frame, "homeInformationMessage"));
             waitUntil(() -> "1 installation has an update".equals(information.getText()));
             assertSame(originalHome, onEdt(() -> find(frame, "managedHomePanel")),
@@ -148,7 +148,7 @@ class OtherCopyCheckSwingTest {
                 services.release.countDown();
                 waitUntil(() -> {
                     JButton button = find(frame, "manageInstallationsButton");
-                    return button != null && "Installations (2 updates)".equals(button.getText());
+                    return button != null && "Installations (2 updates)".equals(SwingTestSupport.spoken(button));
                 });
                 assertEquals(2, services.calls.get());
                 assertEquals(List.of(services.opted.id(), services.newMain.id()),
@@ -169,7 +169,7 @@ class OtherCopyCheckSwingTest {
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
-            assertEquals("Installations", installations.getText(),
+            assertEquals("Installations", SwingTestSupport.label(installations),
                     "unknown checks do not produce a false update count");
             assertEquals(0, services.calls.get());
             JLabel information = waitFor(() -> find(frame, "homeInformationMessage"));

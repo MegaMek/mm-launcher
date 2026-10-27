@@ -81,17 +81,17 @@ class MissingInstallationSwingTest {
             SwingTestSupport.onEdt(() -> { frame.showWindow(); return null; });
             SwingTestSupport.awaitCondition("missing version marked on Home", () -> {
                 JButton launch = SwingTestSupport.find(frame, "launch-megamek-button", JButton.class);
-                return launch != null && launch.getText().endsWith(" · Not found");
+                return launch != null && SwingTestSupport.spoken(launch).endsWith(" · Not found");
             });
             SwingTestSupport.onEdt(() -> {
                 HomeLaunchSplitButton launch = SwingTestSupport.find(
                         frame, "launch-megamek-split-button", HomeLaunchSplitButton.class);
-                assertEquals("MegaMek (1.0.0) · Not found", launch.primaryButton().getText());
-                assertEquals(launch.primaryButton().getText(),
-                        launch.primaryButton().getAccessibleContext().getAccessibleName());
+                assertEquals("MegaMek (1.0.0) · Not found", SwingTestSupport.spoken(launch.primaryButton()));
+                assertEquals("Launch MegaMek", SwingTestSupport.label(launch.primaryButton()));
+                assertEquals("Not found · 1.0.0", ButtonDetail.detail(launch.primaryButton()));
                 assertFalse(launch.primaryButton().isEnabled());
                 assertTrue(launch.optionsButton().isEnabled());
-                assertTrue(((JMenuItem) launch.popupMenu().getComponent(0)).isEnabled());
+                assertTrue(launch.menuItems().get(0).isEnabled());
                 assertNull(SwingTestSupport.find(frame, "homeActionRequiredMessage"));
                 assertNull(SwingTestSupport.find(frame, "resolveHomeBlockerButton"));
                 return null;

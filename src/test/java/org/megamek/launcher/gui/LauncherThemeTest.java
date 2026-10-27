@@ -7,10 +7,33 @@
  * it under the terms of the GNU General Public License (GPL),
  * version 3 or (at your option) any later version,
  * as published by the Free Software Foundation.
+ *
+ * MegaMek Launcher is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty
+ * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details.
+ *
+ * A copy of the GPL should have been included with this project;
+ * if not, see <https://www.gnu.org/licenses/>.
+ *
+ * NOTICE: The MegaMek organization is a non-profit group of volunteers
+ * creating free software for the BattleTech community.
+ *
+ * MechWarrior, BattleMech, `Mech and AeroTech are registered trademarks
+ * of The Topps Company, Inc. All Rights Reserved.
+ *
+ * Catalyst Game Labs and the Catalyst Game Labs logo are trademarks of
+ * InMediaRes Productions, LLC.
+ *
+ * MechWarrior Copyright Microsoft Corporation. MegaMek was created under
+ * Microsoft's "Game Content Usage Rules"
+ * <https://www.xbox.com/en-US/developers/rules> and it is not endorsed by or
+ * affiliated with Microsoft.
  */
 
 package org.megamek.launcher.gui;
 
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import javax.swing.JButton;
@@ -19,123 +42,140 @@ import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
 import javax.swing.JTextField;
-import javax.swing.UIManager;
-import javax.swing.plaf.basic.BasicComboBoxUI;
+import javax.swing.SwingUtilities;
+import javax.swing.plaf.basic.BasicButtonUI;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Graphics2D;
-import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class LauncherThemeTest {
-    @Test
-    void paletteMatchesTheMekHqMapRatherThanThePreviousLauncherSkin() {
-        assertEquals(new Color(5, 12, 21), LauncherTheme.BACKGROUND);
-        assertEquals(new Color(5, 13, 23), LauncherTheme.PANEL);
-        assertEquals(new Color(218, 231, 235), LauncherTheme.TEXT);
-        assertEquals(new Color(65, 210, 224), LauncherTheme.ACCENT);
-        assertEquals(new Color(235, 166, 66), LauncherTheme.SELECTED);
-        assertEquals(new Color(35, 66, 82), LauncherTheme.BORDER);
-        assertEquals(new Color(12, 29, 42), LauncherTheme.CONTROL_BACKGROUND);
-        assertEquals(new Color(17, 64, 78), LauncherTheme.INPUT_BACKGROUND);
-        assertEquals(new Color(18, 45, 56), LauncherTheme.ACTIVE_BACKGROUND);
-        assertEquals(LauncherTheme.TEXT, LauncherTheme.buttonText(true, true));
-        assertEquals(LauncherTheme.TEXT, LauncherTheme.buttonText(false, true));
+    private static final LauncherAppearance DARK = LauncherAppearance.DEFAULT;
+
+    @AfterEach
+    void restoreAppearance() throws Exception {
+        SwingTestSupport.onEdt(() -> {
+            LauncherAppearance.install(LauncherAppearanceSessionListener.testAppearance());
+            return null;
+        });
     }
 
     @Test
-    void buttonsUseTheMapsFlatRectangularSurfaceAndKeepTheirActions() throws Exception {
+    void coloursAreDesignTokenRolesOfTheInstalledMode() throws Exception {
         SwingTestSupport.onEdt(() -> {
-            JButton button = new FirstLaunchButton("", "fixtureButton", true, GuiScale.DEFAULT);
+            LauncherAppearance.install(DARK);
+            assertEquals(new Color(0x0E1314), LauncherTheme.BACKGROUND);
+            assertEquals(new Color(0x141A1C), LauncherTheme.PANEL);
+            assertEquals(new Color(0xF1F4F0), LauncherTheme.TEXT);
+            assertEquals(new Color(0x82E2CE), LauncherTheme.ACCENT);
+            assertEquals(new Color(0xF2C14E), LauncherTheme.WARNING);
+            assertEquals(new Color(0xF0F2EE), LauncherTheme.PRIMARY_BACKGROUND);
+            assertEquals(new Color(0x16201E), LauncherTheme.ON_PRIMARY);
+            assertEquals(LauncherTheme.ON_PRIMARY, LauncherTheme.buttonText(true, true));
+            assertEquals(LauncherTheme.TEXT, LauncherTheme.buttonText(false, true));
+            assertEquals(LauncherTheme.ON_PRIMARY, LauncherTheme.buttonText(true, false));
+            assertEquals(LauncherTheme.DISABLED_TEXT, LauncherTheme.buttonText(false, false));
+
+            LauncherAppearance.install(DARK.withTheme(LauncherAppearance.Theme.LIGHT));
+            assertEquals(new Color(0xECEFEE), LauncherTheme.BACKGROUND);
+            assertEquals(new Color(0x16201E), LauncherTheme.TEXT);
+            assertEquals(new Color(0x0A5C4C), LauncherTheme.ACCENT);
+            assertEquals(new Color(0x1C2426), LauncherTheme.PRIMARY_BACKGROUND);
+            assertEquals(LauncherTheme.TEXT.getRGB(), LauncherTheme.TEXT.hashCode());
+            return null;
+        });
+    }
+
+    @Test
+    void hoverAndPressWashesAreOpaqueAndDistinct() {
+        assertEquals(255, LauncherTheme.ACTIVE_BACKGROUND.getAlpha());
+        assertEquals(255, LauncherTheme.PRESSED_BACKGROUND.getAlpha());
+        assertNotEquals(LauncherTheme.BUTTON_BACKGROUND, LauncherTheme.ACTIVE_BACKGROUND);
+        assertNotEquals(LauncherTheme.ACTIVE_BACKGROUND, LauncherTheme.PRESSED_BACKGROUND);
+        assertEquals(0xFF808080, LauncherTheme.over(0xFF000000, 0x80FFFFFF));
+    }
+
+    @Test
+    void buttonsPaintTokenFacesAndKeepTheirActions() throws Exception {
+        SwingTestSupport.onEdt(() -> {
+            JButton button = new FirstLaunchButton("", "fixtureButton", false, GuiScale.DEFAULT);
             button.setSize(240, 48);
-            assertPixel(button, 3, 3, LauncherTheme.BUTTON_BACKGROUND);
-            assertPixel(button, 30, 38, LauncherTheme.BUTTON_BACKGROUND);
+            assertPixel(button, 20, 24, LauncherTheme.BUTTON_BACKGROUND);
             button.getModel().setRollover(true);
-            assertPixel(button, 3, 3, LauncherTheme.ACTIVE_BACKGROUND);
+            assertPixel(button, 20, 24, LauncherTheme.ACTIVE_BACKGROUND);
             button.getModel().setArmed(true);
             button.getModel().setPressed(true);
-            assertPixel(button, 3, 3, LauncherTheme.PRESSED_BACKGROUND);
+            assertPixel(button, 20, 24, LauncherTheme.PRESSED_BACKGROUND);
             button.getModel().setArmed(false);
             button.getModel().setPressed(false);
+            button.getModel().setRollover(false);
             button.setEnabled(false);
-            assertPixel(button, 3, 3, LauncherTheme.DISABLED_BACKGROUND);
+            assertPixel(button, 20, 24, LauncherTheme.DISABLED_BACKGROUND);
             button.setEnabled(true);
             AtomicInteger clicks = new AtomicInteger();
             button.addActionListener(event -> clicks.incrementAndGet());
             button.doClick(0);
             assertEquals(1, clicks.get());
+
+            JButton primary = new FirstLaunchButton("", "fixturePrimary", true, GuiScale.DEFAULT);
+            primary.setSize(240, 48);
+            assertPixel(primary, 20, 24, LauncherTheme.PRIMARY_BACKGROUND);
+            primary.setEnabled(false);
+            assertPixel(primary, 20, 24, LauncherTheme.PRIMARY_DISABLED_BACKGROUND);
             return null;
         });
     }
 
     @Test
-    void comboUsesMapInputsAndPopupSelectionWithoutChangingTheSelectedValue() throws Exception {
+    void customPaintedControlsSurviveALookAndFeelChange() throws Exception {
+        SwingTestSupport.onEdt(() -> {
+            JPanel root = new JPanel();
+            JButton button = new FirstLaunchButton("Install", "fixtureButton", true, GuiScale.DEFAULT);
+            LauncherLink link = new LauncherLink("Release notes", "fixtureLink", GuiScale.DEFAULT);
+            root.add(button);
+            root.add(link);
+            LauncherAppearance.install(DARK.withTheme(LauncherAppearance.Theme.LIGHT));
+            SwingUtilities.updateComponentTreeUI(root);
+            assertInstanceOf(BasicButtonUI.class, button.getUI());
+            assertInstanceOf(BasicButtonUI.class, link.getUI());
+            button.setSize(240, 48);
+            assertPixel(button, 20, 24, LauncherTheme.PRIMARY_BACKGROUND);
+            assertEquals(new Color(0x1C2426), LauncherTheme.PRIMARY_BACKGROUND);
+            return null;
+        });
+    }
+
+    @Test
+    void comboUsesTheLookAndFeelSelectWithDisplayText() throws Exception {
         SwingTestSupport.onEdt(() -> {
             StyledComboBox<String> combo = new StyledComboBox<>(new String[]{"Milestone", "Weekly"},
                     GuiScale.DEFAULT);
-            assertEquals(LauncherTheme.INPUT_BACKGROUND, combo.getBackground());
-            assertEquals("Milestone", combo.getSelectedItem());
+            assertInstanceOf(com.formdev.flatlaf.ui.FlatComboBoxUI.class, combo.getUI(),
+                    combo.getUI().getClass().getName());
+            combo.setDisplayText(value -> value + " channel");
             Component row = combo.getRenderer().getListCellRendererComponent(
                     new JList<>(), "Weekly", 1, true, false);
-            assertEquals(LauncherTheme.ACTIVE_BACKGROUND, row.getBackground());
-            assertEquals(LauncherTheme.ACCENT, row.getForeground());
+            assertEquals("Weekly channel", ((JLabel) row).getText());
             assertEquals("Milestone", combo.getSelectedItem());
-            combo.setEnabled(false);
-            assertEquals(LauncherTheme.DISABLED_BACKGROUND, combo.getBackground());
-            combo.setEnabled(true);
-            assertEquals(LauncherTheme.INPUT_BACKGROUND, combo.getBackground());
-            assertEquals(LauncherTheme.POPUP_BACKGROUND, combo.createToolTip().getBackground());
+            assertTrue(combo.getPreferredSize().height >= LauncherTheme.CONTROL_HEIGHT);
             return null;
         });
     }
 
     @Test
-    void focusedComboValueDoesNotRevertToTheNativeSelectionBackground() throws Exception {
-        SwingTestSupport.onEdt(() -> {
-            StyledComboBox<String> combo = new StyledComboBox<>(new String[]{"Milestone"}, GuiScale.DEFAULT);
-            BasicComboBoxUI ui = assertInstanceOf(BasicComboBoxUI.class, combo.getUI());
-            BufferedImage image = new BufferedImage(240, 32, BufferedImage.TYPE_INT_ARGB);
-            Rectangle bounds = new Rectangle(0, 0, 240, 32);
-            Graphics2D graphics = image.createGraphics();
-            try {
-                ui.paintCurrentValueBackground(graphics, bounds, true);
-                ui.paintCurrentValue(graphics, bounds, true);
-                assertEquals(LauncherTheme.INPUT_BACKGROUND.getRGB(), image.getRGB(2, 2));
-                combo.setEnabled(false);
-                ui.paintCurrentValueBackground(graphics, bounds, true);
-                ui.paintCurrentValue(graphics, bounds, true);
-                assertEquals(LauncherTheme.DISABLED_BACKGROUND.getRGB(), image.getRGB(2, 2));
-            } finally {
-                graphics.dispose();
-            }
-            return null;
-        });
-    }
-
-    @Test
-    void copiedCheckBoxKeepsSelectionAccessibilityAndScaledAmberIcon() throws Exception {
+    void checkBoxUsesTheLookAndFeelBoxAndKeepsAccessibility() throws Exception {
         SwingTestSupport.onEdt(() -> {
             MapCheckBox checkbox = new MapCheckBox("Check for updates", false, new GuiScale(1.5f));
             assertEquals("Check for updates", checkbox.getAccessibleContext().getAccessibleName());
-            assertEquals(27, checkbox.getIcon().getIconWidth());
+            assertNull(checkbox.getIcon(), "the look and feel draws the box");
             assertEquals(12, checkbox.getIconTextGap());
-            checkbox.doClick(0);
-            assertTrue(checkbox.isSelected());
-            BufferedImage image = new BufferedImage(27, 27, BufferedImage.TYPE_INT_ARGB);
-            Graphics2D graphics = image.createGraphics();
-            try {
-                checkbox.getIcon().paintIcon(checkbox, graphics, 0, 0);
-            } finally {
-                graphics.dispose();
-            }
-            assertEquals(LauncherTheme.SELECTED.getRGB(), image.getRGB(4, 4));
-            checkbox.setEnabled(false);
             checkbox.doClick(0);
             assertTrue(checkbox.isSelected());
             return null;
@@ -143,72 +183,30 @@ class LauncherThemeTest {
     }
 
     @Test
-    void scrollbarAndDefaultFieldsFollowTheMapWithoutOverwritingWarningColors() throws Exception {
+    void defaultFieldsFollowTheTokensWithoutOverwritingWarningColours() throws Exception {
         SwingTestSupport.onEdt(() -> {
             JPanel panel = new JPanel();
             JLabel normal = new JLabel("Description");
             JLabel warning = new JLabel("Warning");
-            warning.setForeground(LauncherTheme.SELECTED);
+            warning.setForeground(LauncherTheme.WARNING);
             JTextField field = new JTextField("Example");
             JList<String> list = new JList<>(new String[]{"One", "Two"});
             JScrollPane scroll = new JScrollPane(list);
+            JScrollPane noHorizontal = new JScrollPane(new JLabel("Example"));
+            noHorizontal.setHorizontalScrollBar(null);
             panel.add(normal);
             panel.add(warning);
             panel.add(field);
             panel.add(scroll);
+            panel.add(noHorizontal);
             LauncherTheme.styleContent(panel, new GuiScale(1.5f));
             assertEquals(LauncherTheme.BACKGROUND, panel.getBackground());
             assertEquals(LauncherTheme.TEXT, normal.getForeground());
-            assertEquals(LauncherTheme.SELECTED, warning.getForeground());
+            assertEquals(LauncherTheme.WARNING, warning.getForeground());
             assertEquals(LauncherTheme.INPUT_BACKGROUND, field.getBackground());
-            assertEquals(LauncherTheme.ACTIVE_BACKGROUND, list.getSelectionBackground());
-            assertInstanceOf(MapScrollBarStyle.class, scroll.getVerticalScrollBar().getUI());
-            assertInstanceOf(MapScrollBarStyle.class, scroll.getHorizontalScrollBar().getUI());
-            assertEquals(15, scroll.getVerticalScrollBar().getPreferredSize().width);
-            assertEquals(15, scroll.getHorizontalScrollBar().getPreferredSize().height);
-            return null;
-        });
-    }
-
-    @Test
-    void horizontalScrollbarCanBeAbsentAsItIsInComboPopups() throws Exception {
-        SwingTestSupport.onEdt(() -> {
-            JScrollPane scroll = new JScrollPane(new JLabel("Example"));
-            scroll.setHorizontalScrollBar(null);
-            LauncherTheme.styleScrollPane(scroll, GuiScale.DEFAULT);
-            assertInstanceOf(MapScrollBarStyle.class, scroll.getVerticalScrollBar().getUI());
-            return null;
-        });
-    }
-
-    @Test
-    void copiedControlsRespectSystemHighContrastInsteadOfForcingMapColors() throws Exception {
-        SwingTestSupport.onEdt(() -> {
-            Object contrast = UIManager.get("Theme.highContrast");
-            Object buttonBackground = UIManager.get("Button.background");
-            Object buttonForeground = UIManager.get("Button.foreground");
-            Object checkboxForeground = UIManager.get("CheckBox.foreground");
-            try {
-                UIManager.put("Theme.highContrast", true);
-                UIManager.put("Button.background", Color.BLACK);
-                UIManager.put("Button.foreground", Color.WHITE);
-                UIManager.put("CheckBox.foreground", Color.WHITE);
-                JButton button = new FirstLaunchButton("", "contrastButton", true, GuiScale.DEFAULT);
-                button.setSize(160, 36);
-                assertPixel(button, 3, 3, Color.BLACK);
-                assertEquals(Color.WHITE, LauncherTheme.buttonText(true, true));
-                assertEquals(Color.WHITE, new MapCheckBox("Check", false, GuiScale.DEFAULT).getForeground());
-                JScrollPane scroll = new JScrollPane(new JLabel("Example"));
-                Color viewportBackground = scroll.getViewport().getBackground();
-                LauncherTheme.styleContent(scroll, GuiScale.DEFAULT);
-                assertFalse(scroll.getVerticalScrollBar().getUI() instanceof MapScrollBarStyle);
-                assertEquals(viewportBackground, scroll.getViewport().getBackground());
-            } finally {
-                UIManager.put("Theme.highContrast", contrast);
-                UIManager.put("Button.background", buttonBackground);
-                UIManager.put("Button.foreground", buttonForeground);
-                UIManager.put("CheckBox.foreground", checkboxForeground);
-            }
+            assertEquals(LauncherTheme.SELECTION_BACKGROUND, list.getSelectionBackground());
+            assertEquals(LauncherTheme.PANEL, scroll.getViewport().getBackground());
+            assertEquals(24, scroll.getVerticalScrollBar().getUnitIncrement());
             return null;
         });
     }
@@ -221,6 +219,6 @@ class LauncherThemeTest {
         } finally {
             graphics.dispose();
         }
-        assertEquals(expected.getRGB(), image.getRGB(x, y));
+        assertEquals(Integer.toHexString(expected.getRGB()), Integer.toHexString(image.getRGB(x, y)));
     }
 }

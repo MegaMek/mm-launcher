@@ -81,6 +81,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -112,7 +113,7 @@ class LauncherSwingSmokeTest {
             assertNotNull(options);
             JButton existing = waitForButton(holder[0], "useExistingCopyButton");
             assertNotNull(existing, "first Home exposes the secondary import action");
-            assertEquals("Use existing installation", existing.getText());
+            assertEquals("Use existing installation", SwingTestSupport.label(existing));
             FirstLaunchSplitButton split = (FirstLaunchSplitButton) options.getParent();
             waitFor(() -> options.isEnabled() && split.isShowing());
             SwingUtilities.invokeAndWait(options::doClick);
@@ -303,8 +304,10 @@ class LauncherSwingSmokeTest {
                 } finally {
                     graphics.dispose();
                 }
-                assertEquals(LauncherTheme.BUTTON_ICON.getRGB(), image.getRGB(0, link.getHeight() / 2),
-                        "keyboard focus has a visible cyan outline");
+                int middle = link.getHeight() / 2;
+                assertTrue(java.util.stream.IntStream.range(0, 3)
+                                .anyMatch(x -> image.getRGB(x, middle) == LauncherTheme.FOCUS.getRGB()),
+                        "keyboard focus has a visible focus-ring outline");
                 return null;
             });
             saveReviewImage("home-news-wide.png", frame);
@@ -443,7 +446,6 @@ class LauncherSwingSmokeTest {
                     component(javaSelector, "javaSelectionDialogContent").getBackground());
             assertTrue(component(javaSelector, "defaultJavaCandidateCombo")
                     instanceof StyledComboBox<?>);
-            assertNotNull(find(javaSelector, "styledComboArrowButton"));
             assertTrue(find(javaSelector, "confirmJavaSelectionButton")
                     instanceof FirstLaunchButton);
             assertTrue(find(javaSelector, "cancelJavaSelectionButton")
@@ -452,6 +454,27 @@ class LauncherSwingSmokeTest {
                     "Java acquisition remains explicitly deferred");
             saveReviewImage("java-selector.png", javaSelector);
             SwingUtilities.invokeAndWait(javaSelector::dispose);
+            JComboBox<?> theme = findCombo(frame, "appearanceThemeCombo");
+            LauncherAppearance.Theme initial = LauncherAppearance.current().theme();
+            LauncherAppearance.Theme other = initial == LauncherAppearance.Theme.DARK
+                    ? LauncherAppearance.Theme.LIGHT : LauncherAppearance.Theme.DARK;
+            assertEquals(initial, onEdt(theme::getSelectedItem));
+            assertNull(component(frame, "appearanceColorBlindCheckbox"));
+            assertNull(component(frame, "appearanceReduceMotionCheckbox"));
+            Color initialBackground = new Color(LauncherTheme.BACKGROUND.getRGB());
+            try {
+                SwingUtilities.invokeAndWait(() -> theme.setSelectedItem(other));
+                assertEquals(other, LauncherAppearance.current().theme());
+                assertNotEquals(initialBackground, LauncherTheme.BACKGROUND,
+                        "the theme applies immediately without a restart");
+                assertEquals(other, onEdt(() -> findCombo(frame, "appearanceThemeCombo").getSelectedItem()),
+                        "the re-rendered page keeps the selection");
+                waitFor(() -> services.appearance().theme() == other);
+            } finally {
+                SwingUtilities.invokeAndWait(() -> findCombo(frame, "appearanceThemeCombo")
+                        .setSelectedItem(initial));
+            }
+            waitFor(() -> services.appearance().theme() == initial);
             JButton logs = waitForButton(frame, "viewOperationLogsButton");
             SwingUtilities.invokeAndWait(logs::doClick);
             JDialog logViewer = owned(frame, "Local operation logs");
@@ -543,7 +566,6 @@ class LauncherSwingSmokeTest {
             JComboBox<?> channel = findCombo(dialog, "downloadChannelCombo");
             assertTrue(product instanceof StyledComboBox<?>);
             assertTrue(channel instanceof StyledComboBox<?>);
-            assertNotNull(find(dialog, "styledComboArrowButton"));
             assertEquals(OfficialRepository.MEKHQ, onEdt(product::getSelectedItem));
             assertEquals(FollowChannel.MILESTONE, onEdt(channel::getSelectedItem));
             assertEquals("Product", product.getAccessibleContext().getAccessibleName());

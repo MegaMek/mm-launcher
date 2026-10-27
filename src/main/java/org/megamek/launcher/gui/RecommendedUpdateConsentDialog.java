@@ -90,7 +90,7 @@ final class RecommendedUpdateConsentDialog extends JDialog {
         summary.setBackground(FirstLaunchPanel.PANEL);
         summary.setBorder(BorderFactory.createCompoundBorder(
                 BorderFactory.createMatteBorder(
-                        scale.scaleForGUI(1), 0, 0, 0, FirstLaunchSplitButton.POPUP_BORDER),
+                        scale.scaleForGUI(1), 0, 0, 0, LauncherTheme.BORDER),
                 BorderFactory.createEmptyBorder(scale.scaleForGUI(17),
                         scale.scaleForGUI(18), scale.scaleForGUI(17),
                         scale.scaleForGUI(18))));

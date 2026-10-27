@@ -9,3 +9,16 @@ provided under third-party-licenses/<jar-name>/ for convenient review.
 
 This notice describes dependency material only. MegaMek Launcher's source
 code license is in LICENSE.code; neither document grants trademark rights.
+
+Bundled fonts
+-------------
+
+The launcher JAR bundles these fonts under org/megamek/launcher/design/fonts/,
+next to their license texts:
+
+- Roboto (Regular, Medium and Condensed Medium static instances), Copyright
+  2011 The Roboto Project Authors, under the SIL Open Font License 1.1
+  (Roboto-OFL.txt).
+- Material Symbols Rounded (a subset of the launcher's icons), Copyright
+  Google LLC, under the Apache License 2.0
+  (MaterialSymbols-LICENSE-2.0.txt).

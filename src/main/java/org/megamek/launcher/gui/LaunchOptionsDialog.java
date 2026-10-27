@@ -97,7 +97,7 @@ final class LaunchOptionsDialog {
         JPanel south = new JPanel(new BorderLayout(0, scale.scaleForGUI(8)));
         south.setOpaque(false);
         message.setName("launchOptionsMessage");
-        message.setForeground(LauncherTheme.SELECTED);
+        message.setForeground(LauncherTheme.WARNING);
         south.add(message, BorderLayout.NORTH);
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, scale.scaleForGUI(8), 0));
         actions.setOpaque(false);

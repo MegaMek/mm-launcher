@@ -81,6 +81,22 @@ final class SwingTestSupport {
         await(description, () -> condition.call() ? Boolean.TRUE : null);
     }
 
+    /**
+     * Waits until {@code window} is showing and its screen bounds have stopped changing. Window managers on Linux
+     * and macOS apply moves and resizes after the call returns, and a late move closes any open popup menu.
+     */
+    static void awaitSettled(java.awt.Window window) throws Exception {
+        java.awt.Rectangle[] last = new java.awt.Rectangle[1];
+        int[] stable = new int[1];
+        awaitCondition("settled window", () -> {
+            java.awt.Rectangle now = window.isShowing()
+                    ? new java.awt.Rectangle(window.getLocationOnScreen(), window.getSize()) : null;
+            stable[0] = now != null && now.equals(last[0]) ? stable[0] + 1 : 0;
+            last[0] = now;
+            return stable[0] >= 10;
+        });
+    }
+
     static AbstractButton click(Container root, String name) throws Exception {
         PendingAction action = startAction(root, name, false);
         // Teardown must still be able to join a modal action after its caller times out.
@@ -143,6 +159,8 @@ final class SwingTestSupport {
     }
 
     static JPopupMenu installationMenu(Container root, String recordId) throws Exception {
+        java.awt.Window window = root instanceof java.awt.Window own ? own : SwingUtilities.getWindowAncestor(root);
+        if (window != null) awaitSettled(window);
         click(root, "installationMenuButton-" + recordId);
         return await("installation menu for " + recordId, () -> showingInstallationMenu(root, recordId));
     }
@@ -207,7 +225,7 @@ final class SwingTestSupport {
 
     static int countButtonText(Container root, String text) throws Exception {
         return onEdt(() -> count(root, child ->
-                child instanceof JButton button && text.equals(button.getText())));
+                child instanceof JButton button && text.equals(label(button))));
     }
 
     private static int count(Container root, Predicate<Component> matches) {
@@ -219,9 +237,22 @@ final class SwingTestSupport {
         return count;
     }
 
+    /** The full sentence a screen reader announces, including any detail line or badge. */
+    static String spoken(AbstractButton button) {
+        return button.getAccessibleContext().getAccessibleName();
+    }
+
+    /**
+     * The label the launcher gave {@code button}. On a game screen (Home and first launch) the look and feel shows button
+     * text upper-cased and keeps the label that was set as the text source.
+     */
+    static String label(AbstractButton button) {
+        return button.getClientProperty("MegaMek.textSource") instanceof String source ? source : button.getText();
+    }
+
     private static AbstractButton buttonText(Container root, String text) {
         for (Component child : root.getComponents()) {
-            if (child instanceof AbstractButton button && text.equals(button.getText())) return button;
+            if (child instanceof AbstractButton button && text.equals(label(button))) return button;
             if (child instanceof Container nested) {
                 AbstractButton found = buttonText(nested, text);
                 if (found != null) return found;

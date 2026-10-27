@@ -33,6 +33,9 @@
 
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.design.DesignTokens.Presentation;
+import org.megamek.launcher.design.swing.TokenPresentation;
+
 import javax.imageio.ImageIO;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -62,6 +65,8 @@ import java.io.IOException;
 
 /** Empty-home presentation only; all user actions are supplied by the existing launcher frame. */
 final class FirstLaunchPanel extends JPanel {
+    /** Matches the Home launch column cap. */
+    private static final int ACTION_WIDTH = 380;
     static final String ART_RESOURCE = "/org/megamek/launcher/gui/first-launch-art.png";
     static final Color BACKGROUND = LauncherTheme.BACKGROUND;
     static final Color PANEL = LauncherTheme.PANEL;
@@ -116,7 +121,7 @@ final class FirstLaunchPanel extends JPanel {
         existingCaption.setName("existingCopyCaption");
         existingCaption.setHorizontalAlignment(SwingConstants.CENTER);
         existingAction.add(existingCaption, BorderLayout.SOUTH);
-        int actionWidth = scale.scaleForGUI(480);
+        int actionWidth = scale.scaleForGUI(ACTION_WIDTH);
         primaryAction.setPreferredSize(new Dimension(actionWidth,
                 primaryAction.getPreferredSize().height));
         existingAction.setPreferredSize(new Dimension(actionWidth,
@@ -127,8 +132,7 @@ final class FirstLaunchPanel extends JPanel {
         actionRow.setOpaque(false);
         actionRow.setAlignmentX(CENTER_ALIGNMENT);
         layoutActions(false);
-        actionRow.setMaximumSize(new Dimension(scale.scaleForGUI(1000),
-                actionRow.getPreferredSize().height));
+        actionRow.setMaximumSize(actionRowMaximum());
         controls.add(actionRow);
         controls.add(Box.createVerticalStrut(scale.scaleForGUI(12)));
         status.setForeground(MUTED);
@@ -156,6 +160,7 @@ final class FirstLaunchPanel extends JPanel {
         scroller.getViewport().setBackground(PANEL);
         scroller.getVerticalScrollBar().setUnitIncrement(scale.scaleForGUI(18));
         add(scroller);
+        TokenPresentation.setMode(this, Presentation.GAME);
     }
 
     static BufferedImage loadArtwork() throws IOException {
@@ -178,30 +183,6 @@ final class FirstLaunchPanel extends JPanel {
      */
     static JPanel managedHome(BufferedImage image, GuiScale scale, JPanel controls, JComponent overlay) {
         return new ManagedHomePanel(image, scale, controls, overlay);
-    }
-
-    /** Rounded, translucent backplate that keeps text readable over the artwork. */
-    static JPanel backplate(GuiScale scale) {
-        JPanel plate = new JPanel() {
-            @Override protected void paintComponent(Graphics graphics) {
-                Graphics2D canvas = (Graphics2D) graphics.create();
-                try {
-                    canvas.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
-                            RenderingHints.VALUE_ANTIALIAS_ON);
-                    int arc = scale.scaleForGUI(12);
-                    canvas.setColor(new Color(PANEL.getRed(), PANEL.getGreen(), PANEL.getBlue(), 225));
-                    canvas.fillRoundRect(0, 0, getWidth() - 1, getHeight() - 1, arc, arc);
-                    canvas.setColor(LauncherTheme.BORDER);
-                    canvas.drawRoundRect(0, 0, getWidth() - 1, getHeight() - 1, arc, arc);
-                } finally {
-                    canvas.dispose();
-                }
-            }
-        };
-        plate.setOpaque(false);
-        plate.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(12), scale.scaleForGUI(16),
-                scale.scaleForGUI(12), scale.scaleForGUI(16)));
-        return plate;
     }
 
     private JLabel label(String text, Font font, Color color) {
@@ -252,6 +233,13 @@ final class FirstLaunchPanel extends JPanel {
         actionRow.revalidate();
     }
 
+    /** Each action is a button-sized column, side by side or stacked, centered in the deck. */
+    private Dimension actionRowMaximum() {
+        int column = scale.scaleForGUI(ACTION_WIDTH);
+        int width = compact ? column : 2 * column + scale.scaleForGUI(14);
+        return new Dimension(width, actionRow.getPreferredSize().height);
+    }
+
     @Override
     public Dimension getPreferredSize() {
         return scale.scaleForGUI(1180, 760);
@@ -265,9 +253,7 @@ final class FirstLaunchPanel extends JPanel {
             compact = nextCompact;
             verticalCenterBefore.setVisible(!compact);
             layoutActions(compact);
-            actionRow.setMaximumSize(new Dimension(
-                    compact ? Integer.MAX_VALUE : scale.scaleForGUI(1000),
-                    actionRow.getPreferredSize().height));
+            actionRow.setMaximumSize(actionRowMaximum());
             controls.setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(compact ? 18 : 26),
                     scale.scaleForGUI(25), scale.scaleForGUI(compact ? 14 : 20),
                     scale.scaleForGUI(25)));
@@ -307,6 +293,7 @@ final class FirstLaunchPanel extends JPanel {
             this.scale = scale;
             this.overlay = overlay;
             setName("managedHomePanel");
+            TokenPresentation.setMode(this, Presentation.GAME);
             setLayout(null);
             setBackground(BACKGROUND);
             artwork = new ArtworkPanel(image, scale, true);

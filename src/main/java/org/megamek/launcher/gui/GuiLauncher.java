@@ -36,7 +36,6 @@ package org.megamek.launcher.gui;
 import org.megamek.launcher.onboarding.PlatformInstallLocations;
 
 import javax.swing.SwingUtilities;
-import javax.swing.UIManager;
 import java.awt.GraphicsEnvironment;
 import java.io.PrintStream;
 import java.nio.file.InvalidPathException;
@@ -61,11 +60,7 @@ public final class GuiLauncher {
             return 2;
         }
         SwingUtilities.invokeLater(() -> {
-            try {
-                UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-            } catch (ReflectiveOperationException | javax.swing.UnsupportedLookAndFeelException ignored) {
-                // The cross-platform Swing look and feel remains usable.
-            }
+            LauncherAppearance.install(LauncherAppearance.DEFAULT);
             if (selection.defaultRegistry()) {
                 try {
                     DefaultRegistryMigration.migrate(selection.registry(), legacyRegistry());
@@ -82,8 +77,13 @@ public final class GuiLauncher {
             PlatformInstallLocations installLocations = selection.defaultRegistry()
                     ? PlatformInstallLocations.system(selection.registry())
                     : PlatformInstallLocations.customRegistry();
-            new LauncherFrame(new LauncherServices(
-                    selection.registry(), installLocations)).showWindow();
+            LauncherServices services = new LauncherServices(
+                    selection.registry(), installLocations);
+            LauncherAppearance saved = services.appearance();
+            if (!saved.equals(LauncherAppearance.DEFAULT)) {
+                LauncherAppearance.install(saved);
+            }
+            new LauncherFrame(services).showWindow();
         });
         return 0;
     }

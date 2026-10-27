@@ -57,6 +57,20 @@ class GuiScaleTest {
     }
 
     @Test
+    void robotoFacesKeepSwingFontFallback() {
+        // The look and feel's own Roboto falls back as far as the platform allows; derived faces must match it
+        Font label = javax.swing.UIManager.getFont("Label.font");
+        Font medium = GuiScale.DEFAULT.font(new Font("Roboto", Font.PLAIN, 12), Font.BOLD, 12);
+        assertEquals("Roboto Medium", medium.getFamily());
+        // Hebrew, Arabic and CJK, as in installation names or folder paths
+        for (char character : new char[]{'\u05D0', '\u0627', '\u4E2D'}) {
+            if (label.canDisplay(character)) {
+                assertTrue(medium.canDisplay(character), "falls back for U+" + Integer.toHexString(character));
+            }
+        }
+    }
+
+    @Test
     void workAreaIsAlreadyInLogicalCoordinates() {
         Rectangle workArea = new Rectangle(1920, 0, 960, 520);
         Dimension fitted = GuiScale.fitWindow(new Dimension(1312, 560), workArea);

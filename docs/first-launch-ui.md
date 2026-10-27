@@ -15,14 +15,16 @@ row. Each available row includes its validated version in parentheses.
 
 Both segments are keyboard-focusable push buttons. Enter/Space activates the focused segment, and
 Alt+Down, F4, the menu key, or Shift+F10 opens the standard semantic popup; Escape closes it.
-Button labels and dropdown arrows use the same normal light control text color. Either segment's
-focus produces one outline around the entire split control; focus changes repaint the whole
+The split control is a primary (inverse-surface) action: its label and dropdown arrow use the
+token on-inverse text color. Either segment's focus produces one focus ring around the entire
+split control; focus changes repaint the whole
 outline so it cannot remain highlighted on only one segment.
-The popup supplies the map's opaque blue-black rows, outlined borders and cyan selection, high-contrast palette
-fallbacks, accessible names/descriptions, and visible focus/selection while retaining normal
-`JMenuItem` action and keyboard behavior. It is not an OS-default white popup.
+The popup uses the design-token look and feel's popover surface and selection colors,
+accessible names/descriptions, and visible focus/selection while retaining normal `JMenuItem`
+action and keyboard behavior. It is not an OS-default popup.
 
-The validated MekHQ Milestone version is added directly to the primary label, for example
+The primary segment reads **Install latest** above a sentence-case detail line naming the suite and its
+validated version, for example **MekHQ Milestone · 0.51.00**; its accessible name is the full
 **Install latest MekHQ Milestone (0.51.00)**. During validation the primary and arrow are labeled
 truthfully, disabled, and removed from keyboard focus; **Use existing installation** remains
 enabled and independent. Failure never invents a version or leaves the primary actionable. It
@@ -74,7 +76,7 @@ launch still passes its captured record and never mutates an application prefere
 Managed update state is installation-level. Home contains no ordinary per-copy
 Check/Retry/Update controls and no separate update-summary button. Its single Installations
 navigation button remains **Installations** unless checked copies have known updates, when it
-becomes **Installations (N updates)**. Imported/no-receipt and unknown copies never create a false
+shows an **N updates** badge (accessible name **Installations (N updates)**). Imported/no-receipt and unknown copies never create a false
 count. Late generation-bound workers update that label on the EDT without rebuilding Home.
 Recovery is prominent only on the affected card, and no bulk update exists.
 
@@ -190,10 +192,10 @@ paint at the original aspect ratio with a centered cover treatment: no stretchin
 with only the crop required by the viewport shape. The PNG is still a finite-resolution bitmap; a
 high-DPI display does not create extra image detail.
 
-Buttons use the Interstellar Map's flat rectangular surface, thin outline, hover/pressed colors,
-and cyan focus indication. Checkbox icons and scrollbar painting are copied from MekHQ's
-immersive controls; combo boxes retain launcher keyboard/high-contrast behavior with the map's
-input and popup treatment. The split segments share one outline and separator, so
+Buttons use the MekBay look and feel's design-token surfaces: rounded raised secondary buttons with a control
+border and hover/pressed washes, inverse-surface primary actions, and the token focus ring.
+Check boxes, scroll bars, and combo boxes come from the MegaMek Dark/Light look and feel; combo
+boxes retain the launcher keyboard behavior. The split segments share one outline and separator, so
 there are no doubled borders. Standard JButton actions, keyboard
 interaction, mnemonics and accessible names/descriptions are retained. Focus is visibly outlined.
 

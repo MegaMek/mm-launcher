@@ -314,8 +314,11 @@ After onboarding, Home is application-oriented. MegaMek, MekHQ, and MegaMekLab e
 independent preferred installation. Every application found across the union of registered
 static package records gets an equal map-style split control whose primary label uses the shared
 **Program Channel (Version)** format, such as **Launch MekHQ Milestone (0.51.0)**. The arrow lists the other records containing that
-application in deterministic registry order. An alternate row launches only that exact captured
-record and never changes a preference.
+application in deterministic registry order, under an **Other installations** header, with each
+row's name above its version and status. An alternate row launches only that exact captured
+record and never changes a preference. The list opens upward when the screen has no room below. Launch controls, and the first-launch
+actions, are capped at a button width, so a lone
+control is centered rather than spanning the window.
 
 Primary and alternate launch actions are direct: there is no command/runtime confirmation dump.
 The existing backend still re-reads the captured registry record, statically reinspects the root
@@ -336,8 +339,8 @@ first remaining compatible copy. Strict parsing, canonical roots, locked mutatio
 replacement remain required.
 
 Home has no visible global “Main” block, per-copy update buttons, or a second navigation control
-for update status. Its single **Installations** button gains a known count such as
-**Installations (2 updates)** when checked installations have updates; unknown and launch-only
+for update status. Its single **Installations** button gains a known count badge such as
+**2 updates** (announced as **Installations (2 updates)**) when checked installations have updates; unknown and launch-only
 copies never create a false count. Update, retry, recovery, channel, location, removal, and explicit
 **Use as preferred for …** actions live on map-style installation cards. A managed card shows its
 read-only **Channel: Milestone/Development/Weekly** identity and directly shows
@@ -359,7 +362,7 @@ posts. **All news** opens the blog archive even if the feed cannot be loaded; ne
 the launcher. At wide window sizes Settings places Game Java, Diagnostics, and
 Launcher update in one column beside Community and Latest news in an equally wide
 column; narrower windows stack the groups in reading order above the fixed bottom
-navigation. News titles, **Join Discord**, and **All news** use unboxed, underlined cyan
+navigation. News titles, **Join Discord**, and **All news** use unboxed, underlined accent-color
 links with keyboard focus/activation; dates appear separately in smaller muted text.
 Comparable Settings utility buttons share a width and height sized for their longest label.
 **Change default Java** validates and
@@ -368,8 +371,10 @@ explicit launch preview resolve and revalidate this setting; installation record
 path or feature. With no saved default, the exact Java runtime executing MegaMek Launcher is the
 automatic effective runtime and is not persisted. An invalid or corrupt explicit setting fails
 visibly instead of silently falling back. The
-pre-release settings schema contains no global update
-fields and deliberately does not migrate older settings schemas. Settings presents unboxed,
+pre-release settings schema (version 4) contains no global update
+fields. It adds the **Appearance** choice; a version 3 file without it is read with the default
+appearance and is rewritten as version 4 only on the next settings change. Older schemas are
+still rejected without migration. Settings presents unboxed,
 left-aligned sections; the Java version and regular-font path appear above
 the left-aligned change action, and **View logs** opens a styled local viewer.
 Settings displays the effective runtime whether it is automatic or explicitly selected. The
@@ -383,20 +388,39 @@ processed files below the bar.
 
 ## Developer CLI and graphical review
 
-The launcher uses MekHQ's Interstellar Map colors and flat outlined controls,
-not a separate launcher skin. The palette, button painter, checkbox icon,
-combo treatment, tooltips, and scrollbar treatment are copied/adapted from
-`MegaMek/mekhq` commit `622f8faeff18f2975498b5494a79059c6e3627bf`.
-The copies live in the launcher's GUI package and use `GuiScale`; they introduce
-no MekHQ/MegaMek runtime dependency, map rendering, or campaign logic.
-Keyboard actions, high-contrast fallbacks, update consent, and cancellation remain
-unchanged. A lightweight shared UI library can replace these presentation
-primitives later without changing the application services.
-This styling applies to the Swing application, not native installer wizards,
-OS window chrome, or system file pickers.
-Button labels use the normal light text color. The map's filter palette is retained:
-selected checkbox/radio icons use amber (`#EBA642`), while combo selections use cyan
-on the dark active background. Amber is not a primary-button accent.
+The launcher uses the MekBay look and feel for the MegaMek Launcher: semantic color, typography,
+spacing, radius, and motion tokens with **MegaMek Dark** and **MegaMek Light** FlatLaf looks.
+The token set and its Swing components live in `org.megamek.launcher.design`, with the few
+services they need (fonts, strings, scaling) in `design.host`, so the launcher keeps no MegaMek
+runtime dependency. Roboto and a Material Symbols subset are bundled for the tokens' typography
+and icons (see `src/distribution/THIRD-PARTY-NOTICES.txt` and
+`scripts/build_launcher_fonts.py`).
+
+`LauncherTheme` maps launcher roles (background, panel, text, accent, primary, focus, and
+status colors) to token roles and resolves them at paint time, so switching theme
+only needs a repaint. Launch actions and **Install latest** are primary buttons (the inverse
+surface); other buttons are raised secondary buttons, and keyboard focus draws the token
+focus ring. Combo boxes, check boxes, popups, scroll bars, and tooltips come from the look
+and feel.
+
+Settings → **Appearance** offers Dark or Light. The change applies immediately and is saved in
+the launcher settings file. The launcher shows status through text rather than colour alone and
+uses only brief fades, so it does not offer a colour-blind palette or reduced motion.
+A high-contrast mode is deferred until the design tokens provide one.
+
+Home and the first-launch screen are *game* screens: their buttons and the news
+title are shown upper-cased in Roboto Condensed, while body text, links and accessible names
+stay sentence case. Upper case is kept to short framing labels such as **Launch MegaMek**,
+**Install latest** or **Installations**; the values they frame (channel, version, *Not found*,
+an update count) appear in sentence case on a detail line or badge, and the accessible name
+keeps the full sentence. Latest news sits in a corner-ticked panel. Every other page and dialog is an *app* screen and keeps sentence-case
+labels at regular width. Launcher buttons always carry the token `button` text role, so a
+button follows the screen it is placed on.
+This styling applies to the Swing application, not native installer wizards or system file
+pickers.
+
+Review screenshots and tests can run under a chosen appearance with the
+`mm.launcher.theme` (`dark`|`light`) system property, read by the test `LauncherAppearanceSessionListener`.
 
 From the launcher checkout, run the source UI on Windows with Java 21 available:
 
@@ -412,8 +436,9 @@ run `.\gradlew.bat run --args="gui"` instead. No installer build is needed.
 With no registered copy, the artwork-led Home has an accessible split
 **Install latest MekHQ Milestone** control. Its large primary segment remains a one-click route to the
 normal confirmation for the current official Milestone MekHQ suite, which contains MegaMek,
-MekHQ, and MegaMekLab. Its validated version is added to the button label, for example
-**Install latest MekHQ Milestone (0.51.0)**; loading and unavailable states never invent a
+MekHQ, and MegaMekLab. The button reads **Install latest** with a detail line naming the suite
+and its validated version, for example **MekHQ Milestone · 0.51.0** (announced as
+**Install latest MekHQ Milestone (0.51.0)**); loading and unavailable states never invent a
 version. The separate arrow opens a
 styled map-color popup containing exactly:
 
@@ -558,8 +583,8 @@ Previous/next use the exact loaded product/channel snapshot and a bounded record
 either combo clears the rows, selection, and page controls and invalidates late results. Eligible
 rows use **Program Channel (Version) — human size**; unavailable rows contain only
 **— Unavailable** after the identity. A separate **Page N** indicator remains in the footer, while
-the reserved status line is blank after success. The controls use the same styled combo/button
-treatment and high-contrast fallback as the rest of the launcher.
+the reserved status line is blank after success. The controls use the same design-token
+combo/button treatment as the rest of the launcher.
 
 Before consent, the picker sends the exact choice and captured record source through the
 normal-install planner. Current and historical choices revalidate that record and its exact

@@ -131,7 +131,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         detail.setAlignmentX(LEFT_ALIGNMENT);
 
         loggingWarning.setName("operationLoggingWarning");
-        loggingWarning.setForeground(LauncherTheme.SELECTED);
+        loggingWarning.setForeground(LauncherTheme.WARNING);
         loggingWarning.setFont(scale.font(loggingWarning.getFont(), Font.PLAIN, 12f));
         loggingWarning.setAlignmentX(LEFT_ALIGNMENT);
         loggingWarning.setVisible(false);
@@ -141,6 +141,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         progress.setBackground(TRACK);
         progress.setBorder(BorderFactory.createLineBorder(LauncherTheme.BORDER));
         progress.setStringPainted(true);
+        progress.setFont(scale.font(progress.getFont(), Font.BOLD, 13f));
         progress.setIndeterminate(true);
         progress.setString("Starting…");
         progress.setPreferredSize(scale.scaleForGUI(500, 22));

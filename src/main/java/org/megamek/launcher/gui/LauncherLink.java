@@ -49,10 +49,8 @@ final class LauncherLink extends JButton {
         putClientProperty("html.disable", Boolean.TRUE);
         setText(Objects.requireNonNull(text, "text"));
         setName(name);
-        setUI(new BasicButtonUI());
         setFont(scale.font(getFont(), Font.PLAIN, 13f));
-        setForeground(LauncherTheme.highContrast()
-                ? LauncherTheme.uiColor("Button.foreground", Color.WHITE) : LauncherTheme.ACCENT);
+        setForeground(LauncherTheme.ACCENT);
         setBorder(BorderFactory.createEmptyBorder(scale.scaleForGUI(4), scale.scaleForGUI(3),
                 scale.scaleForGUI(4), scale.scaleForGUI(3)));
         setOpaque(false);
@@ -74,6 +72,12 @@ final class LauncherLink extends JButton {
                 scrollRectToVisible(new Rectangle(0, 0, getWidth(), getHeight()));
             }
         });
+    }
+
+    @Override
+    public void updateUI() {
+        // The link paints itself; a look-and-feel change must not add a button plate.
+        setUI(new BasicButtonUI());
     }
 
     @Override
@@ -126,9 +130,8 @@ final class LauncherLink extends JButton {
         try {
             canvas.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
             canvas.setStroke(new BasicStroke(Math.max(1f, scale.scaleForGUI(1f))));
-            Color text = LauncherTheme.highContrast() ? LauncherTheme.buttonText(false, isEnabled())
-                    : !isEnabled() ? LauncherTheme.MUTED
-                    : getModel().isRollover() ? LauncherTheme.BUTTON_ICON : LauncherTheme.ACCENT;
+            Color text = !isEnabled() ? LauncherTheme.DISABLED_TEXT
+                    : getModel().isRollover() ? LauncherTheme.TEXT : LauncherTheme.ACCENT;
             canvas.setColor(text);
             Insets insets = getInsets();
             float y = insets.top;
@@ -141,9 +144,7 @@ final class LauncherLink extends JButton {
                 y += line.getDescent() + line.getLeading() + scale.scaleForGUI(2f);
             }
             if (isFocusOwner()) {
-                LauncherTheme.paintOutline(canvas, getWidth(), getHeight(), scale,
-                        LauncherTheme.highContrast()
-                                ? LauncherTheme.uiColor("Focus.color", Color.WHITE) : LauncherTheme.BUTTON_ICON);
+                LauncherTheme.paintFocus(canvas, getWidth(), getHeight(), scale);
             }
         } finally {
             canvas.dispose();
@@ -162,11 +163,6 @@ final class LauncherLink extends JButton {
             lines.add(measurer.nextLayout(Math.max(1, width)));
         }
         return lines;
-    }
-
-    @Override
-    public javax.swing.JToolTip createToolTip() {
-        return LauncherTheme.toolTip(this, scale);
     }
 
     @Override

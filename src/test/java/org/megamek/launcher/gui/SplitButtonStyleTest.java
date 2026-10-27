@@ -31,6 +31,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class SplitButtonStyleTest {
     @Test
@@ -52,8 +53,8 @@ class SplitButtonStyleTest {
                 for (int y = 0; y < image.getHeight(); y++) {
                     for (int x = 0; x < image.getWidth(); x++) {
                         int pixel = image.getRGB(x, y);
-                        if (pixel == LauncherTheme.TEXT.getRGB()) neutralText = true;
-                        assertFalse(pixel == LauncherTheme.SELECTED.getRGB(), "button labels must not use amber");
+                        if (pixel == LauncherTheme.ON_PRIMARY.getRGB()) neutralText = true;
+                        assertFalse(pixel == LauncherTheme.WARNING.getRGB(), "button labels must not use amber");
                     }
                 }
                 org.junit.jupiter.api.Assertions.assertTrue(neutralText, button.getName());
@@ -63,7 +64,7 @@ class SplitButtonStyleTest {
     }
 
     @Test
-    void arrowsUseNormalTextColorInsteadOfPrimaryActionAmber() throws Exception {
+    void arrowsUsePrimaryLabelColorInsteadOfAmber() throws Exception {
         SwingTestSupport.onEdt(() -> {
             for (SplitFixture fixture : fixtures()) {
                 JButton arrow = fixture.options();
@@ -73,11 +74,11 @@ class SplitButtonStyleTest {
                 Graphics2D graphics = image.createGraphics();
                 try {
                     icon.paintIcon(arrow, graphics, 0, 0);
-                    assertEquals(LauncherTheme.TEXT.getRGB(), image.getRGB(icon.getIconWidth() / 2, 2),
+                    assertEquals(LauncherTheme.ON_PRIMARY.getRGB(), image.getRGB(icon.getIconWidth() / 2, 2),
                             fixture.control().getName());
                     arrow.setEnabled(false);
                     icon.paintIcon(arrow, graphics, 0, 0);
-                    assertEquals(LauncherTheme.MUTED.getRGB(), image.getRGB(icon.getIconWidth() / 2, 2),
+                    assertEquals(LauncherTheme.ON_PRIMARY.getRGB(), image.getRGB(icon.getIconWidth() / 2, 2),
                             fixture.control().getName());
                 } finally {
                     graphics.dispose();
@@ -155,14 +156,15 @@ class SplitButtonStyleTest {
                         } finally {
                             graphics.dispose();
                         }
-                        for (int x : new int[]{width / 4, width - 10}) {
-                            assertEquals(LauncherTheme.BUTTON_ICON.getRGB(), image.getRGB(x, 0),
+                        int ring = LauncherTheme.FOCUS.getRGB();
+                        for (int x : new int[]{width / 4, width - 20}) {
+                            assertTrue(ringNear(image, ring, x, 0, 0, 1),
                                     "whole top outline for " + segment.getName());
-                            assertEquals(LauncherTheme.BUTTON_ICON.getRGB(), image.getRGB(x, height - 1),
+                            assertTrue(ringNear(image, ring, x, height - 1, 0, -1),
                                     "whole bottom outline for " + segment.getName());
                         }
-                        assertEquals(LauncherTheme.BUTTON_ICON.getRGB(), image.getRGB(0, height / 2));
-                        assertEquals(LauncherTheme.BUTTON_ICON.getRGB(), image.getRGB(width - 1, height / 2));
+                        assertTrue(ringNear(image, ring, 0, height / 2, 1, 0));
+                        assertTrue(ringNear(image, ring, width - 1, height / 2, -1, 0));
                         return null;
                     });
                 }
@@ -172,8 +174,14 @@ class SplitButtonStyleTest {
         }
     }
 
-    private static List<SplitFixture> fixtures() {
-        FirstLaunchSplitButton install = new FirstLaunchSplitButton(GuiScale.DEFAULT,
+    private static boolean ringNear(BufferedImage image, int ring, int x, int y, int dx, int dy) {
+        for (int step = 0; step < 3; step++) {
+            if (image.getRGB(x + dx * step, y + dy * step) == ring) return true;
+        }
+        return false;
+    }
+
+    private static List<SplitFixture> fixtures() {        FirstLaunchSplitButton install = new FirstLaunchSplitButton(GuiScale.DEFAULT,
                 () -> {}, key -> {}, () -> {});
         install.setOptions(QuickInstallTestData.snapshot("1.2.3", "1.3.0"));
         HomeLaunchSplitButton launch = new HomeLaunchSplitButton(GuiScale.DEFAULT,
