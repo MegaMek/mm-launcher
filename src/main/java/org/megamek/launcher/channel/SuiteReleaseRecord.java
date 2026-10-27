@@ -55,7 +55,7 @@ public record SuiteReleaseRecord(String version, FollowChannel membership, Strin
     public static final int MAX_BYTES = 1024 * 1024;
     private static final Pattern VERSION = Pattern.compile(
             "(?:0|[1-9][0-9]*)\\.(?:[0-9]{2}|[1-9][0-9]{2,})\\."
-                    + "(?:[0-9]{2}|[1-9][0-9]{2,})");
+                    + "(?:[0-9]{2}|[1-9][0-9]{2,})(?:\\.[1-9][0-9]*)?");
     private static final Pattern LAUNCHER_VERSION = Pattern.compile(
             "(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)");
     private static final JsonMapper JSON = JsonMapper.builder(JsonFactory.builder()
@@ -158,11 +158,14 @@ public record SuiteReleaseRecord(String version, FollowChannel membership, Strin
         return value;
     }
 
+    /** Orders three-part versions and four-part Weekly versions; a missing revision is 0. */
     public static int compareVersions(String first, String second) {
         String[] left = first.split("\\.");
         String[] right = second.split("\\.");
-        for (int i = 0; i < 3; i++) {
-            int comparison = new BigInteger(left[i]).compareTo(new BigInteger(right[i]));
+        for (int i = 0; i < Math.max(left.length, right.length); i++) {
+            BigInteger leftComponent = i < left.length ? new BigInteger(left[i]) : BigInteger.ZERO;
+            BigInteger rightComponent = i < right.length ? new BigInteger(right[i]) : BigInteger.ZERO;
+            int comparison = leftComponent.compareTo(rightComponent);
             if (comparison != 0) return comparison;
         }
         return 0;

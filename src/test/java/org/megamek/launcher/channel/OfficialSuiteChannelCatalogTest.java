@@ -119,6 +119,27 @@ class OfficialSuiteChannelCatalogTest {
     }
 
     @Test
+    void weeklyRevisionsOrderBetweenTheirBaseAndTheNextRelease() throws Exception {
+        SuiteTestData network = new SuiteTestData();
+        network.suite("0.51.00.2", FollowChannel.WEEKLY, "0.51.00.2");
+        network.suite("0.51.00.10", FollowChannel.WEEKLY, Map.of(
+                OfficialRepository.MEGAMEK, "0.51.00.2", OfficialRepository.LAB, "0.51.00.10",
+                OfficialRepository.MEKHQ, "0.51.00.10"), Map.of(), Map.of());
+        assertEquals(SuiteTestData.recordUri("0.51.00.10").toString(),
+                catalog(network).target(FollowChannel.WEEKLY, OfficialRepository.MEKHQ).source());
+        assertEquals("0.51.00.2",
+                catalog(network).target(FollowChannel.WEEKLY, OfficialRepository.MEGAMEK).version());
+        network.suite("0.51.01", FollowChannel.MILESTONE, "0.51.01");
+        network.suite("0.51.01.1", FollowChannel.WEEKLY, "0.51.01.1");
+        assertEquals(SuiteTestData.recordUri("0.51.01.1").toString(),
+                catalog(network).target(FollowChannel.WEEKLY, OfficialRepository.MEKHQ).source());
+        assertTrue(SuiteReleaseRecord.compareVersions("0.51.00", "0.51.00.2") < 0);
+        assertTrue(SuiteReleaseRecord.compareVersions("0.51.00.2", "0.51.01") < 0);
+        assertEquals(0, SuiteReleaseRecord.compareVersions("0.51.01", "0.51.01"));
+        assertNoPackages(network);
+    }
+
+    @Test
     void discoversLaterPagesWithoutChoosingGitHubPublicationOrder() throws Exception {
         SuiteTestData network = new SuiteTestData();
         for (int i = 1; i <= 50; i++) network.suite("0.51.%02d".formatted(i),
@@ -269,6 +290,8 @@ class OfficialSuiteChannelCatalogTest {
                 node -> node.put("membership", "Weekly"),
                 node -> node.put("membership", "nightly"),
                 node -> node.put("version", "0.51.1"),
+                node -> node.put("version", "0.51.01.01").put("tag", "v0.51.01.01"),
+                node -> node.put("version", "0.51.01.0").put("tag", "v0.51.01.0"),
                 node -> node.put("tag", "v0.51.02"),
                 node -> ((ObjectNode) node.get("products")).remove("MegaMekLab"),
                 node -> ((ObjectNode) node.at("/products/MekHQ")).put("releaseId", 0),
