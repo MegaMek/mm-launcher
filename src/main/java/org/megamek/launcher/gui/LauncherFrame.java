@@ -1936,8 +1936,6 @@ public final class LauncherFrame extends JFrame {
         body.add(actions, BorderLayout.SOUTH);
         dialog.setContentPane(body);
         packToWidth(dialog, "dialog.md");
-        dialog.setSize(GuiScale.fitWindow(dialog.getSize(),
-                GuiScale.usableBounds(getGraphicsConfiguration())));
         dialog.setLocationRelativeTo(this);
 
         java.util.concurrent.atomic.AtomicBoolean continuing =
@@ -2281,13 +2279,21 @@ public final class LauncherFrame extends JFrame {
         summary.add(heading);
         summary.add(Box.createVerticalStrut(guiScale.space("lg")));
 
-        JLabel message = new JLabel("<html>" + result + "</html>");
+        int textWidth = guiScale.size("dialog.md") - 2 * guiScale.space("xxl");
+        JLabel message = new JLabel("<html><body style='width:" + textWidth + "px'>"
+                + result + "</body></html>");
         message.setName("adoptionResultMessage");
         message.setForeground(FirstLaunchPanel.TEXT);
         message.setFont(guiScale.font(message.getFont(), "body"));
         message.setAlignmentX(Component.LEFT_ALIGNMENT);
         summary.add(message);
-        body.add(summary, BorderLayout.CENTER);
+        JScrollPane scroll = new JScrollPane(summary);
+        scroll.setName("adoptionResultScroll");
+        scroll.setBorder(BorderFactory.createEmptyBorder());
+        scroll.setOpaque(false);
+        scroll.getViewport().setOpaque(false);
+        LauncherTheme.styleScrollPane(scroll, guiScale);
+        body.add(scroll, BorderLayout.CENTER);
         return body;
     }
 
@@ -2302,13 +2308,19 @@ public final class LauncherFrame extends JFrame {
         return dialog;
     }
 
-    /** Sizes {@code dialog} to its content, at least as wide as the design token {@code widthToken}. */
+    /**
+     * Sizes {@code dialog} to its content, at least as wide as the design token {@code widthToken}
+     * and never larger than the usable screen area, so long names or paths cannot push its actions
+     * off-screen. The height is measured again at the final width.
+     */
     private void packToWidth(JDialog dialog, String widthToken) {
         dialog.pack();
-        dialog.setSize(Math.max(dialog.getWidth(), guiScale.size(widthToken)), dialog.getHeight());
+        Rectangle available = GuiScale.usableBounds(dialog.getGraphicsConfiguration());
+        dialog.setSize(GuiScale.fitWindow(new Dimension(
+                Math.max(dialog.getWidth(), guiScale.size(widthToken)), dialog.getHeight()), available));
         dialog.validate();
-        dialog.setSize(dialog.getWidth(), Math.max(dialog.getHeight(),
-                dialog.getPreferredSize().height));
+        dialog.setSize(GuiScale.fitWindow(new Dimension(dialog.getWidth(),
+                Math.max(dialog.getHeight(), dialog.getPreferredSize().height)), available));
     }
 
     private void renameInstallation(InstallationRecord record) {
