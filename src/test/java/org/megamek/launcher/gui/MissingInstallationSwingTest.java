@@ -66,7 +66,7 @@ class MissingInstallationSwingTest {
                     fixture.services.readRegistry(), fixture.removed, OfficialRepository.MEGAMEK,
                     "v1.0.0", "MegaMek-v1.0.0.tar.gz", 10, "sha256:" + "a".repeat(64), build);
             new ChannelPreferenceStore().initializeManaged(fixture.services.registry(),
-                    fixture.removed, receipt, FollowChannel.MILESTONE, false);
+                    fixture.removed, receipt, FollowChannel.CORE, false);
             var service = new UninstallService(fixture.services.registry(), fixture.coordinator);
             var plan = service.plan(fixture.removed, OperationContext.none(OperationType.UNINSTALL));
             OperationContext interruptedContext = new OperationContext(OperationType.UNINSTALL, event -> {

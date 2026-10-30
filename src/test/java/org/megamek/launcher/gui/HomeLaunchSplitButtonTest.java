@@ -74,7 +74,7 @@ class HomeLaunchSplitButtonTest {
                             () -> { }));
                 }
                 holder[0] = new HomeLaunchSplitButton(GuiScale.DEFAULT, "megamek", "MegaMek",
-                        "1.0.0", "Milestone", () -> { }, options);
+                        "1.0.0", "Core", () -> { }, options);
                 frame.setUndecorated(true);
                 frame.setContentPane(holder[0]);
                 frame.pack();
@@ -108,7 +108,7 @@ class HomeLaunchSplitButtonTest {
                 "1.0.0", List.of());
         InstallationRecord main = record("1", "Main", "1.0.0", megamek);
         InstallationRecord older = record("2", "Campaign copy", "0.49.20", megamek);
-        InstallationRecord development = record("3", "Development", "0.51.0", megamek);
+        InstallationRecord development = record("3", "Experimental", "0.51.0", megamek);
         AtomicReference<InstallationRecord> defaultRecord = new AtomicReference<>(main);
         AtomicReference<InstallationRecord> launched = new AtomicReference<>();
         JFrame frame = new JFrame();
@@ -116,12 +116,12 @@ class HomeLaunchSplitButtonTest {
         try {
             SwingUtilities.invokeAndWait(() -> {
                 holder[0] = new HomeLaunchSplitButton(GuiScale.DEFAULT, "megamek", "MegaMek",
-                        "1.0.0", "Milestone", () -> launched.set(main), List.of(
+                        "1.0.0", "Core", () -> launched.set(main), List.of(
                         new HomeLaunchSplitButton.Option(
-                                "Campaign copy · MegaMek Milestone (0.49.20)",
+                                "Campaign copy · MegaMek Core (0.49.20)",
                                 () -> launched.set(older)),
                         new HomeLaunchSplitButton.Option(
-                                "Development · MegaMek Development (0.51.0)",
+                                "Experimental · MegaMek Experimental (0.51.0)",
                                 () -> launched.set(development))));
                 frame.setContentPane(holder[0]);
                 frame.pack();
@@ -130,13 +130,13 @@ class HomeLaunchSplitButtonTest {
             });
             HomeLaunchSplitButton split = holder[0];
             assertEquals("Launch MegaMek", split.primaryButton().getText());
-            assertEquals("Milestone · 1.0.0", ButtonDetail.detail(split.primaryButton()));
-            assertEquals("Launch MegaMek Milestone (1.0.0)",
+            assertEquals("Core · 1.0.0", ButtonDetail.detail(split.primaryButton()));
+            assertEquals("Launch MegaMek Core (1.0.0)",
                     split.primaryButton().getAccessibleContext().getAccessibleName());
             assertFalse(split.primaryButton().isContentAreaFilled());
             assertFalse(split.optionsButton().isContentAreaFilled());
-            assertEquals(List.of("Campaign copy · MegaMek Milestone (0.49.20)",
-                            "Development · MegaMek Development (0.51.0)"),
+            assertEquals(List.of("Campaign copy · MegaMek Core (0.49.20)",
+                            "Experimental · MegaMek Experimental (0.51.0)"),
                     split.menuItems().stream().map(JMenuItem::getText).toList());
             assertEquals(UIManager.getColor("PopupMenu.background"),
                     split.popupMenu().getBackground());

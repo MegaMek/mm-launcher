@@ -62,10 +62,10 @@ class AutomaticAdoptionResolverTest {
     @Test
     void emptySuiteInventoryStillSearchesForOneExactOfficialAncestor() throws Exception {
         QueueTransport transport = new QueueTransport(200, "[]",
-                "[" + release("v0.50.06", "Milestone", false, true) + "]");
+                "[" + release("v0.50.06", "Core", false, true) + "]");
         ByteArrayOutputStream diagnostics = new ByteArrayOutputStream();
         var result = new AutomaticAdoptionResolver(transport).resolve(
-                OfficialRepository.MEGAMEK, "0.50.6", FollowChannel.MILESTONE,
+                OfficialRepository.MEGAMEK, "0.50.6", FollowChannel.CORE,
                 new PrintStream(diagnostics), OperationContext.none(OperationType.ADOPT_EXISTING));
 
         assertEquals(AutomaticAdoptionResolver.Status.MATCHED, result.status());
@@ -79,7 +79,7 @@ class AutomaticAdoptionResolverTest {
     @Test
     void malformedSuiteInventoryDoesNotBecomeAnEmptyInventoryOrPermitReleaseSearch() throws Exception {
         QueueTransport transport = new QueueTransport(200, "{\"unexpected\":true}",
-                "[" + release("v0.50.06", "Milestone", false, true) + "]");
+                "[" + release("v0.50.06", "Core", false, true) + "]");
         var result = resolve(transport, "0.50.6");
 
         assertEquals(AutomaticAdoptionResolver.Status.REQUEST_FAILED, result.status());
@@ -143,46 +143,34 @@ class AutomaticAdoptionResolverTest {
 
         AutomaticAdoptionResolver.Resolution result =
                 new AutomaticAdoptionResolver(transport).resolve(
-                        OfficialRepository.MEKHQ, "0.51.0",
-                        FollowChannel.DEVELOPMENT,
+                        OfficialRepository.MEKHQ, "0.51.0.1",
+                        FollowChannel.EXPERIMENTAL,
                         new PrintStream(new ByteArrayOutputStream()),
                         OperationContext.none(OperationType.ADOPT_EXISTING));
 
         assertEquals(AutomaticAdoptionResolver.Status.CHANNEL_MISMATCH, result.status());
-        assertEquals(FollowChannel.DEVELOPMENT,
+        assertEquals(FollowChannel.EXPERIMENTAL,
                 result.channelMismatch().selectedChannel());
-        assertEquals(FollowChannel.MILESTONE,
+        assertEquals(FollowChannel.CORE,
                 result.channelMismatch().requiredChannel());
-        assertEquals("0.51.00", result.channelMismatch().currentVersion());
+        assertEquals("0.51.00.1", result.channelMismatch().currentVersion());
         assertEquals(9, transport.uris.size(),
                 "known mismatch must stop before the release scan");
         assertFalse(transport.uris.stream().anyMatch(uri -> uri.getPath().endsWith(".tar.gz")));
     }
 
     @Test
-    void sharedCurrentAndHistoricalUnknownAreAllowedForSelectedChannel() throws Exception {
-        QueueTransport shared = new QueueTransport(200,
-                channels("0.51.0", "0.51.0"),
-                "[" + release("v0.51.0", "Current", false, true) + "]");
-        AutomaticAdoptionResolver.Resolution sharedResult =
-                new AutomaticAdoptionResolver(shared).resolve(
-                        OfficialRepository.MEGAMEK, "0.51.0",
-                        FollowChannel.DEVELOPMENT,
-                        new PrintStream(new ByteArrayOutputStream()),
-                        OperationContext.none(OperationType.ADOPT_EXISTING));
-        assertEquals(AutomaticAdoptionResolver.Status.MATCHED, sharedResult.status());
-
+    void historicalUnknownIsAllowedForSelectedChannel() throws Exception {
         QueueTransport historical = new QueueTransport(200,
                 channels("0.51.0", "0.52.0"),
                 "[" + release("v0.49.0", "Historical", false, true) + "]");
         AutomaticAdoptionResolver.Resolution historicalResult =
                 new AutomaticAdoptionResolver(historical).resolve(
                         OfficialRepository.MEGAMEK, "0.49.0",
-                        FollowChannel.DEVELOPMENT,
+                        FollowChannel.EXPERIMENTAL,
                         new PrintStream(new ByteArrayOutputStream()),
                         OperationContext.none(OperationType.ADOPT_EXISTING));
         assertEquals(AutomaticAdoptionResolver.Status.MATCHED, historicalResult.status());
-        assertEquals(7, shared.uris.size());
         assertEquals(10, historical.uris.size());
     }
 
@@ -192,7 +180,7 @@ class AutomaticAdoptionResolverTest {
         ByteArrayOutputStream diagnostics = new ByteArrayOutputStream();
         AutomaticAdoptionResolver.Resolution result = new AutomaticAdoptionResolver(transport)
                 .resolve(OfficialRepository.MEGAMEK, "0.50.7",
-                        FollowChannel.MILESTONE,
+                        FollowChannel.CORE,
                         new PrintStream(diagnostics),
                         OperationContext.none(OperationType.ADOPT_EXISTING));
 
@@ -240,13 +228,13 @@ class AutomaticAdoptionResolverTest {
     private static AutomaticAdoptionResolver.Resolution resolve(
             QueueTransport transport, String observed) throws Exception {
         return new AutomaticAdoptionResolver(transport).resolve(
-                OfficialRepository.MEGAMEK, observed, FollowChannel.MILESTONE,
+                OfficialRepository.MEGAMEK, observed, FollowChannel.CORE,
                 new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING));
     }
 
-    private static ReleaseTransport.Response channels(String milestone, String development) {
-        return SuiteTestData.channels(milestone, development);
+    private static ReleaseTransport.Response channels(String core, String experimental) {
+        return SuiteTestData.channels(core, experimental);
     }
 
     private static Product product(String key) {

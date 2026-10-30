@@ -112,13 +112,13 @@ class AutomaticInstallationChecksTest {
         assertEquals(1, services.checks);
         var second = worker(services, List.of(record), checked);
         assertTrue(second.doInBackground().isEmpty());
-        services.channel = FollowChannel.WEEKLY;
+        services.channel = FollowChannel.EXPERIMENTAL;
         var changed = worker(services, List.of(record), checked);
         assertEquals(1, changed.doInBackground().size());
         assertEquals(2, services.checks);
         assertNotEquals(AutomaticInstallationChecks.key(preference(record, true)),
                 AutomaticInstallationChecks.key(new ChannelPreference(1, record.id(),
-                        record.canonicalRoot(), "new-registration", FollowChannel.MILESTONE, true)));
+                        record.canonicalRoot(), "new-registration", FollowChannel.CORE, true)));
     }
 
     @Test
@@ -184,7 +184,7 @@ class AutomaticInstallationChecksTest {
 
     private static ChannelPreference preference(InstallationRecord record, boolean optIn) {
         return new ChannelPreference(1, record.id(), record.canonicalRoot(), record.registeredAt(),
-                FollowChannel.MILESTONE, optIn);
+                FollowChannel.CORE, optIn);
     }
 
     private final class FakeServices extends LauncherServices {
@@ -195,7 +195,7 @@ class AutomaticInstallationChecksTest {
         private boolean optIn = true;
         private boolean eligible = true;
         private boolean current = true;
-        private FollowChannel channel = FollowChannel.MILESTONE;
+        private FollowChannel channel = FollowChannel.CORE;
         private ChannelPreferenceStore.Status status = ChannelPreferenceStore.Status.CONFIGURED;
         private IOException failure;
         private int checks;

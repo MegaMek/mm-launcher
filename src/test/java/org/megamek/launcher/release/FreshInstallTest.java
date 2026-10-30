@@ -96,7 +96,7 @@ class FreshInstallTest {
         int result = Main.run(new String[]{"install-release", "--application", "megamek",
                         "--tag", "v1.2.3", "--destination", destination.toString(),
                         "--registry", registry.toString(), "--name", "Downloaded",
-                        "--channel", "milestone"},
+                        "--channel", "core"},
                 new PrintStream(output), new PrintStream(new ByteArrayOutputStream()), installing);
 
         assertEquals(0, result);
@@ -109,7 +109,7 @@ class FreshInstallTest {
                 .anyMatch(product -> product.key().equals("megamek")));
         var preference = new ChannelPreferenceStore()
                 .read(registry, data, data.installations().getFirst()).preference();
-        assertEquals(FollowChannel.MILESTONE, preference.channel());
+        assertEquals(FollowChannel.CORE, preference.channel());
         assertTrue(preference.checkOnOpen());
         assertTrue(output.toString(StandardCharsets.UTF_8).contains("checkOnOpen=true"));
         assertTrue(output.toString(StandardCharsets.UTF_8).contains("NOT LAUNCHED"));
@@ -144,7 +144,7 @@ class FreshInstallTest {
         int result = Main.run(new String[]{"install-release", "--application", "megamek",
                         "--tag", "v1.2.3", "--destination", destination.toString(),
                         "--registry", registry.toString(), "--name", "Downloaded",
-                        "--channel", "milestone", "--check-on-open", "false"},
+                        "--channel", "core", "--check-on-open", "false"},
                 new PrintStream(new ByteArrayOutputStream()), new PrintStream(errors), network);
 
         assertEquals(2, result);
@@ -296,7 +296,7 @@ class FreshInstallTest {
         int duplicate = Main.run(new String[]{"install-release", "--application", "megamek",
                         "--tag", "v1.2.3", "--destination", temp.resolve("duplicate").toString(),
                         "--registry", registry.toString(), "--name", "Existing",
-                        "--channel", "milestone"},
+                        "--channel", "core"},
                 new PrintStream(new ByteArrayOutputStream()), new PrintStream(duplicateError),
                 duplicateUnused);
         assertEquals(2, duplicate);
@@ -383,7 +383,7 @@ class FreshInstallTest {
         return Main.run(new String[]{"install-release", "--application", "megamek",
                         "--tag", "v1.2.3", "--destination", destination.toString(),
                         "--registry", registry.toString(), "--name", name,
-                        "--channel", "milestone"},
+                        "--channel", "core"},
                 new PrintStream(new ByteArrayOutputStream()), new PrintStream(errors), transport);
     }
 

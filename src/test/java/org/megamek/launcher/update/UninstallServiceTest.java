@@ -825,7 +825,7 @@ class UninstallServiceTest {
                 record, OfficialRepository.MEGAMEK, "v1", "MegaMek-v1.tar.gz", 10,
                 "sha256:" + "a".repeat(64), build);
         new ChannelPreferenceStore().initializeManaged(
-                registry, record, receipt, FollowChannel.MILESTONE, false);
+                registry, record, receipt, FollowChannel.CORE, false);
         return new Fixture(root, registry, store, record);
     }
 

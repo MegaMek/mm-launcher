@@ -232,6 +232,7 @@ class SimpleHomeSwingTest {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
         FakeServices services = new FakeServices(temp.resolve("registry.json"));
+        services.showExperimental = true;
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
@@ -250,13 +251,13 @@ class SimpleHomeSwingTest {
                 return button != null
                         && SwingTestSupport.spoken(button).endsWith("(1.2.3)");
             });
-            assertEquals("Install latest MekHQ Milestone (1.2.3)", SwingTestSupport.spoken(primary));
+            assertEquals("Install latest MekHQ Core (1.2.3)", SwingTestSupport.spoken(primary));
             assertEquals(QuickInstallSnapshot.DEFAULT_KEY,
-                    new QuickInstallOption.Key(OfficialRepository.MEKHQ, FollowChannel.MILESTONE));
+                    new QuickInstallOption.Key(OfficialRepository.MEKHQ, FollowChannel.CORE));
             assertEquals(List.of(
-                            new QuickInstallOption.Key(OfficialRepository.MEGAMEK, FollowChannel.MILESTONE),
-                            new QuickInstallOption.Key(OfficialRepository.LAB, FollowChannel.MILESTONE)),
-                    QuickInstallSnapshot.MENU_KEYS.subList(0, 2));
+                            new QuickInstallOption.Key(OfficialRepository.MEGAMEK, FollowChannel.CORE),
+                            new QuickInstallOption.Key(OfficialRepository.LAB, FollowChannel.CORE)),
+                    QuickInstallSnapshot.menuKeys(true).subList(0, 2));
             int catalogRequests = services.catalogRequests.get();
 
             invokeKeyBinding(primary, KeyStroke.getKeyStroke(
@@ -264,18 +265,15 @@ class SimpleHomeSwingTest {
             waitUntil(() -> split.popupMenu().isVisible());
             JPopupMenu popup = split.popupMenu();
             waitUntil(() -> popup.getComponent(0).isEnabled());
-            assertEquals(8, popup.getComponentCount());
+            assertEquals(5, popup.getComponentCount());
             List<String> menuLabels = java.util.Arrays.stream(popup.getComponents())
                     .map(JMenuItem.class::cast).map(JMenuItem::getText).toList();
             assertEquals(List.of(
-                            "Install latest MegaMek Milestone (1.2.3)",
-                            "Install latest MegaMekLab Milestone (1.2.3)",
-                            "Install latest MekHQ Development (1.2.4)",
-                            "Install latest MegaMek Development (1.2.4)",
-                            "Install latest MegaMekLab Development (1.2.4)",
-                            "Install latest MekHQ Weekly (1.2.4)",
-                            "Install latest MegaMek Weekly (1.2.4)",
-                            "Install latest MegaMekLab Weekly (1.2.4)"),
+                            "Install latest MegaMek Core (1.2.3)",
+                            "Install latest MegaMekLab Core (1.2.3)",
+                            "Install latest MekHQ Experimental (1.2.4)",
+                            "Install latest MegaMek Experimental (1.2.4)",
+                            "Install latest MegaMekLab Experimental (1.2.4)"),
                     menuLabels);
             assertFalse(menuLabels.contains("Choose another version or application…"));
             assertTrue(menuLabels.stream().noneMatch(label -> label.contains("Advanced")));
@@ -286,13 +284,13 @@ class SimpleHomeSwingTest {
             invokePopupEscape(popup);
             waitUntil(() -> !popup.isVisible());
 
-            for (int index = 0; index < QuickInstallSnapshot.MENU_KEYS.size(); index++) {
-                QuickInstallOption.Key key = QuickInstallSnapshot.MENU_KEYS.get(index);
+            for (int index = 0; index < QuickInstallSnapshot.menuKeys(true).size(); index++) {
+                QuickInstallOption.Key key = QuickInstallSnapshot.menuKeys(true).get(index);
                 int itemIndex = index;
                 waitUntil(() -> popup.getComponent(itemIndex).isEnabled());
                 SwingUtilities.invokeAndWait(options::doClick);
                 invokeMenuSelection((JMenuItem) popup.getComponent(index));
-                String version = key.channel() == FollowChannel.MILESTONE
+                String version = key.channel() == FollowChannel.CORE
                         ? "1.2.3" : "1.2.4";
                 JDialog alternate = waitDialog(frame, VersionDisplay.installLatest(
                         display(key.repository()), key.channel().toString(), version));
@@ -346,19 +344,19 @@ class SimpleHomeSwingTest {
             assertFalse(onEdt(options::isEnabled));
             services.releasePlan.countDown();
             JDialog confirmation =
-                    waitDialog(frame, "Install latest MekHQ Milestone (1.2.3)");
-            assertEquals(FollowChannel.MILESTONE, services.lastPlannedChannel);
+                    waitDialog(frame, "Install latest MekHQ Core (1.2.3)");
+            assertEquals(FollowChannel.CORE, services.lastPlannedChannel);
             assertEquals(OfficialRepository.MEKHQ, services.lastPlannedRepository);
-            assertEquals(9, services.plans.get());
+            assertEquals(QuickInstallSnapshot.menuKeys(true).size() + 1, services.plans.get());
             assertTrue(onEdt(primary::isEnabled));
             assertTrue(onEdt(options::isEnabled));
             assertNull(find(confirmation, "downloadProductCombo"));
             assertNull(find(confirmation, "downloadChannelCombo"));
             assertNull(find(confirmation, "changeNormalJavaButton"));
             assertNormalInstallQuote(confirmation, OfficialRepository.MEKHQ,
-                    FollowChannel.MILESTONE, "1.2.3",
+                    FollowChannel.CORE, "1.2.3",
                     services.quickInstallSnapshot.option(new QuickInstallOption.Key(
-                            OfficialRepository.MEKHQ, FollowChannel.MILESTONE)).asset(),
+                            OfficialRepository.MEKHQ, FollowChannel.CORE)).asset(),
                     services.destination);
 
             services.installStarted = new CountDownLatch(1);
@@ -372,7 +370,7 @@ class SimpleHomeSwingTest {
             assertTrue(services.installStarted.await(
                     5, java.util.concurrent.TimeUnit.SECONDS));
             JDialog progress =
-                    waitDialog(frame, "Installing MekHQ Milestone (1.2.3)");
+                    waitDialog(frame, "Installing MekHQ Core (1.2.3)");
             assertEquals("", ((JLabel) find(frame, "homeStatusLabel")).getText(),
                     "the progress dialog is the only active-operation status surface");
             assertEquals("Cancel",
@@ -456,7 +454,7 @@ class SimpleHomeSwingTest {
                     frame.setExtendedState(javax.swing.JFrame.NORMAL));
 
             assertEquals(1, services.installs.get());
-            assertEquals(FollowChannel.MILESTONE, services.installedChannel);
+            assertEquals(FollowChannel.CORE, services.installedChannel);
             assertTrue(services.launched);
 
             JButton installations = waitButton(frame, "manageInstallationsButton");
@@ -548,13 +546,13 @@ class SimpleHomeSwingTest {
             JButton primary = waitButton(frame, "downloadAndInstallButton");
             waitUntil(primary::isEnabled);
             SwingUtilities.invokeAndWait(primary::doClick);
-            JDialog firstQuote = waitDialog(frame, "Install MekHQ Milestone (1.2.3)");
+            JDialog firstQuote = waitDialog(frame, "Install MekHQ Core (1.2.3)");
             services.currentBrowsedSource = SuiteTestData.recordUri("1.02.04").toString();
             assertFalse(capturedSource.equals(services.currentBrowsedSource));
             JButton change = find(firstQuote, "changeNormalLocationButton");
             SwingUtilities.invokeAndWait(change::doClick);
             waitUntil(() -> !firstQuote.isDisplayable());
-            JDialog changedQuote = waitDialog(frame, "Install MekHQ Milestone (1.2.3)");
+            JDialog changedQuote = waitDialog(frame, "Install MekHQ Core (1.2.3)");
             assertEquals(List.of(capturedSource, capturedSource), services.plannedSources);
             assertEquals(List.of(services.destination, changed), services.plannedDestinations);
             assertEquals(0, services.installs.get());
@@ -571,7 +569,7 @@ class SimpleHomeSwingTest {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
         FakeServices services = new FakeServices(temp.resolve("change-location.json"));
-        Path changed = temp.resolve("chosen-parent").resolve("MekHQ Milestone")
+        Path changed = temp.resolve("chosen-parent").resolve("MekHQ Core")
                 .toAbsolutePath().normalize();
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services,
                 (parent, plan) -> changed));
@@ -581,7 +579,7 @@ class SimpleHomeSwingTest {
             waitUntil(primary::isEnabled);
             SwingUtilities.invokeAndWait(primary::doClick);
             JDialog firstQuote =
-                    waitDialog(frame, "Install latest MekHQ Milestone (1.2.3)");
+                    waitDialog(frame, "Install latest MekHQ Core (1.2.3)");
             int catalogBeforeChange = services.catalogRequests.get();
             assertEquals(services.destination.toString(),
                     ((JTextArea) find(firstQuote, "normalInstallDestination")).getText());
@@ -593,7 +591,7 @@ class SimpleHomeSwingTest {
             });
             waitUntil(() -> !firstQuote.isDisplayable());
             JDialog changedQuote =
-                    waitDialog(frame, "Install latest MekHQ Milestone (1.2.3)");
+                    waitDialog(frame, "Install latest MekHQ Core (1.2.3)");
             assertEquals("", ((JLabel) find(frame, "homeStatusLabel")).getText());
             assertEquals(2, services.plans.get(), "Change location prepares one fresh plan");
             assertEquals(List.of(services.destination, changed),
@@ -637,11 +635,12 @@ class SimpleHomeSwingTest {
 
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
-    void latestMekHQDevelopmentCompletesThroughSharedInstallerAndShowsDevelopment()
+    void latestMekHQExperimentalCompletesThroughSharedInstallerAndShowsExperimental()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
-        FakeServices services = new FakeServices(temp.resolve("development.json"));
+        FakeServices services = new FakeServices(temp.resolve("experimental.json"));
+        services.showExperimental = true;
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
@@ -655,11 +654,11 @@ class SimpleHomeSwingTest {
             invokeMenuSelection((JMenuItem) split.popupMenu().getComponent(2));
 
             JDialog confirmation =
-                    waitDialog(frame, "Install latest MekHQ Development (1.2.4)");
+                    waitDialog(frame, "Install latest MekHQ Experimental (1.2.4)");
             assertNormalInstallQuote(confirmation, OfficialRepository.MEKHQ,
-                    FollowChannel.DEVELOPMENT, "1.2.4",
+                    FollowChannel.EXPERIMENTAL, "1.2.4",
                     services.quickInstallSnapshot.option(new QuickInstallOption.Key(
-                            OfficialRepository.MEKHQ, FollowChannel.DEVELOPMENT)).asset(),
+                            OfficialRepository.MEKHQ, FollowChannel.EXPERIMENTAL)).asset(),
                     services.destination);
             assertEquals(0, services.installs.get(),
                     "confirmation must precede the shared install backend");
@@ -671,15 +670,60 @@ class SimpleHomeSwingTest {
             assertNoShowingDialog(frame, "Install complete");
             assertNoDisplayableProgress(frame);
 
-            assertEquals("Launch MekHQ Development (1.2.4)",
+            assertEquals("Launch MekHQ Experimental (1.2.4)",
                     SwingTestSupport.spoken(waitButton(frame, "launch-mekhq-button")));
-            assertEquals(FollowChannel.DEVELOPMENT, services.lastPlannedChannel);
-            assertEquals(FollowChannel.DEVELOPMENT, services.installedChannel);
+            assertEquals(FollowChannel.EXPERIMENTAL, services.lastPlannedChannel);
+            assertEquals(FollowChannel.EXPERIMENTAL, services.installedChannel);
             assertEquals(1, services.plans.get());
             assertEquals(1, services.installs.get());
         } finally {
             dispose(frame);
         }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
+    void showExperimentalSettingIsSavedAndWidensTheReleasePicker() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        FakeServices services = new FakeServices(temp.resolve("opt-in.json"));
+        services.installed = true;
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            assertEquals(1, pickerChannelCount(frame),
+                    "Core is the only offered channel by default");
+
+            SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
+            JCheckBox checkbox = waitFor(
+                    () -> find(frame, "showExperimentalReleasesCheckbox"));
+            assertFalse(checkbox.isSelected());
+            assertEquals("Show Experimental releases", checkbox.getText());
+            JLabel warning = find(frame, "experimentalReleasesWarning");
+            assertTrue(warning.getText().contains("may break things"));
+            SwingUtilities.invokeAndWait(checkbox::doClick);
+            waitUntil(() -> services.showExperimental);
+
+            assertEquals(2, pickerChannelCount(frame),
+                    "opting in offers Experimental without changing installed channels");
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    private static int pickerChannelCount(LauncherFrame frame) throws Exception {
+        SwingUtilities.invokeAndWait(frame::downloadDialog);
+        JDialog picker = waitFor(() -> {
+            for (java.awt.Window window : frame.getOwnedWindows()) {
+                if (window instanceof JDialog dialog && dialog.isShowing()
+                        && find(dialog, "downloadChannelCombo") != null) return dialog;
+            }
+            return null;
+        });
+        int count = onEdt(() -> ((javax.swing.JComboBox<?>) find(picker,
+                "downloadChannelCombo")).getItemCount());
+        SwingUtilities.invokeAndWait(picker::dispose);
+        return count;
     }
 
     @Test
@@ -696,7 +740,7 @@ class SimpleHomeSwingTest {
             waitUntil(primary::isEnabled);
             SwingUtilities.invokeAndWait(primary::doClick);
             JDialog confirmation =
-                    waitDialog(frame, "Install latest MekHQ Milestone (1.2.3)");
+                    waitDialog(frame, "Install latest MekHQ Core (1.2.3)");
             SwingUtilities.invokeAndWait(
                     () -> ((JButton) find(confirmation,
                             "confirmNormalInstallButton")).doClick());
@@ -730,7 +774,7 @@ class SimpleHomeSwingTest {
             waitUntil(download::isEnabled);
             SwingUtilities.invokeAndWait(download::doClick);
             JDialog confirmation =
-                    waitDialog(frame, "Install latest MekHQ Milestone (1.2.3)");
+                    waitDialog(frame, "Install latest MekHQ Core (1.2.3)");
             SwingUtilities.invokeAndWait(
                     () -> ((JButton) find(confirmation,
                             "confirmNormalInstallButton")).doClick());
@@ -744,7 +788,7 @@ class SimpleHomeSwingTest {
             assertTrue(find(failure, "operationViewDetailsButton").isVisible());
             assertNull(find(failure, "operationViewLogsButton"));
             assertNull(find(failure, "copyOperationDetailsButton"));
-            assertNoShowingDialog(frame, "Installing MekHQ Milestone (1.2.3) failed");
+            assertNoShowingDialog(frame, "Installing MekHQ Core (1.2.3) failed");
             assertNoShowingDialog(frame, "Install complete");
 
             SwingUtilities.invokeAndWait(repair::doClick);
@@ -1666,6 +1710,7 @@ class SimpleHomeSwingTest {
         private NormalInstallService.TargetKind capturedTargetKind =
                 NormalInstallService.TargetKind.CAPTURED_CURRENT;
         private volatile String currentBrowsedSource;
+        private volatile boolean showExperimental;
         private final QuickInstallSnapshot quickInstallSnapshot =
                 QuickInstallTestData.snapshot("1.2.3", "1.2.4");
         private volatile boolean installed;
@@ -1788,7 +1833,15 @@ class SimpleHomeSwingTest {
             return super.settingsView();
         }
 
-        @Override public QuickInstallSnapshot quickInstallSnapshot()
+        @Override boolean showExperimental() {
+            return showExperimental;
+        }
+
+        @Override void saveShowExperimental(boolean showExperimental) {
+            this.showExperimental = showExperimental;
+        }
+
+        @Override public QuickInstallSnapshot quickInstallSnapshot(boolean showExperimental)
                 throws IOException, InterruptedException {
             catalogRequests.incrementAndGet();
             CountDownLatch started = snapshotStarted;
@@ -1798,7 +1851,8 @@ class SimpleHomeSwingTest {
             if (snapshotFailures.getAndUpdate(value -> Math.max(0, value - 1)) > 0) {
                 throw new IOException("fixture metadata unavailable");
             }
-            return quickInstallSnapshot;
+            return quickInstallSnapshot == null ? null
+                    : QuickInstallTestData.offered(quickInstallSnapshot, showExperimental);
         }
 
         @Override
@@ -1911,7 +1965,7 @@ class SimpleHomeSwingTest {
                     current.observedBuild(), "fixture");
             ChannelPreference preference = new ChannelPreference(1, current.id(),
                     current.canonicalRoot(), current.registeredAt(),
-                    installedChannel == null ? FollowChannel.MILESTONE : installedChannel, true);
+                    installedChannel == null ? FollowChannel.CORE : installedChannel, true);
             return new HomeState(new RegistryData(
                     RegistryStore.SCHEMA, current.id(), currentRecords), current,
                     inspection, null,

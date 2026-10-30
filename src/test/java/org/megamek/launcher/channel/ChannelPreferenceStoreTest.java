@@ -87,14 +87,14 @@ class ChannelPreferenceStoreTest {
         assertEquals(ChannelPreferenceStore.Status.UNKNOWN,
                 store.read(registry, data, first).status());
         store.initializeManaged(
-                registry, first, firstReceipt, FollowChannel.MILESTONE, false);
+                registry, first, firstReceipt, FollowChannel.CORE, false);
         store.initializeManaged(
-                registry, second, secondReceipt, FollowChannel.DEVELOPMENT, true);
+                registry, second, secondReceipt, FollowChannel.EXPERIMENTAL, true);
 
         RegistryData after = new RegistryStore().read(registry);
-        assertEquals(FollowChannel.MILESTONE,
+        assertEquals(FollowChannel.CORE,
                 store.read(registry, after, first).preference().channel());
-        assertEquals(FollowChannel.DEVELOPMENT,
+        assertEquals(FollowChannel.EXPERIMENTAL,
                 store.read(registry, after, second).preference().channel());
         assertEquals("keep-pin", after.installations().getFirst().pin());
         assertEquals(first.id(), after.defaultInstallationId());
@@ -116,16 +116,16 @@ class ChannelPreferenceStoreTest {
         OwnershipReceipt receipt = receipt(registry, data, record);
         ChannelPreferenceStore store = new ChannelPreferenceStore();
         ChannelPreference original = store.initializeManaged(
-                registry, record, receipt, FollowChannel.MILESTONE, false);
+                registry, record, receipt, FollowChannel.CORE, false);
         Path sidecar = store.path(registry, record.id());
         byte[] before = Files.readAllBytes(sidecar);
 
         assertEquals(original, store.initializeManaged(
-                registry, record, receipt, FollowChannel.MILESTONE, true),
+                registry, record, receipt, FollowChannel.CORE, true),
                 "a transaction retry preserves the already-published check preference");
         assertArrayEquals(before, Files.readAllBytes(sidecar));
         IOException rejected = assertThrows(IOException.class, () -> store.initializeManaged(
-                registry, record, receipt, FollowChannel.DEVELOPMENT, false));
+                registry, record, receipt, FollowChannel.EXPERIMENTAL, false));
         assertTrue(rejected.getMessage().contains(
                 "Channel is fixed; install another managed copy"));
         assertArrayEquals(before, Files.readAllBytes(sidecar));
@@ -145,7 +145,7 @@ class ChannelPreferenceStoreTest {
         ChannelPreferenceStore store = new ChannelPreferenceStore();
 
         assertThrows(IOException.class, () -> store.initializeManaged(
-                registry, record, claimed, FollowChannel.MILESTONE, false));
+                registry, record, claimed, FollowChannel.CORE, false));
         assertFalse(Files.exists(store.path(registry, record.id())));
         assertFalse(Files.exists(new ReceiptStore().metadataDirectory(registry)));
     }
@@ -163,15 +163,15 @@ class ChannelPreferenceStoreTest {
         ChannelPreferenceStore store = new ChannelPreferenceStore();
         ChannelPreference missingExpected = new ChannelPreference(ChannelPreferenceStore.SCHEMA,
                 record.id(), record.canonicalRoot(), record.registeredAt(),
-                FollowChannel.MILESTONE, false);
+                FollowChannel.CORE, false);
         assertThrows(java.io.IOException.class,
                 () -> store.setCheckOnOpen(registry, record, missingExpected, true));
         Path sidecar = store.path(registry, record.id());
         assertFalse(Files.exists(sidecar));
 
         ChannelPreference expected = store.initializeManaged(
-                registry, record, receipt, FollowChannel.MILESTONE, false);
-        Files.writeString(sidecar, "{\"schemaVersion\":1,\"schemaVersion\":1}");
+                registry, record, receipt, FollowChannel.CORE, false);
+        Files.writeString(sidecar, "{\"schemaVersion\":2,\"schemaVersion\":2}");
 
         ChannelPreferenceStore.ReadResult corrupt = store.read(registry, data, record);
         assertEquals(ChannelPreferenceStore.Status.UNAVAILABLE, corrupt.status());
@@ -179,12 +179,12 @@ class ChannelPreferenceStoreTest {
         ChannelPreference corruptExpected = expected;
         assertThrows(java.io.IOException.class,
                 () -> store.setCheckOnOpen(registry, record, corruptExpected, true));
-        assertEquals("{\"schemaVersion\":1,\"schemaVersion\":1}", Files.readString(sidecar));
+        assertEquals("{\"schemaVersion\":2,\"schemaVersion\":2}", Files.readString(sidecar));
 
         Files.delete(sidecar);
         ChannelPreference stale = new ChannelPreference(ChannelPreferenceStore.SCHEMA,
                 record.id(), temp.resolve("replacement").toAbsolutePath().normalize().toString(),
-                "2026-09-16T01:02:04Z", FollowChannel.MILESTONE, false);
+                "2026-09-16T01:02:04Z", FollowChannel.CORE, false);
         new ObjectMapper().writerWithDefaultPrettyPrinter()
                 .writeValue(sidecar.toFile(), stale);
         byte[] staleBytes = Files.readAllBytes(sidecar);
@@ -193,6 +193,48 @@ class ChannelPreferenceStoreTest {
         assertThrows(java.io.IOException.class,
                 () -> store.setCheckOnOpen(registry, record, corruptExpected, true));
         assertArrayEquals(staleBytes, Files.readAllBytes(sidecar));
+    }
+
+    @Test
+    void retiredChannelSidecarIsLaunchOnlyAndNeverMigrated() throws Exception {
+        Path root = Files.createDirectory(temp.resolve("retired-copy"));
+        Files.writeString(root.resolve("MegaMek.jar"), "application fixture");
+        InstallationRecord record = record(root, "Copy", null, null);
+        Path registry = registry(new RegistryData(RegistryStore.SCHEMA, record.id(),
+                List.of(record)));
+        RegistryData data = new RegistryStore().read(registry);
+        OwnershipReceipt receipt = receipt(registry, data, record);
+        ChannelPreferenceStore store = new ChannelPreferenceStore();
+        Path sidecar = store.path(registry, record.id());
+        Files.createDirectories(sidecar.getParent());
+        for (String channel : List.of("MILESTONE", "DEVELOPMENT", "WEEKLY")) {
+            String legacy = """
+                    {"schemaVersion":1,"installationId":"%s","canonicalRoot":%s,
+                     "registeredAt":"%s","channel":"%s","checkOnOpen":true}
+                    """.formatted(record.id(), new ObjectMapper().writeValueAsString(
+                    record.canonicalRoot()), record.registeredAt(), channel);
+            Files.writeString(sidecar, legacy);
+
+            ChannelPreferenceStore.ReadResult retired = store.read(registry, data, record);
+            assertEquals(ChannelPreferenceStore.Status.RETIRED, retired.status());
+            assertEquals(null, retired.preference());
+            assertTrue(retired.reason().contains("launch-only"));
+            assertThrows(IOException.class, () -> store.initializeManaged(
+                    registry, record, receipt, FollowChannel.CORE, true));
+            ChannelPreference guess = new ChannelPreference(ChannelPreferenceStore.SCHEMA,
+                    record.id(), record.canonicalRoot(), record.registeredAt(),
+                    FollowChannel.CORE, true);
+            assertThrows(IOException.class,
+                    () -> store.setCheckOnOpen(registry, record, guess, false));
+            ChannelUpdateChecker.Result check = new ChannelUpdateChecker(registry,
+                    (uri, accept) -> {
+                        throw new AssertionError("a retired channel makes no request: " + uri);
+                    }).check(record.id());
+            assertEquals(ChannelUpdateChecker.Status.RETIRED_CHANNEL, check.status());
+            assertFalse(check.retryable());
+            assertFalse(check.updateAvailable());
+            assertEquals(legacy, Files.readString(sidecar), "retired sidecars are never rewritten");
+        }
     }
 
     @Test
@@ -206,7 +248,7 @@ class ChannelPreferenceStoreTest {
         OwnershipReceipt receipt = receipt(registry, data, record);
         ChannelPreferenceStore store = new ChannelPreferenceStore();
         ChannelPreference before = store.initializeManaged(
-                registry, record, receipt, FollowChannel.DEVELOPMENT, false);
+                registry, record, receipt, FollowChannel.EXPERIMENTAL, false);
         byte[] beforeBytes = Files.readAllBytes(store.path(registry, record.id()));
 
         ChannelPreference after =
@@ -233,7 +275,7 @@ class ChannelPreferenceStoreTest {
         OwnershipReceipt receipt = receipt(registry, data, record);
         ChannelPreferenceStore store = new ChannelPreferenceStore();
         ChannelPreference preference = store.initializeManaged(
-                registry, record, receipt, FollowChannel.MILESTONE, false);
+                registry, record, receipt, FollowChannel.CORE, false);
         Path directory = new ReceiptStore().metadataDirectory(registry);
         Path lockPath = directory.resolve(record.id() + ".channel.json.lock");
 
@@ -242,7 +284,7 @@ class ChannelPreferenceStoreTest {
             assertThrows(java.io.IOException.class,
                     () -> store.setCheckOnOpen(registry, record, preference, true));
         }
-        assertEquals(FollowChannel.MILESTONE,
+        assertEquals(FollowChannel.CORE,
                 store.read(registry, new RegistryStore().read(registry), record)
                         .preference().channel());
     }

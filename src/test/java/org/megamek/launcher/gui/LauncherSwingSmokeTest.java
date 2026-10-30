@@ -101,8 +101,8 @@ class LauncherSwingSmokeTest {
             holder[0] = new LauncherFrame(
                     new LauncherServices(temp.resolve("registry.json")) {
                         @Override public org.megamek.launcher.channel.QuickInstallSnapshot
-                                quickInstallSnapshot() {
-                            return QuickInstallTestData.snapshot("0.51.0", "0.52.0");
+                                quickInstallSnapshot(boolean showExperimental) {
+                            return QuickInstallTestData.offered(QuickInstallTestData.snapshot("0.51.0", "0.52.0"), showExperimental);
                         }
                     });
             holder[0].showWindow();
@@ -118,7 +118,8 @@ class LauncherSwingSmokeTest {
             waitFor(() -> options.isEnabled() && split.isShowing());
             SwingUtilities.invokeAndWait(options::doClick);
             waitFor(() -> split.popupMenu().isVisible());
-            assertEquals(8, split.popupMenu().getComponentCount());
+            assertEquals(2, split.popupMenu().getComponentCount(),
+                    "Experimental stays hidden until the player opts in");
             SwingUtilities.invokeAndWait(split::closePopup);
         } finally {
             SwingUtilities.invokeAndWait(() -> {
@@ -146,7 +147,7 @@ class LauncherSwingSmokeTest {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
         SubfolderDialog valid = onEdt(() ->
-                new SubfolderDialog(null, "MekHQ Milestone (0.51.0)", GuiScale.DEFAULT));
+                new SubfolderDialog(null, "MekHQ Core (0.51.0)", GuiScale.DEFAULT));
         try {
             JTextField field = component(valid, "subfolderNameField");
             assertEquals(LauncherTheme.INPUT_BACKGROUND, field.getBackground());
@@ -161,22 +162,22 @@ class LauncherSwingSmokeTest {
             assertTrue(valid.isDisplayable(), "invalid input stays in the same dialog");
             assertFalse(findLabel(valid, "subfolderValidationError").getText().isBlank());
             SwingUtilities.invokeAndWait(() -> {
-                field.setText("MekHQ Milestone (0.51.0)");
+                field.setText("MekHQ Core (0.51.0)");
                 continueButton.doClick();
             });
-            assertEquals(Path.of("MekHQ Milestone (0.51.0)"), valid.result());
+            assertEquals(Path.of("MekHQ Core (0.51.0)"), valid.result());
         } finally {
             SwingUtilities.invokeAndWait(valid::dispose);
         }
 
         SubfolderDialog cancelled = onEdt(() ->
-                new SubfolderDialog(null, "MekHQ Milestone (0.51.0)", GuiScale.DEFAULT));
+                new SubfolderDialog(null, "MekHQ Core (0.51.0)", GuiScale.DEFAULT));
         SwingUtilities.invokeAndWait(
                 () -> find(cancelled, "cancelSubfolderButton").doClick());
         assertEquals(null, cancelled.result());
 
         SubfolderDialog escaped = onEdt(() ->
-                new SubfolderDialog(null, "MekHQ Milestone (0.51.0)", GuiScale.DEFAULT));
+                new SubfolderDialog(null, "MekHQ Core (0.51.0)", GuiScale.DEFAULT));
         SwingUtilities.invokeAndWait(() -> escaped.getRootPane().getActionMap()
                 .get("cancelSubfolder").actionPerformed(
                         new java.awt.event.ActionEvent(escaped, 0, "escape")));
@@ -518,6 +519,10 @@ class LauncherSwingSmokeTest {
             JButton next = find(dialog, "nextReleasePageButton");
             JButton fetch = find(dialog, "fetchReleasesButton");
             JComboBox<?> product = findCombo(dialog, "downloadProductCombo");
+            JComboBox<?> channel = findCombo(dialog, "downloadChannelCombo");
+            assertEquals(List.of(FollowChannel.CORE), onEdt(() -> List.of(channel.getItemAt(0))));
+            assertEquals(1, (int) onEdt(channel::getItemCount),
+                    "Experimental stays hidden until the player opts in");
             assertFalse(previous.isEnabled());
             assertFalse(next.isEnabled());
             SwingUtilities.invokeAndWait(() -> product.setSelectedIndex(1));
@@ -555,6 +560,7 @@ class LauncherSwingSmokeTest {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
         PagingServices services = new PagingServices(temp.resolve("selected-target.json"));
+        services.showExperimental = true;
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(() -> {
@@ -567,7 +573,9 @@ class LauncherSwingSmokeTest {
             assertTrue(product instanceof StyledComboBox<?>);
             assertTrue(channel instanceof StyledComboBox<?>);
             assertEquals(OfficialRepository.MEKHQ, onEdt(product::getSelectedItem));
-            assertEquals(FollowChannel.MILESTONE, onEdt(channel::getSelectedItem));
+            assertEquals(FollowChannel.CORE, onEdt(channel::getSelectedItem));
+            assertEquals(2, (int) onEdt(channel::getItemCount),
+                    "an opted-in player can browse Experimental releases");
             assertEquals("Product", product.getAccessibleContext().getAccessibleName());
             assertEquals("Channel", channel.getAccessibleContext().getAccessibleName());
 
@@ -594,13 +602,13 @@ class LauncherSwingSmokeTest {
             JList<?> list = findList(dialog, "releaseList");
             assertEquals(1, services.currentFetches);
             assertEquals(OfficialRepository.MEKHQ, services.currentRepository);
-            assertEquals(FollowChannel.MILESTONE, services.currentChannel);
+            assertEquals(FollowChannel.CORE, services.currentChannel);
             assertEquals(List.of(1), services.pages);
             assertTrue(list.getModel().getElementAt(0).toString()
-                    .equals("MekHQ Milestone (0.51.0) — 4.0 KiB"));
+                    .equals("MekHQ Core (0.51.0) — 4.0 KiB"));
             assertTrue(list.getModel().getElementAt(1).toString()
-                    .equals("MekHQ Milestone (0.50.1) — 4.0 KiB"));
-            assertEquals("MekHQ Milestone (0.49.1) — Unavailable",
+                    .equals("MekHQ Core (0.50.1) — 4.0 KiB"));
+            assertEquals("MekHQ Core (0.49.1) — Unavailable",
                     list.getModel().getElementAt(2).toString());
             assertEquals("Install", find(dialog, "installReleaseButton").getText());
             assertFalse(list.getModel().getElementAt(0).toString().contains("Available"));
@@ -626,7 +634,7 @@ class LauncherSwingSmokeTest {
                     "an unavailable row cannot enable destination selection");
 
             SwingUtilities.invokeAndWait(
-                    () -> channel.setSelectedItem(FollowChannel.DEVELOPMENT));
+                    () -> channel.setSelectedItem(FollowChannel.EXPERIMENTAL));
             assertEquals(0, list.getModel().getSize(),
                     "changing the channel invalidates all fetched rows");
             assertEquals("Page —", findLabel(dialog, "releasePageIndicator").getText());
@@ -688,7 +696,7 @@ class LauncherSwingSmokeTest {
             SwingUtilities.invokeAndWait(() -> {
                 frame.setVisible(true);
                 frame.install(OfficialRepository.MEGAMEK, "v-test", temp.resolve("destination"),
-                        "Test", FollowChannel.MILESTONE);
+                        "Test", FollowChannel.CORE);
             });
             assertTrue(services.started.await(5, TimeUnit.SECONDS));
             assertFalse(services.wasEdt);
@@ -749,7 +757,7 @@ class LauncherSwingSmokeTest {
                 frame.setVisible(true);
                 frame.install(OfficialRepository.MEGAMEK, "v-test",
                         temp.resolve("cancel-destination"), "Cancel test",
-                        FollowChannel.MILESTONE);
+                        FollowChannel.CORE);
             });
             assertTrue(services.started.await(5, TimeUnit.SECONDS));
             JDialog progress = owned(frame, "Downloading and installing");
@@ -1254,9 +1262,15 @@ class LauncherSwingSmokeTest {
         volatile int currentFetches;
         volatile OfficialRepository currentRepository;
         volatile FollowChannel currentChannel;
+        volatile boolean showExperimental;
 
         PagingServices(Path registry) {
             super(registry);
+        }
+
+        @Override
+        boolean showExperimental() {
+            return showExperimental;
         }
 
         @Override
@@ -1273,7 +1287,7 @@ class LauncherSwingSmokeTest {
             List<SelectedChannelReleaseCatalog.Entry> entries = new ArrayList<>();
             if (page == 1) {
                 entries.add(entry(repository,
-                        channel == FollowChannel.MILESTONE ? "v0.51.0" : "v0.52.0",
+                        channel == FollowChannel.CORE ? "v0.51.0" : "v0.52.0",
                         SelectedChannelReleaseCatalog.Classification.SELECTED_CHANNEL, true));
             }
             entries.add(entry(repository, "v0.50." + page,
@@ -1283,8 +1297,8 @@ class LauncherSwingSmokeTest {
                         SelectedChannelReleaseCatalog.Classification.UNKNOWN, false));
             }
             return new SelectedChannelReleaseCatalog.Result(repository, channel, page, 10,
-                    channel == FollowChannel.MILESTONE ? "0.51.0" : "0.52.0",
-                    channel == FollowChannel.MILESTONE ? "v0.51.0" : "v0.52.0",
+                    channel == FollowChannel.CORE ? "0.51.0" : "0.52.0",
+                    channel == FollowChannel.CORE ? "v0.51.0" : "v0.52.0",
                     entries, true);
         }
 

@@ -47,7 +47,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Real schema-shaped metadata with no package transfers unless explicitly provided. */
+/** Real schema-2 metadata with no package transfers unless explicitly provided. */
 public final class SuiteTestData implements ReleaseTransport {
     private static final JsonMapper JSON = new JsonMapper();
     private final List<ObjectNode> inventory = new ArrayList<>();
@@ -55,10 +55,12 @@ public final class SuiteTestData implements ReleaseTransport {
     private final Map<URI, byte[]> bodies = new HashMap<>();
     public final List<URI> requests = new ArrayList<>();
 
+    /** Pads to {@code major.MM.LL.B}; a three-part shorthand means build 1 of that line. */
     public static String canonical(String version) {
         String[] parts = version.split("\\.");
         return Integer.parseInt(parts[0]) + "." + "%02d".formatted(Integer.parseInt(parts[1]))
-                + "." + "%02d".formatted(Integer.parseInt(parts[2]));
+                + "." + "%02d".formatted(Integer.parseInt(parts[2]))
+                + "." + (parts.length > 3 ? Integer.parseInt(parts[3]) : 1);
     }
 
     public static long releaseId(OfficialRepository repository, String version) {
@@ -83,19 +85,16 @@ public final class SuiteTestData implements ReleaseTransport {
                 + version + "/" + repository.productName() + "-" + version + ".tar.gz");
     }
 
-    public static Response channels(String milestone, String development) {
+    /** One Core and one Experimental suite; the inputs are {@link #canonical} shorthands. */
+    public static Response channels(String core, String experimental) {
         SuiteTestData data = new SuiteTestData();
-        String stable = canonical(milestone);
-        String dev = canonical(development);
-        data.suite(stable, FollowChannel.MILESTONE, stable);
-        String devSuite = dev;
-        if (dev.equals(stable)) {
-            String[] components = dev.split("\\.");
-            devSuite = components[0] + "." + components[1] + "."
-                    + "%02d".formatted(Integer.parseInt(components[2]) + 1);
-        }
-        data.suite(devSuite, FollowChannel.DEVELOPMENT, dev);
+        data.suite(canonical(core), FollowChannel.CORE);
+        data.suite(canonical(experimental), FollowChannel.EXPERIMENTAL);
         return new Response(200, Map.of(), new InventoryBody(data));
+    }
+
+    public Response inventoryResponse() {
+        return new Response(200, Map.of(), new InventoryBody(this));
     }
 
     public static final class MetadataRouter {
@@ -129,18 +128,24 @@ public final class SuiteTestData implements ReleaseTransport {
         }
     }
 
-    public ObjectNode suite(String version, FollowChannel channel, String productVersion) {
-        Map<OfficialRepository, String> versions = new EnumMap<>(OfficialRepository.class);
-        for (OfficialRepository repository : OfficialRepository.values()) versions.put(repository, productVersion);
-        return suite(version, channel, versions, Map.of(), Map.of());
+    public ObjectNode suite(String version, FollowChannel channel) {
+        return suite(version, channel, Map.of(), Map.of());
     }
 
+    public ObjectNode suite(String version, FollowChannel channel,
+                            Map<OfficialRepository, Long> sizes, Map<OfficialRepository, String> hashes) {
+        Map<OfficialRepository, String> versions = new EnumMap<>(OfficialRepository.class);
+        for (OfficialRepository repository : OfficialRepository.values()) versions.put(repository, version);
+        return suite(version, channel, versions, sizes, hashes);
+    }
+
+    /** Low-level form; product versions other than the suite version yield an invalid record. */
     public ObjectNode suite(String version, FollowChannel channel,
                             Map<OfficialRepository, String> versions,
                             Map<OfficialRepository, Long> sizes, Map<OfficialRepository, String> hashes) {
         ObjectNode record = JSON.createObjectNode();
-        record.put("schemaVersion", 1).put("version", version)
-                .put("membership", channel.cliName()).put("tag", "v" + version);
+        record.put("schemaVersion", SuiteReleaseRecord.SCHEMA).put("version", version)
+                .put("channel", channel.cliName()).put("tag", "v" + version);
         ObjectNode products = record.putObject("products");
         for (OfficialRepository repository : OfficialRepository.values()) {
             String productVersion = versions.get(repository);

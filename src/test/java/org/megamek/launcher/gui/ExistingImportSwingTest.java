@@ -202,7 +202,7 @@ class ExistingImportSwingTest {
                 frame.setVisible(true);
                 frame.showIneligibleAdoption(new PreparedAdoption.Report(
                         false, "MekHQ", "0.50.7",
-                        org.megamek.launcher.channel.FollowChannel.DEVELOPMENT,
+                        org.megamek.launcher.channel.FollowChannel.EXPERIMENTAL,
                         "Core application files differ from the official release."));
                 return null;
             });
@@ -217,8 +217,8 @@ class ExistingImportSwingTest {
             assertTrue(message.getText().contains(
                     "Core application files differ from the official release."));
             assertTrue(message.getText().contains("No files were changed."));
-            assertFalse(message.getText().contains("currently a Milestone release"));
-            assertFalse(message.getText().contains("currently a Development release"));
+            assertFalse(message.getText().contains("currently a Core release"));
+            assertFalse(message.getText().contains("currently a Experimental release"));
             assertNull(find(dialog, "viewAdoptionLogsButton"));
             assertNull(find(dialog, "operationViewDetailsButton"));
             assertNull(find(dialog, "retrySuggestedAdoptionButton"));
@@ -242,7 +242,7 @@ class ExistingImportSwingTest {
                 frame.setVisible(true);
                 frame.showIneligibleAdoption(new PreparedAdoption.Report(
                         false, "MekHQ", "0.50.7",
-                        org.megamek.launcher.channel.FollowChannel.DEVELOPMENT,
+                        org.megamek.launcher.channel.FollowChannel.EXPERIMENTAL,
                         "Core application files differ from the official release. ".repeat(400)));
                 return null;
             });
@@ -529,7 +529,7 @@ class ExistingImportSwingTest {
                         "adoptionDetectedApplicationVersion");
                 JComboBox<?> channel = (JComboBox<?>) find(dialog, "adoptionChannelCombo");
                 assertEquals("MegaMek (0.50.7)", application.getText());
-                assertEquals(org.megamek.launcher.channel.FollowChannel.MILESTONE,
+                assertEquals(org.megamek.launcher.channel.FollowChannel.CORE,
                         channel.getSelectedItem());
                 assertTrue(cancel.getX() < proceed.getX());
                 assertTrue(dialog.getHeight() < dialog.getWidth(), "dialog remains compact");
@@ -633,7 +633,7 @@ class ExistingImportSwingTest {
             assertFalse(hasShowingDialog(frame, "Copy verified"));
             var preference = new ChannelPreferenceStore()
                     .read(registry, services.readRegistry(), record).preference();
-            assertEquals(org.megamek.launcher.channel.FollowChannel.MILESTONE,
+            assertEquals(org.megamek.launcher.channel.FollowChannel.CORE,
                     preference.channel());
             assertTrue(preference.checkOnOpen());
             assertSame(preparationContext.get(), publicationContext.get(),
@@ -662,6 +662,10 @@ class ExistingImportSwingTest {
                 registry, new RegistryStore(), new InstallationInspector(), transport,
                 new JavaRuntime(new RecordingRunner()),
                 new ApplicationLauncher(new RecordingRunner())) {
+            @Override boolean showExperimental() {
+                return true;
+            }
+
             @Override public PreparedAdoption prepareAutomaticAdoption(
                     org.megamek.launcher.registry.InstallationRecord selected,
                     org.megamek.launcher.release.OfficialRepository repository,
@@ -701,7 +705,7 @@ class ExistingImportSwingTest {
             JDialog start = waitFor(() -> findDialog(frame, "adoptionCandidateDialog"));
             onEdt(() -> {
                 JComboBox<?> channel = (JComboBox<?>) find(start, "adoptionChannelCombo");
-                channel.setSelectedItem(FollowChannel.DEVELOPMENT);
+                channel.setSelectedItem(FollowChannel.EXPERIMENTAL);
                 ((JButton) find(start, "continueAdoptionButton")).doClick();
                 return null;
             });
@@ -710,15 +714,15 @@ class ExistingImportSwingTest {
             JLabel heading = (JLabel) find(mismatch, "adoptionResultHeading");
             JLabel message = (JLabel) find(mismatch, "adoptionResultMessage");
             JButton retry = (JButton) find(mismatch, "retrySuggestedAdoptionButton");
-            assertEquals("Use Milestone for this installation", mismatch.getTitle());
-            assertEquals("Use Milestone for this installation", heading.getText());
+            assertEquals("Use Core for this installation", mismatch.getTitle());
+            assertEquals("Use Core for this installation", heading.getText());
             assertEquals(FirstLaunchPanel.ACCENT, heading.getForeground());
             assertEquals(java.awt.Font.PLAIN, message.getFont().getStyle());
             assertTrue(message.getText().contains(
-                    "Version 0.50.07 is currently a Milestone release"));
+                    "Version 0.50.07.1 is currently a Core release"));
             assertTrue(message.getText().contains("No files were changed."));
-            assertTrue(message.getText().contains("Select Milestone"));
-            assertEquals("Try Milestone", retry.getText());
+            assertTrue(message.getText().contains("Select Core"));
+            assertEquals("Try Core", retry.getText());
             assertEquals(1, countButtonText(mismatch, "Close"));
             assertFalse(mismatch.isResizable());
             assertEquals(retry, mismatch.getRootPane().getDefaultButton());
@@ -747,7 +751,7 @@ class ExistingImportSwingTest {
             assertEquals(28, requests.get());
             var preference = new ChannelPreferenceStore()
                     .read(registry, services.readRegistry(), record).preference();
-            assertEquals(FollowChannel.MILESTONE, preference.channel());
+            assertEquals(FollowChannel.CORE, preference.channel());
         } finally {
             dispose(frame);
         }
@@ -843,8 +847,8 @@ class ExistingImportSwingTest {
                 registry, new RegistryStore(), new InstallationInspector(),
                 noNetwork, new JavaRuntime(runner), new ApplicationLauncher(runner)) {
             @Override public org.megamek.launcher.channel.QuickInstallSnapshot
-                    quickInstallSnapshot() {
-                return snapshots.get();
+                    quickInstallSnapshot(boolean showExperimental) {
+                return QuickInstallTestData.offered(snapshots.get(), showExperimental);
             }
         };
     }
@@ -906,15 +910,15 @@ class ExistingImportSwingTest {
         java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
         try (GzipCompressorOutputStream gzip = new GzipCompressorOutputStream(bytes);
              TarArchiveOutputStream tar = new TarArchiveOutputStream(gzip)) {
-            addArchiveEntry(tar, "MegaMek-0.50.07/", null);
-            addArchiveEntry(tar, "MegaMek-0.50.07/data/", null);
-            addArchiveEntry(tar, "MegaMek-0.50.07/mmconf/", null);
-            addArchiveEntry(tar, "MegaMek-0.50.07/lib/", null);
-            addArchiveEntry(tar, "MegaMek-0.50.07/MegaMek.jar", jar);
-            addArchiveEntry(tar, "MegaMek-0.50.07/lib/library.jar", dependency);
-            addArchiveEntry(tar, "MegaMek-0.50.07/data/base.txt",
+            addArchiveEntry(tar, "MegaMek-0.50.07.1/", null);
+            addArchiveEntry(tar, "MegaMek-0.50.07.1/data/", null);
+            addArchiveEntry(tar, "MegaMek-0.50.07.1/mmconf/", null);
+            addArchiveEntry(tar, "MegaMek-0.50.07.1/lib/", null);
+            addArchiveEntry(tar, "MegaMek-0.50.07.1/MegaMek.jar", jar);
+            addArchiveEntry(tar, "MegaMek-0.50.07.1/lib/library.jar", dependency);
+            addArchiveEntry(tar, "MegaMek-0.50.07.1/data/base.txt",
                     "official-data".getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            addArchiveEntry(tar, "MegaMek-0.50.07/mmconf/user.cfg",
+            addArchiveEntry(tar, "MegaMek-0.50.07.1/mmconf/user.cfg",
                     "official-setting".getBytes(java.nio.charset.StandardCharsets.UTF_8));
         }
         return new AdoptionFixture(root, bytes.toByteArray());
@@ -927,7 +931,7 @@ class ExistingImportSwingTest {
         java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
         try (JarOutputStream jar = new JarOutputStream(bytes, manifest)) {
             jar.putNextEntry(new java.util.jar.JarEntry("megamek/Version.properties"));
-            jar.write("major=0\nminor=50\npatch=7\n".getBytes(
+            jar.write("major=0\nminor=50\npatch=7\nrevision=1\n".getBytes(
                     java.nio.charset.StandardCharsets.UTF_8));
             jar.closeEntry();
         }
@@ -950,22 +954,22 @@ class ExistingImportSwingTest {
         String digest = HexFormat.of().formatHex(
                 MessageDigest.getInstance("SHA-256").digest(archive));
         String metadata = """
-                {"tag_name":"v0.50.07","name":"Version 0.50.07","draft":false,
+                {"tag_name":"v0.50.07.1","name":"Version 0.50.07.1","draft":false,
                 "prerelease":false,
-                "html_url":"https://github.com/MegaMek/megamek/releases/tag/v0.50.07",
-                "assets":[{"name":"MegaMek-0.50.07.tar.gz","size":%d,
+                "html_url":"https://github.com/MegaMek/megamek/releases/tag/v0.50.07.1",
+                "assets":[{"name":"MegaMek-0.50.07.1.tar.gz","size":%d,
                 "digest":"sha256:%s",
                 "browser_download_url":"https://github.com/MegaMek/megamek/releases/download/\
-                v0.50.07/MegaMek-0.50.07.tar.gz"}]}
+                v0.50.07.1/MegaMek-0.50.07.1.tar.gz"}]}
                 """.formatted(archive.length, digest);
         Deque<java.util.function.Supplier<ReleaseTransport.Response>> responses =
                 new ArrayDeque<>(List.of(
-                        () -> org.megamek.launcher.channel.SuiteTestData.channels("0.50.07", "0.51.0"),
+                        () -> org.megamek.launcher.channel.SuiteTestData.channels("0.50.07.1", "0.51.0"),
                         response("[" + metadata + "]"),
                         response(metadata),
                         response(metadata),
                         binaryResponse(archive),
-                        () -> org.megamek.launcher.channel.SuiteTestData.channels("0.50.07", "0.51.0"),
+                        () -> org.megamek.launcher.channel.SuiteTestData.channels("0.50.07.1", "0.51.0"),
                         response(metadata)));
         var metadataRouter = new org.megamek.launcher.channel.SuiteTestData.MetadataRouter();
         return (uri, accept) -> {
@@ -985,23 +989,23 @@ class ExistingImportSwingTest {
         String digest = HexFormat.of().formatHex(
                 MessageDigest.getInstance("SHA-256").digest(archive));
         String metadata = """
-                {"tag_name":"v0.50.07","name":"Version 0.50.07","draft":false,
+                {"tag_name":"v0.50.07.1","name":"Version 0.50.07.1","draft":false,
                 "prerelease":false,
-                "html_url":"https://github.com/MegaMek/megamek/releases/tag/v0.50.07",
-                "assets":[{"name":"MegaMek-0.50.07.tar.gz","size":%d,
+                "html_url":"https://github.com/MegaMek/megamek/releases/tag/v0.50.07.1",
+                "assets":[{"name":"MegaMek-0.50.07.1.tar.gz","size":%d,
                 "digest":"sha256:%s",
                 "browser_download_url":"https://github.com/MegaMek/megamek/releases/download/\
-                v0.50.07/MegaMek-0.50.07.tar.gz"}]}
+                v0.50.07.1/MegaMek-0.50.07.1.tar.gz"}]}
                 """.formatted(archive.length, digest);
         Deque<java.util.function.Supplier<ReleaseTransport.Response>> responses =
                 new ArrayDeque<>(List.of(
-                        () -> org.megamek.launcher.channel.SuiteTestData.channels("0.50.07", "0.51.0"),
-                        () -> org.megamek.launcher.channel.SuiteTestData.channels("0.50.07", "0.51.0"),
+                        () -> org.megamek.launcher.channel.SuiteTestData.channels("0.50.07.1", "0.51.0"),
+                        () -> org.megamek.launcher.channel.SuiteTestData.channels("0.50.07.1", "0.51.0"),
                         response("[" + metadata + "]"),
                         response(metadata),
                         response(metadata),
                         binaryResponse(archive),
-                        () -> org.megamek.launcher.channel.SuiteTestData.channels("0.50.07", "0.51.0"),
+                        () -> org.megamek.launcher.channel.SuiteTestData.channels("0.50.07.1", "0.51.0"),
                         response(metadata)));
         var metadataRouter = new org.megamek.launcher.channel.SuiteTestData.MetadataRouter();
         return (uri, accept) -> {

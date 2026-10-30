@@ -214,7 +214,7 @@ class ReceiptMaterialTest {
                 registry, data, record, OfficialRepository.MEGAMEK, "v-old",
                 "MegaMek-v-old.tar.gz", 123, "sha256:" + "a".repeat(64), build);
         new ChannelPreferenceStore().initializeManaged(
-                registry, record, receipt, FollowChannel.MILESTONE, false);
+                registry, record, receipt, FollowChannel.CORE, false);
         return new Fixture(root, registry, receipts.receiptPath(registry, record.id()),
                 record, data, build, receipts);
     }
