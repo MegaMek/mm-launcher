@@ -481,6 +481,31 @@ class UninstallServiceTest {
     }
 
     @Test
+    void removeFromLauncherForgetsCopyWhoseBuildChangedButUninstallStillRefuses()
+            throws Exception {
+        Fixture fixture = managed("remove-changed-build");
+        Path jar = fixture.root.resolve("MegaMek.jar");
+        java.util.jar.Manifest manifest = new java.util.jar.Manifest();
+        manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
+        manifest.getMainAttributes().put(Attributes.Name.MAIN_CLASS, "megamek.MegaMek");
+        try (JarOutputStream output = new JarOutputStream(Files.newOutputStream(jar), manifest)) {
+            output.putNextEntry(new JarEntry("megamek/Version.properties"));
+            output.write("major=1\nminor=2\npatch=0\n".getBytes(StandardCharsets.UTF_8));
+            output.closeEntry();
+        }
+        byte[] changed = Files.readAllBytes(jar);
+
+        assertThrows(IOException.class,
+                () -> fixture.service(point -> { }).plan(fixture.record, context()));
+        UninstallService.Result result = fixture.service(point -> { })
+                .removeFromLauncher(fixture.record);
+
+        assertFalse(result.committed());
+        assertArrayEquals(changed, Files.readAllBytes(jar));
+        assertTrue(fixture.store.read(fixture.registry).installations().isEmpty());
+    }
+
+    @Test
     void failedLauncherRemovalRestoresAllMetadataAndRegistration() throws Exception {
         Fixture fixture = managed("remove-rollback");
         Path receipt = new ReceiptStore().receiptPath(fixture.registry, fixture.record.id());

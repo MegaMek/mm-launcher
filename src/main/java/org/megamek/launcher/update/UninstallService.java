@@ -224,10 +224,11 @@ public final class UninstallService {
             if (hasUninstallPending(expected.id()) && !missing) {
                 throw new IOException("Uninstall recovery required before removing this copy");
             }
+            // Files are kept, so a copy whose build or layout changed can still be forgotten.
             if (missing) {
                 requireMissing(root);
             } else {
-                requireCurrentLayout(current);
+                requirePresent(current);
             }
             UninstallJournal pendingJournal = missing && hasUninstallPending(current.id())
                     ? readJournal(current.id()) : null;
