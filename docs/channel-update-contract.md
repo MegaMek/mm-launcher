@@ -29,8 +29,7 @@ interrupted, stale, missing, and unavailable state is never reset, inferred, or 
 
 There is no compatibility with earlier launchers. A schema-1 sidecar from the retired Milestone,
 Development, or Weekly channels is read as **Retired**: the copy stays launch-only, its sidecar is
-never rewritten or migrated, and a check reports `RETIRED_CHANNEL` (the card says **Still launches, but its release channel no longer exists. Install a new copy to get
-updates.**) without a network request or retry. To get updates, install a new Core or Experimental
+never rewritten or migrated, and a check reports `RETIRED_CHANNEL` (the card says **Still launches. Install a new copy to get updates.**) without a network request or retry. To get updates, install a new Core or Experimental
 copy.
 
 The only mutable field is `checkOnOpen`. Its separate setter requires the exact previously read
@@ -178,7 +177,9 @@ the original **Unable to check** result.
 The main first-run **Install latest MekHQ Core** action explicitly persists Core for the MekHQ
 repository. By default its split menu adds only MegaMek Core and MegaMekLab Core. Settings has a
 **Show Experimental releases** option, off by default and stored in the launcher settings file
-(schema 5), with the warning that Experimental builds may break things. When it is on, the menu
+(schema 5), with the warning that Experimental builds may break things. Turning it on requires
+confirming a dialog that says Experimental releases are for testing and features may break or be
+incomplete; cancelling leaves it off. When it is on, the menu
 also offers MekHQ, MegaMek, and MegaMekLab Experimental. The option only widens what is offered;
 it never changes an installed channel. Changing it discards the cached quick-install snapshot so
 the next Home visit loads the matching choices. Each route persists exactly its displayed channel

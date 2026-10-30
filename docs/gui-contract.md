@@ -136,9 +136,12 @@ Settings starts with **Appearance**: a Dark/Light theme select. A change applies
 and is saved off the event-dispatch thread; a failed save reports an error without reverting the
 visible appearance. High contrast is not offered until the design tokens define it.
 Loading and error states keep the same layout; there is no global automatic-check control.
-**Releases** follows Appearance. It says that new installs use Core, the release for playing, and
+**Releases** follows Appearance. It
 offers **Show Experimental releases** (off by default) with the warning that Experimental builds
-help us test and may break things. The option is saved off the event-dispatch thread in launcher
+help us test and may break things. Ticking it opens a confirmation (**Show Experimental
+releases?**) that repeats that Experimental releases are for testing and features may break or be
+incomplete; **Cancel** or Escape leaves it unticked and saves nothing. Unticking needs no
+confirmation. The option is saved off the event-dispatch thread in launcher
 settings schema 5. It only adds Experimental to quick install, **Install another version**, and
 adoption; it never changes an installed copy's channel.
 
@@ -211,10 +214,16 @@ A followed channel with no published suite record instead says
 installation card (or a combined message for multiple unpublished channels). This remains
 retryable and never counts as an update or an up-to-date result; request/validation failures
 still say **Could not check**. A copy that followed a retired Milestone, Development, or Weekly
-channel (a schema-1 channel sidecar) is never checked or migrated. Its card is marked
-**Retired release channel · Launch only** and says **Still launches, but its release channel no longer exists. Install a new copy to get
-updates.** It offers no check, update,
+channel (a schema-1 channel sidecar), or that has no release type and a version older than the
+first Core release (0.51.01, `FIRST_CORE_BUILD`), is never checked, adopted, or migrated. Its card is marked
+**Legacy release · Launch only** and says **Still launches. Install a new copy to get updates.** It offers no check, update,
 repair, or uninstall action, and is never shown as managed setup needing repair.
+
+While no registered, present copy follows Core, the Installations header shows **Install Core** as
+the primary (highlighted) action, left of **Install another version**. It starts the normal Core
+install as a new copy at the default Core destination for the package that covers the registered
+programs (MegaMek only, MegaMekLab only, otherwise MekHQ); existing copies are not changed. Each
+card lists its **Preferred for …** marker directly under the name, above the release line.
 
 Download bars paint percentage only, with localized human-readable byte detail below. Extraction
 is indeterminate with processed-file detail and no bar string.
@@ -362,9 +371,12 @@ product/channel combos. The same combo class is used by the Game Java selector;
 it retains native Swing popup, keyboard, selection, and accessibility behavior, and the look and
 feel paints the field and arrow.
 
-One top row contains, in order, styled **Product**, styled **Channel**, and styled
+One top row contains, in order, styled **Product**, styled **Release type**, and styled
 **Fetch releases** controls. It defaults to MekHQ/Core; there is no separate Browse mode. The
-Channel select offers Experimental only when **Show Experimental releases** is on.
+Release type select offers Experimental only when **Show Experimental releases** is on. Above
+the row, the dialog says **Core releases are recommended for most players. Choose Core if you want
+to play the game.** When Experimental is offered it adds, in the warning color, **Experimental
+releases are for testing. Features may break or be incomplete.**
 One fetch performs bounded complete-record discovery and resolves the current record plus the
 records needed for one selected-channel product-history page. Every resolved record requires
 all three product references to validate. It never requests package bytes.

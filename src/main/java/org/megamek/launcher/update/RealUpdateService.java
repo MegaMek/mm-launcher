@@ -147,7 +147,7 @@ public final class RealUpdateService {
                 channelPreferences.read(registryPath, data, record);
         if (fixed.status() != ChannelPreferenceStore.Status.CONFIGURED
                 || fixed.preference() == null) {
-            throw new IOException("fixed channel provenance is unavailable; this copy is "
+            throw new IOException("release type information is unavailable; this copy is "
                     + "launch-only: " + fixed.reason());
         }
         Path root = validateBoundary(registryPath, data, record);

@@ -41,9 +41,12 @@ import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.ChannelUpdateChecker;
 import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.onboarding.Inspection;
+import org.megamek.launcher.onboarding.NormalInstallService;
 import org.megamek.launcher.onboarding.Product;
 import org.megamek.launcher.registry.InstallationRecord;
 import org.megamek.launcher.registry.RegistryData;
+import org.megamek.launcher.release.OfficialRepository;
+import org.megamek.launcher.update.ImportedCopyAdoptionService;
 import org.megamek.launcher.update.OwnershipPolicy;
 import org.megamek.launcher.update.OwnershipReceipt;
 import org.megamek.launcher.update.UpdatePreviewService;
@@ -327,6 +330,7 @@ class ChannelSwingIntegrationTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void retiredChannelCopyStaysLaunchOnlyWithoutRepairOrUpdateActions() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing channel integration requires a display");
@@ -340,12 +344,11 @@ class ChannelSwingIntegrationTest {
             SwingUtilities.invokeAndWait(installations::doClick);
             JLabel provenance = waitFor(() -> (JLabel) findNamed(frame,
                     "installationProvenance-" + services.record.id()));
-            assertEquals("Retired release channel · Launch only", onEdt(provenance::getText));
+            assertEquals("Legacy release · Launch only", onEdt(provenance::getText));
             JLabel status = waitFor(() -> (JLabel) findNamed(frame,
                     "installationStatus-" + services.record.id()));
             assertEquals(LauncherFrame.RETIRED_CHANNEL_STATUS, onEdt(status::getText));
-            assertEquals("Still launches, but its release channel no longer exists. "
-                    + "Install a new copy to get updates.", LauncherFrame.RETIRED_CHANNEL_STATUS);
+            assertEquals("Still launches. Install a new copy to get updates.", LauncherFrame.RETIRED_CHANNEL_STATUS);
             assertNull(onEdt(() -> find(frame, "checkUpdatesButton")));
             assertNull(onEdt(() -> find(frame, "applyUpdateButton")));
             assertNull(onEdt(() -> find(frame, "recoverUpdateButton")));
@@ -356,6 +359,100 @@ class ChannelSwingIntegrationTest {
             assertNotNull(onEdt(() -> find(frame,
                     "installationMenuButton-" + services.record.id())));
             assertEquals(0, services.checks.get(), "a retired copy is never checked");
+            Container topActions = (Container) findNamed(frame, "installationTopActions");
+            assertEquals("installCoreButton", onEdt(() -> topActions.getComponent(0).getName()),
+                    "Install Core leads the header actions");
+            Container summary = provenance.getParent();
+            int preferredIndex = onEdt(() -> java.util.Arrays.asList(summary.getComponents())
+                    .indexOf(findNamed(summary, "preferredApplicationMarkers")));
+            int provenanceIndex = onEdt(() -> java.util.Arrays.asList(summary.getComponents())
+                    .indexOf(provenance));
+            assertTrue(preferredIndex >= 0 && preferredIndex < provenanceIndex,
+                    "the Preferred marker sits directly under the name");
+
+            SwingTestSupport.click(frame, "installCoreButton");
+            JDialog failure = SwingTestSupport.dialog(frame, "Could not prepare download");
+            SwingTestSupport.click(failure, "launcherAlertButton0");
+            assertEquals("MEGAMEK Core", services.plannedInstall,
+                    "Install Core plans a new Core copy of the same product");
+        } finally {
+            services.release.countDown();
+            SwingUtilities.invokeAndWait(frame::dispose);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
+    void retiredCopyOffersNoInstallCoreWhenACoreCopyAlreadyCoversIt() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing channel integration requires a display");
+        FakeServices services = new FakeServices(temp.resolve("retired-with-core.json"));
+        services.preference = new ChannelPreferenceStore.ReadResult(
+                ChannelPreferenceStore.Status.RETIRED, null, "retired channel");
+        services.coreCopy = new InstallationRecord("00000000-0000-0000-0000-000000000002",
+                "MekHQ Core (0.51.01.1)",
+                temp.resolve("mekhq-core").toString(), "0.51.01.1",
+                List.of(new Product("megamek", "MegaMek.jar", "megamek.MegaMek",
+                                "0.51.01.1", List.of()),
+                        new Product("mekhq", "MekHQ.jar", "mekhq.MekHQ",
+                                "0.51.01.1", List.of()),
+                        new Product("lab", "MegaMekLab.jar", "megameklab.MegaMekLab",
+                                "0.51.01.1", List.of())),
+                "keep", false, "2026-10-30T00:00:00Z");
+        LauncherFrame frame = SwingTestSupport.createWindow(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
+            SwingUtilities.invokeAndWait(installations::doClick);
+            waitFor(() -> findNamed(frame, "installationProvenance-" + services.record.id()));
+            assertNotNull(onEdt(() -> find(frame,
+                    "installationMenuButton-" + services.coreCopy.id())));
+            assertNull(onEdt(() -> find(frame, "installCoreButton")),
+                    "Install Core is hidden once any Core copy is installed");
+        } finally {
+            services.release.countDown();
+            SwingUtilities.invokeAndWait(frame::dispose);
+        }
+    }
+
+    @Test
+    void onlyBuildsBeforeTheFirstCoreReleaseAreLegacy() {
+        assertTrue(LauncherFrame.preCoreBuild("0.50.6"));
+        assertTrue(LauncherFrame.preCoreBuild("0.51.0.1"));
+        assertTrue(LauncherFrame.preCoreBuild("0.51.0-1"));
+        assertTrue(LauncherFrame.preCoreBuild("0.49.20 (nightly)"));
+        assertFalse(LauncherFrame.preCoreBuild("0.51.1"));
+        assertFalse(LauncherFrame.preCoreBuild("0.51.1.3"));
+        assertFalse(LauncherFrame.preCoreBuild("0.52.0"));
+        assertFalse(LauncherFrame.preCoreBuild(null));
+        assertFalse(LauncherFrame.preCoreBuild("unknown"));
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
+    void importedPreCoreCopyIsALegacyReleaseWithoutEnableUpdates() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing channel integration requires a display");
+        FakeServices services = new FakeServices(temp.resolve("imported-legacy.json"),
+                false, "0.50.6");
+        services.preference = new ChannelPreferenceStore.ReadResult(
+                ChannelPreferenceStore.Status.UNKNOWN, null, "No release type");
+        services.importedCopy = true;
+        LauncherFrame frame = SwingTestSupport.createWindow(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
+            SwingUtilities.invokeAndWait(installations::doClick);
+            JLabel provenance = waitFor(() -> (JLabel) findNamed(frame,
+                    "installationProvenance-" + services.record.id()));
+            assertEquals("Legacy release · Launch only", onEdt(provenance::getText));
+            JLabel status = waitFor(() -> (JLabel) findNamed(frame,
+                    "installationStatus-" + services.record.id()));
+            assertEquals(LauncherFrame.RETIRED_CHANNEL_STATUS, onEdt(status::getText));
+            assertNull(onEdt(() -> find(frame,
+                    "enableManagedUpdatesButton-" + services.record.id())));
+            assertNotNull(onEdt(() -> find(frame,
+                    "installCoreButton")));
         } finally {
             services.release.countDown();
             SwingUtilities.invokeAndWait(frame::dispose);
@@ -490,19 +587,26 @@ class ChannelSwingIntegrationTest {
         private volatile IOException checkFailure;
         private volatile ChannelUpdateChecker.Status checkStatus = ChannelUpdateChecker.Status.EXACT_CURRENT;
         private volatile IOException saveFailure;
+        private volatile String plannedInstall;
+        private volatile InstallationRecord coreCopy;
+        private volatile boolean importedCopy;
 
         FakeServices(Path registry) {
             this(registry, false);
         }
 
         FakeServices(Path registry, boolean checkOnOpen) {
+            this(registry, checkOnOpen, "0.51.0");
+        }
+
+        FakeServices(Path registry, boolean checkOnOpen, String build) {
             super(registry);
             Product product = new Product("megamek", "MegaMek.jar", "megamek.MegaMek",
-                    "0.51.0", List.of());
+                    build, List.of());
             record = new InstallationRecord("00000000-0000-0000-0000-000000000001",
-                    "MegaMek Core (0.51.0)",
+                    "MegaMek Core (" + build + ")",
                     registry.getParent().resolve("copy").toString(),
-                    "0.51.0", List.of(product), "keep", false,
+                    build, List.of(product), "keep", false,
                     "2026-09-16T00:00:00Z");
             inspection = new Inspection(record.canonicalRoot(), record.products(),
                     record.observedBuild(), "fixture");
@@ -518,11 +622,34 @@ class ChannelSwingIntegrationTest {
 
         @Override
         public HomeState loadHome() {
-            RegistryData data = new RegistryData(
-                    org.megamek.launcher.registry.RegistryStore.SCHEMA,
-                    record.id(), List.of(record));
             UpdatePreviewService.Eligibility eligible = new UpdatePreviewService.Eligibility(
                     record, true, "fixture", receipt, null);
+            if (importedCopy) {
+                RegistryData data = new RegistryData(
+                        org.megamek.launcher.registry.RegistryStore.SCHEMA,
+                        record.id(), List.of(record));
+                return new HomeState(data, record, inspection, null, null, false,
+                        preference, java.util.Map.of(), java.util.Map.of(record.id(),
+                        new InstallationStatus(preference, null, false, false, null,
+                                ImportedCopyAdoptionService.Availability.TRUE_IMPORTED, false)));
+            }
+            if (coreCopy != null) {
+                RegistryData data = new RegistryData(
+                        org.megamek.launcher.registry.RegistryStore.SCHEMA,
+                        record.id(), List.of(record, coreCopy));
+                ChannelPreferenceStore.ReadResult core = new ChannelPreferenceStore.ReadResult(
+                        ChannelPreferenceStore.Status.CONFIGURED,
+                        new ChannelPreference(1, coreCopy.id(), coreCopy.canonicalRoot(),
+                                coreCopy.registeredAt(), FollowChannel.CORE, false),
+                        "Configured");
+                return new HomeState(data, record, inspection, null, eligible, false,
+                        preference, java.util.Map.of(), java.util.Map.of(
+                        record.id(), new InstallationStatus(preference, eligible, false, null),
+                        coreCopy.id(), new InstallationStatus(core, null, false, null)));
+            }
+            RegistryData data = new RegistryData(
+                    org.megamek.launcher.registry.RegistryStore.SCHEMA,
+                    record.id(), java.util.Map.of("megamek", record.id()), List.of(record));
             return new HomeState(data, record, inspection, null, eligible, false, preference);
         }
 
@@ -557,6 +684,21 @@ class ChannelSwingIntegrationTest {
             } finally {
                 diagnosticsFinished.countDown();
             }
+        }
+
+        @Override
+        public Path normalInstallDestination(OfficialRepository repository,
+                                             FollowChannel channel) {
+            return Path.of(record.canonicalRoot()).resolveSibling("new-core");
+        }
+
+        @Override
+        public NormalInstallService.Plan prepareNormalInstall(OfficialRepository repository,
+                                                              FollowChannel channel,
+                                                              Path destination)
+                throws IOException {
+            plannedInstall = repository + " " + channel;
+            throw new IOException("fixture stops before download");
         }
 
         @Override

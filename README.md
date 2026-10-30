@@ -356,9 +356,11 @@ repeat an obvious post-install “ready” message or place status text above na
 
 The title bar shows the packaged MegaMek Launcher version (or "development build" outside a
 packaged release). Settings also includes **Releases**, **Launcher update** on supported native
-installations, **Community**, and **Latest news**. **Releases** explains that new installs use Core,
-the release for playing, and holds **Show Experimental releases** (off by default) with the warning
-that Experimental builds help us test and may break things. Turning it on only adds Experimental
+installations, **Community**, and **Latest news**. **Releases** holds **Show Experimental releases**
+(off by default) with the warning
+that Experimental builds help us test and may break things. Turning it on first asks for
+confirmation: Experimental releases are for testing and features may break or be incomplete.
+Cancel leaves it off. Turning it on only adds Experimental
 choices to quick install, the version picker, and adoption; it never changes an installed copy's
 channel. It is saved in launcher settings schema 5. Latest news reads the official MegaMek Atom feed once per launcher window,
 independently of installation checks, and shows up to three dated headlines linking to official
@@ -578,14 +580,16 @@ falls back to another repository/channel, a different tag, or “latest.” MekH
 three-program suite; standalone MegaMek and MegaMekLab packages must inspect as only their actual
 product, so managed Home never gains launch buttons from a mixed or title-inferred bundle.
 
-The Installations page's dark **Install another version** dialog defaults to MekHQ and Core; its
-Channel select offers Experimental only when **Show Experimental releases** is on.
-Its Product/Channel/**Fetch releases** row discovers bounded complete records and shows one page
+The Installations page's dark **Install another version** dialog defaults to MekHQ and Core. Its
+top text recommends Core for most players who want to play the game and, when Experimental is
+offered, says Experimental releases are for testing and may break or be incomplete. Its
+**Release type** select offers Experimental only when **Show Experimental releases** is on.
+Its Product/Release type/**Fetch releases** row discovers bounded complete records and shows one page
 of product targets from records of the selected channel, newest first. Page one contains the
 current product exactly once.
 All three product references must validate for each displayed target. Titles, publication dates,
 and `prerelease` flags never supply classification, and unclassified repository history is not
-a fallback. The selected Channel becomes the new installation's immutable update track.
+a fallback. The selected release type becomes the new installation's immutable update track.
 No picker metadata action fetches package bytes.
 
 Previous/next use the exact loaded product/channel snapshot and a bounded record-history page. Changing
@@ -621,10 +625,12 @@ copy's boolean using the exact displayed record/preference binding.
 Use **Install another version** to create a separate root on another channel. Existing valid
 channel sidecars are read without migration writes; missing, corrupt, stale, or unavailable
 channel state remains launch-only and cannot be assigned through channel settings. Copies that
-followed the retired Milestone, Development, or Weekly channels are marked **Retired release
-channel · Launch only** and say **Still launches, but its release channel no longer exists. Install a new copy to get
-updates.** They get no update checks, no repair or
-update actions, and no migration. Imported
+followed the retired Milestone, Development, or Weekly channels, and copies with no release type
+whose version is older than the first Core release (0.51.01), are marked **Legacy release · Launch only** and say **Still launches. Install a new copy to get updates.** They get no update checks, no repair or
+update actions, and no migration: the old copy is never updated. While no Core copy is
+installed, the Installations header shows a highlighted **Install Core** button first, which
+starts the normal Core install as a new copy in its own folder and leaves existing copies
+unchanged. The "Preferred for" line sits directly under each card's name. Imported
 folders receive no channel sidecar or ownership receipt unless the separate exact-ancestor
 adoption succeeds. A check reads canonical channel and exact release metadata
 only; it downloads no package and changes no installed files. If an update is recommended,

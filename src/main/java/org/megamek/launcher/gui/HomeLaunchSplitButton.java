@@ -131,7 +131,7 @@ final class HomeLaunchSplitButton extends JPanel {
                         + (preferredVersion == null || preferredVersion.isBlank()
                         ? "" : ", version " + preferredVersion)
                         + (preferredChannel == null || preferredChannel.isBlank()
-                        ? "." : ", " + preferredChannel + " channel."));
+                        ? "." : ", " + preferredChannel + " release."));
         primaryButton.addActionListener(event -> {
             if (!disposed && primaryButton.isEnabled()) primaryAction.run();
         });

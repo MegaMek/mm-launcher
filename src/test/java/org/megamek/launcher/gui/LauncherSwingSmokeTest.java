@@ -577,13 +577,18 @@ class LauncherSwingSmokeTest {
             assertEquals(2, (int) onEdt(channel::getItemCount),
                     "an opted-in player can browse Experimental releases");
             assertEquals("Product", product.getAccessibleContext().getAccessibleName());
-            assertEquals("Channel", channel.getAccessibleContext().getAccessibleName());
+            assertEquals("Release type", channel.getAccessibleContext().getAccessibleName());
+            assertEquals(LauncherFrame.CORE_RELEASE_INFO,
+                    findLabel(dialog, "releaseTypeCoreInfo").getText());
+            assertEquals(LauncherFrame.EXPERIMENTAL_RELEASE_INFO,
+                    findLabel(dialog, "releaseTypeExperimentalInfo").getText(),
+                    "an opted-in player also sees what Experimental means");
 
             JButton fetch = find(dialog, "fetchReleasesButton");
             assertEquals("Fetch releases", fetch.getText());
             assertEquals(product.getParent(), channel.getParent());
             assertEquals(product.getParent(), fetch.getParent(),
-                    "Product, Channel, and Fetch belong to one responsive control row");
+                    "Product, Release type, and Fetch belong to one responsive control row");
             java.awt.GridBagLayout controlLayout =
                     (java.awt.GridBagLayout) product.getParent().getLayout();
             assertEquals(controlLayout.getConstraints(product).gridy,

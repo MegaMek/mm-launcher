@@ -342,7 +342,7 @@ class UpdateApplySwingTest {
             fixture.services.releaseApply.countDown();
             JDialog failed = waitForDialog(frame, "Update failed — recovery may be required");
             assertTrue(componentText(failed).contains("channel source")
-                    || componentText(failed).contains("Channel check failed"));
+                    || componentText(failed).contains("Update check failed"));
             assertEquals(1, fixture.services.network.binaryRequests);
             assertEquals(fixture.services.archive.length,
                     fixture.services.network.binaryBytes);
