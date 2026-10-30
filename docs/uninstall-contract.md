@@ -5,7 +5,8 @@ and older registry shapes are rejected without migration.
 Uninstall and remove-from-launcher do not read Java settings, resolve a runtime, or execute Java.
 
 **Remove from launcher…** is available for imported and managed copies. It revalidates the exact
-registration and canonical product layout under the root/process gate, refuses pending update,
+registration under the root/process gate, but not the on-disk build or product layout, so a copy
+that changed or was registered by an older launcher can still be forgotten. It refuses pending update,
 pending uninstall, or a live child, removes all launcher-owned sidecars for the installation ID,
 then removes the registration under the registry lock. Application-root bytes and timestamps are
 never touched. Preferred application references fall back deterministically to the first remaining
