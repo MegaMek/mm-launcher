@@ -67,7 +67,7 @@ import java.util.UUID;
  */
 public final class ChannelPreferenceStore {
     public static final int SCHEMA = 2;
-    static final String RETIRED_REASON = "This copy follows a retired channel (Milestone, "
+    static final String RETIRED_REASON = "This is a legacy release (Milestone, "
             + "Development, or Weekly); it is launch-only. Install a Core or Experimental copy "
             + "to receive updates.";
     private static final int MAX_BYTES = 8 * 1024;
@@ -243,7 +243,7 @@ public final class ChannelPreferenceStore {
             StrictPathSafety.requireDirectory(directory, "channel metadata directory");
         } catch (NoSuchFileException error) {
             return new ReadResult(Status.UNKNOWN, null,
-                    "No fixed channel provenance is recorded; this copy is launch-only.");
+                    "No release type is recorded; this copy is launch-only.");
         }
         Path file = preferencePath(directory, record.id());
         Path staging = stagingPath(file);
@@ -254,7 +254,7 @@ public final class ChannelPreferenceStore {
             StrictPathSafety.requireFile(file, "channel setting");
         } catch (NoSuchFileException error) {
             return new ReadResult(Status.UNKNOWN, null,
-                    "No fixed channel provenance is recorded; this copy is launch-only.");
+                    "No release type is recorded; this copy is launch-only.");
         }
         long size = Files.size(file);
         if (size <= 0 || size > MAX_BYTES) throw new IOException("channel setting size is invalid");

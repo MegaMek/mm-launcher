@@ -41,6 +41,7 @@ import org.megamek.launcher.channel.ChannelPreference;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.ChannelUpdateChecker;
 import org.megamek.launcher.channel.FollowChannel;
+import org.megamek.launcher.channel.SuiteReleaseRecord;
 import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.channel.QuickInstallSnapshot;
 import org.megamek.launcher.channel.SelectedChannelReleaseCatalog;
@@ -135,8 +136,15 @@ public final class LauncherFrame extends JFrame {
             DateTimeFormatter.ofPattern("MMM d, uuuu", Locale.ENGLISH);
     static final String DISCORD_INVITE_URL = "https://discord.gg/megamek";
     static final String PLAY_ONLINE_URL = "https://megamek.games/";
-    static final String RETIRED_CHANNEL_STATUS = "Still launches, but its release channel no "
-            + "longer exists. Install a new copy to get updates.";
+    static final String FIRST_CORE_BUILD = "0.51.1";
+    static final String RETIRED_CHANNEL_STATUS = "Still launches. Install a new copy to get updates.";
+    static final String EXPERIMENTAL_CONFIRM_TITLE = "Show Experimental releases?";
+    static final String EXPERIMENTAL_CONFIRM_MESSAGE = "Experimental releases are for testing. "
+            + "Features may break or be incomplete. Keep backups of your campaigns and saves.";
+    static final String CORE_RELEASE_INFO = "Core releases are recommended for most players. "
+            + "Choose Core if you want to play the game.";
+    static final String EXPERIMENTAL_RELEASE_INFO = "Experimental releases are for testing. "
+            + "Features may break or be incomplete.";
     private final LauncherServices services;
     private final Object appearanceSaveLock = new Object();
     private final LauncherNewsFeed newsFeed;
@@ -894,7 +902,7 @@ public final class LauncherFrame extends JFrame {
             }
         }
         if (unpublished.size() == 1) return unpublishedChannelMessage(unpublished.iterator().next());
-        if (!unpublished.isEmpty()) return "Update information is not available yet for some channels";
+        if (!unpublished.isEmpty()) return "Update information is not available yet for some release types";
         boolean allChecked = checkedRecords.stream().allMatch(record -> {
             InstallationCheck check = installationChecks.get(record.id());
             return check != null && check.error() == null && check.result() != null;
@@ -1104,7 +1112,7 @@ public final class LauncherFrame extends JFrame {
             case EXACT_CURRENT -> "Up to date";
             case UPDATE_AVAILABLE -> "Update available";
             case INSTALLED_AHEAD -> "Installed ahead";
-            case UNCONFIGURED -> "Channel not configured";
+            case UNCONFIGURED -> "Release type not set";
             case RETIRED_CHANNEL -> RETIRED_CHANNEL_STATUS;
             case CHANNEL_NOT_PUBLISHED -> unpublishedChannelMessage(result.preference().channel());
             case UNAVAILABLE, NON_COMPARABLE -> "Could not check";
@@ -1151,7 +1159,7 @@ public final class LauncherFrame extends JFrame {
                     if (result.preference() != null
                             && !services.isCheckBindingCurrent(record, result.preference())) {
                         return new InstallationCheck(null,
-                                "Copy or channel changed; check again");
+                                "Copy or release type changed; check again");
                     }
                     return new InstallationCheck(result, null);
                 } catch (InterruptedException error) {
@@ -1294,7 +1302,7 @@ public final class LauncherFrame extends JFrame {
         content.removeAll();
         content.setBorder(guiScale.padding("xxl", "xxl", "xl", "xxl"));
         content.setBackground(FirstLaunchPanel.BACKGROUND);
-        JPanel header = new JPanel(new BorderLayout());
+        JPanel header = new JPanel(new BorderLayout(0, guiScale.space("lg")));
         header.setBackground(FirstLaunchPanel.BACKGROUND);
         header.setBorder(BorderFactory.createEmptyBorder(0, 0,
                 guiScale.space("lg"), 0));
@@ -1313,6 +1321,18 @@ public final class LauncherFrame extends JFrame {
         JButton importExisting = homeButton("Import existing installation",
                 "manageAddExistingButton");
         importExisting.addActionListener(event -> chooseExisting());
+        OfficialRepository coreRepository = coreInstallRepository();
+        if (coreRepository != null) {
+            JButton installCore = new FirstLaunchButton("Install Core", "installCoreButton",
+                    true, guiScale, FirstLaunchButton.Size.SMALL);
+            installCore.getAccessibleContext().setAccessibleDescription(
+                    "Install the latest " + displayProduct(coreRepository.key())
+                            + " Core release as a new copy. Your other installations are not changed.");
+            installCore.addActionListener(event ->
+                    prepareNormalInstall(coreRepository, FollowChannel.CORE, null));
+            topActions.add(installCore);
+            topActions.add(Box.createHorizontalStrut(guiScale.space("md")));
+        }
         topActions.add(install);
         topActions.add(Box.createHorizontalStrut(guiScale.space("md")));
         topActions.add(importExisting);
@@ -1405,18 +1425,13 @@ public final class LauncherFrame extends JFrame {
                 .collect(java.util.stream.Collectors.joining(", "));
         String provenance = missing
                 ? products
-                : retiredChannel(local)
-                ? "Retired release channel · Launch only"
+                : legacyRelease(record, local)
+                ? "Legacy release · Launch only"
                 : trueImported
                 ? "Imported copy · Launch only · Updates unavailable"
                 : fixedChannel
                 ? products
                 : "Managed setup incomplete · Launch only · Updates unavailable";
-        JLabel metadata = new JLabel(provenance);
-        metadata.setName("installationProvenance-" + record.id());
-        metadata.setForeground(FirstLaunchPanel.MUTED);
-        metadata.setAlignmentX(Component.LEFT_ALIGNMENT);
-        summary.add(metadata);
         String markers = record.products().stream().map(Product::key)
                 .filter(key -> (state.preferredApplications() != null
                         && record.equals(state.preferredApplications().get(key)))
@@ -1431,6 +1446,11 @@ public final class LauncherFrame extends JFrame {
             preferred.setAlignmentX(Component.LEFT_ALIGNMENT);
             summary.add(preferred);
         }
+        JLabel metadata = new JLabel(provenance);
+        metadata.setName("installationProvenance-" + record.id());
+        metadata.setForeground(FirstLaunchPanel.MUTED);
+        metadata.setAlignmentX(Component.LEFT_ALIGNMENT);
+        summary.add(metadata);
         String updateText = installationUpdateStatus(record, local);
         if (!provenance.toLowerCase(java.util.Locale.ROOT)
                 .contains(updateText.toLowerCase(java.util.Locale.ROOT))) {
@@ -1459,7 +1479,7 @@ public final class LauncherFrame extends JFrame {
                     "Check for updates when the launcher opens for " + record.name());
             checkOnOpen.getAccessibleContext().setAccessibleDescription(
                     "Saves immediately for this installation only. It does not change the "
-                            + "fixed channel or affect an update check already in progress.");
+                            + "release type or affect an update check already in progress.");
             checkOnOpen.setEnabled(pendingSelection == null);
             checkOnOpen.addActionListener(event -> saveCheckOnOpen(
                     record, expectedPreference, checkOnOpen));
@@ -1501,7 +1521,7 @@ public final class LauncherFrame extends JFrame {
                 actions.add(check);
             }
         }
-        if (trueImported) {
+        if (trueImported && !legacyRelease(record, local)) {
             JButton adopt = homeButton("Enable Updates",
                     "enableManagedUpdatesButton-" + record.id());
             adopt.setMnemonic(KeyEvent.VK_E);
@@ -1810,12 +1830,47 @@ public final class LauncherFrame extends JFrame {
                 && local.channelPreference().preference() != null;
     }
 
-    /** A copy whose channel sidecar predates Core/Experimental; it is launch-only by design. */
-    private static boolean retiredChannel(LauncherServices.InstallationStatus local) {
-        return local != null && !local.missing() && local.channelPreference() != null
-                && local.channelPreference().status() == ChannelPreferenceStore.Status.RETIRED;
+    /**
+     * A copy from before Core/Experimental: either its channel sidecar names a retired channel,
+     * or it has no release type and its build predates the first Core release. Launch-only.
+     */
+    private static boolean legacyRelease(InstallationRecord record,
+                                         LauncherServices.InstallationStatus local) {
+        if (local == null || local.missing()) return false;
+        if (local.channelPreference() != null
+                && local.channelPreference().status() == ChannelPreferenceStore.Status.RETIRED) {
+            return true;
+        }
+        return !hasFixedChannel(local) && record != null && preCoreBuild(record.observedBuild());
     }
 
+    static boolean preCoreBuild(String build) {
+        if (build == null) return false;
+        java.util.regex.Matcher numeric =
+                java.util.regex.Pattern.compile("^(\\d+)\\.(\\d+)\\.(\\d+)").matcher(build);
+        if (!numeric.find()) return false;
+        return SuiteReleaseRecord.compareVersions(numeric.group(1) + "." + numeric.group(2)
+                + "." + numeric.group(3), FIRST_CORE_BUILD) < 0;
+    }
+
+    /**
+     * The Core package to offer from the Installations header, or {@code null} once any present
+     * copy follows Core. The package covers every program the registered copies provide.
+     */
+    private OfficialRepository coreInstallRepository() {
+        Set<String> keys = new java.util.HashSet<>();
+        for (InstallationRecord record : state.registry().installations()) {
+            LauncherServices.InstallationStatus status = installationLocalStatus(record);
+            if (status != null && !status.missing() && hasFixedChannel(status)
+                    && status.channelPreference().preference().channel() == FollowChannel.CORE) {
+                return null;
+            }
+            record.products().forEach(product -> keys.add(product.key()));
+        }
+        if (keys.equals(Set.of("megamek"))) return OfficialRepository.MEGAMEK;
+        if (keys.equals(Set.of("lab"))) return OfficialRepository.LAB;
+        return OfficialRepository.MEKHQ;
+    }
     private static boolean trueImported(LauncherServices.InstallationStatus local) {
         return local != null
                 && local.adoption() == ImportedCopyAdoptionService.Availability.TRUE_IMPORTED
@@ -1834,10 +1889,10 @@ public final class LauncherFrame extends JFrame {
         if (local != null && local.error() != null) {
             return "Installation needs attention";
         }
-        if (retiredChannel(local)) return RETIRED_CHANNEL_STATUS;
+        if (legacyRelease(record, local)) return RETIRED_CHANNEL_STATUS;
         if (!hasOwnershipProvenance(local)) return "Launch only · updates unavailable";
         if (!managedUpdatesAvailable(local)) {
-            return "Fixed channel provenance needs repair";
+            return "Release type information needs repair";
         }
         if (local.pendingUpdate()) return "Recovery required";
         InstallationCheck checked = installationChecks.get(record.id());
@@ -1900,7 +1955,7 @@ public final class LauncherFrame extends JFrame {
         JPanel channelRow = new JPanel(new java.awt.FlowLayout(
                 java.awt.FlowLayout.LEFT, 0, 0));
         channelRow.setOpaque(false);
-        JLabel channelLabel = new JLabel("Update channel:");
+        JLabel channelLabel = new JLabel("Release type:");
         channelLabel.setForeground(FirstLaunchPanel.TEXT);
         StyledComboBox<FollowChannel> channel = new StyledComboBox<>(
                 FollowChannel.offered(showExperimental).toArray(FollowChannel[]::new),
@@ -1910,7 +1965,7 @@ public final class LauncherFrame extends JFrame {
                 guiScale.scaleForGUI(180), channel.getPreferredSize().height));
         channel.setSelectedItem(FollowChannel.CORE);
         channel.setToolTipText(channelChoiceDescription());
-        channel.getAccessibleContext().setAccessibleName("Future update channel");
+        channel.getAccessibleContext().setAccessibleName("Release type");
         channel.getAccessibleContext().setAccessibleDescription(
                 channelChoiceDescription() + " This choice is fixed after enabling.");
         channelLabel.setLabelFor(channel);
@@ -2118,7 +2173,7 @@ public final class LauncherFrame extends JFrame {
             String exactTag, FollowChannel fixedChannel, long generation) {
         if (!isCurrentAdoption(generation, record)) return;
         if (!FollowChannel.offered(showExperimental).contains(fixedChannel)) {
-            showError("Channel not available", new IOException("Turn on Show "
+            showError("Release type not available", new IOException("Turn on Show "
                     + fixedChannel + " releases in Settings first."));
             return;
         }
@@ -2812,10 +2867,6 @@ public final class LauncherFrame extends JFrame {
 
     private JPanel releasesSection() {
         JPanel section = settingsSection("Releases");
-        JLabel core = mutedSettingsLabel("New installs use Core, the release for playing.");
-        core.setName("releasesCoreDescription");
-        section.add(core);
-        section.add(Box.createVerticalStrut(guiScale.space("xs")));
         JCheckBox experimental = new MapCheckBox("Show Experimental releases",
                 showExperimental, guiScale);
         experimental.setName("showExperimentalReleasesCheckbox");
@@ -2824,8 +2875,17 @@ public final class LauncherFrame extends JFrame {
         experimental.setBorder(BorderFactory.createEmptyBorder());
         experimental.setMargin(new java.awt.Insets(0, 0, 0, 0));
         experimental.getAccessibleContext().setAccessibleDescription(
-                "Also offer Experimental installs. Existing installations keep their channel.");
-        experimental.addActionListener(event -> applyShowExperimental(experimental.isSelected()));
+                "Also offer Experimental installs. Existing installations keep their release type.");
+        experimental.addActionListener(event -> {
+            boolean requested = experimental.isSelected();
+            if (requested && !showExperimental && !LauncherAlertDialog.showConfirm(this, guiScale,
+                    EXPERIMENTAL_CONFIRM_TITLE, EXPERIMENTAL_CONFIRM_MESSAGE,
+                    "Show Experimental")) {
+                experimental.setSelected(false);
+                return;
+            }
+            applyShowExperimental(requested);
+        });
         section.add(experimental);
         section.add(Box.createVerticalStrut(guiScale.space("xs")));
         JLabel warning = mutedSettingsLabel(
@@ -3563,8 +3623,8 @@ public final class LauncherFrame extends JFrame {
         OperationProgressDialog progress = new OperationProgressDialog(this,
                 operationDescription, "normalInstallProgressLog", this::showOperationLogs);
         progress.append("Installing the confirmed official " + product + " "
-                + plan.channel() + " selection; the channel is the created installation's "
-                + "fixed update track...\n");
+                + plan.channel() + " release; this copy will keep receiving "
+                + plan.channel() + " updates...\n");
         JButton repair = button("Open Installations", "repairNormalInstallButton");
         repair.setEnabled(false);
         progress.addActionButton(repair);
@@ -3646,9 +3706,9 @@ public final class LauncherFrame extends JFrame {
             channel.setName("downloadChannelCombo");
             channel.setSelectedItem(FollowChannel.CORE);
             channel.setToolTipText(channelChoiceDescription());
-            channel.getAccessibleContext().setAccessibleName("Channel");
+            channel.getAccessibleContext().setAccessibleName("Release type");
             channel.getAccessibleContext().setAccessibleDescription(
-                    "Update channel for the new installation. " + channelChoiceDescription());
+                    "Release type for the new installation. " + channelChoiceDescription());
 
             releases.setName("releaseList");
             releases.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
@@ -3662,7 +3722,7 @@ public final class LauncherFrame extends JFrame {
             releases.setBorder(guiScale.padding("sm", "sm"));
             releases.getAccessibleContext().setAccessibleName("Available official releases");
             releases.getAccessibleContext().setAccessibleDescription(
-                    "Published releases of the selected channel, newest first.");
+                    "Published releases of the selected release type, newest first.");
             releases.setCellRenderer((list, value, index, selected, focused) -> {
                 JLabel label = new JLabel(value == null ? "" : value.toString());
                 label.setOpaque(true);
@@ -3686,11 +3746,11 @@ public final class LauncherFrame extends JFrame {
             });
 
             fetch.getAccessibleContext().setAccessibleDescription(
-                    "Fetch page one for the selected product and channel.");
+                    "Fetch page one for the selected product and release type.");
             previous.getAccessibleContext().setAccessibleDescription(
-                    "Fetch the previous page for the unchanged product and channel.");
+                    "Fetch the previous page for the unchanged product and release type.");
             next.getAccessibleContext().setAccessibleDescription(
-                    "Fetch the next page for the unchanged product and channel.");
+                    "Fetch the next page for the unchanged product and release type.");
             install.getAccessibleContext().setAccessibleDescription(
                     "Install the selected release after choosing a destination and confirming.");
             previous.setEnabled(false);
@@ -3713,7 +3773,7 @@ public final class LauncherFrame extends JFrame {
             selectorCell.weightx = 0.5;
             selectorCell.fill = java.awt.GridBagConstraints.HORIZONTAL;
             selectors.add(product, selectorCell);
-            JLabel channelLabel = styledPickerLabel("Channel:");
+            JLabel channelLabel = styledPickerLabel("Release type:");
             channelLabel.setLabelFor(channel);
             selectorCell.gridx = 2;
             selectorCell.weightx = 0;
@@ -3739,6 +3799,20 @@ public final class LauncherFrame extends JFrame {
             title.setAlignmentX(Component.LEFT_ALIGNMENT);
             selectors.setAlignmentX(Component.LEFT_ALIGNMENT);
             heading.add(title);
+            heading.add(Box.createVerticalStrut(guiScale.space("md")));
+            JLabel coreInfo = new JLabel(CORE_RELEASE_INFO);
+            coreInfo.setName("releaseTypeCoreInfo");
+            coreInfo.setForeground(FirstLaunchPanel.TEXT);
+            coreInfo.setAlignmentX(Component.LEFT_ALIGNMENT);
+            heading.add(coreInfo);
+            if (showExperimental) {
+                heading.add(Box.createVerticalStrut(guiScale.space("xs")));
+                JLabel experimentalInfo = new JLabel(EXPERIMENTAL_RELEASE_INFO);
+                experimentalInfo.setName("releaseTypeExperimentalInfo");
+                experimentalInfo.setForeground(LauncherTheme.WARNING);
+                experimentalInfo.setAlignmentX(Component.LEFT_ALIGNMENT);
+                heading.add(experimentalInfo);
+            }
             heading.add(Box.createVerticalStrut(guiScale.space("lg")));
             heading.add(selectors);
 
@@ -3805,7 +3879,7 @@ public final class LauncherFrame extends JFrame {
                             available.y + available.height - placed.height)));
             dialog.getAccessibleContext().setAccessibleName("Install another version");
             dialog.getAccessibleContext().setAccessibleDescription(
-                    "Fetch official releases for one selected product and fixed update channel.");
+                    "Fetch official releases for one selected product and release type.");
             dialog.getRootPane().setDefaultButton(fetch);
             dialog.getRootPane().getInputMap(
                     javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(

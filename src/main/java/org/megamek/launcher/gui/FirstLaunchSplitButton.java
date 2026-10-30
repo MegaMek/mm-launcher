@@ -233,7 +233,7 @@ final class FirstLaunchSplitButton extends JPanel {
                         : primary.unavailableReason());
         primaryButton.setToolTipText(primary.available() ? null : primary.unavailableReason());
         getAccessibleContext().setAccessibleDescription(
-                "Install an available complete suite; unavailable channels are disabled.");
+                "Install an available complete suite; unavailable release types are disabled.");
         setNormalOptionsDescription();
         availableOptions = snapshot.options().stream().filter(QuickInstallOption::available)
                 .map(QuickInstallOption::key).collect(java.util.stream.Collectors.toUnmodifiableSet());
@@ -276,7 +276,7 @@ final class FirstLaunchSplitButton extends JPanel {
             String label = menuLabel(entry.getKey(), "Loading…");
             JMenuItem item = entry.getValue();
             item.setText(label);
-            item.setToolTipText("Official channel and release metadata is loading.");
+            item.setToolTipText("Official release information is loading.");
             item.getAccessibleContext().setAccessibleName(label);
             item.getAccessibleContext().setAccessibleDescription(
                     label + ". Wait for validated metadata.");
@@ -435,7 +435,7 @@ final class FirstLaunchSplitButton extends JPanel {
     }
 
     private String optionsAccessibleName() {
-        return showExperimental ? "Choose another application and channel"
+        return showExperimental ? "Choose another application and release type"
                 : "Choose another application";
     }
 

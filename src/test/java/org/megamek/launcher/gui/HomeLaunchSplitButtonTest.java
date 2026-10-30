@@ -152,8 +152,18 @@ class HomeLaunchSplitButtonTest {
                     "home content cannot paint over the alternatives");
             assertTrue(split.popupMenu().getWidth() >= split.getWidth(),
                     "the alternatives are at least as wide as the control");
-            assertEquals(split.getLocationOnScreen().x + split.getWidth(),
-                    split.popupMenu().getLocationOnScreen().x + split.popupMenu().getWidth(),
+            int[] rightEdges = SwingTestSupport.await("alternatives shown on screen", () -> {
+                if (!split.popupMenu().isShowing()) return null;
+                try {
+                    return new int[] {
+                            split.getLocationOnScreen().x + split.getWidth(),
+                            split.popupMenu().getLocationOnScreen().x
+                                    + split.popupMenu().getWidth()};
+                } catch (java.awt.IllegalComponentStateException notYetOnScreen) {
+                    return null;
+                }
+            });
+            assertEquals(rightEdges[0], rightEdges[1],
                     "the alternatives line up with the control's right edge");
             JMenuItem selected = split.menuItems().get(1);
             SwingUtilities.invokeAndWait(selected::doClick);

@@ -755,16 +755,16 @@ public class LauncherServices {
                                          Path destination, String name, FollowChannel channel,
                                          PrintStream progress)
             throws IOException, InterruptedException {
-        if (channel == null) throw new IOException("choose a channel for the new installation");
+        if (channel == null) throw new IOException("choose a release type for the new installation");
         FreshInstaller.Result result = install(repository, tag, destination, name, progress);
         try {
             new ChannelPreferenceStore().initializeManaged(registry, result.record(),
                     result.ownershipReceipt(), channel, true);
         } catch (IOException error) {
             throw new IOException("installation is valid and REGISTERED at "
-                    + result.destination() + " but FIXED CHANNEL PROVENANCE WAS NOT PERSISTED: "
+                    + result.destination() + " but ITS RELEASE TYPE WAS NOT SAVED: "
                     + detail(error) + ". Keep the retained copy launch-only until setup is "
-                    + "repaired; its channel cannot be assigned or changed manually.", error);
+                    + "repaired; its release type cannot be assigned or changed manually.", error);
         }
         return result;
     }
@@ -773,7 +773,7 @@ public class LauncherServices {
                                          Path destination, String name, FollowChannel channel,
                                          PrintStream progress, OperationContext context)
             throws IOException, InterruptedException {
-        if (channel == null) throw new IOException("choose a channel for the new installation");
+        if (channel == null) throw new IOException("choose a release type for the new installation");
         FreshInstaller.Result result = install(
                 repository, tag, destination, name, progress, context);
         try {
@@ -781,9 +781,9 @@ public class LauncherServices {
                     result.ownershipReceipt(), channel, true);
         } catch (IOException error) {
             throw new IOException("installation is valid and REGISTERED at "
-                    + result.destination() + " but FIXED CHANNEL PROVENANCE WAS NOT PERSISTED: "
+                    + result.destination() + " but ITS RELEASE TYPE WAS NOT SAVED: "
                     + detail(error) + ". Keep the retained copy launch-only until setup is "
-                    + "repaired; its channel cannot be assigned or changed manually.", error);
+                    + "repaired; its release type cannot be assigned or changed manually.", error);
         }
         return result;
     }

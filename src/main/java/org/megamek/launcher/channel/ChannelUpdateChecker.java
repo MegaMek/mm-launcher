@@ -107,12 +107,12 @@ public final class ChannelUpdateChecker {
                     record, preference, snapshot.current().tag(), detail(error));
         } catch (IOException error) {
             return unavailable(Status.UNAVAILABLE, record, preference, snapshot.current().tag(),
-                    "Channel check failed: " + detail(error));
+                    "Update check failed: " + detail(error));
         }
         if (target.repository() != repository
                 || !target.release().tag().equals("v" + target.version())) {
             return unavailable(Status.UNAVAILABLE, record, preference, snapshot.current().tag(),
-                    "Channel source returned a mismatched repository or tag");
+                    "Release source returned a mismatched repository or tag");
         }
         Recommendation recommendation = new Recommendation(record.id(), record.canonicalRoot(),
                 record.registeredAt(), preference, repository, target.source(),
@@ -123,7 +123,7 @@ public final class ChannelUpdateChecker {
         String currentTag = snapshot.current().tag();
         if (currentTag.equals(target.release().tag())) {
             return result(Status.EXACT_CURRENT, record, preference, currentTag, recommendation,
-                    "The verified current package is the exact followed-channel release.");
+                    "The verified current package is the latest release of its release type.");
         }
         Status comparison = compareTags(currentTag, target.release().tag());
         if (comparison == Status.NON_COMPARABLE) {
@@ -133,11 +133,11 @@ public final class ChannelUpdateChecker {
         }
         if (comparison == Status.UPDATE_AVAILABLE) {
             return result(Status.UPDATE_AVAILABLE, record, preference, currentTag, recommendation,
-                    "A newer release is available on this installation's fixed channel.");
+                    "A newer release of this installation's release type is available.");
         }
         if (comparison == Status.INSTALLED_AHEAD) {
             return result(Status.INSTALLED_AHEAD, record, preference, currentTag, recommendation,
-                    "The verified installed release is newer than this channel target; "
+                    "The verified installed release is newer than the latest release of its type; "
                             + "no downgrade is recommended.");
         }
         return result(Status.NON_COMPARABLE, record, preference, currentTag, recommendation,

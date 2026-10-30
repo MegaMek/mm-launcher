@@ -249,7 +249,7 @@ class UpdatePreviewTest {
         IOException error = assertThrows(IOException.class, () ->
                 new UpdatePreviewService(network).preview(registry, record.id(), "v-new",
                         new PrintStream(new ByteArrayOutputStream())));
-        assertTrue(error.getMessage().contains("fixed channel provenance"));
+        assertTrue(error.getMessage().contains("release type information"));
         assertTrue(error.getMessage().contains("launch-only"));
         assertTrue(network.uris.isEmpty());
         assertEquals(record.id(), new org.megamek.launcher.registry.RegistryStore()
@@ -273,11 +273,11 @@ class UpdatePreviewTest {
                 new UpdatePreviewService(network).eligibility(registry, published.record().id());
         assertFalse(eligibility.available());
         assertEquals(published.ownershipReceipt(), eligibility.receipt());
-        assertTrue(eligibility.reason().contains("Fixed channel provenance"));
+        assertTrue(eligibility.reason().contains("Release type information"));
         IOException failure = assertThrows(IOException.class, () ->
                 new UpdatePreviewService(network).preview(registry, published.record().id(),
                         "v-new", new PrintStream(new ByteArrayOutputStream())));
-        assertTrue(failure.getMessage().contains("fixed channel provenance"));
+        assertTrue(failure.getMessage().contains("release type information"));
         assertTrue(network.uris.isEmpty());
     }
 

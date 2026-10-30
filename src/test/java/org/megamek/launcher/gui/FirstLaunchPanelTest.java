@@ -171,7 +171,7 @@ class FirstLaunchPanelTest {
                     find(panel, "downloadAndInstallButton").getAccessibleContext()
                             .getAccessibleName());
             assertNull(find(panel, "downloadAndInstallButton").getToolTipText());
-            assertEquals("Choose another application and channel",
+            assertEquals("Choose another application and release type",
                     find(panel, "downloadOptionsButton").getAccessibleContext()
                             .getAccessibleName());
             assertEquals(AccessibleRole.PUSH_BUTTON,

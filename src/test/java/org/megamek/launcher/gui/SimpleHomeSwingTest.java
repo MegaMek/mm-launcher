@@ -701,8 +701,22 @@ class SimpleHomeSwingTest {
             assertEquals("Show Experimental releases", checkbox.getText());
             JLabel warning = find(frame, "experimentalReleasesWarning");
             assertTrue(warning.getText().contains("may break things"));
-            SwingUtilities.invokeAndWait(checkbox::doClick);
+
+            SwingTestSupport.startClick(frame, "showExperimentalReleasesCheckbox");
+            JDialog cancelled = waitDialog(frame, LauncherFrame.EXPERIMENTAL_CONFIRM_TITLE);
+            assertTrue(LauncherFrame.EXPERIMENTAL_CONFIRM_MESSAGE.contains("for testing"));
+            assertTrue(LauncherFrame.EXPERIMENTAL_CONFIRM_MESSAGE.contains(
+                    "may break or be incomplete"));
+            SwingTestSupport.click(cancelled, "launcherAlertButton0");
+            waitUntil(() -> !cancelled.isShowing());
+            assertFalse(onEdt(checkbox::isSelected), "cancel leaves the box unticked");
+            assertFalse(services.showExperimental, "cancel saves nothing");
+
+            SwingTestSupport.startClick(frame, "showExperimentalReleasesCheckbox");
+            JDialog confirmed = waitDialog(frame, LauncherFrame.EXPERIMENTAL_CONFIRM_TITLE);
+            SwingTestSupport.click(confirmed, "launcherAlertButton1");
             waitUntil(() -> services.showExperimental);
+            assertTrue(onEdt(checkbox::isSelected));
 
             assertEquals(2, pickerChannelCount(frame),
                     "opting in offers Experimental without changing installed channels");

@@ -150,12 +150,12 @@ location. This macOS location is not the `MegaMek Launcher.app` resource tree.
 Explicit `gui --registry` overrides and custom `LauncherServices` registries instead keep the
 isolated `<registry parent>/installations/<product channel>` layout.
 
-On managed Installations, one Product/Channel/**Fetch releases** row defaults to MekHQ/Core and
+On managed Installations, one Product/Release type/**Fetch releases** row defaults to MekHQ/Core and
 offers Experimental only when **Show Experimental releases** is on. It shows the channel's current
 product plus paged history from that channel's complete records, newest first. All three product
 references must validate for each displayed target; titles and prerelease flags never infer a
 channel.
-Channel becomes the created installation's fixed update track. Product or channel changes clear results and
+The release type becomes the created installation's fixed update track. Product or channel changes clear results and
 invalidate in-flight work; Previous/Next retain their exact selection snapshot. Every row returns
 through captured-record normal-planner revalidation before consent. Change location preserves
 the chosen record source, even if a newer record reuses the same product tag. Product/channel and Java

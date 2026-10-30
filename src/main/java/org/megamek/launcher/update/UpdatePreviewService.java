@@ -99,7 +99,7 @@ public final class UpdatePreviewService {
             if (fixed.status() != ChannelPreferenceStore.Status.CONFIGURED
                     || fixed.preference() == null) {
                 return new Eligibility(record, false,
-                        "Fixed channel provenance is unavailable; this copy is launch-only: "
+                        "Release type information is unavailable; this copy is launch-only: "
                                 + fixed.reason(),
                         receipt, current);
             }
@@ -359,7 +359,7 @@ public final class UpdatePreviewService {
                 channelPreferences.read(registry, data, record);
         if (fixed.status() != ChannelPreferenceStore.Status.CONFIGURED
                 || fixed.preference() == null) {
-            throw new IOException("fixed channel provenance is unavailable; this copy is "
+            throw new IOException("release type information is unavailable; this copy is "
                     + "launch-only: " + fixed.reason());
         }
         OwnershipReceipt receipt = receiptStore.read(registry, data, record);
