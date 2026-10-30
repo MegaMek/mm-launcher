@@ -3,15 +3,16 @@
 The artwork-led screen is used only when there is no registered installation and no registry or
 inspection error. An unreadable registry is still an error, not a new-user reset.
 
-There is one joined, accessible split **Install latest MekHQ Milestone** control. Its large primary segment
-is the plain-language Milestone/all-three-program action. The distinct arrow segment opens exactly
-eight fixed rows, in this order: **Install latest MegaMek Milestone**,
-**Install latest MegaMekLab Milestone**, **Install latest MekHQ Development**,
-**Install latest MegaMek Development**, **Install latest MegaMekLab Development**,
-**Install latest MekHQ Weekly**, **Install latest MegaMek Weekly**, and
-**Install latest MegaMekLab Weekly**.
-There is no redundant MekHQ Milestone row and no exact-picker
-row. Each available row includes its validated version in parentheses.
+There is one joined, accessible split **Install latest MekHQ Core** control. Its large primary segment
+is the plain-language Core/all-three-program action; Core is the release for playing. By default
+the distinct arrow segment opens exactly two fixed rows: **Install latest MegaMek Core** and
+**Install latest MegaMekLab Core**. Experimental builds help us test and may break things, so they
+appear only after the player turns on **Show Experimental releases** in Settings. The popup then
+adds, in this order, **Install latest MekHQ Experimental**, **Install latest MegaMek Experimental**,
+and **Install latest MegaMekLab Experimental**.
+There is no redundant MekHQ Core row and no exact-picker
+row. Each available row includes its validated version in parentheses. Because first launch has
+no Settings navigation, a new player installs Core first; the option is available afterwards.
 
 Both segments are keyboard-focusable push buttons. Enter/Space activates the focused segment, and
 Alt+Down, F4, the menu key, or Shift+F10 opens the standard semantic popup; Escape closes it.
@@ -24,8 +25,8 @@ accessible names/descriptions, and visible focus/selection while retaining norma
 action and keyboard behavior. It is not an OS-default popup.
 
 The primary segment reads **Install latest** above a sentence-case detail line naming the suite and its
-validated version, for example **MekHQ Milestone · 0.51.00**; its accessible name is the full
-**Install latest MekHQ Milestone (0.51.00)**. During validation the primary and arrow are labeled
+validated version, for example **MekHQ Core · 0.51.00.1**; its accessible name is the full
+**Install latest MekHQ Core (0.51.00.1)**. During validation the primary and arrow are labeled
 truthfully, disabled, and removed from keyboard focus; **Use existing installation** remains
 enabled and independent. Failure never invents a version or leaves the primary actionable. It
 enables only the arrow needed to expose a clear **Retry version check** menu command.
@@ -33,10 +34,11 @@ The disabled button already communicates loading, so Home does not repeat a `Che
 Its fixed-height message row remains reserved even when empty, preventing metadata completion or
 later failure text from moving the action controls.
 
-One display-only worker discovers bounded complete suite records and resolves all nine choices,
-with explicit unavailability per channel and repeated release-ID caching. A Weekly-only bootstrap
-enables the three Weekly rows while the Milestone default remains disabled; it never changes the
-default or invents a fallback. Concurrent retry activation is deduplicated. A successful immutable
+One display-only worker discovers bounded complete suite records and resolves the three Core
+choices, or all six when Experimental is shown, with explicit unavailability per channel and
+repeated release-ID caching. With Experimental shown, an Experimental-only bootstrap enables the
+three Experimental rows while the Core default remains disabled; it never changes the default or
+invents a fallback. Changing **Show Experimental releases** discards the cached snapshot. Concurrent retry activation is deduplicated. A successful immutable
 snapshot is cached only in the `LauncherFrame` session. It updates the current Home controls
 together; a late result may populate that cache but cannot mutate disposed, replaced, non-empty,
 or non-Home components. Home re-render/reload, page transitions, confirmation cancellation/close,
@@ -54,7 +56,7 @@ full-width centered-cover artwork stays on top and a compact dark, vertically sc
 directly below. The deck has no repeated launcher title/footer or visible Main block. It presents
 one joined split control for every application in the union of registered static product records.
 The primary segment uses the same **Program Channel (Version)** order as first launch, for example
-**Launch MekHQ Milestone (0.51.0)**. Controls share equal widths and wrap/stack on compact widths.
+**Launch MekHQ Core (0.51.00.1)**. Controls share equal widths and wrap/stack on compact widths.
 
 Each application resolves independently from schema-3 preference state. The arrow lists every
 other record containing that product in deterministic registry order as **name · version** plus
@@ -86,7 +88,7 @@ no Java prerequisite/download copy or control and no separate advanced action. I
 the product/exact-release/channel picker after a copy exists and on relevant repair/recovery
 navigation; that picker still performs no request until **Fetch releases**. Local logs remain in
 Settings, and there is no simple/advanced mode toggle. Merely displaying empty Home starts only
-the nine-choice metadata snapshot; it performs no package request, registration, Java validation,
+the quick-install metadata snapshot; it performs no package request, registration, Java validation,
 channel choice, or filesystem write. It disables only the two install segments while loading,
 never the direct import action. Disposing the frame cancels and discards an in-flight result.
 Re-rendering or leaving Home retains an in-flight or successful session snapshot without binding
@@ -104,15 +106,15 @@ it is never part of import and never appears for corrupt/incomplete provenance. 
 starts with a compact **Program (Version)** and update-channel dialog. Cancel/Escape performs no
 network work; Continue automatically searches bounded official release-list metadata and, only
 for one safe match, verifies one exact official package without changing root files before it can
-publish a fixed Milestone, Development, or Weekly channel. A simple launch-only result offers the bounded
+publish a fixed Core or Experimental channel. A simple launch-only result offers the bounded
 manual version chooser only after automatic matching is inconclusive or unavailable.
 
-Selecting the main segment passes the cached `(MEKHQ, MILESTONE)` option to the normal planner.
+Selecting the main segment passes the cached `(MEKHQ, CORE)` option to the normal planner.
 Selecting an available row passes that exact cached `QuickInstallOption`; neither action performs
 a current-record lookup. The planner still freshly captures destination and registry/default state off the EDT. A local
 planning failure/retry keeps
 the cached target. The planner, confirmation, verified transfer, cancellation, atomic registration, current-runtime
-reuse, destination, and Main-if-empty selection are shared by all nine.
+reuse, destination, and Main-if-empty selection are shared by every choice.
 Each immutable quote uses the same map-derived visual language as the other launcher
 dialogs. The normal summary names the selected application/channel, validated version, actual
 program set, human-readable binary download size, and full selectable destination.
@@ -148,10 +150,11 @@ location. This macOS location is not the `MegaMek Launcher.app` resource tree.
 Explicit `gui --registry` overrides and custom `LauncherServices` registries instead keep the
 isolated `<registry parent>/installations/<product channel>` layout.
 
-On managed Installations, one Product/Channel/**Fetch releases** row defaults to MekHQ/Milestone.
-It shows the channel's current product plus paged history with explicit complete-record membership.
-Reused tags are deduplicated by their newest referencing record. All three product references
-must validate for each displayed target; titles and prerelease flags never infer membership.
+On managed Installations, one Product/Channel/**Fetch releases** row defaults to MekHQ/Core and
+offers Experimental only when **Show Experimental releases** is on. It shows the channel's current
+product plus paged history from that channel's complete records, newest first. All three product
+references must validate for each displayed target; titles and prerelease flags never infer a
+channel.
 Channel becomes the created installation's fixed update track. Product or channel changes clear results and
 invalidate in-flight work; Previous/Next retain their exact selection snapshot. Every row returns
 through captured-record normal-planner revalidation before consent. Change location preserves

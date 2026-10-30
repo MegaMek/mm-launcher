@@ -36,17 +36,19 @@ published digest use the same computed local identity; archives that otherwise f
 remain unsupported and launch-only.
 
 The GUI's **Fetch releases** action uses bounded complete-record discovery and pages product
-targets with the selected Milestone, Development, or Weekly membership. Page one contains the
-current product exactly once; reused tags are deduplicated by their newest referencing record.
+targets from records of the selected Core or Experimental channel, newest first. Experimental is
+offered only when **Show Experimental releases** is on. Page one contains the current product
+exactly once.
 Every displayed target requires all three product references to validate. Its source is the
 exact record asset, retained through planning and revalidation rather than re-resolving latest.
-There is no website pointer, unclassified repository-history, or inferred-membership fallback.
+There is no website pointer, unclassified repository-history, or inferred-channel fallback.
 No picker metadata action downloads package bytes.
 
 Empty Home has a separate frame-scoped current snapshot contract. One background attempt resolves
-all nine fixed quick-install choices while both install segments are disabled and **Use existing
-installation** remains enabled. Unavailable channels have disabled entries and explicit reasons.
-Weekly can remain installable when the default Milestone has no record. Failure or partial
+the three Core quick-install choices (six when **Show Experimental releases** is on) while both
+install segments are disabled and **Use existing installation** remains enabled. Unavailable
+channels have disabled entries and explicit reasons. With Experimental shown, Experimental can
+remain installable when the default Core has no record. Changing the option discards the snapshot. Failure or partial
 availability exposes an explicit, deduplicated Retry. A successful immutable snapshot is reused
 across re-render, cancel/close, Change location, and repeated planning; those paths do not reread
 the current record inventory, unless the user explicitly retries unavailable choices.
@@ -76,7 +78,7 @@ Explicit `gui --registry` overrides and custom `LauncherServices` registries ret
 records, install a payload directly as the shared `MegaMek` support root, or place payloads inside
 `MegaMek Launcher.app`. Registry/receipt files remain outside each product/channel child. Leaf names
 include the selected product and channel, such as
-`MekHQ Milestone`, `MegaMek Development`, or `MegaMekLab Milestone`, so different quick choices
+`MekHQ Core`, `MegaMek Experimental`, or `MegaMekLab Core`, so different quick choices
 do not collide or misdescribe their contents.
 After the native parent chooser, a styled folder-name dialog preselects the friendly
 `Program Channel (Version)` name and keeps invalid input in place with an inline error. Cancel or
@@ -103,10 +105,10 @@ selection is preserved by registration; the first record supplies that compatibi
 empty registry. Independently, registration initializes only still-unset per-application
 preferences for products actually in the new static record and never overwrites an explicit
 preference. The normal GUI setup does not inspect Java. It initializes the exact
-planned Milestone, Development, or Weekly channel once with check-on-open enabled, rechecks that no
+planned Core or Experimental channel once with check-on-open enabled, rechecks that no
 unrelated registry/default drift occurred, and updates the compatibility default only for the
 still-empty registry captured by the quote. The primary first-run route defaults to
-`(MEKHQ, MILESTONE)`; the eight popup routes bind their displayed fixed repository/channel pairs and
+`(MEKHQ, CORE)`; the two (or, with Experimental shown, five) popup routes bind their displayed fixed repository/channel pairs and
 cannot silently alter the primary default or an existing installation's track. The same installer
 requires exact product matching for
 normal quotes: MekHQ is the three-program suite, while MegaMek and MegaMekLab are standalone.
@@ -154,7 +156,7 @@ that exact receipt and registry binding revalidate. Same-channel transaction ret
 idempotent; another channel is rejected. Archives are not retained.
 
 The first-launch display snapshot is separate from planning. It discovers complete records and resolves
-the nine repository/channel choices, caching repeated product release IDs during that attempt.
+the offered repository/channel choices (three Core, plus three Experimental when shown), caching repeated product release IDs during that attempt.
 It performs no package transfer, Java validation, destination/state write,
 or state write. Its two install segments are disabled while loading; direct existing-copy import
 remains active. Opening its styled menu when READY performs no request. A failed attempt exposes
