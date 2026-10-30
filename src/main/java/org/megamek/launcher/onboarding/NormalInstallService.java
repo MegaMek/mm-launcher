@@ -121,7 +121,7 @@ public final class NormalInstallService {
 
     /** The per-user default is outside the launcher program tree and is not created by this call. */
     public Path defaultDestination() throws IOException {
-        return defaultDestination(OfficialRepository.MEKHQ, FollowChannel.MILESTONE);
+        return defaultDestination(OfficialRepository.MEKHQ, FollowChannel.CORE);
     }
 
     /**
@@ -152,7 +152,7 @@ public final class NormalInstallService {
      */
     public Plan prepare(Path requestedDestination)
             throws IOException, InterruptedException {
-        return prepare(OfficialRepository.MEKHQ, FollowChannel.MILESTONE,
+        return prepare(OfficialRepository.MEKHQ, FollowChannel.CORE,
                 requestedDestination);
     }
 
@@ -467,7 +467,7 @@ public final class NormalInstallService {
     private static FollowChannel requireAllowedChannel(FollowChannel channel)
             throws IOException {
         if (channel == null) {
-            throw new IOException("normal install channel must be Milestone, Development, or Weekly");
+            throw new IOException("normal install channel must be Core or Experimental");
         }
         return channel;
     }
@@ -659,7 +659,7 @@ public final class NormalInstallService {
             requiredProducts = Set.copyOf(requiredProducts);
             if (channel == null) {
                 throw new IllegalArgumentException(
-                        "normal install channel must be Milestone, Development, or Weekly");
+                        "normal install channel must be Core or Experimental");
             }
             if (repository != OfficialRepository.MEKHQ
                     && repository != OfficialRepository.MEGAMEK

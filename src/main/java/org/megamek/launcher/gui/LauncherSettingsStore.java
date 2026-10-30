@@ -58,7 +58,8 @@ import java.util.function.UnaryOperator;
  * Per-copy automatic-check choices live solely in ChannelPreferenceStore.
  */
 final class LauncherSettingsStore {
-    static final int SCHEMA = 4;
+    static final int SCHEMA = 5;
+    private static final int RELEASE_CHOICE_FREE_SCHEMA = 4;
     private static final int APPEARANCE_FREE_SCHEMA = 3;
     private static final int MAX_BYTES = 4096;
     private final Path registry;
@@ -95,7 +96,8 @@ final class LauncherSettingsStore {
             if (version == null || !version.canConvertToInt()) {
                 throw new IOException("unsupported launcher settings schema");
             }
-            if (version.intValue() != SCHEMA && version.intValue() != APPEARANCE_FREE_SCHEMA) {
+            if (version.intValue() != SCHEMA && version.intValue() != RELEASE_CHOICE_FREE_SCHEMA
+                    && version.intValue() != APPEARANCE_FREE_SCHEMA) {
                 throw new IOException("unsupported launcher settings schema");
             }
             com.fasterxml.jackson.databind.JsonNode java =
@@ -114,12 +116,22 @@ final class LauncherSettingsStore {
                 AppearanceFreeSettings previous =
                         mapper.treeToValue(tree, AppearanceFreeSettings.class);
                 settings = new Settings(SCHEMA, previous.defaultJavaExecutable(),
-                        previous.defaultJavaFeature(), Appearance.DEFAULT);
+                        previous.defaultJavaFeature(), Appearance.DEFAULT, false);
             } else {
                 com.fasterxml.jackson.databind.JsonNode appearance = tree.get("appearance");
                 if (appearance == null || !appearance.isObject()
                         || !appearance.path("theme").isTextual()) {
                     throw new IOException("appearance settings have invalid types");
+                }
+                if (version.intValue() == RELEASE_CHOICE_FREE_SCHEMA) {
+                    // Schema 4 predates the Experimental opt-in; it reads as Core only.
+                    if (tree.has("showExperimental")) {
+                        throw new IOException("unsupported launcher settings schema");
+                    }
+                    ((com.fasterxml.jackson.databind.node.ObjectNode) tree)
+                            .put("schemaVersion", SCHEMA).put("showExperimental", false);
+                } else if (!tree.path("showExperimental").isBoolean()) {
+                    throw new IOException("release settings have invalid types");
                 }
                 settings = mapper.treeToValue(tree, Settings.class);
             }
@@ -140,13 +152,18 @@ final class LauncherSettingsStore {
             throw new IOException("default Java executable must be canonical");
         }
         return update(settings -> new Settings(SCHEMA, canonical.toString(), feature,
-                settings.appearance()));
+                settings.appearance(), settings.showExperimental()));
     }
 
     Settings writeAppearance(LauncherAppearance appearance) throws IOException {
         Appearance stored = Appearance.of(appearance);
         return update(settings -> new Settings(SCHEMA, settings.defaultJavaExecutable(),
-                settings.defaultJavaFeature(), stored));
+                settings.defaultJavaFeature(), stored, settings.showExperimental()));
+    }
+
+    Settings writeShowExperimental(boolean showExperimental) throws IOException {
+        return update(settings -> new Settings(SCHEMA, settings.defaultJavaExecutable(),
+                settings.defaultJavaFeature(), settings.appearance(), showExperimental));
     }
 
     private Settings update(UnaryOperator<Settings> change) throws IOException {
@@ -264,9 +281,12 @@ final class LauncherSettingsStore {
         }
     }
 
+    /** {@code showExperimental} only widens what is offered; installed channels never change. */
     record Settings(int schemaVersion, String defaultJavaExecutable,
-                    Integer defaultJavaFeature, Appearance appearance) {
-        static final Settings DEFAULT = new Settings(SCHEMA, null, null, Appearance.DEFAULT);
+                    Integer defaultJavaFeature, Appearance appearance,
+                    boolean showExperimental) {
+        static final Settings DEFAULT =
+                new Settings(SCHEMA, null, null, Appearance.DEFAULT, false);
     }
 
     /**

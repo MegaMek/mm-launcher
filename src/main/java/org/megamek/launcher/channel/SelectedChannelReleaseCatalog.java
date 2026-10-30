@@ -43,7 +43,8 @@ import java.util.Objects;
 
 /**
  * Builds a bounded page of product releases authorized by complete records of the selected
- * channel. Reused product tags appear once, backed by their newest referencing record.
+ * channel, newest four-part version first. Each record names one suite release, so every entry
+ * is a distinct tag.
  */
 public final class SelectedChannelReleaseCatalog {
     public static final int MAX_PAGE = 1000;

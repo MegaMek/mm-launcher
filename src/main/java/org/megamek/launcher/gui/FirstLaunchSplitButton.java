@@ -77,9 +77,9 @@ final class FirstLaunchSplitButton extends JPanel {
     static final String PRIMARY_NAME = "downloadAndInstallButton";
     static final String OPTIONS_NAME = "downloadOptionsButton";
     static final String PRIMARY_LABEL = "Install latest";
-    static final String PRIMARY_SUBJECT = "MekHQ Milestone";
+    static final String PRIMARY_SUBJECT = "MekHQ Core";
     static final String PRIMARY_ACCESSIBLE_NAME =
-            VersionDisplay.installLatest("MekHQ", "Milestone", null);
+            VersionDisplay.installLatest("MekHQ", "Core", null);
     /** The first-run launch command's minimum width; the design tokens have no width for it. */
     private static final int MINIMUM_WIDTH = 248;
     private static final String OPEN_POPUP_ACTION = "openFirstLaunchDownloadOptions";
@@ -92,6 +92,8 @@ final class FirstLaunchSplitButton extends JPanel {
     private final Map<QuickInstallOption.Key, JMenuItem> optionItems = new LinkedHashMap<>();
     private final JMenuItem retryItem;
     private final Runnable unavailableRetryAction;
+    private final boolean showExperimental;
+    private final int choiceCount;
     private Set<QuickInstallOption.Key> availableOptions = Set.of();
     private OptionState optionState = OptionState.LOADING;
     private boolean disposed;
@@ -99,7 +101,16 @@ final class FirstLaunchSplitButton extends JPanel {
     FirstLaunchSplitButton(GuiScale scale, Runnable primaryAction,
                            Consumer<QuickInstallOption.Key> optionAction,
                            Runnable unavailableRetryAction) {
+        this(scale, primaryAction, optionAction, unavailableRetryAction, false);
+    }
+
+    /** Experimental choices appear in the menu only when the player has opted in to see them. */
+    FirstLaunchSplitButton(GuiScale scale, Runnable primaryAction,
+                           Consumer<QuickInstallOption.Key> optionAction,
+                           Runnable unavailableRetryAction, boolean showExperimental) {
         this.scale = scale;
+        this.showExperimental = showExperimental;
+        this.choiceCount = QuickInstallSnapshot.keys(showExperimental).size();
         this.unavailableRetryAction = java.util.Objects.requireNonNull(
                 unavailableRetryAction, "unavailableRetryAction");
         setName("firstLaunchSplitButton");
@@ -108,14 +119,14 @@ final class FirstLaunchSplitButton extends JPanel {
         setAlignmentX(Component.LEFT_ALIGNMENT);
         getAccessibleContext().setAccessibleName("Install latest official applications");
         getAccessibleContext().setAccessibleDescription(
-                "Install the latest MekHQ Milestone, or open the adjacent eight-choice menu.");
+                "Install the latest MekHQ Core, or open the adjacent menu of other choices.");
 
         primaryButton = new SegmentButton(PRIMARY_LABEL, PRIMARY_NAME, false);
         primaryButton.setMnemonic(KeyEvent.VK_D);
         ButtonDetail.setDetail(primaryButton, PRIMARY_SUBJECT);
         primaryButton.getAccessibleContext().setAccessibleName(PRIMARY_ACCESSIBLE_NAME);
         primaryButton.getAccessibleContext().setAccessibleDescription(
-                "Review and install the latest official Milestone MekHQ bundle containing "
+                "Review and install the latest official Core MekHQ bundle containing "
                         + "MegaMek, MekHQ, and MegaMekLab.");
         primaryButton.addActionListener(event -> {
             if (!disposed) primaryAction.run();
@@ -124,21 +135,18 @@ final class FirstLaunchSplitButton extends JPanel {
         optionsButton = new SegmentButton("", OPTIONS_NAME, true);
         optionsButton.setIcon(new DownArrowIcon(scale));
         optionsButton.setHorizontalAlignment(SwingConstants.CENTER);
-        optionsButton.setToolTipText(
-                "Choose another official application and Milestone, Development, or Weekly channel.");
-        optionsButton.getAccessibleContext().setAccessibleName(
-                "Choose another application and channel");
+        optionsButton.setToolTipText(optionsTooltip());
+        optionsButton.getAccessibleContext().setAccessibleName(optionsAccessibleName());
         optionsButton.getAccessibleContext().setAccessibleDescription(
-                "Open the eight-choice quick-install menu. Opening it performs no network request.");
+                "Open the quick-install menu. Opening it performs no network request.");
         optionsButton.addActionListener(event -> openPopup());
 
         popupMenu = new JPopupMenu();
         popupMenu.setName("downloadOptionsPopup");
         popupMenu.getAccessibleContext().setAccessibleName("Latest application choices");
         popupMenu.getAccessibleContext().setAccessibleDescription(
-                "Eight official Milestone, Development, or Weekly choices. "
-                        + "Opening this menu performs no network request.");
-        for (QuickInstallOption.Key key : QuickInstallSnapshot.MENU_KEYS) {
+                menuChoices() + ". Opening this menu performs no network request.");
+        for (QuickInstallOption.Key key : QuickInstallSnapshot.menuKeys(showExperimental)) {
             JMenuItem item = menuItem(menuLabel(key, "Loading…"), menuItemName(key),
                     menuLabel(key) + " version metadata is loading.");
             item.setEnabled(false);
@@ -147,11 +155,11 @@ final class FirstLaunchSplitButton extends JPanel {
             popupMenu.add(item);
         }
         retryItem = menuItem("Retry version check", "retryQuickInstallMetadataMenuItem",
-                "Retry loading the nine official current install choices.");
+                "Retry loading the official current install choices.");
         retryItem.addActionListener(event -> {
             closePopup();
             if (!disposed && isEnabled() && (optionState == OptionState.FAILED
-                    || availableOptions.size() < QuickInstallSnapshot.ALL_KEYS.size())) {
+                    || availableOptions.size() < choiceCount)) {
                 unavailableRetryAction.run();
             }
         });
@@ -210,13 +218,17 @@ final class FirstLaunchSplitButton extends JPanel {
 
     void setOptions(QuickInstallSnapshot snapshot) {
         if (disposed) return;
+        if (snapshot.experimentalShown() != showExperimental) {
+            throw new IllegalArgumentException("quick-install snapshot does not match the "
+                    + "Experimental releases setting");
+        }
         QuickInstallOption primary = snapshot.option(QuickInstallSnapshot.DEFAULT_KEY);
         setPrimaryValue(primary.available() ? primary.version() : "Unavailable");
         optionState = OptionState.READY;
         popupMenu.remove(retryItem);
         primaryButton.getAccessibleContext().setAccessibleDescription(
                 primary.available()
-                        ? "Review and install this captured official Milestone MekHQ bundle containing "
+                        ? "Review and install this captured official Core MekHQ bundle containing "
                         + "MegaMek, MekHQ, and MegaMekLab."
                         : primary.unavailableReason());
         primaryButton.setToolTipText(primary.available() ? null : primary.unavailableReason());
@@ -236,9 +248,9 @@ final class FirstLaunchSplitButton extends JPanel {
                     label + ". " + (option.available() ? "Review this exact normal-install choice."
                             : option.unavailableReason()));
         }
-        if (availableOptions.size() < QuickInstallSnapshot.ALL_KEYS.size()) popupMenu.add(retryItem);
+        if (availableOptions.size() < choiceCount) popupMenu.add(retryItem);
         popupMenu.getAccessibleContext().setAccessibleDescription(
-                "Eight official choices with versions or explicit unavailable reasons. "
+                menuChoices() + " with versions or explicit unavailable reasons. "
                         + "Opening this menu performs no network request.");
         applyEnabledState();
         popupMenu.revalidate();
@@ -271,7 +283,7 @@ final class FirstLaunchSplitButton extends JPanel {
             item.setEnabled(false);
         }
         popupMenu.getAccessibleContext().setAccessibleDescription(
-                "Eight official choices are loading. Opening this menu performs no "
+                menuChoices() + " are loading. Opening this menu performs no "
                         + "network request.");
         applyEnabledState();
         popupMenu.revalidate();
@@ -302,7 +314,7 @@ final class FirstLaunchSplitButton extends JPanel {
             item.setEnabled(false);
         }
         popupMenu.getAccessibleContext().setAccessibleDescription(
-                "Eight official choices are unavailable. Retry version check is the only "
+                menuChoices() + " are unavailable. Retry version check is the only "
                         + "available menu command.");
         if (retryItem.getParent() != popupMenu) popupMenu.add(retryItem);
         retryItem.setToolTipText(explanation);
@@ -354,12 +366,10 @@ final class FirstLaunchSplitButton extends JPanel {
     }
 
     private void setNormalOptionsDescription() {
-        optionsButton.getAccessibleContext().setAccessibleName(
-                "Choose another application and channel");
-        optionsButton.setToolTipText(
-                "Choose another official application and Milestone, Development, or Weekly channel.");
+        optionsButton.getAccessibleContext().setAccessibleName(optionsAccessibleName());
+        optionsButton.setToolTipText(optionsTooltip());
         optionsButton.getAccessibleContext().setAccessibleDescription(
-                "Open the eight-choice quick-install menu. Opening it performs no "
+                "Open the quick-install menu. Opening it performs no "
                         + "network request while metadata is loading or available.");
     }
 
@@ -407,7 +417,7 @@ final class FirstLaunchSplitButton extends JPanel {
         optionItems.forEach((key, item) ->
                 item.setEnabled(ready && availableOptions.contains(key)));
         if (retryItem != null) retryItem.setEnabled(retry
-                || ready && availableOptions.size() < QuickInstallSnapshot.ALL_KEYS.size());
+                || ready && availableOptions.size() < choiceCount);
         if (!ready && !retry && popupMenu != null) closePopup();
     }
 
@@ -415,6 +425,23 @@ final class FirstLaunchSplitButton extends JPanel {
         LOADING,
         READY,
         FAILED
+    }
+
+    private String optionsTooltip() {
+        return showExperimental
+                ? "Choose another official application, on Core (for playing) or Experimental "
+                        + "(help us test, may break things)."
+                : "Choose another official Core application.";
+    }
+
+    private String optionsAccessibleName() {
+        return showExperimental ? "Choose another application and channel"
+                : "Choose another application";
+    }
+
+    private String menuChoices() {
+        return showExperimental ? "Official Core and Experimental choices"
+                : "Official Core choices";
     }
 
     private static String menuLabel(QuickInstallOption.Key key) {

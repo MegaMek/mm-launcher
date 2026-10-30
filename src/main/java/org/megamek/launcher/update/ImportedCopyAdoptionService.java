@@ -984,7 +984,7 @@ public final class ImportedCopyAdoptionService {
 
     private static void requireChannel(FollowChannel channel) throws IOException {
         if (channel == null) {
-            throw new IOException("adoption channel must be Milestone, Development, or Weekly");
+            throw new IOException("adoption channel must be Core or Experimental");
         }
     }
 

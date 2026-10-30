@@ -48,14 +48,20 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-/** The schema-1 complete suite record; product versions are independent of the suite version. */
-public record SuiteReleaseRecord(String version, FollowChannel membership, String tag,
+/**
+ * The schema-2 complete suite record. Every product is rebuilt for every suite, so each product
+ * carries the suite's four-part version and tag; the record's channel is authoritative.
+ */
+public record SuiteReleaseRecord(String version, FollowChannel channel, String tag,
                                  String minimumLauncherVersion,
                                  Map<OfficialRepository, Product> products, String dataCommit) {
+    public static final int SCHEMA = 2;
     public static final int MAX_BYTES = 1024 * 1024;
     private static final Pattern VERSION = Pattern.compile(
             "(?:0|[1-9][0-9]*)\\.(?:[0-9]{2}|[1-9][0-9]{2,})\\."
-                    + "(?:[0-9]{2}|[1-9][0-9]{2,})(?:\\.[1-9][0-9]*)?");
+                    + "(?:[0-9]{2}|[1-9][0-9]{2,})\\.[1-9][0-9]*");
+    private static final Pattern RETIRED_VERSION = Pattern.compile(
+            "(?:0|[1-9][0-9]*)\\.(?:[0-9]{2}|[1-9][0-9]{2,})\\.(?:[0-9]{2}|[1-9][0-9]{2,})");
     private static final Pattern LAUNCHER_VERSION = Pattern.compile(
             "(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)");
     private static final JsonMapper JSON = JsonMapper.builder(JsonFactory.builder()
@@ -78,24 +84,30 @@ public record SuiteReleaseRecord(String version, FollowChannel membership, Strin
         } catch (com.fasterxml.jackson.core.JsonProcessingException error) {
             throw new IOException("malformed suite record: " + error.getOriginalMessage(), error);
         }
-        fields(root, "record", Set.of("schemaVersion", "version", "membership", "tag",
-                "products", "mmData"), Set.of("minimumLauncherVersion"));
+        if (root == null || !root.isObject()) throw new IOException("record must be an object");
         JsonNode schema = root.get("schemaVersion");
-        if (!schema.isIntegralNumber() || !schema.canConvertToInt() || schema.intValue() != 1) {
+        if (schema != null && schema.isIntegralNumber() && schema.canConvertToInt()
+                && schema.intValue() >= 1 && schema.intValue() < SCHEMA) {
+            throw new RetiredSchemaException();
+        }
+        if (schema == null || !schema.isIntegralNumber() || !schema.canConvertToInt()
+                || schema.intValue() != SCHEMA) {
             throw new IOException("unsupported suite record schemaVersion");
         }
+        fields(root, "record", Set.of("schemaVersion", "version", "channel", "tag",
+                "products", "mmData"), Set.of("minimumLauncherVersion"));
         String version = canonicalVersion(text(root, "version"), "version");
         String tag = text(root, "tag");
         if (!tag.equals("v" + version)) throw new IOException("suite record tag mismatch");
-        final FollowChannel membership;
+        final FollowChannel channel;
         try {
-            String value = text(root, "membership");
-            membership = FollowChannel.parse(value);
-            if (!membership.cliName().equals(value)) {
-                throw new IOException("suite membership must be lowercase");
+            String value = text(root, "channel");
+            channel = FollowChannel.parse(value);
+            if (!channel.cliName().equals(value)) {
+                throw new IOException("suite channel must be lowercase");
             }
         } catch (IllegalArgumentException error) {
-            throw new IOException("unknown suite membership", error);
+            throw new IOException("unknown suite channel", error);
         }
         String minimum = root.has("minimumLauncherVersion")
                 ? text(root, "minimumLauncherVersion") : null;
@@ -116,9 +128,8 @@ public record SuiteReleaseRecord(String version, FollowChannel membership, Strin
             String commit = hex(node, "commit", 40);
             String productVersion = canonicalVersion(text(node, "version"), name + ".version");
             String productTag = text(node, "tag");
-            if (!productTag.equals("v" + productVersion)
-                    || compareVersions(productVersion, version) > 0) {
-                throw new IOException(name + " version/tag mismatch");
+            if (!productVersion.equals(version) || !productTag.equals(tag)) {
+                throw new IOException(name + " version and tag must equal the suite's");
             }
             long releaseId = positive(node, "releaseId");
             JsonNode asset = node.get("asset");
@@ -131,23 +142,29 @@ public record SuiteReleaseRecord(String version, FollowChannel membership, Strin
                     positive(asset, "assetId"), filename, hex(asset, "sha256", 64),
                     positive(asset, "size")));
         }
-        if (compareVersions(products.get(OfficialRepository.MEGAMEK).version(),
-                products.get(OfficialRepository.LAB).version()) > 0
-                || compareVersions(products.get(OfficialRepository.LAB).version(),
-                products.get(OfficialRepository.MEKHQ).version()) > 0) {
-            throw new IOException("bundled product version predates its dependency");
-        }
         JsonNode data = root.get("mmData");
         fields(data, "mmData", Set.of("repository", "commit"), Set.of());
         if (!text(data, "repository").equals("https://github.com/MegaMek/mm-data")) {
             throw new IOException("mmData repository mismatch");
         }
-        return new SuiteReleaseRecord(version, membership, tag, minimum, products,
+        return new SuiteReleaseRecord(version, channel, tag, minimum, products,
                 hex(data, "commit", 40));
     }
 
     static String canonicalVersion(String value, String field) throws IOException {
         if (!VERSION.matcher(value).matches()) throw new IOException("invalid canonical " + field);
+        return requireIntComponents(value, field);
+    }
+
+    /** Record asset names may still carry retired three-part versions; their content is skipped. */
+    static String assetVersion(String value, String field) throws IOException {
+        if (!VERSION.matcher(value).matches() && !RETIRED_VERSION.matcher(value).matches()) {
+            throw new IOException("invalid canonical " + field);
+        }
+        return requireIntComponents(value, field);
+    }
+
+    private static String requireIntComponents(String value, String field) throws IOException {
         for (String component : value.split("\\.")) {
             try {
                 Integer.parseInt(component);
@@ -158,7 +175,7 @@ public record SuiteReleaseRecord(String version, FollowChannel membership, Strin
         return value;
     }
 
-    /** Orders three-part versions and four-part Weekly versions; a missing revision is 0. */
+    /** Orders dotted numeric versions component by component; a missing component is 0. */
     public static int compareVersions(String first, String second) {
         String[] left = first.split("\\.");
         String[] right = second.split("\\.");
@@ -224,5 +241,15 @@ public record SuiteReleaseRecord(String version, FollowChannel membership, Strin
 
     public record Product(String commit, String version, String tag, long releaseId,
                           long assetId, String name, String sha256, long size) {
+    }
+
+    /**
+     * A record from the retired Milestone/Development/Weekly scheme. Catalogs skip it instead of
+     * failing, because those releases stay published but are never offered or followed.
+     */
+    public static final class RetiredSchemaException extends IOException {
+        RetiredSchemaException() {
+            super("retired suite record schema");
+        }
     }
 }

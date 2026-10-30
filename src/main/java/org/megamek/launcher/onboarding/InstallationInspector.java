@@ -227,7 +227,7 @@ public final class InstallationInspector {
                 String revision = base.getProperty("revision");
                 if (revision != null && !revision.isBlank()) {
                     String trimmed = revision.trim();
-                    // MegaMek's numeric revision is the fourth version component (e.g. Weekly 0.51.00.2).
+                    // MegaMek's numeric revision is the fourth version component (e.g. 0.51.02.7).
                     if (trimmed.matches("[0-9]{1,18}")) {
                         long number = Long.parseLong(trimmed);
                         if (number > 0) result += "." + number;
