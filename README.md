@@ -621,9 +621,10 @@ copy's boolean using the exact displayed record/preference binding.
 Use **Install another version** to create a separate root on another channel. Existing valid
 channel sidecars are read without migration writes; missing, corrupt, stale, or unavailable
 channel state remains launch-only and cannot be assigned through channel settings. Copies that
-followed the retired Milestone, Development, or Weekly channels show **Retired channel; launch
-only**: they still launch, but get no update checks, and there is no migration. Install a new
-Core or Experimental copy to get updates. Imported
+followed the retired Milestone, Development, or Weekly channels are marked **Retired release
+channel · Launch only** and say **Still launches, but its release channel no longer exists. Install a new copy to get
+updates.** They get no update checks, no repair or
+update actions, and no migration. Imported
 folders receive no channel sidecar or ownership receipt unless the separate exact-ancestor
 adoption succeeds. A check reads canonical channel and exact release metadata
 only; it downloads no package and changes no installed files. If an update is recommended,

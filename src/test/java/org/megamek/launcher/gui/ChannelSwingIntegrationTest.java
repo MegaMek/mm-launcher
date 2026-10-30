@@ -327,6 +327,42 @@ class ChannelSwingIntegrationTest {
     }
 
     @Test
+    void retiredChannelCopyStaysLaunchOnlyWithoutRepairOrUpdateActions() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing channel integration requires a display");
+        FakeServices services = new FakeServices(temp.resolve("retired.json"));
+        services.preference = new ChannelPreferenceStore.ReadResult(
+                ChannelPreferenceStore.Status.RETIRED, null, "retired channel");
+        LauncherFrame frame = SwingTestSupport.createWindow(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
+            SwingUtilities.invokeAndWait(installations::doClick);
+            JLabel provenance = waitFor(() -> (JLabel) findNamed(frame,
+                    "installationProvenance-" + services.record.id()));
+            assertEquals("Retired release channel · Launch only", onEdt(provenance::getText));
+            JLabel status = waitFor(() -> (JLabel) findNamed(frame,
+                    "installationStatus-" + services.record.id()));
+            assertEquals(LauncherFrame.RETIRED_CHANNEL_STATUS, onEdt(status::getText));
+            assertEquals("Still launches, but its release channel no longer exists. "
+                    + "Install a new copy to get updates.", LauncherFrame.RETIRED_CHANNEL_STATUS);
+            assertNull(onEdt(() -> find(frame, "checkUpdatesButton")));
+            assertNull(onEdt(() -> find(frame, "applyUpdateButton")));
+            assertNull(onEdt(() -> find(frame, "recoverUpdateButton")));
+            assertNull(onEdt(() -> findNamed(frame,
+                    "checkOnOpenCheckbox-" + services.record.id())));
+            assertNull(onEdt(() -> find(frame,
+                    "enableManagedUpdatesButton-" + services.record.id())));
+            assertNotNull(onEdt(() -> find(frame,
+                    "installationMenuButton-" + services.record.id())));
+            assertEquals(0, services.checks.get(), "a retired copy is never checked");
+        } finally {
+            services.release.countDown();
+            SwingUtilities.invokeAndWait(frame::dispose);
+        }
+    }
+
+    @Test
     void failedAutomaticCheckShowsCouldNotCheckAndExplicitRetry() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing channel integration requires a display");

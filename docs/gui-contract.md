@@ -211,8 +211,10 @@ A followed channel with no published suite record instead says
 installation card (or a combined message for multiple unpublished channels). This remains
 retryable and never counts as an update or an up-to-date result; request/validation failures
 still say **Could not check**. A copy that followed a retired Milestone, Development, or Weekly
-channel (a schema-1 channel sidecar) is never checked or migrated; its card says
-**Retired channel; launch only** without a retry.
+channel (a schema-1 channel sidecar) is never checked or migrated. Its card is marked
+**Retired release channel · Launch only** and says **Still launches, but its release channel no longer exists. Install a new copy to get
+updates.** It offers no check, update,
+repair, or uninstall action, and is never shown as managed setup needing repair.
 
 Download bars paint percentage only, with localized human-readable byte detail below. Extraction
 is indeterminate with processed-file detail and no bar string.
@@ -589,7 +591,9 @@ plain copy identifies the version's current canonical channel and confirms that 
 and its only actions are a direct styled **Try Core** / **Try Experimental** retry and
 **Close**. Retry uses the same record, suggestion, and dialog generation with the canonical
 channel. It neither exposes logs/technical details nor mislabels a file-comparison failure as a
-channel mismatch.
+channel mismatch. When the canonical channel is Experimental and **Show Experimental releases**
+is off, there is no retry: the copy tells the player to turn the option on in Settings first,
+**Close** is the only action, and adoption never prepares a channel that is not offered.
 Both the channel-mismatch and ineligible result dialogs are fixed-size (not resizable),
 retain their centered dark styling, default action and Escape-to-close behavior, and
 offer no technical-details action. A disposed progress surface must not be updated again

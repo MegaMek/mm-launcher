@@ -29,8 +29,8 @@ interrupted, stale, missing, and unavailable state is never reset, inferred, or 
 
 There is no compatibility with earlier launchers. A schema-1 sidecar from the retired Milestone,
 Development, or Weekly channels is read as **Retired**: the copy stays launch-only, its sidecar is
-never rewritten or migrated, and a check reports `RETIRED_CHANNEL` (**Retired channel; launch
-only**) without a network request or retry. To get updates, install a new Core or Experimental
+never rewritten or migrated, and a check reports `RETIRED_CHANNEL` (the card says **Still launches, but its release channel no longer exists. Install a new copy to get
+updates.**) without a network request or retry. To get updates, install a new Core or Experimental
 copy.
 
 The only mutable field is `checkOnOpen`. Its separate setter requires the exact previously read

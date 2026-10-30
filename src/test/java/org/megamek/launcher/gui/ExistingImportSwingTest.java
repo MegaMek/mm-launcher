@@ -758,6 +758,80 @@ class ExistingImportSwingTest {
     }
 
     @Test
+    void hiddenExperimentalMismatchPointsToSettingsInsteadOfOfferingRetry() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        AdoptionFixture fixture = adoptableMegaMekSuite("hidden-experimental-mismatch");
+        Path registry = temp.resolve("hidden-experimental-mismatch-registry.json");
+        AtomicInteger requests = new AtomicInteger();
+        AtomicInteger packageRequests = new AtomicInteger();
+        ReleaseTransport transport = channelMismatchAdoptionTransport(
+                fixture.archive(), requests, packageRequests, "0.49.00.1", "0.50.07.1");
+        LauncherServices services = new LauncherServices(
+                registry, new RegistryStore(), new InstallationInspector(), transport,
+                new JavaRuntime(new RecordingRunner()),
+                new ApplicationLauncher(new RecordingRunner())) {
+            @Override boolean showExperimental() {
+                return false;
+            }
+        };
+        var record = services.register("Imported", fixture.root());
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            onEdt(() -> {
+                frame.showWindow();
+                return null;
+            });
+            JButton manage = waitFor(() -> findButton(frame, "manageInstallationsButton"));
+            onEdt(() -> {
+                manage.doClick();
+                return null;
+            });
+            JButton enable = waitFor(() -> findButton(frame,
+                    "enableManagedUpdatesButton-" + record.id()));
+            onEdt(() -> {
+                enable.doClick();
+                return null;
+            });
+            JDialog start = waitFor(() -> findDialog(frame, "adoptionCandidateDialog"));
+            onEdt(() -> {
+                JComboBox<?> channel = (JComboBox<?>) find(start, "adoptionChannelCombo");
+                assertEquals(1, channel.getItemCount());
+                assertEquals(FollowChannel.CORE, channel.getSelectedItem());
+                ((JButton) find(start, "continueAdoptionButton")).doClick();
+                return null;
+            });
+
+            JDialog mismatch = waitFor(() -> findDialog(frame, "adoptionResultDialog"));
+            JLabel heading = (JLabel) find(mismatch, "adoptionResultHeading");
+            JLabel message = (JLabel) find(mismatch, "adoptionResultMessage");
+            assertEquals("Use Experimental for this installation", heading.getText());
+            assertTrue(message.getText().contains(
+                    "Version 0.50.07.1 is currently an Experimental release, not a Core release."));
+            assertTrue(message.getText().contains("No files were changed."));
+            assertTrue(message.getText().contains(
+                    "first turn on Show Experimental releases in Settings"));
+            assertNull(find(mismatch, "retrySuggestedAdoptionButton"));
+            assertEquals(0, countButtonText(mismatch, "Try Experimental"));
+            JButton close = (JButton) find(mismatch, "closeAdoptionResultButton");
+            assertEquals(close, mismatch.getRootPane().getDefaultButton());
+            assertEquals(0, packageRequests.get(),
+                    "channel mismatch must be decided before package transfer");
+            onEdt(() -> {
+                close.doClick();
+                return null;
+            });
+            waitFor(() -> mismatch.isDisplayable() ? null : mismatch);
+            assertEquals(0, packageRequests.get());
+            assertTrue(services.channelPreference(record).status()
+                    != ChannelPreferenceStore.Status.CONFIGURED,
+                    "a hidden channel must not be adopted");
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
     void automaticMatchFailureIsSimpleDeduplicatedAndOnlyThenOffersChooser()
             throws Exception {
             Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
@@ -986,6 +1060,13 @@ class ExistingImportSwingTest {
     private static ReleaseTransport channelMismatchAdoptionTransport(
             byte[] archive, AtomicInteger requests, AtomicInteger packageRequests)
             throws Exception {
+        return channelMismatchAdoptionTransport(
+                archive, requests, packageRequests, "0.50.07.1", "0.51.0");
+    }
+
+    private static ReleaseTransport channelMismatchAdoptionTransport(
+            byte[] archive, AtomicInteger requests, AtomicInteger packageRequests,
+            String core, String experimental) throws Exception {
         String digest = HexFormat.of().formatHex(
                 MessageDigest.getInstance("SHA-256").digest(archive));
         String metadata = """
@@ -999,13 +1080,13 @@ class ExistingImportSwingTest {
                 """.formatted(archive.length, digest);
         Deque<java.util.function.Supplier<ReleaseTransport.Response>> responses =
                 new ArrayDeque<>(List.of(
-                        () -> org.megamek.launcher.channel.SuiteTestData.channels("0.50.07.1", "0.51.0"),
-                        () -> org.megamek.launcher.channel.SuiteTestData.channels("0.50.07.1", "0.51.0"),
+                        () -> org.megamek.launcher.channel.SuiteTestData.channels(core, experimental),
+                        () -> org.megamek.launcher.channel.SuiteTestData.channels(core, experimental),
                         response("[" + metadata + "]"),
                         response(metadata),
                         response(metadata),
                         binaryResponse(archive),
-                        () -> org.megamek.launcher.channel.SuiteTestData.channels("0.50.07.1", "0.51.0"),
+                        () -> org.megamek.launcher.channel.SuiteTestData.channels(core, experimental),
                         response(metadata)));
         var metadataRouter = new org.megamek.launcher.channel.SuiteTestData.MetadataRouter();
         return (uri, accept) -> {

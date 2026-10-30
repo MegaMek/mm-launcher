@@ -135,9 +135,10 @@ public final class LauncherFrame extends JFrame {
             DateTimeFormatter.ofPattern("MMM d, uuuu", Locale.ENGLISH);
     static final String DISCORD_INVITE_URL = "https://discord.gg/megamek";
     static final String PLAY_ONLINE_URL = "https://megamek.games/";
+    static final String RETIRED_CHANNEL_STATUS = "Still launches, but its release channel no "
+            + "longer exists. Install a new copy to get updates.";
     private final LauncherServices services;
     private final Object appearanceSaveLock = new Object();
-    private final Object releaseSettingSaveLock = new Object();
     private final LauncherNewsFeed newsFeed;
     private final ExistingImportPrompts existingImportPrompts;
     private final NormalInstallLocationPrompts normalInstallLocationPrompts;
@@ -155,6 +156,7 @@ public final class LauncherFrame extends JFrame {
             FirstLaunchMetadataState.NOT_STARTED;
     private QuickInstallSnapshot firstLaunchSnapshot;
     private boolean showExperimental;
+    private final LatestSettingSave<Boolean> showExperimentalSave;
     private String firstLaunchMetadataFailure;
     private long firstLaunchMetadataAttempt;
     private SwingWorker<Map<String, InstallationCheck>, Void> automaticChecksWorker;
@@ -224,6 +226,7 @@ public final class LauncherFrame extends JFrame {
         super(titleFor(LauncherFrame.class.getPackage().getImplementationVersion()));
         this.services = services;
         this.showExperimental = services.showExperimental();
+        this.showExperimentalSave = new LatestSettingSave<>(services::saveShowExperimental);
         this.newsFeed = newsFeed;
         this.existingImportPrompts = existingImportPrompts;
         this.normalInstallLocationPrompts = normalInstallLocationPrompts;
@@ -1102,7 +1105,7 @@ public final class LauncherFrame extends JFrame {
             case UPDATE_AVAILABLE -> "Update available";
             case INSTALLED_AHEAD -> "Installed ahead";
             case UNCONFIGURED -> "Channel not configured";
-            case RETIRED_CHANNEL -> "Retired channel; launch only";
+            case RETIRED_CHANNEL -> RETIRED_CHANNEL_STATUS;
             case CHANNEL_NOT_PUBLISHED -> unpublishedChannelMessage(result.preference().channel());
             case UNAVAILABLE, NON_COMPARABLE -> "Could not check";
         };
@@ -1402,6 +1405,8 @@ public final class LauncherFrame extends JFrame {
                 .collect(java.util.stream.Collectors.joining(", "));
         String provenance = missing
                 ? products
+                : retiredChannel(local)
+                ? "Retired release channel · Launch only"
                 : trueImported
                 ? "Imported copy · Launch only · Updates unavailable"
                 : fixedChannel
@@ -1805,6 +1810,12 @@ public final class LauncherFrame extends JFrame {
                 && local.channelPreference().preference() != null;
     }
 
+    /** A copy whose channel sidecar predates Core/Experimental; it is launch-only by design. */
+    private static boolean retiredChannel(LauncherServices.InstallationStatus local) {
+        return local != null && !local.missing() && local.channelPreference() != null
+                && local.channelPreference().status() == ChannelPreferenceStore.Status.RETIRED;
+    }
+
     private static boolean trueImported(LauncherServices.InstallationStatus local) {
         return local != null
                 && local.adoption() == ImportedCopyAdoptionService.Availability.TRUE_IMPORTED
@@ -1823,6 +1834,7 @@ public final class LauncherFrame extends JFrame {
         if (local != null && local.error() != null) {
             return "Installation needs attention";
         }
+        if (retiredChannel(local)) return RETIRED_CHANNEL_STATUS;
         if (!hasOwnershipProvenance(local)) return "Launch only · updates unavailable";
         if (!managedUpdatesAvailable(local)) {
             return "Fixed channel provenance needs repair";
@@ -2105,6 +2117,11 @@ public final class LauncherFrame extends JFrame {
             ImportedCopyAdoptionService.Suggestion suggestion,
             String exactTag, FollowChannel fixedChannel, long generation) {
         if (!isCurrentAdoption(generation, record)) return;
+        if (!FollowChannel.offered(showExperimental).contains(fixedChannel)) {
+            showError("Channel not available", new IOException("Turn on Show "
+                    + fixedChannel + " releases in Settings first."));
+            return;
+        }
         OperationProgressDialog progress = new OperationProgressDialog(this,
                 "Verifying imported copy", "adoptionProgressLog", this::showOperationLogs);
         JButton browse = button("Choose a different version…",
@@ -2227,17 +2244,33 @@ public final class LauncherFrame extends JFrame {
             long generation) {
         String headingText = "Use " + mismatch.requiredChannel()
                 + " for this installation";
+        boolean retryOffered = FollowChannel.offered(showExperimental)
+                .contains(mismatch.requiredChannel());
+        String guidance = retryOffered
+                ? "Select " + mismatch.requiredChannel()
+                        + " to verify this copy and enable managed updates."
+                : "To enable managed updates for this copy, first turn on Show "
+                        + mismatch.requiredChannel() + " releases in Settings.";
         JPanel body = adoptionResultBody(headingText,
-                "Version " + mismatch.currentVersion() + " is currently a "
-                        + mismatch.requiredChannel() + " release, not a "
-                        + mismatch.selectedChannel() + " release."
-                        + "<br><br>No files were changed. Select "
-                        + mismatch.requiredChannel()
-                        + " to verify this copy and enable managed updates.");
+                "Version " + mismatch.currentVersion() + " is currently "
+                        + withArticle(mismatch.requiredChannel()) + " release, not "
+                        + withArticle(mismatch.selectedChannel()) + " release."
+                        + "<br><br>No files were changed. " + guidance);
         JPanel actions = new JPanel(new java.awt.FlowLayout(
                 java.awt.FlowLayout.RIGHT, guiScale.space("md"), 0));
         actions.setOpaque(false);
         JButton close = homeButton("Close", "closeAdoptionResultButton");
+        if (!retryOffered) {
+            actions.add(close);
+            body.add(actions, BorderLayout.SOUTH);
+            JDialog dialog = adoptionResultDialog(headingText, body);
+            dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+            close.addActionListener(event -> dialog.dispose());
+            installEscapeAction(dialog, "closeAdoptionChannelMismatch", dialog::dispose);
+            dialog.getRootPane().setDefaultButton(close);
+            dialog.setVisible(true);
+            return;
+        }
         JButton retry = homeButton("Try " + mismatch.requiredChannel(),
                 "retrySuggestedAdoptionButton");
         retry.setFont(guiScale.font(retry.getFont(), "label"));
@@ -2255,6 +2288,9 @@ public final class LauncherFrame extends JFrame {
             retry.setEnabled(false);
             close.setEnabled(false);
             dialog.dispose();
+            if (!FollowChannel.offered(showExperimental).contains(mismatch.requiredChannel())) {
+                return;
+            }
             prepareAdoption(record, suggestion, null,
                     mismatch.requiredChannel(), generation);
         });
@@ -2267,6 +2303,10 @@ public final class LauncherFrame extends JFrame {
             }
         });
         dialog.setVisible(true);
+    }
+
+    private static String withArticle(FollowChannel channel) {
+        return (channel == FollowChannel.EXPERIMENTAL ? "an " : "a ") + channel;
     }
 
     private JPanel adoptionResultBody(String headingText, String result) {
@@ -2801,12 +2841,11 @@ public final class LauncherFrame extends JFrame {
         if (requested == showExperimental) return;
         showExperimental = requested;
         cancelFirstLaunchOptionsWorker();
+        long revision = showExperimentalSave.request();
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() throws Exception {
-                synchronized (releaseSettingSaveLock) {
-                    services.saveShowExperimental(requested);
-                }
+                showExperimentalSave.saveIfLatest(revision, requested);
                 return null;
             }
 
