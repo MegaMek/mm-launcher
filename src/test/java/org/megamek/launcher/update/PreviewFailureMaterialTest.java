@@ -153,7 +153,7 @@ class PreviewFailureMaterialTest {
         var result = new FreshInstaller(transportFor("v-old", baseline, sha(baseline))).install(
                 OfficialRepository.MEGAMEK, "v-old", root, registry, "Official", quiet());
         new ChannelPreferenceStore().initializeManaged(registry, result.record(),
-                result.ownershipReceipt(), FollowChannel.MILESTONE, false);
+                result.ownershipReceipt(), FollowChannel.CORE, false);
         assertFalse(result.record().updateEligible());
         return new Fixture(area, root, registry, result.record(), result.ownershipReceipt());
     }

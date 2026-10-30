@@ -35,31 +35,32 @@ package org.megamek.launcher.channel;
 
 import org.megamek.launcher.release.OfficialRepository;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-/** Immutable nine-choice catalog, with explicit availability for each product/channel pair. */
+/**
+ * Immutable quick-install catalog with explicit availability for each offered product/channel
+ * pair. Core choices are always present; Experimental choices are present only when the player
+ * has opted in to see them.
+ */
 public final class QuickInstallSnapshot {
     public static final QuickInstallOption.Key DEFAULT_KEY =
-            new QuickInstallOption.Key(OfficialRepository.MEKHQ, FollowChannel.MILESTONE);
-    public static final List<QuickInstallOption.Key> MENU_KEYS = List.of(
-            new QuickInstallOption.Key(OfficialRepository.MEGAMEK, FollowChannel.MILESTONE),
-            new QuickInstallOption.Key(OfficialRepository.LAB, FollowChannel.MILESTONE),
-            new QuickInstallOption.Key(OfficialRepository.MEKHQ, FollowChannel.DEVELOPMENT),
-            new QuickInstallOption.Key(OfficialRepository.MEGAMEK, FollowChannel.DEVELOPMENT),
-            new QuickInstallOption.Key(OfficialRepository.LAB, FollowChannel.DEVELOPMENT),
-            new QuickInstallOption.Key(OfficialRepository.MEKHQ, FollowChannel.WEEKLY),
-            new QuickInstallOption.Key(OfficialRepository.MEGAMEK, FollowChannel.WEEKLY),
-            new QuickInstallOption.Key(OfficialRepository.LAB, FollowChannel.WEEKLY));
-    public static final List<QuickInstallOption.Key> ALL_KEYS = List.of(
+            new QuickInstallOption.Key(OfficialRepository.MEKHQ, FollowChannel.CORE);
+    public static final List<QuickInstallOption.Key> CORE_KEYS = List.of(
             DEFAULT_KEY,
-            MENU_KEYS.get(0), MENU_KEYS.get(1), MENU_KEYS.get(2), MENU_KEYS.get(3),
-            MENU_KEYS.get(4), MENU_KEYS.get(5), MENU_KEYS.get(6), MENU_KEYS.get(7));
+            new QuickInstallOption.Key(OfficialRepository.MEGAMEK, FollowChannel.CORE),
+            new QuickInstallOption.Key(OfficialRepository.LAB, FollowChannel.CORE));
+    public static final List<QuickInstallOption.Key> EXPERIMENTAL_KEYS = List.of(
+            new QuickInstallOption.Key(OfficialRepository.MEKHQ, FollowChannel.EXPERIMENTAL),
+            new QuickInstallOption.Key(OfficialRepository.MEGAMEK, FollowChannel.EXPERIMENTAL),
+            new QuickInstallOption.Key(OfficialRepository.LAB, FollowChannel.EXPERIMENTAL));
 
     private final List<QuickInstallOption> options;
     private final Map<QuickInstallOption.Key, QuickInstallOption> byKey;
+    private final boolean experimentalShown;
 
     public QuickInstallSnapshot(List<QuickInstallOption> options) {
         Objects.requireNonNull(options, "options");
@@ -72,12 +73,39 @@ public final class QuickInstallSnapshot {
                         "duplicate quick-install option: " + option.key());
             }
         }
-        if (!List.copyOf(indexed.keySet()).equals(ALL_KEYS)) {
-            throw new IllegalArgumentException(
-                    "quick-install snapshot must contain all nine choices in fixed order");
+        List<QuickInstallOption.Key> keys = List.copyOf(indexed.keySet());
+        if (keys.equals(keys(false))) {
+            experimentalShown = false;
+        } else if (keys.equals(keys(true))) {
+            experimentalShown = true;
+        } else {
+            throw new IllegalArgumentException("quick-install snapshot must contain the Core "
+                    + "choices, optionally followed by the Experimental choices, in fixed order");
         }
         this.options = List.copyOf(indexed.values());
         this.byKey = Map.copyOf(indexed);
+    }
+
+    /** Every offered choice in fixed order; the first is the primary install. */
+    public static List<QuickInstallOption.Key> keys(boolean showExperimental) {
+        if (!showExperimental) return CORE_KEYS;
+        List<QuickInstallOption.Key> keys = new ArrayList<>(CORE_KEYS);
+        keys.addAll(EXPERIMENTAL_KEYS);
+        return List.copyOf(keys);
+    }
+
+    /** The offered choices other than the primary install, in menu order. */
+    public static List<QuickInstallOption.Key> menuKeys(boolean showExperimental) {
+        List<QuickInstallOption.Key> keys = keys(showExperimental);
+        return keys.subList(1, keys.size());
+    }
+
+    public boolean experimentalShown() {
+        return experimentalShown;
+    }
+
+    public List<QuickInstallOption.Key> menuKeys() {
+        return menuKeys(experimentalShown);
     }
 
     public List<QuickInstallOption> options() {

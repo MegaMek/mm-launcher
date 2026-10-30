@@ -167,9 +167,9 @@ public class LauncherServices {
         return registry;
     }
 
-    public QuickInstallSnapshot quickInstallSnapshot()
+    public QuickInstallSnapshot quickInstallSnapshot(boolean showExperimental)
             throws IOException, InterruptedException {
-        return new OfficialSuiteChannelCatalog(transport).quickInstallSnapshot();
+        return new OfficialSuiteChannelCatalog(transport).quickInstallSnapshot(showExperimental);
     }
 
     public LoggedOperation beginOperation(OperationType type,
@@ -237,7 +237,7 @@ public class LauncherServices {
 
     public NormalInstallService.Plan prepareNormalInstall(Path destination)
             throws IOException, InterruptedException {
-        return prepareNormalInstall(FollowChannel.MILESTONE, destination);
+        return prepareNormalInstall(FollowChannel.CORE, destination);
     }
 
     public NormalInstallService.Plan prepareNormalInstall(FollowChannel channel, Path destination)
@@ -290,6 +290,19 @@ public class LauncherServices {
 
     void saveAppearance(LauncherAppearance appearance) throws IOException {
         settings.writeAppearance(appearance);
+    }
+
+    /** Whether Experimental releases are offered; unreadable settings keep them hidden. */
+    boolean showExperimental() {
+        try {
+            return settings.read().showExperimental();
+        } catch (IOException | RuntimeException error) {
+            return false;
+        }
+    }
+
+    void saveShowExperimental(boolean showExperimental) throws IOException {
+        settings.writeShowExperimental(showExperimental);
     }
 
     public SettingsView settingsView() throws IOException, InterruptedException {

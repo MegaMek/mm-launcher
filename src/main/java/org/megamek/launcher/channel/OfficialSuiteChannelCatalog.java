@@ -47,14 +47,17 @@ import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Properties;
 import java.util.regex.Pattern;
 
-/** Reads complete immutable records, never website pointers or independently selected releases. */
+/**
+ * Reads complete immutable schema-2 records, never website pointers, prerelease flags, or
+ * independently selected releases. A channel's target is its record with the greatest four-part
+ * version, so a Core install follows each new Core line automatically.
+ */
 public final class OfficialSuiteChannelCatalog implements ChannelCatalog {
     public static final URI SOURCE = URI.create("https://api.github.com/repos/MegaMek/megamek/releases");
     public static final int MAX_PAGES = 100;
@@ -88,11 +91,11 @@ public final class OfficialSuiteChannelCatalog implements ChannelCatalog {
         requireSelection(channel, repository);
         if (!isSource(source)) throw new IOException("approved complete suite record source required");
         for (Located located : records()) {
-            if (source.equals(located.source()) && located.record().membership() == channel) {
+            if (source.equals(located.source()) && located.record().channel() == channel) {
                 return resolve(located, new HashMap<>()).get(repository);
             }
         }
-        throw new IOException("captured complete suite record is unavailable or has different membership");
+        throw new IOException("captured complete suite record is unavailable or has a different channel");
     }
 
     @Override
@@ -100,8 +103,7 @@ public final class OfficialSuiteChannelCatalog implements ChannelCatalog {
             throws IOException, InterruptedException {
         requireSelection(channel, repository);
         for (Located located : records()) {
-            if (located.record().membership() == channel
-                    && located.record().products().get(repository).tag().equals(tag)) {
+            if (located.record().channel() == channel && located.record().tag().equals(tag)) {
                 return resolve(located, new HashMap<>()).get(repository);
             }
         }
@@ -121,13 +123,18 @@ public final class OfficialSuiteChannelCatalog implements ChannelCatalog {
         return new CurrentPointers(versions);
     }
 
-    public QuickInstallSnapshot quickInstallSnapshot() throws IOException, InterruptedException {
+    /**
+     * Captures the quick-install choices. Experimental targets are resolved only when the player
+     * has opted in to see them.
+     */
+    public QuickInstallSnapshot quickInstallSnapshot(boolean showExperimental)
+            throws IOException, InterruptedException {
         List<Located> records = records();
         if (records.isEmpty()) throw new IOException("No complete suite records have been published yet.");
         Map<ReleaseKey, ReleaseCatalog.Release> cache = new HashMap<>();
         Map<FollowChannel, Map<OfficialRepository, Target>> targets = new EnumMap<>(FollowChannel.class);
         Map<FollowChannel, String> failures = new EnumMap<>(FollowChannel.class);
-        for (FollowChannel channel : FollowChannel.values()) {
+        for (FollowChannel channel : FollowChannel.offered(showExperimental)) {
             Located located = newest(records, channel);
             if (located == null) {
                 failures.put(channel, "No complete " + channel + " suite record has been published.");
@@ -143,7 +150,7 @@ public final class OfficialSuiteChannelCatalog implements ChannelCatalog {
             throw new IOException("No supported complete suite is available: " + failures);
         }
         List<QuickInstallOption> options = new ArrayList<>();
-        for (QuickInstallOption.Key key : QuickInstallSnapshot.ALL_KEYS) {
+        for (QuickInstallOption.Key key : QuickInstallSnapshot.keys(showExperimental)) {
             Map<OfficialRepository, Target> channelTargets = targets.get(key.channel());
             options.add(channelTargets == null
                     ? new QuickInstallOption(key, null, failures.get(key.channel()))
@@ -155,15 +162,10 @@ public final class OfficialSuiteChannelCatalog implements ChannelCatalog {
     History history(OfficialRepository repository, FollowChannel channel, int page, int perPage)
             throws IOException, InterruptedException {
         requireSelection(channel, repository);
-        Map<String, Located> unique = new LinkedHashMap<>();
         Map<ReleaseKey, ReleaseCatalog.Release> cache = new HashMap<>();
-        for (Located located : records()) {
-            if (located.record().membership() == channel) {
-                unique.putIfAbsent(located.record().products().get(repository).tag(), located);
-            }
-        }
-        if (unique.isEmpty()) throw new UnpublishedChannelException(channel);
-        List<Located> members = List.copyOf(unique.values());
+        List<Located> members = records().stream()
+                .filter(located -> located.record().channel() == channel).toList();
+        if (members.isEmpty()) throw new UnpublishedChannelException(channel);
         Target current = resolve(members.getFirst(), cache).get(repository);
         int start = Math.min((page - 1) * perPage, members.size());
         int end = Math.min(start + perPage, members.size());
@@ -202,7 +204,7 @@ public final class OfficialSuiteChannelCatalog implements ChannelCatalog {
                     if (!asset.name().startsWith("suite-record-")) continue;
                     var name = RECORD_NAME.matcher(asset.name());
                     if (!name.matches()) throw new IOException("malformed complete suite record asset name");
-                    String version = SuiteReleaseRecord.canonicalVersion(name.group(1), "record filename");
+                    String version = SuiteReleaseRecord.assetVersion(name.group(1), "record filename");
                     if (!versions.add(version)) throw new IOException("duplicate complete suite version: " + version);
                     if (!release.tag().equals("v" + version) || release.id().isEmpty()
                             || asset.id().isEmpty() || !asset.state().orElse("").equals("uploaded")
@@ -213,8 +215,13 @@ public final class OfficialSuiteChannelCatalog implements ChannelCatalog {
                     if (totalBytes > MAX_RECORD_BYTES_TOTAL) {
                         throw new IOException("suite record inventory exceeds total metadata limit");
                     }
-                    SuiteReleaseRecord record = SuiteReleaseRecord.parse(fetcher.readMetadataAsset(
-                            OfficialRepository.MEGAMEK, release, asset, SuiteReleaseRecord.MAX_BYTES));
+                    final SuiteReleaseRecord record;
+                    try {
+                        record = SuiteReleaseRecord.parse(fetcher.readMetadataAsset(
+                                OfficialRepository.MEGAMEK, release, asset, SuiteReleaseRecord.MAX_BYTES));
+                    } catch (SuiteReleaseRecord.RetiredSchemaException retired) {
+                        continue;
+                    }
                     if (!record.version().equals(version) || !record.tag().equals(release.tag())) {
                         throw new IOException("suite record content differs from its release identity");
                     }
@@ -259,7 +266,7 @@ public final class OfficialSuiteChannelCatalog implements ChannelCatalog {
             ReleaseCatalog.Asset attested = new ReleaseCatalog.Asset(asset.name(), asset.size(),
                     PackageDigest.published("sha256:" + product.sha256()), asset.url(), asset.id(), asset.state());
             ReleaseCatalog.Release attestedRelease = ReleaseCatalog.withAsset(release, asset, attested);
-            targets.put(repository, new Target(located.record().membership(), product.version(),
+            targets.put(repository, new Target(located.record().channel(), product.version(),
                     repository, attestedRelease, attested, located.source()));
         }
         return Map.copyOf(targets);
@@ -284,7 +291,7 @@ public final class OfficialSuiteChannelCatalog implements ChannelCatalog {
     }
 
     private static Located newest(List<Located> records, FollowChannel channel) {
-        for (Located record : records) if (record.record().membership() == channel) return record;
+        for (Located record : records) if (record.record().channel() == channel) return record;
         return null;
     }
 

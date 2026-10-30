@@ -130,9 +130,9 @@ class UpdatePreviewConsentMaterialTest {
                 "sha256:" + "b".repeat(64), secondBuild);
         ChannelPreferenceStore channels = new ChannelPreferenceStore();
         channels.initializeManaged(
-                registry, first, firstReceipt, FollowChannel.MILESTONE, false);
+                registry, first, firstReceipt, FollowChannel.CORE, false);
         channels.initializeManaged(
-                registry, second, secondReceipt, FollowChannel.DEVELOPMENT, false);
+                registry, second, secondReceipt, FollowChannel.EXPERIMENTAL, false);
         FakeServices services = new FakeServices(registry, store);
         return new Fixture(services, first, second, firstReceipt);
     }

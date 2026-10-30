@@ -313,7 +313,7 @@ program-files/user-data separation, native runner coverage, and release limitati
 After onboarding, Home is application-oriented. MegaMek, MekHQ, and MegaMekLab each have an
 independent preferred installation. Every application found across the union of registered
 static package records gets an equal map-style split control whose primary label uses the shared
-**Program Channel (Version)** format, such as **Launch MekHQ Milestone (0.51.0)**. The arrow lists the other records containing that
+**Program Channel (Version)** format, such as **Launch MekHQ Core (0.51.00.1)**. The arrow lists the other records containing that
 application in deterministic registry order, under an **Other installations** header, with each
 row's name above its version and status. An alternate row launches only that exact captured
 record and never changes a preference. The list opens upward when the screen has no room below. Launch controls, and the first-launch
@@ -343,7 +343,7 @@ for update status. Its single **Installations** button gains a known count badge
 **2 updates** (announced as **Installations (2 updates)**) when checked installations have updates; unknown and launch-only
 copies never create a false count. Update, retry, recovery, channel, location, removal, and explicit
 **Use as preferred for …** actions live on map-style installation cards. A managed card shows its
-read-only **Channel: Milestone/Development/Weekly** identity and directly shows
+read-only **Channel: Core/Experimental** identity and directly shows
 **Check for updates when the launcher opens**. This per-card checkbox is the sole automatic-check
 setting and saves immediately without changing the fixed channel. An imported card says
 **Imported copy · Launch only · Updates unavailable** and has
@@ -355,8 +355,12 @@ Managed Home has one top-left information area for useful aggregate update state
 repeat an obvious post-install “ready” message or place status text above navigation.
 
 The title bar shows the packaged MegaMek Launcher version (or "development build" outside a
-packaged release). Settings also includes **Launcher update** on supported native installations, **Community**,
-and **Latest news**. Latest news reads the official MegaMek Atom feed once per launcher window,
+packaged release). Settings also includes **Releases**, **Launcher update** on supported native
+installations, **Community**, and **Latest news**. **Releases** explains that new installs use Core,
+the release for playing, and holds **Show Experimental releases** (off by default) with the warning
+that Experimental builds help us test and may break things. Turning it on only adds Experimental
+choices to quick install, the version picker, and adoption; it never changes an installed copy's
+channel. It is saved in launcher settings schema 5. Latest news reads the official MegaMek Atom feed once per launcher window,
 independently of installation checks, and shows up to three dated headlines linking to official
 posts. **All news** opens the blog archive even if the feed cannot be loaded; news never blocks
 the launcher. At wide window sizes Settings places Game Java, Diagnostics, and
@@ -434,34 +438,37 @@ launcher's registrations/settings. To inspect the ordinary launcher state,
 run `.\gradlew.bat run --args="gui"` instead. No installer build is needed.
 
 With no registered copy, the artwork-led Home has an accessible split
-**Install latest MekHQ Milestone** control. Its large primary segment remains a one-click route to the
-normal confirmation for the current official Milestone MekHQ suite, which contains MegaMek,
+**Install latest MekHQ Core** control. Its large primary segment remains a one-click route to the
+normal confirmation for the current official Core MekHQ suite, which contains MegaMek,
 MekHQ, and MegaMekLab. The button reads **Install latest** with a detail line naming the suite
-and its validated version, for example **MekHQ Milestone · 0.51.0** (announced as
-**Install latest MekHQ Milestone (0.51.0)**); loading and unavailable states never invent a
+and its validated version, for example **MekHQ Core · 0.51.00.1** (announced as
+**Install latest MekHQ Core (0.51.00.1)**); loading and unavailable states never invent a
 version. The separate arrow opens a
 styled map-color popup containing exactly:
 
-1. **Install latest MegaMek Milestone**
-2. **Install latest MegaMekLab Milestone**
-3. **Install latest MekHQ Development**
-4. **Install latest MegaMek Development**
-5. **Install latest MegaMekLab Development**
-6. **Install latest MekHQ Weekly**
-7. **Install latest MegaMek Weekly**
-8. **Install latest MegaMekLab Weekly**
+1. **Install latest MegaMek Core**
+2. **Install latest MegaMekLab Core**
 
-Each available row includes its independently validated version in parentheses. One background
-snapshot per launcher-window session discovers complete suite records for Milestone, Development,
-and Weekly, validates all three exact product references before offering any product, and caches
-reused release IDs. The record's mandatory SHA-256 remains authoritative when GitHub omits its digest.
+Core is for playing. Experimental builds help us test and may break things, so they are opt-in:
+when **Show Experimental releases** is on in Settings (it is off by default), the popup also
+offers:
+
+3. **Install latest MekHQ Experimental**
+4. **Install latest MegaMek Experimental**
+5. **Install latest MegaMekLab Experimental**
+
+Each available row includes its validated suite version in parentheses. One background
+snapshot per launcher-window session discovers complete suite records for the offered channels,
+validates all three exact product references before offering any product, and caches
+release IDs. Changing **Show Experimental releases** discards that snapshot so the next Home
+visit loads the matching choices. The record's mandatory SHA-256 remains authoritative when GitHub omits its digest.
 There is no website YAML or independent-latest-release fallback. While it loads, both install segments are visibly disabled and removed from
 keyboard focus, while **Use existing installation** remains available. Failure keeps installation
 unavailable and exposes one explicit **Retry version check** command; concurrent retries are
 deduplicated. The first successful immutable snapshot is retained for the frame lifetime, so Home
 reloads, confirmation cancellation, location changes, and repeated quote opens preserve the same
 labels without another current-channel request. Missing channels are disabled with explicit reasons;
-Weekly-only records remain usable without changing the Milestone default. Explicit Retry can refresh
+with Experimental shown, Experimental-only records remain usable without changing the Core default. Explicit Retry can refresh
 partial availability. A visible secondary
 **Use existing installation** action, captioned **MegaMek, MekHQ, or MegaMekLab**, imports a
 portable copy without moving it. After the folder chooser, static inspection and atomic
@@ -522,11 +529,11 @@ is not GUI qualification. Two package-local testability hooks expose metadata-wo
 completion and let progress tests explicitly flush pending rendering, without changing
 the production worker or timer behavior.
 
-Review Home, Installations, Settings, the split **Install latest MekHQ Milestone** control,
+Review Home, Installations, Settings, the split **Install latest MekHQ Core** control,
 **Use existing installation**, **Install another version**, Update, recovery, Game Java
 selection, and direct launch behavior. The primary normal first install uses the greatest complete
-Milestone suite record's MekHQ target. Each popup item binds its displayed official repository and
-record membership; no selection can substitute a different product, channel, title, or
+Core suite record's MekHQ target. Each popup item binds its displayed official repository and
+record channel; no selection can substitute a different product, channel, title, or
 bundle.
 Before package transfer it shows a dedicated map-style confirmation headed with the selected
 product and channel. Its concise summary gives the validated version, actual included programs,
@@ -545,8 +552,9 @@ creation, install revalidates the captured record and its exact references, requ
 IDs, name, size, SHA-256, and URL. A newer record cannot silently retarget the quoted install;
 exact metadata drift requires fresh consent.
 
-Static folder inspection recognizes independent program versions, preferring each root jar's
-`Implementation-Version` and retaining the legacy shared-MegaMek metadata fallback when absent.
+Static folder inspection reads each program's version, preferring each root jar's
+`Implementation-Version` and otherwise MegaMek's `Version.properties` (including its optional
+fourth `revision` component).
 The bundle display uses MekHQ's version, otherwise Lab's, otherwise MegaMek's. This does not prove
 compatibility or ownership: imported copies remain launch-only until exact official archive
 verification succeeds. Conflicting versions of duplicated MegaMek jars remain unsupported.
@@ -558,7 +566,7 @@ With the ordinary GUI registry, launcher-managed application payload/support dat
 `%LOCALAPPDATA%\MegaMek\<product channel>` on Windows,
 `~/Library/Application Support/MegaMek/<product channel>` on macOS, and
 `${XDG_DATA_HOME:-~/.local/share}/MegaMek/<product channel>` on Linux. A relative
-`XDG_DATA_HOME` is ignored. The product/channel child, such as `MekHQ Milestone`, is required
+`XDG_DATA_HOME` is ignored. The product/channel child, such as `MekHQ Core`, is required
 because registry and receipt metadata may use files in the same support root; the payload is never
 installed directly as the `MegaMek` root. An explicit
 `gui --registry` override, and custom registries supplied to `LauncherServices`, intentionally
@@ -570,10 +578,11 @@ falls back to another repository/channel, a different tag, or “latest.” MekH
 three-program suite; standalone MegaMek and MegaMekLab packages must inspect as only their actual
 product, so managed Home never gains launch buttons from a mixed or title-inferred bundle.
 
-The Installations page's dark **Install another version** dialog defaults to MekHQ and Milestone.
+The Installations page's dark **Install another version** dialog defaults to MekHQ and Core; its
+Channel select offers Experimental only when **Show Experimental releases** is on.
 Its Product/Channel/**Fetch releases** row discovers bounded complete records and shows one page
-of product targets with the selected record membership. Page one contains the current product
-exactly once; reused tags retain their newest referencing record as the captured source.
+of product targets from records of the selected channel, newest first. Page one contains the
+current product exactly once.
 All three product references must validate for each displayed target. Titles, publication dates,
 and `prerelease` flags never supply classification, and unclassified repository history is not
 a fallback. The selected Channel becomes the new installation's immutable update track.
@@ -611,7 +620,11 @@ For a managed receipt-backed copy, the installation card displays its fixed chan
 copy's boolean using the exact displayed record/preference binding.
 Use **Install another version** to create a separate root on another channel. Existing valid
 channel sidecars are read without migration writes; missing, corrupt, stale, or unavailable
-channel state remains launch-only and cannot be assigned through channel settings. Imported
+channel state remains launch-only and cannot be assigned through channel settings. Copies that
+followed the retired Milestone, Development, or Weekly channels are marked **Retired release
+channel · Launch only** and say **Still launches, but its release channel no longer exists. Install a new copy to get
+updates.** They get no update checks, no repair or
+update actions, and no migration. Imported
 folders receive no channel sidecar or ownership receipt unless the separate exact-ancestor
 adoption succeeds. A check reads canonical channel and exact release metadata
 only; it downloads no package and changes no installed files. If an update is recommended,
@@ -715,7 +728,7 @@ Logging failure never changes the operation result, masks an original failure, o
 journals/backups. The current checkpoint adds these functional surfaces only; broader empty,
 imported, managed, and recovery-state visual polish remains a separate UI/UX checkpoint.
 
-The primary normal GUI install creates a fixed Milestone copy. Current-channel, exact-history,
+The primary normal GUI install creates a fixed Core copy. Current-channel, exact-history,
 adopted, and CLI managed installations always initialize check-on-open to true. That value is not
 part of the install quote and there is no configurable new-install default. Existing explicit
 false choices remain false, and
@@ -730,7 +743,7 @@ started manually. Launcher-started games are coordinated across launcher GUI/CLI
 their full lifetime. The launcher cannot universally detect old or externally started processes
 and does not claim that Windows file locks prove closure. It never kills a process.
 
-There are no automatic Applies, launcher self-updates, Nightly channel, bundled Java, elevation,
+There are no automatic Applies, launcher self-updates, bundled Java, elevation,
 or administrator requirement. A channel cannot be changed: another channel always means another
 managed copy/root, so there is no cross-channel in-place downgrade or retarget path. Advanced
 downloads need an existing writable parent and always create a new subfolder. A styled
@@ -749,7 +762,7 @@ record with no receipt, current provenance, fixed channel, or pending transactio
 **Enable managed updates…** action. Incomplete or corrupt managed metadata never gets that action.
 
 The opt-in flow shows the statically detected applications/version and a fixed future channel
-(Milestone by default, or Development or Weekly). It treats that information only as a candidate. Before
+(Core by default, or Experimental when **Show Experimental releases** is on). It treats that information only as a candidate. Before
 offering Enable, the launcher resolves one exact release in the matching fixed official
 repository, requires its bounded asset name/size and validated official URL, downloads that
 package once, verifies a valid published SHA-256 when present (or records the SHA-256 computed
@@ -760,7 +773,7 @@ user may explicitly choose an exact version from the bounded official release br
 titles and GitHub prerelease flags do not establish identity or channel history.
 A successfully read inventory with no complete suite records does not block that exact-ancestor
 search. Adoption still verifies the official package and local files, but a followed channel
-without a published record says **Milestone/Development/Weekly update information is not
+without a published record says **Core/Experimental update information is not
 available yet**, with an explicit retry, rather than claiming the copy is up to date.
 Malformed or failed inventory requests remain errors; no website or inferred-channel fallback
 is introduced.
@@ -783,10 +796,10 @@ publishes receipt, current state/override history, adoption binding, and fixed c
 root. The channel is the final visibility barrier; failed publication rolls back only
 attempt-owned metadata and leaves the copy launch-only. Success reports **Managed updates
 enabled**, does not launch or update anything, and makes the normal Check/Update path
-available for later explicit use. There is no second package download and no Nightly adoption.
+available for later explicit use. There is no second package download.
 
-The official source hierarchy is singular: the canonical release index is the long-term release
-and channel authority; an embedded package identity is a signed/build-produced projection that
+The official source hierarchy is singular: the published suite records are the release and
+channel authority; an embedded package identity is a signed/build-produced projection that
 assists exact candidate selection; the launcher receipt and fixed track are local policy.
 Adoption never trusts an embedded marker, local version string, or registry field by itself.
 

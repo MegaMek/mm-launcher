@@ -301,7 +301,7 @@ class OtherCopyCheckSwingTest {
                 InstallationRecord record, boolean enabled) {
             ChannelPreference preference = new ChannelPreference(1, record.id(),
                     record.canonicalRoot(), record.registeredAt(),
-                    FollowChannel.MILESTONE, enabled);
+                    FollowChannel.CORE, enabled);
             return new ChannelPreferenceStore.ReadResult(
                     ChannelPreferenceStore.Status.CONFIGURED, preference, "Configured");
         }

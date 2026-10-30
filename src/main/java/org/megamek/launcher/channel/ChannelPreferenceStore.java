@@ -35,6 +35,7 @@ package org.megamek.launcher.channel;
 
 import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import org.megamek.launcher.registry.InstallationRecord;
@@ -60,11 +61,15 @@ import java.util.UUID;
 
 /**
  * Atomic sidecar storage for an installation's immutable update channel and mutable
- * check-on-open flag. Absence is UNKNOWN; unreadable, stale, or malformed data is UNAVAILABLE
- * and is never silently reset.
+ * check-on-open flag. Absence is UNKNOWN; a sidecar from the retired Milestone/Development/Weekly
+ * scheme is RETIRED and launch-only; unreadable, stale, or malformed data is UNAVAILABLE and is
+ * never silently reset.
  */
 public final class ChannelPreferenceStore {
-    public static final int SCHEMA = 1;
+    public static final int SCHEMA = 2;
+    static final String RETIRED_REASON = "This copy follows a retired channel (Milestone, "
+            + "Development, or Weekly); it is launch-only. Install a Core or Experimental copy "
+            + "to receive updates.";
     private static final int MAX_BYTES = 8 * 1024;
     private final RegistryStore registries;
     private final ReceiptStore receipts;
@@ -253,13 +258,28 @@ public final class ChannelPreferenceStore {
         }
         long size = Files.size(file);
         if (size <= 0 || size > MAX_BYTES) throw new IOException("channel setting size is invalid");
+        byte[] bytes = Files.readAllBytes(file);
+        if (isRetiredSchema(bytes)) {
+            return new ReadResult(Status.RETIRED, null, RETIRED_REASON);
+        }
         try {
-            ChannelPreference preference = mapper.readValue(Files.readAllBytes(file),
-                    ChannelPreference.class);
+            ChannelPreference preference = mapper.readValue(bytes, ChannelPreference.class);
             validate(preference, record);
             return new ReadResult(Status.CONFIGURED, preference, "Configured");
         } catch (IOException | RuntimeException error) {
             throw new IOException("invalid channel setting: " + detail(error), error);
+        }
+    }
+
+    /** Sidecars older than schema 2 follow Milestone, Development, or Weekly; they are not migrated. */
+    private boolean isRetiredSchema(byte[] bytes) {
+        try {
+            JsonNode root = mapper.readTree(bytes);
+            JsonNode schema = root == null ? null : root.get("schemaVersion");
+            return schema != null && schema.isIntegralNumber() && schema.canConvertToInt()
+                    && schema.intValue() >= 1 && schema.intValue() < SCHEMA;
+        } catch (IOException | RuntimeException error) {
+            return false;
         }
     }
 
@@ -392,6 +412,7 @@ public final class ChannelPreferenceStore {
     public enum Status {
         UNKNOWN,
         CONFIGURED,
+        RETIRED,
         UNAVAILABLE
     }
 

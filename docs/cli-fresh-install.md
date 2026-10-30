@@ -39,7 +39,7 @@ if (Test-Path -LiteralPath $destination) {
 }
 $name = Read-Host "Name to show in the launcher registry"
 & $cli install-release --application mekhq --tag $tag --destination $destination `
-    --registry $registry --name $name --channel milestone
+    --registry $registry --name $name --channel core
 if ($LASTEXITCODE -ne 0) {
     throw "Install failed. Read the error carefully; it says if a valid folder was retained but not registered."
 }
@@ -57,13 +57,14 @@ To install MegaMek or MegaMekLab independently, use `--application megamek` or
 `--application lab` consistently in both commands. A new registration becomes default only if the
 registry was empty.
 
-`--channel milestone|development|weekly` is required. It becomes this new installation's immutable
+`--channel core|experimental` is required. Core is for playing; Experimental helps us test and
+may break things. It becomes this new installation's immutable
 update track after the exact ownership receipt is published. The manually selected tag does not
 classify the release; it only supplies the new copy's initial bytes. To follow another channel,
 run `install-release` again with another nonexistent destination. Every successful managed CLI
 install initializes its per-installation check-on-open preference to true. There is no
 `--check-on-open` option or global/new-install default; supplying that removed option is an error.
-Nightly is not yet supported.
+The retired `milestone`, `development`, and `weekly` values are rejected.
 
 ## 2a. Perform a metadata-only check
 
@@ -143,7 +144,7 @@ started by old launchers or external commands. It never kills them. See the
 The graphical launcher also has an explicit **Enable Updates** flow for a genuine
 launch-only import. It verifies one exact official package and publishes only external launcher
 metadata; it does not replace this CLI fresh-install procedure, modify the imported root, add a
-channel-switching command, or enable Nightly. Old releases without a valid published package
+or add a channel-switching command. Old releases without a valid published package
 SHA-256 remain launch-only.
 
 ## Technical reference

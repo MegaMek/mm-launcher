@@ -49,11 +49,21 @@ final class QuickInstallTestData {
     private QuickInstallTestData() {
     }
 
-    static QuickInstallSnapshot snapshot(String milestone, String development) {
+    /** Core choices only, as offered while Show Experimental releases is off. */
+    static QuickInstallSnapshot snapshot(String core) {
+        return snapshot(false, core, null);
+    }
+
+    /** Core and Experimental choices, as offered once the player has opted in. */
+    static QuickInstallSnapshot snapshot(String core, String experimental) {
+        return snapshot(true, core, experimental);
+    }
+
+    static QuickInstallSnapshot snapshot(boolean showExperimental, String core,
+                                         String experimental) {
         List<QuickInstallOption> options = new ArrayList<>();
-        for (QuickInstallOption.Key key : QuickInstallSnapshot.ALL_KEYS) {
-            String version = key.channel() == FollowChannel.MILESTONE
-                    ? milestone : development;
+        for (QuickInstallOption.Key key : QuickInstallSnapshot.keys(showExperimental)) {
+            String version = key.channel() == FollowChannel.CORE ? core : experimental;
             String tag = "v" + version;
             OfficialRepository repository = key.repository();
             String assetName = repository.assetPrefix() + version + ".tar.gz";
@@ -61,7 +71,7 @@ final class QuickInstallTestData {
                     "sha256:" + "a".repeat(64), URI.create("https://github.com/"
                     + repository.slug() + "/releases/download/" + tag + "/" + assetName));
             ReleaseCatalog.Release release = new ReleaseCatalog.Release(tag, tag,
-                    false, key.channel() == FollowChannel.DEVELOPMENT,
+                    false, key.channel() == FollowChannel.EXPERIMENTAL,
                     URI.create("https://github.com/" + repository.slug()
                             + "/releases/tag/" + tag), List.of(asset));
             ChannelCatalog.Target target = new ChannelCatalog.Target(key.channel(), version,
@@ -72,9 +82,20 @@ final class QuickInstallTestData {
         return new QuickInstallSnapshot(options);
     }
 
-    static QuickInstallSnapshot weeklyOnly(String version) {
+    /** The part of a full fixture snapshot that the launcher would capture for the setting. */
+    static QuickInstallSnapshot offered(QuickInstallSnapshot full, boolean showExperimental) {
+        if (full.experimentalShown() == showExperimental) return full;
+        if (showExperimental) {
+            throw new IllegalArgumentException("fixture snapshot has no Experimental choices");
+        }
+        return new QuickInstallSnapshot(QuickInstallSnapshot.keys(false).stream()
+                .map(full::option).toList());
+    }
+
+    /** Only Experimental is published; Experimental choices are shown. */
+    static QuickInstallSnapshot experimentalOnly(String version) {
         return new QuickInstallSnapshot(snapshot(version, version).options().stream()
-                .map(option -> option.key().channel() == FollowChannel.WEEKLY ? option
+                .map(option -> option.key().channel() == FollowChannel.EXPERIMENTAL ? option
                         : new QuickInstallOption(option.key(), null,
                         "No complete " + option.key().channel() + " suite record has been published."))
                 .toList());

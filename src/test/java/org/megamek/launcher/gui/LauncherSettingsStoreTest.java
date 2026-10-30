@@ -78,7 +78,8 @@ class LauncherSettingsStoreTest {
         assertEquals(java.toString(), saved.defaultJavaExecutable());
         assertEquals(21, saved.defaultJavaFeature());
         assertEquals(saved, store.read());
-        assertTrue(json.contains("\"schemaVersion\" : 4"));
+        assertTrue(json.contains("\"schemaVersion\" : 5"));
+        assertTrue(json.contains("\"showExperimental\" : false"));
         assertFalse(json.contains("checkInstalledVersionsOnOpen"));
         assertFalse(json.contains("checkNewInstallsOnOpen"));
     }
@@ -255,6 +256,67 @@ class LauncherSettingsStoreTest {
                   "schemaVersion" : 4,
                   "defaultJavaExecutable" : null,
                   "defaultJavaFeature" : null
+                }
+                """;
+        Files.writeString(store.path(), malformed);
+
+        assertThrows(IOException.class, store::read);
+        assertEquals(malformed, Files.readString(store.path()));
+    }
+
+    @Test
+    void showExperimentalRoundTripsAndKeepsOtherSettings() throws Exception {
+        LauncherSettingsStore store =
+                new LauncherSettingsStore(temp.resolve("registry.json"));
+        LauncherAppearance light = LauncherAppearance.DEFAULT.withTheme(LauncherAppearance.Theme.LIGHT);
+        store.writeAppearance(light);
+
+        LauncherSettingsStore.Settings saved = store.writeShowExperimental(true);
+
+        assertTrue(saved.showExperimental());
+        assertEquals(saved, store.read());
+        assertEquals(light, store.read().appearance().launcherAppearance());
+        assertTrue(Files.readString(store.path()).contains("\"showExperimental\" : true"));
+        assertFalse(store.writeShowExperimental(false).showExperimental());
+        assertFalse(store.read().showExperimental());
+    }
+
+    @Test
+    void schemaFourReadsAsCoreOnlyAndIsRewrittenOnTheNextChange() throws Exception {
+        LauncherSettingsStore store =
+                new LauncherSettingsStore(temp.resolve("registry.json"));
+        Files.writeString(store.path(), """
+                {
+                  "schemaVersion" : 4,
+                  "defaultJavaExecutable" : null,
+                  "defaultJavaFeature" : null,
+                  "appearance" : { "theme" : "light" }
+                }
+                """);
+
+        LauncherSettingsStore.Settings read = store.read();
+
+        assertEquals(LauncherSettingsStore.SCHEMA, read.schemaVersion());
+        assertFalse(read.showExperimental());
+        store.writeShowExperimental(true);
+        String json = Files.readString(store.path());
+        assertTrue(json.contains("\"schemaVersion\" : 5"));
+        assertTrue(json.contains("\"showExperimental\" : true"));
+        assertEquals(LauncherAppearance.DEFAULT.withTheme(LauncherAppearance.Theme.LIGHT),
+                store.read().appearance().launcherAppearance());
+    }
+
+    @Test
+    void nonBooleanShowExperimentalIsRejectedWithoutRewrite() throws Exception {
+        LauncherSettingsStore store =
+                new LauncherSettingsStore(temp.resolve("registry.json"));
+        String malformed = """
+                {
+                  "schemaVersion" : 5,
+                  "defaultJavaExecutable" : null,
+                  "defaultJavaFeature" : null,
+                  "appearance" : { "theme" : "light" },
+                  "showExperimental" : "yes"
                 }
                 """;
         Files.writeString(store.path(), malformed);

@@ -86,7 +86,7 @@ class ChannelSwingIntegrationTest {
         LauncherFrame frame = SwingTestSupport.createWindow(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
-            assertEquals("Launch MegaMek Milestone (0.51.0)",
+            assertEquals("Launch MegaMek Core (0.51.0)",
                     SwingTestSupport.spoken(waitFor(() -> find(frame, "launch-megamek-button"))));
             JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
             SwingUtilities.invokeAndWait(installations::doClick);
@@ -98,7 +98,7 @@ class ChannelSwingIntegrationTest {
             JLabel name = waitFor(() -> (JLabel) findNamed(frame,
                     "installationName-" + services.record.id()));
             assertEquals("MegaMek", name.getText());
-            assertEquals("0.51.0 · Milestone", details.getText());
+            assertEquals("0.51.0 · Core", details.getText());
             assertNull(onEdt(() -> find(frame, "chooseChannelButton")));
             assertNull(onEdt(() -> find(frame, "channelChoiceCombo")));
             JCheckBox checks = waitFor(() -> (JCheckBox) findNamed(
@@ -109,7 +109,7 @@ class ChannelSwingIntegrationTest {
             assertTrue(onEdt(checks::isSelected));
             assertEquals(0, services.checks.get(),
                     "saving a local check preference must not fetch metadata");
-            assertEquals(FollowChannel.MILESTONE,
+            assertEquals(FollowChannel.CORE,
                     services.preference.preference().channel());
             assertNull(onEdt(() -> find(frame, "updateChecksButton")));
             assertNull(onEdt(() -> find(frame, "saveUpdateChecksButton")));
@@ -145,8 +145,8 @@ class ChannelSwingIntegrationTest {
             JDialog download = waitForDialog(frame, "Download an official release");
             JComboBox<?> freshChannel = findCombo(download, "downloadChannelCombo");
             assertNotNull(freshChannel);
-            assertEquals(FollowChannel.MILESTONE, onEdt(freshChannel::getSelectedItem),
-                    "the install picker defaults to the authoritative Milestone channel");
+            assertEquals(FollowChannel.CORE, onEdt(freshChannel::getSelectedItem),
+                    "the install picker defaults to the authoritative Core channel");
             assertEquals(1, services.checks.get(),
                     "opening a fresh download picker must not perform a hidden check");
         } finally {
@@ -273,7 +273,7 @@ class ChannelSwingIntegrationTest {
                 "actual Swing channel integration requires a display");
         FakeServices services = new FakeServices(temp.resolve("unpublished-check.json"), true);
         services.checkStatus = ChannelUpdateChecker.Status.CHANNEL_NOT_PUBLISHED;
-        String message = "Milestone update information is not available yet";
+        String message = "Core update information is not available yet";
         LauncherFrame frame = SwingTestSupport.createWindow(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
@@ -320,6 +320,42 @@ class ChannelSwingIntegrationTest {
                 Component component = findNamed(frame, "homeInformationMessage");
                 return component instanceof JLabel label && "All installations are up to date".equals(label.getText());
             });
+        } finally {
+            services.release.countDown();
+            SwingUtilities.invokeAndWait(frame::dispose);
+        }
+    }
+
+    @Test
+    void retiredChannelCopyStaysLaunchOnlyWithoutRepairOrUpdateActions() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing channel integration requires a display");
+        FakeServices services = new FakeServices(temp.resolve("retired.json"));
+        services.preference = new ChannelPreferenceStore.ReadResult(
+                ChannelPreferenceStore.Status.RETIRED, null, "retired channel");
+        LauncherFrame frame = SwingTestSupport.createWindow(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
+            SwingUtilities.invokeAndWait(installations::doClick);
+            JLabel provenance = waitFor(() -> (JLabel) findNamed(frame,
+                    "installationProvenance-" + services.record.id()));
+            assertEquals("Retired release channel · Launch only", onEdt(provenance::getText));
+            JLabel status = waitFor(() -> (JLabel) findNamed(frame,
+                    "installationStatus-" + services.record.id()));
+            assertEquals(LauncherFrame.RETIRED_CHANNEL_STATUS, onEdt(status::getText));
+            assertEquals("Still launches, but its release channel no longer exists. "
+                    + "Install a new copy to get updates.", LauncherFrame.RETIRED_CHANNEL_STATUS);
+            assertNull(onEdt(() -> find(frame, "checkUpdatesButton")));
+            assertNull(onEdt(() -> find(frame, "applyUpdateButton")));
+            assertNull(onEdt(() -> find(frame, "recoverUpdateButton")));
+            assertNull(onEdt(() -> findNamed(frame,
+                    "checkOnOpenCheckbox-" + services.record.id())));
+            assertNull(onEdt(() -> find(frame,
+                    "enableManagedUpdatesButton-" + services.record.id())));
+            assertNotNull(onEdt(() -> find(frame,
+                    "installationMenuButton-" + services.record.id())));
+            assertEquals(0, services.checks.get(), "a retired copy is never checked");
         } finally {
             services.release.countDown();
             SwingUtilities.invokeAndWait(frame::dispose);
@@ -464,7 +500,7 @@ class ChannelSwingIntegrationTest {
             Product product = new Product("megamek", "MegaMek.jar", "megamek.MegaMek",
                     "0.51.0", List.of());
             record = new InstallationRecord("00000000-0000-0000-0000-000000000001",
-                    "MegaMek Milestone (0.51.0)",
+                    "MegaMek Core (0.51.0)",
                     registry.getParent().resolve("copy").toString(),
                     "0.51.0", List.of(product), "keep", false,
                     "2026-09-16T00:00:00Z");
@@ -475,7 +511,7 @@ class ChannelSwingIntegrationTest {
                     "MegaMek-v0.51.0.tar.gz", 123, "a".repeat(64), null, List.of());
             ChannelPreference selected = new ChannelPreference(1, record.id(),
                     record.canonicalRoot(), record.registeredAt(),
-                    FollowChannel.MILESTONE, checkOnOpen);
+                    FollowChannel.CORE, checkOnOpen);
             preference = new ChannelPreferenceStore.ReadResult(
                     ChannelPreferenceStore.Status.CONFIGURED, selected, "Configured");
         }

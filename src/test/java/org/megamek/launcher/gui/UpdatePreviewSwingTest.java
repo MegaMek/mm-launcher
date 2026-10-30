@@ -175,7 +175,7 @@ class UpdatePreviewSwingTest {
                     OfficialRepository.MEGAMEK, "v-old", "MegaMek-v-old.tar.gz", 10,
                     "sha256:" + "a".repeat(64), build);
             new ChannelPreferenceStore().initializeManaged(registry, record, ownership,
-                    FollowChannel.MILESTONE, false);
+                    FollowChannel.CORE, false);
         }
         CountingTransport network = new CountingTransport();
         LauncherServices services = new LauncherServices(registry, store,

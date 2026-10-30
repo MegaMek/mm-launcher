@@ -308,7 +308,7 @@ class UpdatePreviewTest {
     private static void initializeChannel(Path registry, FreshInstaller.Result installed)
             throws IOException {
         new ChannelPreferenceStore().initializeManaged(registry, installed.record(),
-                installed.ownershipReceipt(), FollowChannel.MILESTONE, false);
+                installed.ownershipReceipt(), FollowChannel.CORE, false);
     }
 
     private static void assertCaseRenameReport(UpdatePreviewService.Preview preview) {

@@ -131,21 +131,21 @@ class ImportedCopyAdoptionServiceTest {
     }
 
     @Test
-    void explicitWeeklyAdoptionPublishesImmutableWeeklyPreferenceWithoutChangingFiles() throws Exception {
+    void explicitExperimentalAdoptionPublishesImmutableExperimentalPreferenceWithoutChangingFiles() throws Exception {
         byte[] jar = jar(null);
         byte[] archive = archive(jar, "official-data", "official-setting");
         Fixture fixture = fixture(jar, "official-data", "local-setting", transport(archive), point -> {});
         Map<String, Evidence> before = rootEvidence(fixture.root());
         try (PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.WEEKLY, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.EXPERIMENTAL, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING))) {
             assertTrue(prepared.report().eligible());
-            assertEquals(FollowChannel.WEEKLY, fixture.service().commit(prepared).channel());
+            assertEquals(FollowChannel.EXPERIMENTAL, fixture.service().commit(prepared).channel());
         }
         RegistryData data = fixture.registries().read(fixture.registry());
         var record = fixture.registries().resolve(data, fixture.record().id());
-        assertEquals(FollowChannel.WEEKLY, new ChannelPreferenceStore()
+        assertEquals(FollowChannel.EXPERIMENTAL, new ChannelPreferenceStore()
                 .read(fixture.registry(), data, record).preference().channel());
         assertEquals(before, rootEvidence(fixture.root()));
     }
@@ -162,14 +162,14 @@ class ImportedCopyAdoptionServiceTest {
 
         try (PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING))) {
             assertTrue(prepared.report().eligible());
             assertEquals("This copy can be managed safely. Existing files will not be changed.",
                     prepared.report().message());
             ImportedCopyAdoptionService.CommitResult result =
                     fixture.service().commit(prepared);
-            assertEquals(FollowChannel.MILESTONE, result.channel());
+            assertEquals(FollowChannel.CORE, result.channel());
             assertThrows(IOException.class, () -> fixture.service().commit(prepared),
                     "a committed handle is one-use");
         }
@@ -186,7 +186,7 @@ class ImportedCopyAdoptionServiceTest {
         assertTrue(current.overrides().isEmpty());
         var preference = new ChannelPreferenceStore()
                 .read(fixture.registry(), data, record).preference();
-        assertEquals(FollowChannel.MILESTONE, preference.channel());
+        assertEquals(FollowChannel.CORE, preference.channel());
         assertTrue(preference.checkOnOpen());
         assertTrue(new UpdatePreviewService(transport)
                 .eligibility(fixture.registry(), record.id()).available());
@@ -223,7 +223,7 @@ class ImportedCopyAdoptionServiceTest {
 
         try (PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 context)) {
             assertTrue(prepared.report().eligible());
             localEntryCount = prepared.localSnapshot().entries().size();
@@ -315,7 +315,7 @@ class ImportedCopyAdoptionServiceTest {
                 transport, point -> {});
         PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING));
         Path staging = prepared.workspace().staging();
         Files.write(staging.resolve("package.tar.gz"), new byte[]{9, 8, 7});
@@ -343,7 +343,7 @@ class ImportedCopyAdoptionServiceTest {
         Path neighbor = Files.writeString(temp.resolve("unrelated-user-file"), "keep");
         PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING));
         Path attempt = prepared.workspace().staging().getParent();
         Files.createDirectories(attempt.resolve("residual/nested"));
@@ -363,7 +363,7 @@ class ImportedCopyAdoptionServiceTest {
                 transport(archive(jar, "official-data", "official-setting")), point -> {});
         PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING));
         Path staging = prepared.workspace().staging();
         Path attempt = staging.getParent();
@@ -391,7 +391,7 @@ class ImportedCopyAdoptionServiceTest {
                 transport(archive(jar, "official-data", "official-setting")), point -> {});
         PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING));
         Path attempt = prepared.workspace().staging().getParent();
         Path outside = Files.createDirectory(temp.resolve("outside-owned-attempt"));
@@ -429,7 +429,7 @@ class ImportedCopyAdoptionServiceTest {
         ByteArrayOutputStream logs = new ByteArrayOutputStream();
         PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(logs),
+                FollowChannel.CORE, new PrintStream(logs),
                 OperationContext.none(OperationType.ADOPT_EXISTING));
         Path attempt = prepared.workspace().staging().getParent();
 
@@ -459,7 +459,7 @@ class ImportedCopyAdoptionServiceTest {
                 ImportedCopyAdoptionService.CandidateResolutionException.class,
                 () -> fixture.service().prepare(fixture.record(),
                         org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                        FollowChannel.MILESTONE, new PrintStream(logs),
+                        FollowChannel.CORE, new PrintStream(logs),
                         OperationContext.none(OperationType.ADOPT_EXISTING)));
 
         assertEquals(ImportedCopyAdoptionService.AUTOMATIC_MATCH_UNAVAILABLE,
@@ -475,23 +475,24 @@ class ImportedCopyAdoptionServiceTest {
     }
 
     @Test
-    void releaseDayLegacyMilestoneAndDevelopmentImportsCanAdoptAndApplyTheirPublishedChannelUpdate()
+    void releaseDayLegacyImportsCanAdoptAndApplyTheirPublishedChannelUpdate()
             throws Exception {
-        for (FollowChannel channel : List.of(FollowChannel.MILESTONE, FollowChannel.DEVELOPMENT)) {
-            boolean milestone = channel == FollowChannel.MILESTONE;
-            String legacyVersion = milestone ? "0.50.06" : "0.50.07";
-            String targetVersion = milestone ? "0.52.00" : "0.52.01";
-            byte[] targetJar = jarVersion(0, 52, milestone ? 0 : 1, null);
-            byte[] legacyJar = jarVersion(0, 50, milestone ? 6 : 7, null);
+        for (FollowChannel channel : List.of(FollowChannel.CORE, FollowChannel.EXPERIMENTAL)) {
+            boolean core = channel == FollowChannel.CORE;
+            String legacyVersion = core ? "0.50.06" : "0.50.07";
+            String targetVersion = core ? "0.52.00.33" : "0.52.01.1";
+            byte[] targetJar = core ? jarVersion(0, 52, 0, 33, null) : jarVersion(0, 52, 1, 1, null);
+            byte[] legacyJar = jarVersion(0, 50, core ? 6 : 7, null);
             byte[] legacyArchive = archive("MegaMek-" + legacyVersion, legacyJar,
                     "old official data", "old official setting", Map.of());
             String legacyMetadata = releaseJson(legacyArchive, "v" + legacyVersion, legacyVersion);
             SuiteTestData network = new SuiteTestData();
-            for (FollowChannel publishedChannel : List.of(FollowChannel.MILESTONE, FollowChannel.DEVELOPMENT)) {
-                String version = publishedChannel == FollowChannel.MILESTONE ? "0.52.00" : "0.52.01";
+            for (FollowChannel publishedChannel : List.of(FollowChannel.CORE, FollowChannel.EXPERIMENTAL)) {
+                String version = publishedChannel == FollowChannel.CORE ? "0.52.00.33" : "0.52.01.1";
                 byte[] target = archive("MegaMek-" + version,
                         version.equals(targetVersion) ? targetJar
-                                : jarVersion(0, 52, publishedChannel == FollowChannel.MILESTONE ? 0 : 1, null),
+                                : publishedChannel == FollowChannel.CORE
+                                ? jarVersion(0, 52, 0, 33, null) : jarVersion(0, 52, 1, 1, null),
                         "new official data", "new official setting", Map.of(
                                 "data/added.txt", "new managed data",
                                 "suite-build.properties", "schemaVersion=1\nproduct=MegaMek\nversion=" + version
@@ -570,7 +571,7 @@ class ImportedCopyAdoptionServiceTest {
     }
 
     @Test
-    void automaticMilestoneAdoptionWithoutSuiteRecordsRemainsVerifiedAndChecksRecoverWhenPublished()
+    void automaticCoreAdoptionWithoutSuiteRecordsRemainsVerifiedAndChecksRecoverWhenPublished()
             throws Exception {
         byte[] jar = jarVersion(0, 50, 6, null);
         byte[] archive = archive(jar, "official-data", "official-setting");
@@ -582,11 +583,11 @@ class ImportedCopyAdoptionServiceTest {
         Map<String, Evidence> before = rootEvidence(fixture.root());
         try (PreparedAdoption prepared = fixture.service().prepareAutomatically(
                 fixture.record(), org.megamek.launcher.release.OfficialRepository.MEGAMEK,
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING))) {
             assertTrue(prepared.report().eligible());
             assertEquals("v0.50.06", prepared.release().tag());
-            assertEquals(FollowChannel.MILESTONE, fixture.service().commit(prepared).channel());
+            assertEquals(FollowChannel.CORE, fixture.service().commit(prepared).channel());
         }
         assertEquals(1, transport.packageRequests);
         byte[] registryBefore = Files.readAllBytes(fixture.registry());
@@ -597,7 +598,7 @@ class ImportedCopyAdoptionServiceTest {
         assertEquals(org.megamek.launcher.channel.ChannelUpdateChecker.Status.CHANNEL_NOT_PUBLISHED,
                 missing.status());
         assertEquals("v0.50.06", missing.currentTag());
-        assertEquals(FollowChannel.MILESTONE, missing.preference().channel());
+        assertEquals(FollowChannel.CORE, missing.preference().channel());
         assertTrue(missing.retryable());
         assertFalse(missing.updateAvailable());
         assertNull(missing.recommendation());
@@ -608,16 +609,18 @@ class ImportedCopyAdoptionServiceTest {
                 "check-updates", "--registry", fixture.registry().toString(),
                 "--id", fixture.record().id()}, new PrintStream(output), new PrintStream(errors), transport));
         assertTrue(output.toString(StandardCharsets.UTF_8).contains("status=channel_not_published"));
-        assertTrue(output.toString(StandardCharsets.UTF_8).contains("No complete Milestone suite record"));
+        assertTrue(output.toString(StandardCharsets.UTF_8).contains("No complete Core suite record"));
         assertEquals("", errors.toString(StandardCharsets.UTF_8));
 
         var published = new org.megamek.launcher.channel.SuiteTestData();
-        published.suite("0.50.06", FollowChannel.MILESTONE, "0.50.06");
+        published.suite("0.50.06.1", FollowChannel.CORE);
         var current = new org.megamek.launcher.channel.ChannelUpdateChecker(fixture.registry(), published)
                 .check(fixture.record().id());
-        assertEquals(org.megamek.launcher.channel.ChannelUpdateChecker.Status.EXACT_CURRENT, current.status());
+        assertEquals(org.megamek.launcher.channel.ChannelUpdateChecker.Status.UPDATE_AVAILABLE, current.status(),
+                "a legacy three-part release precedes the first four-part build of its line");
+        assertEquals("v0.50.06.1", current.recommendation().targetTag());
         assertFalse(current.retryable());
-        assertFalse(current.updateAvailable());
+        assertTrue(current.updateAvailable());
         assertTrue(published.requests.stream().noneMatch(uri -> uri.getPath().endsWith(".tar.gz")));
         assertArrayEquals(registryBefore, Files.readAllBytes(fixture.registry()));
         assertArrayEquals(preferenceBefore, Files.readAllBytes(preference));
@@ -640,11 +643,11 @@ class ImportedCopyAdoptionServiceTest {
         try (PreparedAdoption prepared = fixture.service().prepareAutomatically(
                 fixture.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK,
-                FollowChannel.DEVELOPMENT, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.EXPERIMENTAL, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING))) {
             assertTrue(prepared.report().eligible());
             assertEquals("v0.50.07", prepared.release().tag());
-            assertEquals(FollowChannel.DEVELOPMENT, prepared.report().fixedChannel(),
+            assertEquals(FollowChannel.EXPERIMENTAL, prepared.report().fixedChannel(),
                     "historical unknown identity keeps the selected fixed channel");
         }
 
@@ -675,7 +678,7 @@ class ImportedCopyAdoptionServiceTest {
 
         PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.DEVELOPMENT, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.EXPERIMENTAL, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING));
         assertTrue(prepared.report().eligible());
         fixture.service().commit(prepared);
@@ -704,7 +707,7 @@ class ImportedCopyAdoptionServiceTest {
                 mixedTransport, point -> {});
         try (PreparedAdoption prepared = mixed.service().prepare(mixed.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING))) {
             assertFalse(prepared.report().eligible());
             assertEquals("Core application files differ from the official release.",
@@ -719,7 +722,7 @@ class ImportedCopyAdoptionServiceTest {
         Files.write(dependency.root().resolve("lib/library.jar"), new byte[]{9, 8, 7});
         try (PreparedAdoption prepared = dependency.service().prepare(dependency.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING))) {
             assertFalse(prepared.report().eligible(),
                     "a mixed dependency JAR must block adoption");
@@ -737,7 +740,7 @@ class ImportedCopyAdoptionServiceTest {
         Files.writeString(runtime.root().resolve("lib/Runtime.txt"), "runtime");
         try (PreparedAdoption prepared = runtime.service().prepare(runtime.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING))) {
             assertFalse(prepared.report().eligible());
             assertTrue(prepared.comparison().conflicts().contains("lib/runtime.txt"));
@@ -751,7 +754,7 @@ class ImportedCopyAdoptionServiceTest {
         Files.writeString(structural.root().resolve("data/base.txt/unknown.txt"), "unknown");
         try (PreparedAdoption prepared = structural.service().prepare(structural.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING))) {
             assertFalse(prepared.report().eligible());
             assertTrue(prepared.comparison().conflicts().contains("data/base.txt"));
@@ -764,7 +767,7 @@ class ImportedCopyAdoptionServiceTest {
         Files.writeString(parent.root().resolve("docs"), "local-file-parent");
         try (PreparedAdoption prepared = parent.service().prepare(parent.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING))) {
             assertFalse(prepared.report().eligible());
             assertTrue(prepared.comparison().conflicts().contains("docs/manual.txt"));
@@ -788,7 +791,7 @@ class ImportedCopyAdoptionServiceTest {
 
         try (PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING))) {
             assertTrue(prepared.report().eligible());
             assertEquals(List.of(new CaseOverride("data/base.txt", "data/Base.txt",
@@ -824,7 +827,7 @@ class ImportedCopyAdoptionServiceTest {
         Files.writeString(fixture.root().resolve("Docs/Guide.txt"), "guide");
         try (PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING))) {
             assertTrue(prepared.report().eligible());
             assertEquals(List.of(new CaseOverride("docs", "Docs",
@@ -857,7 +860,7 @@ class ImportedCopyAdoptionServiceTest {
         try (PreparedAdoption prepared = criticalMissing.service().prepare(
                 criticalMissing.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING))) {
             assertTrue(prepared.report().eligible(),
                     "a missing dependency no longer blocks adoption");
@@ -872,7 +875,7 @@ class ImportedCopyAdoptionServiceTest {
         Files.delete(missing.root().resolve("data/base.txt"));
         try (PreparedAdoption prepared = missing.service().prepare(missing.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING))) {
             assertTrue(prepared.report().eligible(),
                     "an intentionally removed managed file no longer blocks adoption");
@@ -894,7 +897,7 @@ class ImportedCopyAdoptionServiceTest {
                 driftTransport, point -> {});
         PreparedAdoption changed = drift.service().prepare(drift.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING));
         Files.writeString(drift.root().resolve("custom-after-verify.txt"), "changed");
         assertThrows(IOException.class, () -> drift.service().commit(changed));
@@ -905,11 +908,11 @@ class ImportedCopyAdoptionServiceTest {
                 ownerTransport, point -> {});
         PreparedAdoption owned = owner.service().prepare(owner.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING));
         assertThrows(IOException.class, () -> owner.service().prepare(owner.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING)),
                 "one service must not prepare two attempts for the same record");
         ImportedCopyAdoptionService other = new ImportedCopyAdoptionService(owner.registry(),
@@ -927,7 +930,7 @@ class ImportedCopyAdoptionServiceTest {
                     });
             PreparedAdoption publication = failed.service().prepare(failed.record(),
                     org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                    FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                    FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                     OperationContext.none(OperationType.ADOPT_EXISTING));
             assertThrows(IOException.class, () -> failed.service().commit(publication),
                     failurePoint);
@@ -949,7 +952,7 @@ class ImportedCopyAdoptionServiceTest {
 
         assertThrows(IOException.class, () -> fixture.service().prepare(fixture.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING)));
 
         assertEquals(before, rootEvidence(fixture.root()));
@@ -969,7 +972,7 @@ class ImportedCopyAdoptionServiceTest {
         Files.createDirectory(pending.root().resolve(RootCoordinator.UPDATE_NAMESPACE));
         assertThrows(IOException.class, () -> pending.service().prepare(pending.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING)));
         assertTrue(pendingTransport.requests.isEmpty());
 
@@ -981,7 +984,7 @@ class ImportedCopyAdoptionServiceTest {
         assertThrows(OperationCancelledException.class,
                 () -> cancelled.service().prepare(cancelled.record(),
                         org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                        FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                        FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                         context));
         assertTrue(cancelledTransport.requests.isEmpty());
         assertNoProvenance(cancelled);
@@ -998,7 +1001,7 @@ class ImportedCopyAdoptionServiceTest {
         OperationContext context = new OperationContext(OperationType.ADOPT_EXISTING);
         PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 context);
 
         assertTrue(context.requestCancellation().accepted());
@@ -1029,7 +1032,7 @@ class ImportedCopyAdoptionServiceTest {
                 transport, point -> {});
         try (PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
                 org.megamek.launcher.release.OfficialRepository.MEGAMEK, "v1.2.3",
-                FollowChannel.MILESTONE, new PrintStream(new ByteArrayOutputStream()),
+                FollowChannel.CORE, new PrintStream(new ByteArrayOutputStream()),
                 OperationContext.none(OperationType.ADOPT_EXISTING))) {
             assertFalse(prepared.report().eligible());
         }
@@ -1096,13 +1099,19 @@ class ImportedCopyAdoptionServiceTest {
 
     private static byte[] jarVersion(int major, int minor, int patch, String extra)
             throws IOException {
+        return jarVersion(major, minor, patch, 0, extra);
+    }
+
+    private static byte[] jarVersion(int major, int minor, int patch, int revision, String extra)
+            throws IOException {
         Manifest manifest = new Manifest();
         manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
         manifest.getMainAttributes().put(Attributes.Name.MAIN_CLASS, "megamek.MegaMek");
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         try (JarOutputStream output = new JarOutputStream(bytes, manifest)) {
             output.putNextEntry(new JarEntry("megamek/Version.properties"));
-            output.write(("major=" + major + "\nminor=" + minor + "\npatch=" + patch + "\n")
+            output.write(("major=" + major + "\nminor=" + minor + "\npatch=" + patch + "\n"
+                    + (revision > 0 ? "revision=" + revision + "\n" : ""))
                     .getBytes(StandardCharsets.UTF_8));
             output.closeEntry();
             if (extra != null) {

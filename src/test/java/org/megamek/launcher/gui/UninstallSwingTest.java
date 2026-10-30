@@ -82,7 +82,7 @@ class UninstallSwingTest {
                 OfficialRepository.MEGAMEK, "v1.0.0", "MegaMek-v1.0.0.tar.gz", 10,
                 "sha256:" + "a".repeat(64), build);
         new ChannelPreferenceStore().initializeManaged(
-                services.registry(), record, receipt, FollowChannel.MILESTONE, false);
+                services.registry(), record, receipt, FollowChannel.CORE, false);
         LauncherFrame frame = SwingTestSupport.onEdt(() -> new LauncherFrame(services));
         try {
             SwingTestSupport.onEdt(() -> { frame.showWindow(); return null; });

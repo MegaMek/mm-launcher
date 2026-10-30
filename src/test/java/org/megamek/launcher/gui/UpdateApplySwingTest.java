@@ -136,14 +136,14 @@ class UpdateApplySwingTest {
                     "Close MegaMek, MekHQ, and MegaMekLab before continuing."));
             assertTrue(firstText.contains("Application: MegaMek"));
             assertTrue(firstText.contains("Current version: 1.0.0"));
-            assertTrue(firstText.contains("New version: 2.00.00"));
+            assertTrue(firstText.contains("New version: 2.00.00.1"));
             assertTrue(firstText.contains("Download size: "
                     + BinarySizeFormat.mebibytes(fixture.services.asset.size())));
             assertFalse(firstText.contains(fixture.services.asset.name()));
             assertFalse(firstText.contains(fixture.services.asset.digest()));
             assertFalse(firstText.contains(fixture.services.asset.url().toString()));
             assertFalse(firstText.contains(" bytes"));
-            assertFalse(firstText.contains("v2.00.00"));
+            assertFalse(firstText.contains("v2.00.00.1"));
             assertFalse(firstText.contains("tag"));
             assertFalse(firstText.contains("digest"));
             assertFalse(firstText.contains("read-only"));
@@ -183,7 +183,7 @@ class UpdateApplySwingTest {
             assertEquals(1, fixture.services.applyCalls);
             assertEquals(fixture.first, fixture.services.appliedRecord);
             assertEquals(fixture.firstCurrent, fixture.services.appliedState);
-            assertEquals("v2.00.00", fixture.services.appliedTag);
+            assertEquals("v2.00.00.1", fixture.services.appliedTag);
             assertEquals(fixture.services.asset.size(), fixture.services.appliedSize);
             assertEquals(fixture.services.asset.digest(), fixture.services.appliedDigest);
             assertEquals(RealUpdateService.CONFIRM, fixture.services.appliedConfirmation);
@@ -192,7 +192,7 @@ class UpdateApplySwingTest {
                     "the accepted attempt downloads exactly one package");
             assertEquals(fixture.services.archive.length,
                     fixture.services.network.binaryBytes);
-            assertEquals("v2.00.00", new RealUpdateService(fixture.services.network)
+            assertEquals("v2.00.00.1", new RealUpdateService(fixture.services.network)
                     .snapshot(fixture.services.registry(), fixture.first.id()).current().tag());
             assertEquals("runtime-2", Files.readString(
                     Path.of(fixture.first.canonicalRoot()).resolve("lib/runtime.txt")));
@@ -247,11 +247,11 @@ class UpdateApplySwingTest {
                     fixture.services.network.binaryBytes);
             assertEquals(1, fixture.services.applyCalls);
             assertFalse(fixture.services.applyOnEdt);
-            assertEquals("v2.00.00", fixture.services.appliedTag);
+            assertEquals("v2.00.00.1", fixture.services.appliedTag);
             RealUpdateService.Snapshot installed =
                     new RealUpdateService(fixture.services.network)
                             .snapshot(fixture.services.registry(), fixture.first.id());
-            assertEquals("v2.00.00", installed.current().tag());
+            assertEquals("v2.00.00.1", installed.current().tag());
             assertEquals(fixture.first.canonicalRoot(), installed.current().canonicalRoot());
             assertEquals("runtime-2", Files.readString(
                     Path.of(fixture.first.canonicalRoot()).resolve("lib/runtime.txt")));
@@ -482,7 +482,7 @@ class UpdateApplySwingTest {
         CurrentUpdateState firstCurrent = CurrentUpdateState.initial(firstReceipt);
         CurrentUpdateState secondCurrent = CurrentUpdateState.initial(secondReceipt);
         new ChannelPreferenceStore().initializeManaged(
-                registry, first, firstReceipt, FollowChannel.MILESTONE, false);
+                registry, first, firstReceipt, FollowChannel.CORE, false);
         byte[] targetArchive = targetArchive();
         PreparedTransport transport = new PreparedTransport(targetArchive);
         FakeServices services = new FakeServices(registry, store, transport,
@@ -624,7 +624,7 @@ class UpdateApplySwingTest {
 
     private static byte[] targetArchive() throws Exception {
         Map<String, byte[]> files = new LinkedHashMap<>();
-        files.put("MegaMek.jar", jar(2));
+        files.put("MegaMek.jar", jar(2, 1));
         files.put("lib/runtime.txt", "runtime-2".getBytes(StandardCharsets.UTF_8));
         files.put("data/default.txt", "data-2".getBytes(StandardCharsets.UTF_8));
         files.put("mmconf/clientsettings.xml", "target-protected".getBytes(StandardCharsets.UTF_8));
@@ -647,13 +647,18 @@ class UpdateApplySwingTest {
     }
 
     private static byte[] jar(int version) throws Exception {
+        return jar(version, 0);
+    }
+
+    private static byte[] jar(int version, int revision) throws Exception {
         Manifest manifest = new Manifest();
         manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
         manifest.getMainAttributes().put(Attributes.Name.MAIN_CLASS, "megamek.MegaMek");
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         try (JarOutputStream jar = new JarOutputStream(output, manifest)) {
             jar.putNextEntry(new JarEntry("megamek/Version.properties"));
-            jar.write(("major=" + version + "\nminor=0\npatch=0\n")
+            jar.write(("major=" + version + "\nminor=0\npatch=0\n"
+                    + (revision > 0 ? "revision=" + revision + "\n" : ""))
                     .getBytes(StandardCharsets.UTF_8));
             jar.closeEntry();
         }
@@ -716,16 +721,16 @@ class UpdateApplySwingTest {
             this.archive = archive;
             this.registryStore = store;
             try {
-                this.asset = new ReleaseCatalog.Asset("MegaMek-2.00.00.tar.gz", archive.length,
+                this.asset = new ReleaseCatalog.Asset("MegaMek-2.00.00.1.tar.gz", archive.length,
                         "sha256:" + sha(archive),
                         URI.create("https://github.com/MegaMek/megamek/releases/download/"
-                                + "v2.00.00/MegaMek-2.00.00.tar.gz"));
+                                + "v2.00.00.1/MegaMek-2.00.00.1.tar.gz"));
             } catch (Exception error) {
                 throw new IllegalStateException(error);
             }
             this.release = new ReleaseCatalog.Release(
-                    "v2.00.00", "Target", false, false,
-                    URI.create("https://github.com/MegaMek/megamek/releases/tag/v2.00.00"),
+                    "v2.00.00.1", "Target", false, false,
+                    URI.create("https://github.com/MegaMek/megamek/releases/tag/v2.00.00.1"),
                     List.of(asset));
             this.first = first;
             this.second = second;
@@ -920,9 +925,9 @@ class UpdateApplySwingTest {
         private PreparedTransport(byte[] archive) throws Exception {
             this.archive = archive;
             this.digest = sha(archive);
-            for (String version : List.of("2.00.00", "2.01.00")) {
-                complete.suite(version, version.equals("2.00.00")
-                                ? FollowChannel.MILESTONE : FollowChannel.DEVELOPMENT,
+            for (String version : List.of("2.00.00.1", "2.01.00.1")) {
+                complete.suite(version, version.equals("2.00.00.1")
+                                ? FollowChannel.CORE : FollowChannel.EXPERIMENTAL,
                         Map.of(OfficialRepository.MEGAMEK, version, OfficialRepository.LAB, version,
                                 OfficialRepository.MEKHQ, version),
                         Map.of(OfficialRepository.MEGAMEK, (long) archive.length),
@@ -962,15 +967,15 @@ class UpdateApplySwingTest {
                 return complete.get(uri, accept);
             }
             String json = """
-                    {"id":%d,"tag_name":"v2.00.00","name":"Target","draft":false,"prerelease":false,
-                    "html_url":"https://github.com/MegaMek/megamek/releases/tag/v2.00.00",
-                    "assets":[{"id":%d,"state":"uploaded","name":"MegaMek-2.00.00.tar.gz","size":%d,
+                    {"id":%d,"tag_name":"v2.00.00.1","name":"Target","draft":false,"prerelease":false,
+                    "html_url":"https://github.com/MegaMek/megamek/releases/tag/v2.00.00.1",
+                    "assets":[{"id":%d,"state":"uploaded","name":"MegaMek-2.00.00.1.tar.gz","size":%d,
                     "digest":"sha256:%s",
-                    "browser_download_url":"https://github.com/MegaMek/megamek/releases/download/v2.00.00/MegaMek-2.00.00.tar.gz"}]}
+                    "browser_download_url":"https://github.com/MegaMek/megamek/releases/download/v2.00.00.1/MegaMek-2.00.00.1.tar.gz"}]}
                     """.formatted(org.megamek.launcher.channel.SuiteTestData.releaseId(
-                            OfficialRepository.MEGAMEK, "2.00.00"),
+                            OfficialRepository.MEGAMEK, "2.00.00.1"),
                     org.megamek.launcher.channel.SuiteTestData.assetId(
-                            OfficialRepository.MEGAMEK, "2.00.00"), archive.length, digest);
+                            OfficialRepository.MEGAMEK, "2.00.00.1"), archive.length, digest);
             return new Response(200, Map.of(),
                     new ByteArrayInputStream(json.getBytes(StandardCharsets.UTF_8)));
         }

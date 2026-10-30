@@ -77,6 +77,9 @@ public final class ChannelUpdateChecker {
         if (selected.status() == ChannelPreferenceStore.Status.UNKNOWN) {
             return unavailable(Status.UNCONFIGURED, record, null, null, selected.reason());
         }
+        if (selected.status() == ChannelPreferenceStore.Status.RETIRED) {
+            return unavailable(Status.RETIRED_CHANNEL, record, null, null, selected.reason());
+        }
         if (selected.status() == ChannelPreferenceStore.Status.UNAVAILABLE) {
             return unavailable(Status.UNAVAILABLE, record, null, null, selected.reason());
         }
@@ -191,6 +194,7 @@ public final class ChannelUpdateChecker {
 
     public enum Status {
         UNCONFIGURED,
+        RETIRED_CHANNEL,
         UNAVAILABLE,
         CHANNEL_NOT_PUBLISHED,
         UPDATE_AVAILABLE,
@@ -252,7 +256,7 @@ public final class ChannelUpdateChecker {
         public boolean retryable() {
             return switch (status) {
                 case UNCONFIGURED, UNAVAILABLE, CHANNEL_NOT_PUBLISHED, NON_COMPARABLE -> true;
-                case UPDATE_AVAILABLE, EXACT_CURRENT, INSTALLED_AHEAD -> false;
+                case RETIRED_CHANNEL, UPDATE_AVAILABLE, EXACT_CURRENT, INSTALLED_AHEAD -> false;
             };
         }
     }

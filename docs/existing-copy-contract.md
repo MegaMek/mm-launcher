@@ -131,15 +131,15 @@ Network work is refused on the Swing event thread.
 
 The observed product set maps deterministically: any supported bundle containing MekHQ uses the
 MekHQ repository, lab-only uses MegaMekLab, and MegaMek-only uses MegaMek. Other mixed or unknown
-sets are rejected. After the user chooses the future update policy (Milestone by default or
-Development or Weekly), the launcher searches bounded release-list metadata rather than guessing
+sets are rejected. After the user chooses the future update policy (Core by default, or
+Experimental when **Show Experimental releases** is on), the launcher searches bounded release-list metadata rather than guessing
 `/tags/v<observed>`. It accepts exactly one eligible immutable tag whose normalized dotted version
 matches the observed build; leading zeroes are insignificant, but prerelease/build suffixes and
 component count are not discarded. Draft and ineligible releases do not qualify. A full final
 bounded page is inconclusive rather than permission to guess. Before that scan, the same canonical
 complete-record current targets are compared with the normalized primary-product identity.
-A selected-current match is allowed; a shared identity is valid for its matching channels.
-A distinct identity current only in another channel is a typed mismatch and stops before package
+A selected-current match is allowed. An identity current only in the other channel is a typed
+mismatch and stops before package
 download. A version matching no current target remains historical/unknown, so the user's selected
 fixed channel remains valid for this exact-ancestor adoption route. This does not add unknown
 history to the normal record-only install browser.
@@ -154,7 +154,7 @@ release browser and binds its exact selection to the same record and chosen futu
 Neither path classifies a historical release into a channel from its title or prerelease flag.
 The typed current-channel mismatch instead names the canonical channel, confirms no files changed,
 and offers a direct retry with that channel plus Close; it does not expose technical details.
-Nightly is unsupported. `ReleaseCatalog` must return one supported full
+`ReleaseCatalog` must return one supported full
 `tar.gz` asset with a bounded size and either a valid published SHA-256 or no published digest.
 The verified fetcher downloads it
 once and the safe extractor opens it in an attempt-owned external workspace. Official static

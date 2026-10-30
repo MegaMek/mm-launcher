@@ -136,6 +136,11 @@ Settings starts with **Appearance**: a Dark/Light theme select. A change applies
 and is saved off the event-dispatch thread; a failed save reports an error without reverting the
 visible appearance. High contrast is not offered until the design tokens define it.
 Loading and error states keep the same layout; there is no global automatic-check control.
+**Releases** follows Appearance. It says that new installs use Core, the release for playing, and
+offers **Show Experimental releases** (off by default) with the warning that Experimental builds
+help us test and may break things. The option is saved off the event-dispatch thread in launcher
+settings schema 5. It only adds Experimental to quick install, **Install another version**, and
+adoption; it never changes an installed copy's channel.
 
 Latest news appears on the managed home page as a corner-ticked panel (titled
 **Latest news**) in the top-right corner of the artwork. It loads up to three dated headlines from MegaMek's official Atom feed in the
@@ -202,29 +207,32 @@ only useful aggregate update state: **Checking for updates…**,
 unchecked installations prevent that conclusion. There is no separate middle status line and no
 post-install “ready” notice.
 A followed channel with no published suite record instead says
-**Milestone/Development/Weekly update information is not available yet** on Home and its
+**Core/Experimental update information is not available yet** on Home and its
 installation card (or a combined message for multiple unpublished channels). This remains
 retryable and never counts as an update or an up-to-date result; request/validation failures
-still say **Could not check**.
+still say **Could not check**. A copy that followed a retired Milestone, Development, or Weekly
+channel (a schema-1 channel sidecar) is never checked or migrated. Its card is marked
+**Retired release channel · Launch only** and says **Still launches, but its release channel no longer exists. Install a new copy to get
+updates.** It offers no check, update,
+repair, or uninstall action, and is never shown as managed setup needing repair.
 
 Download bars paint percentage only, with localized human-readable byte detail below. Extraction
 is indeterminate with processed-file detail and no bar string.
 
 The empty first-launch screen uses the supplied artwork, a responsive token-surface action panel,
 and design-token controls. Its joined split control keeps
-**Install latest MekHQ Milestone** as the
-large primary action for the fixed current Milestone MekHQ all-three-program suite. A distinct
-arrow opens a look-and-feel popover with exactly **Install latest MegaMek Milestone**,
-**Install latest MegaMekLab Milestone**, **Install latest MekHQ Development**,
-**Install latest MegaMek Development**, **Install latest MegaMekLab Development**,
-**Install latest MekHQ Weekly**, **Install latest MegaMek Weekly**, and
-**Install latest MegaMekLab Weekly**, in that order. Each
-available row shows its validated version. The popup contains neither a redundant MekHQ Milestone
+**Install latest MekHQ Core** as the
+large primary action for the fixed current Core MekHQ all-three-program suite. A distinct
+arrow opens a look-and-feel popover with exactly **Install latest MegaMek Core** and
+**Install latest MegaMekLab Core**. Only when **Show Experimental releases** is on does it add
+**Install latest MekHQ Experimental**, **Install latest MegaMek Experimental**, and
+**Install latest MegaMekLab Experimental**, in that order. Each
+available row shows its validated version. The popup contains neither a redundant MekHQ Core
 row nor the full exact-release picker. It preserves ordinary menu actions, keyboard opening,
 Escape, accessible names/descriptions, and opaque token selection contrast rather than plain OS
 rows.
 Successful rows need no validation tooltip; unavailable rows retain concise diagnostic details.
-On initial empty Home, one frame-scoped background snapshot loads all nine choices. Until it
+On initial empty Home, one frame-scoped background snapshot loads every offered choice. Until it
 succeeds, both install segments are disabled and unfocusable while **Use existing installation**
 stays enabled. Failure or partial availability exposes one explicit Retry command; retry
 activation is deduplicated. READY labels and exact options survive Home reloads, page transitions,
@@ -297,18 +305,20 @@ the frame visible/front, and shows the existing explicit error. BusyGate refusal
 iconify and retains **Please wait**. No path disposes, exits, detaches, or uses a system tray.
 
 The primary segment reads **Install latest** with a detail line carrying the validated version, for
-example **MekHQ Milestone · 0.51.00** (accessible name **Install latest MekHQ Milestone (0.51.00)**). There is no separate caption. A single background
-metadata-only snapshot discovers bounded complete records and validates all nine
-repository/channel targets. Repeated product release IDs are cached within the attempt.
-The main label and eight labels update atomically only on the current panel.
+example **MekHQ Core · 0.51.00.1** (accessible name **Install latest MekHQ Core (0.51.00.1)**). There is no separate caption. A single background
+metadata-only snapshot discovers bounded complete records and validates the three Core
+repository/channel targets, or all six when Experimental is shown. Repeated product release IDs
+are cached within the attempt. The main label and menu labels update atomically only on the
+current panel. Changing **Show Experimental releases** discards the snapshot.
 It never requests package bytes or writes state. Loading disables both install segments but not
-other onboarding. Offline results show **Version unavailable** and eight disabled
-**(Unavailable)** rows plus the explicit Retry command. Partially available channels remain usable:
-a Weekly-only bootstrap leaves the Milestone primary disabled and Weekly rows enabled. Each disabled
+other onboarding. Offline results show **Version unavailable** and every menu row disabled as
+**(Unavailable)** plus the explicit Retry command. Partially available channels remain usable:
+with Experimental shown, an Experimental-only bootstrap leaves the Core primary disabled and
+Experimental rows enabled. Each disabled
 choice carries a reason; explicit Retry can refresh partial snapshots. Stale components are never rebound.
 
 The normal planner accepts only one explicit official `MEKHQ`, `MEGAMEK`, or `LAB` repository and
-one explicit Milestone, Development, or Weekly channel. The default overload remains available to the
+one explicit Core or Experimental channel. The default overload remains available to the
 managed picker. First-launch primary/menu actions instead pass their fixed cached option to the
 same backend. Planning is metadata-only and binds the requested repository/product set/channel, source
 version/tag, full release/asset identity, product/channel-specific per-user destination, registry
@@ -347,22 +357,21 @@ no migration or filesystem write.
 Installations contains import, exact-release download, independent per-application preference,
 launcher removal, safe uninstall, location, channel/check, Update, and recovery actions on exact
 cards. Merely viewing/focusing a card mutates nothing. **Install another version** defaults to
-MekHQ/Milestone and uses token-colored content, list, viewport, labels, buttons, and
+MekHQ/Core and uses token-colored content, list, viewport, labels, buttons, and
 product/channel combos. The same combo class is used by the Game Java selector;
 it retains native Swing popup, keyboard, selection, and accessibility behavior, and the look and
 feel paints the field and arrow.
 
 One top row contains, in order, styled **Product**, styled **Channel**, and styled
-**Fetch releases** controls. It defaults to MekHQ/Milestone; there is no separate Browse mode.
+**Fetch releases** controls. It defaults to MekHQ/Core; there is no separate Browse mode. The
+Channel select offers Experimental only when **Show Experimental releases** is on.
 One fetch performs bounded complete-record discovery and resolves the current record plus the
-records needed for one selected-membership product-history page. Every resolved record requires
+records needed for one selected-channel product-history page. Every resolved record requires
 all three product references to validate. It never requests package bytes.
 
-Results include the selected channel's current product and only history with explicit record membership.
-Reused product tags retain their newest referencing record as the captured install source.
-No title, `prerelease`, version, or publication-date ordering
-inference is allowed. Page one contains the selected current identity exactly once, with stable
-repository/tag deduplication. **Previous page**, a non-button **Page N**, **Next page**, and
+Results include the selected channel's current product and only that channel's record history,
+newest four-part version first. No title, `prerelease`, or publication-date inference is allowed.
+Page one contains the selected current identity exactly once. **Previous page**, a non-button **Page N**, **Next page**, and
 **Install** share a stable footer. Previous is disabled on page one; Next follows the
 record history's bounded may-have-next signal. Product or channel changes clear selection/results/page
 controls and invalidate in-flight work. Page requests retain their exact product/channel snapshot
@@ -378,9 +387,8 @@ selected channel as the new copy's immutable track. It binds destination, regist
 product set, source, release, asset URL/name/size/optional published digest, and fixed channel,
 then repeats its exact metadata check before transfer. A quoted digest cannot disappear or change;
 quoted absence may become a valid digest at that refresh, or remain absent and use the SHA-256
-computed from the one exact retained body. Unknown historical membership is not channel evidence.
-The proposed complete-suite records and the current workaround are documented
-in [the CI update proposal](../ci_update.md).
+computed from the one exact retained body. Unknown historical releases are not channel evidence.
+The complete-suite records are summarized in [the CI and release channels notes](../ci_update.md).
 
 Static inspection, registry writes, package metadata/download work, launch-time Java validation,
 and child-process waiting run on background `SwingWorker`s, never the event-dispatch
@@ -551,15 +559,16 @@ current state, channel, adoption staging, and pending transaction are all absent
 managed-incomplete/corrupt, and recovery-pending cards never show it.
 
 The compact first screen shows one **Program (Version)** line and a styled update-channel selector
-with Milestone selected by default and Development and Weekly as alternatives. **Cancel** is fixed at
+with Core selected by default; Experimental is the only alternative and appears only when
+**Show Experimental releases** is on. **Cancel** is fixed at
 the far left and **Continue** at the far right; Escape cancels and Enter continues. No network
 request occurs until Continue. Continue searches bounded GitHub release-list metadata for the
 detected official repository and automatically prepares the copy only when one safe immutable tag
 matches. Numeric dotted versions compare numerically (`0.50.7`, `0.50.07`, and `v0.50.07` are
 equivalent), while component count and prerelease/build suffix remain identity-bearing. It first
 compares the primary product's observed version with the available channels' current complete-record
-targets. A selected-current identity is allowed, a shared identity is valid for its matching channels,
-and a distinct identity current only in another channel is rejected before package download.
+targets. A selected-current identity is allowed, and an identity current only in the other channel
+is rejected before package download.
 An identity matching no current target remains historical/unknown and may use the selected fixed
 channel in this legacy-ancestor adoption route, not in the normal record-only install browser.
 
@@ -577,12 +586,14 @@ metadata/package work runs in a worker under `BusyGate`, with exact record, sele
 dialog generation, and cancellation guards.
 
 The typed opposite-current result replaces the progress surface before package download. Its accent
-heading names **Use Milestone**, **Use Development**, or **Use Weekly for this installation**,
+heading names **Use Core** or **Use Experimental for this installation**,
 plain copy identifies the version's current canonical channel and confirms that no files changed,
-and its only actions are a direct styled **Try Milestone** / **Try Development** / **Try Weekly** retry and
+and its only actions are a direct styled **Try Core** / **Try Experimental** retry and
 **Close**. Retry uses the same record, suggestion, and dialog generation with the canonical
 channel. It neither exposes logs/technical details nor mislabels a file-comparison failure as a
-channel mismatch.
+channel mismatch. When the canonical channel is Experimental and **Show Experimental releases**
+is off, there is no retry: the copy tells the player to turn the option on in Settings first,
+**Close** is the only action, and adoption never prepares a channel that is not offered.
 Both the channel-mismatch and ineligible result dialogs are fixed-size (not resizable),
 retain their centered dark styling, default action and Escape-to-close behavior, and
 offer no technical-details action. A disposed progress surface must not be updated again

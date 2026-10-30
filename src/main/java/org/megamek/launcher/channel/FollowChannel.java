@@ -33,29 +33,45 @@
 
 package org.megamek.launcher.channel;
 
+import java.util.List;
 import java.util.Locale;
 
-/** Explicit membership in a published complete suite record; Nightly is not a game channel. */
+/**
+ * The channel named by a published complete suite record. Core is the default for players;
+ * Experimental is opt-in. The record's channel is authoritative, never GitHub's prerelease flag
+ * or the version number.
+ */
 public enum FollowChannel {
-    MILESTONE("milestone", "Milestone"),
-    DEVELOPMENT("development", "Development"),
-    WEEKLY("weekly", "Weekly");
+    CORE("core", "Core", "For playing"),
+    EXPERIMENTAL("experimental", "Experimental", "Help us test, may break things");
 
     private final String cliName;
     private final String displayName;
+    private final String description;
 
-    FollowChannel(String cliName, String displayName) {
+    FollowChannel(String cliName, String displayName, String description) {
         this.cliName = cliName;
         this.displayName = displayName;
+        this.description = description;
     }
 
     public String cliName() {
         return cliName;
     }
 
+    /** Short player-facing explanation of who the channel is for. */
+    public String description() {
+        return description;
+    }
+
     @Override
     public String toString() {
         return displayName;
+    }
+
+    /** The channels a player may choose; Experimental only after opting in. */
+    public static List<FollowChannel> offered(boolean showExperimental) {
+        return showExperimental ? List.of(CORE, EXPERIMENTAL) : List.of(CORE);
     }
 
     public static FollowChannel parse(String value) {
@@ -65,7 +81,6 @@ public enum FollowChannel {
                 if (channel.cliName.equals(normalized)) return channel;
             }
         }
-        throw new IllegalArgumentException(
-                "channel must be milestone, development, or weekly (nightly is not supported)");
+        throw new IllegalArgumentException("channel must be core or experimental");
     }
 }

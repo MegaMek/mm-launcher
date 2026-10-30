@@ -58,9 +58,9 @@ class PlatformInstallLocationsTest {
                 Map.of("LOCALAPPDATA", localAppData.toString()),
                 temp.resolve("home"), registry);
 
-        Path destination = locations.destination(registry, "MekHQ Milestone");
+        Path destination = locations.destination(registry, "MekHQ Core");
 
-        assertEquals(localAppData.resolve("MegaMek").resolve("MekHQ Milestone"),
+        assertEquals(localAppData.resolve("MegaMek").resolve("MekHQ Core"),
                 destination);
         assertFalse(Files.exists(destination));
     }
@@ -73,10 +73,10 @@ class PlatformInstallLocationsTest {
         PlatformInstallLocations locations =
                 locations("Mac OS X", Map.of(), home, registry);
 
-        Path destination = locations.destination(registry, "MegaMek Development");
+        Path destination = locations.destination(registry, "MegaMek Experimental");
 
         assertEquals(home.resolve("Library").resolve("Application Support")
-                .resolve("MegaMek").resolve("MegaMek Development"), destination);
+                .resolve("MegaMek").resolve("MegaMek Experimental"), destination);
         assertFalse(Files.exists(destination));
     }
 
@@ -88,14 +88,14 @@ class PlatformInstallLocationsTest {
 
         PlatformInstallLocations configured = locations("Linux",
                 Map.of("XDG_DATA_HOME", xdgData.toString()), home, registry);
-        assertEquals(xdgData.resolve("MegaMek").resolve("MegaMekLab Milestone"),
-                configured.destination(registry, "MegaMekLab Milestone"));
+        assertEquals(xdgData.resolve("MegaMek").resolve("MegaMekLab Core"),
+                configured.destination(registry, "MegaMekLab Core"));
 
         PlatformInstallLocations relativeIgnored = locations("Linux",
                 Map.of("XDG_DATA_HOME", "relative/data"), home, registry);
         assertEquals(home.resolve(".local").resolve("share").resolve("MegaMek")
-                        .resolve("MegaMekLab Milestone"),
-                relativeIgnored.destination(registry, "MegaMekLab Milestone"));
+                        .resolve("MegaMekLab Core"),
+                relativeIgnored.destination(registry, "MegaMekLab Core"));
     }
 
     @Test
@@ -107,13 +107,13 @@ class PlatformInstallLocationsTest {
                 locations("Windows 11", Map.of(), temp.resolve("home"), defaultRegistry);
 
         assertEquals(customRegistry.getParent().resolve("installations")
-                        .resolve("MekHQ Milestone"),
+                        .resolve("MekHQ Core"),
                 missingWindowsEnvironment.destination(
-                        customRegistry, "MekHQ Milestone"));
+                        customRegistry, "MekHQ Core"));
         assertEquals(defaultRegistry.getParent().resolve("installations")
-                        .resolve("MekHQ Milestone"),
+                        .resolve("MekHQ Core"),
                 PlatformInstallLocations.customRegistry().destination(
-                        defaultRegistry, "MekHQ Milestone"));
+                        defaultRegistry, "MekHQ Core"));
     }
 
     @Test
@@ -123,13 +123,13 @@ class PlatformInstallLocationsTest {
 
         IOException missing = assertThrows(IOException.class,
                 () -> locations("Windows 11", Map.of(), home, registry)
-                        .destination(registry, "MekHQ Milestone"));
+                        .destination(registry, "MekHQ Core"));
         assertTrue(missing.getMessage().contains("LOCALAPPDATA"));
 
         IOException relative = assertThrows(IOException.class,
                 () -> locations("Windows 11",
                         Map.of("LOCALAPPDATA", "relative/local"), home, registry)
-                        .destination(registry, "MekHQ Milestone"));
+                        .destination(registry, "MekHQ Core"));
         assertTrue(relative.getMessage().contains("absolute"));
     }
 
@@ -142,10 +142,10 @@ class PlatformInstallLocationsTest {
                 source("Mac OS X", Map.of(), "relative/home", registry));
 
         IOException blank = assertThrows(IOException.class,
-                () -> blankHome.destination(registry, "MekHQ Milestone"));
+                () -> blankHome.destination(registry, "MekHQ Core"));
         assertTrue(blank.getMessage().contains("user.home"));
         IOException relative = assertThrows(IOException.class,
-                () -> relativeHome.destination(registry, "MekHQ Milestone"));
+                () -> relativeHome.destination(registry, "MekHQ Core"));
         assertTrue(relative.getMessage().contains("absolute"));
     }
 

@@ -183,7 +183,7 @@ class SplitButtonStyleTest {
 
     private static List<SplitFixture> fixtures() {        FirstLaunchSplitButton install = new FirstLaunchSplitButton(GuiScale.DEFAULT,
                 () -> {}, key -> {}, () -> {});
-        install.setOptions(QuickInstallTestData.snapshot("1.2.3", "1.3.0"));
+        install.setOptions(QuickInstallTestData.snapshot("1.2.3"));
         HomeLaunchSplitButton launch = new HomeLaunchSplitButton(GuiScale.DEFAULT,
                 "megamek", "MegaMek", () -> {},
                 List.of(new HomeLaunchSplitButton.Option("Another installation", () -> {})));
