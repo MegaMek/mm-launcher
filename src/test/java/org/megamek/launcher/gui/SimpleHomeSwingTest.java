@@ -231,7 +231,7 @@ class SimpleHomeSwingTest {
 
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
-    void nothingReleasedPointsToSettingsWhichEmptyHomeStillOffers() throws Exception {
+    void nothingReleasedSaysSoWithoutPromotingExperimental() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
         FakeServices services = new FakeServices(temp.resolve("nothing-released.json"));
@@ -242,9 +242,9 @@ class SimpleHomeSwingTest {
             SwingUtilities.invokeAndWait(frame::showWindow);
             JLabel status = waitFor(() -> {
                 JLabel label = find(frame, "homeStatusLabel");
-                return label != null && label.getText().startsWith("No Core release") ? label : null;
+                return label != null && label.getText().startsWith("No release") ? label : null;
             });
-            assertEquals("No Core release yet. To try an Experimental release, turn it on in Settings.",
+            assertEquals("No release is available to install yet. Please check back soon.",
                     status.getText());
             assertNull(status.getToolTipText());
             // The message arrives after the first layout; the deck must grow without a resize.

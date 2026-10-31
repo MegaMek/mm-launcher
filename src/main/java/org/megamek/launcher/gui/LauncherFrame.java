@@ -795,10 +795,9 @@ public final class LauncherFrame extends JFrame {
         }
     }
 
-    private String nothingReleasedMessage() {
-        return showExperimental
-                ? "No release is available to install yet. Please check back soon."
-                : "No Core release yet. To try an Experimental release, turn it on in Settings.";
+    // Experimental is for testers who opt in, so this never points to it.
+    private static String nothingReleasedMessage() {
+        return "No release is available to install yet. Please check back soon.";
     }
 
     private boolean isCurrentEmptyFirstLaunch() {

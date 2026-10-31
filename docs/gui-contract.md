@@ -157,8 +157,8 @@ Home offers two community links: **Join Discord** opens the MegaMek Discord invi
 **Play online** opens megamek.games, which lists public MegaMek servers. On the managed home they
 sit on the right of the Installations/Settings row, which stays centered; when the window is too
 narrow for both, the links move centered below that row so the buttons never wrap or clip. The
-first-run home uses the same row with a single **Settings** button, so Experimental releases can be
-turned on before anything is installed.
+first-run home uses the same row with a single **Settings** button, so testers can opt in to
+Experimental releases before anything is installed.
 
 Launch options set per-application maximum memory (MegaMek, MekHQ, MegaMekLab), a graphics
 renderer (default, Disable Direct3D on Windows, or OpenGL), additional Java arguments, and the MegaMek user

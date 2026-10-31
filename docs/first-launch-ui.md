@@ -31,11 +31,11 @@ truthfully, disabled, and removed from keyboard focus; **Use existing installati
 enabled and independent. Failure never invents a version or leaves the primary actionable. It
 enables only the arrow needed to expose a clear **Retry version check** menu command, and the
 message row asks the player to check their connection, with the error details in its tooltip.
-A check that works but finds nothing offered released yet is not a failure to retry: with
-Experimental hidden the message points to Settings to turn it on, and with Experimental shown it
-says nothing is available yet. If only Experimental has been released and it is shown, the message
+A check that works but finds nothing offered released yet is not a failure to retry: the message
+says nothing is available yet. It never suggests Experimental, which is only for testers who opt in
+through Settings. If only Experimental has been released and the player has opted in, the message
 points to the arrow menu. Empty Home has a centered **Settings** button with the community links on
-its right, as on managed Home, so Experimental can be turned on before anything is installed.
+its right, as on managed Home, so testers can opt in before anything is installed.
 The disabled button already communicates loading, so Home does not repeat a `Checking…` message.
 Its fixed-height message row remains reserved even when empty, preventing metadata completion or
 later failure text from moving the action controls.

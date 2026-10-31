@@ -468,7 +468,7 @@ There is no website YAML or independent-latest-release fallback. While it loads,
 keyboard focus, while **Use existing installation** remains available. Failure keeps installation
 unavailable and exposes one explicit **Retry version check** command; concurrent retries are
 deduplicated. When the check works but nothing offered has been released yet, Home says so
-instead: with Experimental hidden it points to **Settings**, which empty Home also offers. The first successful immutable snapshot is retained for the frame lifetime, so Home
+instead, without suggesting Experimental, which is only for testers who opt in through **Settings** (empty Home also offers it). The first successful immutable snapshot is retained for the frame lifetime, so Home
 reloads, confirmation cancellation, location changes, and repeated quote opens preserve the same
 labels without another current-channel request. Missing channels are disabled with explicit reasons;
 with Experimental shown, Experimental-only records remain usable without changing the Core default. Explicit Retry can refresh
