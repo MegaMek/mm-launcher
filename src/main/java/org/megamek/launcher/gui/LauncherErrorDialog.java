@@ -66,7 +66,8 @@ final class LauncherErrorDialog extends JDialog {
     private final JLabel logging;
 
     private LauncherErrorDialog(Window owner, String title, String details, String loggingStatus,
-                                GuiScale scale, Runnable copyAction, Runnable viewLogsAction) {
+                                GuiScale scale, Runnable copyAction, Runnable viewLogsAction,
+                                Runnable reportAction) {
         super(owner, title, ModalityType.MODELESS);
         setName("launcherErrorDialog");
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
@@ -122,6 +123,10 @@ final class LauncherErrorDialog extends JDialog {
         JButton logs = new FirstLaunchButton("View logs", "viewOperationLogsButton",
                 false, scale, FirstLaunchButton.Size.SMALL);
         logs.addActionListener(event -> viewLogsAction.run());
+        JButton report = new LauncherLink("Report this problem", "reportErrorButton", scale);
+        report.getAccessibleContext().setAccessibleDescription(
+                "Opens the launcher's bug report helper");
+        report.addActionListener(event -> reportAction.run());
         JButton close = new FirstLaunchButton("Close", "closeErrorDialogButton",
                 true, scale, FirstLaunchButton.Size.SMALL);
         close.addActionListener(event -> dispose());
@@ -134,6 +139,8 @@ final class LauncherErrorDialog extends JDialog {
         actions.add(Box.createHorizontalStrut(scale.space("md")));
         actions.add(logs);
         actions.add(Box.createHorizontalGlue());
+        actions.add(report);
+        actions.add(Box.createHorizontalStrut(scale.space("md")));
         actions.add(close);
 
         JPanel content = new JPanel(new BorderLayout(0, scale.space("xl")));
@@ -162,11 +169,12 @@ final class LauncherErrorDialog extends JDialog {
      * label can be updated once local diagnostics finish recording. */
     static LauncherErrorDialog show(Window owner, String title, String details,
                                     String loggingStatus, GuiScale scale, Runnable copyAction,
-                                    Runnable viewLogsAction) {
+                                    Runnable viewLogsAction, Runnable reportAction) {
         Objects.requireNonNull(copyAction, "copyAction");
         Objects.requireNonNull(viewLogsAction, "viewLogsAction");
+        Objects.requireNonNull(reportAction, "reportAction");
         LauncherErrorDialog dialog = new LauncherErrorDialog(owner, title, details, loggingStatus,
-                scale, copyAction, viewLogsAction);
+                scale, copyAction, viewLogsAction, reportAction);
         dialog.setVisible(true);
         return dialog;
     }

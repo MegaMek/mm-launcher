@@ -1,0 +1,114 @@
+name: "Report a Bug"
+description: >
+  Something in MegaMek Launcher is broken or behaving incorrectly. Problems inside MegaMek,
+  MegaMekLab or MekHQ themselves belong in those repositories.
+type: "Bug"
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The quickest way to file this is **Report a bug** in the launcher - on Home next to
+        **Join Discord**, in **Settings > Diagnostics**, or on any error dialog. It fills in the
+        version fields below for you and can save the launcher's diagnostics as a single ZIP.
+
+        Problems that happen *inside* MegaMek, MegaMekLab or MekHQ after they start should be
+        reported from that program's **Help > Report a Bug**.
+
+  - type: textarea
+    id: brief-description
+    attributes:
+      label: "What went wrong"
+      description: "Describe what you saw, including any error message. Screenshots help."
+      placeholder: "Describe the problem here..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected-behaviour
+    attributes:
+      label: "What you expected instead"
+      description: "One line is enough."
+      placeholder: "I expected..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps-to-reproduce
+    attributes:
+      label: "Steps to reproduce"
+      description: >
+        A numbered list, if you can make it happen again. If it happened once and never came back,
+        say so - that is still worth reporting.
+      placeholder: "1. ...\n2. ...\n3. ..."
+
+  - type: upload
+    id: report-files
+    attributes:
+      label: "Attach your files"
+      description: >
+        The diagnostics ZIP saved by the launcher's Report a bug dialog, plus any screenshots.
+        Review the ZIP before sharing; it can contain local folder names.
+    validations:
+      required: false
+      accept: ".zip,.gz,.log,.txt,.json,.png,.jpg,.jpeg,.gif,.mp4,.mov"
+
+  - type: textarea
+    id: log-excerpt
+    attributes:
+      label: "Relevant log lines"
+      description: >
+        Only needed if you cannot attach the ZIP. Use **Settings > Diagnostics > View logs > Copy
+        sanitized log** and paste the part around the problem.
+      render: text
+
+  - type: input
+    id: launcher-version
+    attributes:
+      label: "Launcher Version"
+      description: >
+        Filled in for you if you opened this form from the launcher. By hand: read it from the
+        launcher's title bar.
+      placeholder: "Example: 0.14.24"
+    validations:
+      required: true
+
+  - type: input
+    id: install-type
+    attributes:
+      label: "How the launcher is installed"
+      description: >
+        Windows installer (.msi), macOS installer (.pkg), Linux package (.deb or .rpm), or portable
+        archive.
+      placeholder: "Example: Windows installer (.msi)"
+    validations:
+      required: true
+
+  - type: input
+    id: operating-system
+    attributes:
+      label: "Operating System"
+      description: "Please be specific - Windows 11, macOS 15 Sequoia, Ubuntu 24.04."
+      placeholder: "Example: Windows 11 (10.0.26200) amd64"
+    validations:
+      required: true
+
+  - type: input
+    id: java-version
+    attributes:
+      label: "Java Version"
+      description: "The Java runtime running the launcher. Filled in for you from the launcher."
+      placeholder: "Example: Eclipse Adoptium 21.0.8"
+
+  - type: checkboxes
+    id: final-checks
+    attributes:
+      label: "Before you submit"
+      options:
+        - label: "This report only contains one issue, and I haven't already reported it"
+          required: true
+        - label: >
+            This is a launcher problem (installing, updating, launching or managing copies), not a
+            problem inside MegaMek, MegaMekLab or MekHQ
+          required: true
+        - label: "I have asked about this on the MegaMek Discord (optional)"

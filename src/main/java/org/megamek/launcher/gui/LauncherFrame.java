@@ -46,6 +46,7 @@ import org.megamek.launcher.channel.SuiteReleaseRecord;
 import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.channel.QuickInstallSnapshot;
 import org.megamek.launcher.channel.SelectedChannelReleaseCatalog;
+import org.megamek.launcher.diagnostics.BugReport;
 import org.megamek.launcher.diagnostics.SanitizedErrors;
 import org.megamek.launcher.launch.LaunchOptions;
 import org.megamek.launcher.launch.LaunchOptionsStore;
@@ -208,6 +209,7 @@ public final class LauncherFrame extends JFrame {
     private String transientHomeMessage;
     private boolean launcherUpdateChecked;
     private final LauncherSelfUpdate launcherUpdater = new LauncherSelfUpdate();
+    private BugReportDialog bugReportDialog;
 
     public LauncherFrame(LauncherServices services) {
         this(services, new SwingExistingImportPrompts(),
@@ -2727,6 +2729,12 @@ public final class LauncherFrame extends JFrame {
             logs.addActionListener(event -> showOperationLogs());
             utilityButtons.add(logs);
             diagnostics.add(logs);
+            diagnostics.add(Box.createVerticalStrut(guiScale.space("sm")));
+            JButton report = homeButton("Report a bug", "reportBugSettingsButton");
+            report.setAlignmentX(Component.LEFT_ALIGNMENT);
+            report.addActionListener(event -> showBugReport());
+            utilityButtons.add(report);
+            diagnostics.add(report);
             left.add(diagnostics);
             if (LauncherSelfUpdate.available()) {
                 left.add(Box.createVerticalStrut(guiScale.space("lg")));
@@ -3142,6 +3150,10 @@ public final class LauncherFrame extends JFrame {
                 "Opens megamek.games, the list of public MegaMek servers, in your browser");
         online.addActionListener(event -> openWebsite(
                 java.net.URI.create(PLAY_ONLINE_URL), "megamek.games"));
+        JButton report = new LauncherLink("Report a bug", "reportBugButton", guiScale);
+        report.getAccessibleContext().setAccessibleDescription(
+                "Opens the launcher's bug report helper");
+        report.addActionListener(event -> showBugReport());
         JPanel links = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.CENTER,
                 guiScale.space("lg"), 0));
         links.setName("communityLinks");
@@ -3149,6 +3161,7 @@ public final class LauncherFrame extends JFrame {
         links.setAlignmentX(Component.CENTER_ALIGNMENT);
         links.add(discord);
         links.add(online);
+        links.add(report);
         links.setMaximumSize(new Dimension(Integer.MAX_VALUE, links.getPreferredSize().height));
         return links;
     }
@@ -4845,7 +4858,8 @@ public final class LauncherFrame extends JFrame {
         String loggingStatus = record ? "Saving local diagnostics..."
                 : "Local operation diagnostics are available when recording succeeded.";
         LauncherErrorDialog errorDialog = LauncherErrorDialog.show(this, title, details,
-                loggingStatus, guiScale, () -> copySanitized(details), this::showOperationLogs);
+                loggingStatus, guiScale, () -> copySanitized(details), this::showOperationLogs,
+                this::showBugReport);
         if (record) {
             recordErrorAsync(title, error, errorDialog::updateLoggingStatus);
         }
@@ -4940,6 +4954,64 @@ public final class LauncherFrame extends JFrame {
     private static void copySanitized(String text) {
         Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
                 new StringSelection(SanitizedErrors.document(text)), null);
+    }
+
+    /** Opens the bug report helper, or brings the open one to the front. */
+    void showBugReport() {
+        if (bugReportDialog != null && bugReportDialog.isDisplayable()) {
+            bugReportDialog.toFront();
+            bugReportDialog.requestFocus();
+            return;
+        }
+        bugReportDialog = BugReportDialog.show(this, guiScale, new BugReportDialog.Actions(
+                this::saveBugReportArchive,
+                () -> openWebsite(BugReport.issueForm(services.bugReportEnvironment()),
+                        "the bug report form"),
+                () -> openWebsite(java.net.URI.create(DISCORD_INVITE_URL), "Discord")));
+    }
+
+    private void saveBugReportArchive() {
+        BugReportDialog dialog = bugReportDialog;
+        java.awt.Window owner = dialog != null && dialog.isDisplayable() ? dialog : this;
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Save diagnostics ZIP");
+        chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
+                "ZIP archives", "zip"));
+        chooser.setSelectedFile(new java.io.File(BugReport.archiveFileName(java.time.Instant.now())));
+        if (chooser.showSaveDialog(owner) != JFileChooser.APPROVE_OPTION) return;
+        Path selected = chooser.getSelectedFile().toPath();
+        Path target = selected.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".zip")
+                ? selected : selected.resolveSibling(selected.getFileName() + ".zip");
+        if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)
+                && !LauncherAlertDialog.showConfirm(owner, guiScale, "Replace file?",
+                target.getFileName() + " already exists. Replace it?", "Replace")) {
+            return;
+        }
+        if (dialog != null) dialog.archiveSaving(true);
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                services.writeBugReport(target);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                if (dialog == null) return;
+                dialog.archiveSaving(false);
+                try {
+                    get();
+                    dialog.showArchiveStatus("Saved " + target.getFileName()
+                            + ". Attach it to the bug report form.", false);
+                } catch (java.util.concurrent.ExecutionException problem) {
+                    dialog.showArchiveStatus("The diagnostics ZIP could not be saved. "
+                            + SanitizedErrors.display(problem.getCause()), true);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    dialog.showArchiveStatus("Saving the diagnostics ZIP was interrupted.", true);
+                }
+            }
+        }.execute();
     }
 
     private JDialog dialog(String title, Component center, Component south, Dimension size) {

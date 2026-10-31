@@ -141,6 +141,7 @@ class SimpleHomeSwingTest {
                         "first-run Home also offers the community links");
                 assertInstanceOf(LauncherLink.class, find(frame, "openDiscordButton"));
                 assertInstanceOf(LauncherLink.class, find(frame, "playOnlineButton"));
+                assertInstanceOf(LauncherLink.class, find(frame, "reportBugButton"));
                 return null;
             });
             SwingUtilities.invokeAndWait(() -> {

@@ -1,0 +1,12 @@
+blank_issues_enabled: false
+
+contact_links:
+  - name: Questions
+    url: https://discord.gg/megamek
+    about: If you have questions, please ask on the MegaMek Discord before opening an issue.
+
+  - name: Problems inside MegaMek, MegaMekLab or MekHQ
+    url: https://github.com/MegaMek/megamek/issues/new/choose
+    about: >
+      Report problems that happen after a game starts from that program's Help > Report a Bug, or
+      from the MegaMek, MegaMekLab or MekHQ repository.
