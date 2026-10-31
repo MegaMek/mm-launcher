@@ -199,13 +199,39 @@ class SimpleHomeSwingTest {
             assertTrue(options.isEnabled());
             assertEquals(1, services.catalogRequests.get());
             JLabel failedStatus = onEdt(() -> find(frame, "homeStatusLabel"));
-            assertTrue(failedStatus.getText().startsWith("Couldn't check for install versions"),
+            assertTrue(failedStatus.getText().contains("Couldn't check for install versions"),
                     failedStatus.getText());
             assertTrue(failedStatus.getToolTipText().contains("fixture metadata unavailable"));
             // The message arrives after the first layout; the deck must grow without a resize.
             waitUntil(() -> {
                 javax.swing.JScrollPane scroller = find(frame, "firstLaunchControlsScroller");
                 return scroller != null && scroller.getViewport().getHeight()
+                        >= scroller.getViewport().getView().getPreferredSize().height;
+            });
+            // At the narrowest window long guidance wraps instead of clipping.
+            String original = failedStatus.getText();
+            SwingUtilities.invokeAndWait(() -> {
+                failedStatus.setText(original.replace("</div>",
+                        " " + "Long translated guidance keeps going past one line. ".repeat(4)
+                                + "</div>"));
+                frame.setSize(frame.getMinimumSize());
+                frame.validate();
+            });
+            waitUntil(() -> {
+                javax.swing.JScrollPane scroller = find(frame, "firstLaunchControlsScroller");
+                if (scroller == null) return false;
+                // Measure with a separate view so the check doesn't resize the label's own.
+                javax.swing.text.View view = javax.swing.plaf.basic.BasicHTML.createHTMLView(
+                        failedStatus, failedStatus.getText());
+                java.awt.Insets insets = failedStatus.getInsets();
+                int width = failedStatus.getWidth() - insets.left - insets.right;
+                if (width <= 0) return false;
+                view.setSize(width, 0);
+                int line = failedStatus.getFontMetrics(failedStatus.getFont()).getHeight();
+                return Math.ceil(view.getPreferredSpan(javax.swing.text.View.Y_AXIS)) > 2 * line
+                        && Math.ceil(view.getPreferredSpan(javax.swing.text.View.Y_AXIS))
+                        <= failedStatus.getHeight() - insets.top - insets.bottom
+                        && scroller.getViewport().getHeight()
                         >= scroller.getViewport().getView().getPreferredSize().height;
             });
 

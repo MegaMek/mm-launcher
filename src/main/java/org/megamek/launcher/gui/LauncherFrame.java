@@ -788,12 +788,19 @@ public final class LauncherFrame extends JFrame {
                 if (firstLaunchNothingReleased) {
                     status.setText("");
                 } else {
-                    status.setText("Couldn't check for install versions. Check your connection, "
-                            + "then open the arrow menu and choose Retry version check.");
+                    status.setText(wrappingStatus("Couldn't check for install versions. Check "
+                            + "your connection, then open the arrow menu and choose Retry version "
+                            + "check."));
                     status.setToolTipText(firstLaunchMetadataFailure);
                 }
             }
         }
+    }
+
+    /** Empty Home is narrow-safe only if its guidance wraps instead of clipping. */
+    private static String wrappingStatus(String text) {
+        String escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        return "<html><div style='text-align:center'>" + escaped + "</div></html>";
     }
 
     private boolean isCurrentEmptyFirstLaunch() {
@@ -806,13 +813,14 @@ public final class LauncherFrame extends JFrame {
     private void setStableFirstLaunchStatus() {
         if (isCurrentEmptyFirstLaunch() && firstLaunchMetadataFailure != null
                 && firstLaunchSnapshot != null) {
-            status.setText("Version refresh failed — using previous versions. Choose Retry.");
+            status.setText(wrappingStatus(
+                    "Version refresh failed — using previous versions. Choose Retry."));
             status.setToolTipText(firstLaunchMetadataFailure);
             return;
         }
         status.setToolTipText(null);
         status.setText(isCurrentEmptyFirstLaunch() && firstLaunchArtworkError != null
-                ? "Artwork unavailable; diagnostics are available in Settings."
+                ? wrappingStatus("Artwork unavailable; diagnostics are available in Settings.")
                 : "");
     }
 
@@ -3271,14 +3279,15 @@ public final class LauncherFrame extends JFrame {
                 LauncherSelfUpdate.consumeReport(launcherUpdateReport(), LauncherSelfUpdate.currentVersion()),
                 launcherUpdater::check), checked -> {
             if (checked.pending()) {
-                status.setText(checked.message());
+                setLauncherUpdateStatus(explicit, checked.message());
                 if (explicit) LauncherAlertDialog.showMessage(this, guiScale,
                         "Launcher update in progress", checked.message());
                 return;
             }
             LauncherSelfUpdate.Candidate candidate = checked.candidate();
             if (candidate == null) {
-                status.setText(checked.message() == null ? "Launcher is up to date." : checked.message());
+                setLauncherUpdateStatus(explicit,
+                        checked.message() == null ? "Launcher is up to date." : checked.message());
                 if (checked.message() != null) LauncherAlertDialog.showMessage(this, guiScale,
                         "Launcher update result", checked.message());
                 return;
@@ -3312,10 +3321,23 @@ public final class LauncherFrame extends JFrame {
             }, error -> progress.append("\nLauncher update failed: " + errorDetail(error) + "\n"), () -> {});
         }, error -> {
             if (!explicit) {
-                status.setText("Launcher update: " + SanitizedErrors.text(error.getMessage()));
+                setLauncherUpdateStatus(false,
+                        "Launcher update: " + SanitizedErrors.text(error.getMessage()));
                 recordErrorAsync("Automatic launcher update check", error, ignored -> {});
             }
         }, () -> {}, explicit, explicit);
+    }
+
+    /**
+     * The automatic check races empty Home's version check on the shared status line; it must
+     * not replace guidance the player still needs to act on.
+     */
+    private void setLauncherUpdateStatus(boolean explicit, String text) {
+        if (!explicit && isCurrentEmptyFirstLaunch() && firstLaunchMetadataFailure != null
+                && !firstLaunchNothingReleased) {
+            return;
+        }
+        status.setText(text);
     }
 
     static boolean confirmLauncherUpdate(Window owner, GuiScale scale,

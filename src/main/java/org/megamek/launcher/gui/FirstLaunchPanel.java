@@ -49,6 +49,8 @@ import javax.swing.Scrollable;
 import javax.swing.SwingConstants;
 import javax.swing.UIManager;
 import javax.swing.border.Border;
+import javax.swing.plaf.basic.BasicHTML;
+import javax.swing.text.View;
 import java.awt.Color;
 import java.awt.BorderLayout;
 import java.awt.Component;
@@ -142,9 +144,20 @@ final class FirstLaunchPanel extends JPanel {
         status.setName("homeStatusLabel");
         status.setVisible(true);
         // Empty status takes no space; the content panel grows the deck when text arrives.
+        // HTML guidance wraps to the deck width, so its height follows that width.
         JPanel statusRow = new JPanel(new BorderLayout()) {
             @Override public Dimension getPreferredSize() {
-                return new Dimension(0, super.getPreferredSize().height);
+                int height = super.getPreferredSize().height;
+                Object html = status.getClientProperty(BasicHTML.propertyKey);
+                Insets deck = controls.getInsets();
+                int width = controls.getWidth() - deck.left - deck.right;
+                if (html instanceof View view && width > 0) {
+                    Insets label = status.getInsets();
+                    view.setSize(Math.max(1, width - label.left - label.right), 0);
+                    height = (int) Math.ceil(view.getPreferredSpan(View.Y_AXIS))
+                            + label.top + label.bottom;
+                }
+                return new Dimension(0, height);
             }
 
             @Override public Dimension getMaximumSize() {
