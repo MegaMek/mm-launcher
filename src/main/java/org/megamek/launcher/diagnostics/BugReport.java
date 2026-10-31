@@ -83,9 +83,10 @@ public final class BugReport {
                               String javaVersion) {
         public static Environment current() {
             String version = BugReport.class.getPackage().getImplementationVersion();
-            return new Environment(version == null || version.isBlank() ? "development build" : version,
-                    BugReport.installType(System.getProperty("os.name", ""), LauncherSelfUpdate.available(),
-                            System.getProperty("jpackage.app-path", "")),
+            boolean packaged = version != null && !version.isBlank();
+            return new Environment(packaged ? version : "development build",
+                    BugReport.installType(System.getProperty("os.name", ""),
+                            LauncherSelfUpdate.available(), packaged),
                     "%s %s (%s)".formatted(System.getProperty("os.name"),
                             System.getProperty("os.version"), System.getProperty("os.arch")),
                     "%s %s".formatted(System.getProperty("java.vendor"),
@@ -96,16 +97,18 @@ public final class BugReport {
     /**
      * @param osName          the {@code os.name} property
      * @param nativeInstall   whether this is a self-updating native installation
-     * @param packagedAppPath the {@code jpackage.app-path} property, blank outside a packaged app
+     * @param packaged        whether the launcher runs from its released JAR, which carries an
+     *                        {@code Implementation-Version}. Portable entry points do not set
+     *                        {@code jpackage.app-path}, so that property cannot tell them apart
+     *                        from a source build.
      */
-    static String installType(String osName, boolean nativeInstall, String packagedAppPath) {
+    static String installType(String osName, boolean nativeInstall, boolean packaged) {
         if (nativeInstall) {
             if (osName.startsWith("Windows")) return "Windows installer (.msi)";
             if (osName.startsWith("Mac")) return "macOS installer (.pkg)";
             return "Linux package (.deb or .rpm)";
         }
-        if (packagedAppPath != null && !packagedAppPath.isBlank()) return "Portable archive";
-        return "Development build";
+        return packaged ? "Portable archive" : "Development build";
     }
 
     /** The issue form with this environment filled in, or the plain form if that would be too long. */

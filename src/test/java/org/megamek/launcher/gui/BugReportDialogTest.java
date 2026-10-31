@@ -59,6 +59,9 @@ class BugReportDialogTest {
             assertEquals(content.saveArchive().getPreferredSize(),
                     content.openIssueForm().getPreferredSize());
             assertFalse(content.archiveStatus().isVisible(), "no status until something is saved");
+            assertEquals(Boolean.TRUE, content.saveArchive().getClientProperty(
+                            OperationProgressDialog.OPERATION_CONTROL),
+                    "browser work in the frame must not snapshot and later restore a stale Save state");
             assertInstanceOf(LauncherLink.class, find(content.panel(), "bugReportDiscordButton"));
             assertNotNull(find(content.panel(), "bugReportIntro"));
 

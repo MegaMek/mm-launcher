@@ -106,12 +106,13 @@ class BugReportTest {
 
     @Test
     void installTypeDescribesHowTheLauncherWasDistributed() {
-        assertEquals("Windows installer (.msi)", BugReport.installType("Windows 11", true, "x"));
-        assertEquals("macOS installer (.pkg)", BugReport.installType("Mac OS X", true, "x"));
-        assertEquals("Linux package (.deb or .rpm)", BugReport.installType("Linux", true, "x"));
-        assertEquals("Portable archive", BugReport.installType("Windows 11", false,
-                "C:\\Games\\MegaMek Launcher\\MegaMek Launcher.exe"));
-        assertEquals("Development build", BugReport.installType("Linux", false, ""));
+        assertEquals("Windows installer (.msi)", BugReport.installType("Windows 11", true, true));
+        assertEquals("macOS installer (.pkg)", BugReport.installType("Mac OS X", true, true));
+        assertEquals("Linux package (.deb or .rpm)", BugReport.installType("Linux", true, true));
+        assertEquals("Portable archive", BugReport.installType("Windows 11", false, true));
+        assertEquals("Portable archive", BugReport.installType("Linux", false, true),
+                "the portable shell scripts run the released JAR without jpackage.app-path");
+        assertEquals("Development build", BugReport.installType("Linux", false, false));
     }
 
     @Test

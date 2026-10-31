@@ -103,11 +103,20 @@ final class BugReportDialog extends JDialog {
         });
 
         pack();
+        Dimension fitted = fitToScreen();
+        setMinimumSize(new Dimension(Math.min(scale.size("dialog.sm"), fitted.width), fitted.height));
+        setLocationRelativeTo(owner);
+    }
+
+    /** Sizes the dialog to its content but no larger than the usable screen, and keeps it on it. */
+    private Dimension fitToScreen() {
         Rectangle available = GuiScale.usableBounds(getGraphicsConfiguration());
         Dimension fitted = GuiScale.fitWindow(getSize(), available);
-        setMinimumSize(new Dimension(Math.min(scale.size("dialog.sm"), fitted.width), fitted.height));
         setSize(fitted);
-        setLocationRelativeTo(owner);
+        int x = Math.max(available.x, Math.min(getX(), available.x + available.width - fitted.width));
+        int y = Math.max(available.y, Math.min(getY(), available.y + available.height - fitted.height));
+        setLocation(x, y);
+        return fitted;
     }
 
     static BugReportDialog show(Window owner, GuiScale scale, Actions actions) {
@@ -132,6 +141,7 @@ final class BugReportDialog extends JDialog {
         status.setForeground(problem ? LauncherTheme.WARNING : FirstLaunchPanel.MUTED);
         status.setVisible(true);
         pack();
+        fitToScreen();
     }
 
     static Content content(GuiScale scale, Actions actions, Runnable close) {
@@ -155,6 +165,8 @@ final class BugReportDialog extends JDialog {
         save.getAccessibleContext().setAccessibleDescription(
                 "Saves the launcher's sanitized logs and system details as one ZIP file");
         save.addActionListener(event -> actions.saveArchive().run());
+        // Enabled only by archiveSaving, so the frame's busy handling must not snapshot or restore it.
+        save.putClientProperty(OperationProgressDialog.OPERATION_CONTROL, Boolean.TRUE);
         JButton open = new FirstLaunchButton("Open bug report form", "openBugReportFormButton",
                 true, scale, FirstLaunchButton.Size.SMALL);
         open.getAccessibleContext().setAccessibleDescription(
