@@ -289,6 +289,7 @@ public class LauncherServices {
     }
 
     void saveAppearance(LauncherAppearance appearance) throws IOException {
+        ensureRegistryParent();
         settings.writeAppearance(appearance);
     }
 
@@ -302,6 +303,7 @@ public class LauncherServices {
     }
 
     void saveShowExperimental(boolean showExperimental) throws IOException {
+        ensureRegistryParent();
         settings.writeShowExperimental(showExperimental);
     }
 

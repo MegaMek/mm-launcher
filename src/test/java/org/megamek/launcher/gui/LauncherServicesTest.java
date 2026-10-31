@@ -401,6 +401,23 @@ class LauncherServicesTest {
     }
 
     @Test
+    void releaseAndAppearanceSettingsSaveBeforeTheStateFolderExists() throws Exception {
+        Path registry = temp.resolve("fresh-machine").resolve("MegaMek Launcher")
+                .resolve("launcher-registry.json");
+        Files.createDirectories(registry.getParent().getParent());
+        LauncherServices services = new LauncherServices(registry);
+        services.saveShowExperimental(true);
+        assertTrue(services.showExperimental());
+
+        Path otherRegistry = temp.resolve("fresh-appearance").resolve("MegaMek Launcher")
+                .resolve("launcher-registry.json");
+        Files.createDirectories(otherRegistry.getParent().getParent());
+        new LauncherServices(otherRegistry).saveAppearance(LauncherAppearance.DEFAULT);
+        assertTrue(Files.isRegularFile(otherRegistry.resolveSibling(
+                otherRegistry.getFileName() + ".settings.json")));
+    }
+
+    @Test
     void javaRefusalAndPreviewDoNotStartGameUntilLaunch() throws Exception {
         Path root = suite("launch");
         Path registry = temp.resolve("registry.json");
