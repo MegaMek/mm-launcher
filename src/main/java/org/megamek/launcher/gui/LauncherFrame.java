@@ -37,6 +37,7 @@ import org.megamek.launcher.design.swing.TokenPanel;
 
 import org.megamek.launcher.gui.AutomaticInstallationChecks.InstallationCheck;
 
+import org.megamek.launcher.channel.ChannelCatalog;
 import org.megamek.launcher.channel.ChannelPreference;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.ChannelUpdateChecker;
@@ -166,6 +167,8 @@ public final class LauncherFrame extends JFrame {
     private boolean showExperimental;
     private final LatestSettingSave<Boolean> showExperimentalSave;
     private String firstLaunchMetadataFailure;
+    /** The last version check worked but nothing offered has been released yet. */
+    private boolean firstLaunchNothingReleased;
     private long firstLaunchMetadataAttempt;
     private SwingWorker<Map<String, InstallationCheck>, Void> automaticChecksWorker;
     private SwingWorker<InstallationCheck, Void> installationCheckWorker;
@@ -401,12 +404,8 @@ public final class LauncherFrame extends JFrame {
         navigation.setAlignmentX(Component.CENTER_ALIGNMENT);
         navigation.add(manage);
         navigation.add(settings);
-        JPanel links = new JPanel(new java.awt.GridBagLayout());
-        links.setOpaque(false);
-        links.add(communityLinks());
-        JPanel navigationRow = new NavigationRow(navigation, links, guiScale.space("md"));
+        JPanel navigationRow = homeNavigationRow(navigation);
         navigationRow.setName("managedHomeNavigationRow");
-        navigationRow.setAlignmentX(Component.CENTER_ALIGNMENT);
         center.add(navigationRow);
 
         homeNewsBody = new JPanel();
@@ -660,7 +659,7 @@ public final class LauncherFrame extends JFrame {
                 ? ""
                 : "Artwork unavailable; diagnostics are available in Settings.");
         FirstLaunchPanel firstLaunch = new FirstLaunchPanel(firstLaunchArtwork, guiScale,
-                download, useExisting, status, communityLinks());
+                download, useExisting, status, firstLaunchNavigation());
         firstLaunchPanel = firstLaunch;
         content.add(firstLaunch, BorderLayout.CENTER);
         applyFirstLaunchMetadata(true);
@@ -685,6 +684,7 @@ public final class LauncherFrame extends JFrame {
         }
         firstLaunchMetadataState = FirstLaunchMetadataState.LOADING;
         firstLaunchMetadataFailure = null;
+        firstLaunchNothingReleased = false;
         final long attempt = ++firstLaunchMetadataAttempt;
         applyFirstLaunchMetadata(false);
         final boolean experimental = showExperimental;
@@ -715,10 +715,15 @@ public final class LauncherFrame extends JFrame {
                 } catch (java.util.concurrent.CancellationException ignored) {
                     return;
                 } catch (java.util.concurrent.ExecutionException error) {
-                    firstLaunchOptionsFailed(
-                            "Install versions unavailable: "
-                                    + SanitizedErrors.display(error.getCause())
-                                    + ". Choose Retry version check.");
+                    if (error.getCause() instanceof ChannelCatalog.UnpublishedChannelException) {
+                        firstLaunchNothingReleased = true;
+                        firstLaunchOptionsFailed("No release is available to install yet.");
+                    } else {
+                        firstLaunchOptionsFailed(
+                                "Install versions unavailable: "
+                                        + SanitizedErrors.display(error.getCause())
+                                        + ". Choose Retry version check.");
+                    }
                 } catch (InterruptedException error) {
                     Thread.currentThread().interrupt();
                     firstLaunchOptionsFailed(
@@ -779,9 +784,23 @@ public final class LauncherFrame extends JFrame {
             }
             case FAILED -> {
                 firstLaunchSplitButton.setOptionsUnavailable(firstLaunchMetadataFailure);
-                status.setText("Install versions unavailable — choose Retry.");
+                // A missing release is not a failure the player can act on, so it stays quiet.
+                if (firstLaunchNothingReleased) {
+                    status.setText("");
+                } else {
+                    status.setText(wrappingStatus("Couldn't check for install versions. Check "
+                            + "your connection, then open the arrow menu and choose Retry version "
+                            + "check."));
+                    status.setToolTipText(firstLaunchMetadataFailure);
+                }
             }
         }
+    }
+
+    /** Empty Home is narrow-safe only if its guidance wraps instead of clipping. */
+    private static String wrappingStatus(String text) {
+        String escaped = text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;");
+        return "<html><div style='text-align:center'>" + escaped + "</div></html>";
     }
 
     private boolean isCurrentEmptyFirstLaunch() {
@@ -794,13 +813,14 @@ public final class LauncherFrame extends JFrame {
     private void setStableFirstLaunchStatus() {
         if (isCurrentEmptyFirstLaunch() && firstLaunchMetadataFailure != null
                 && firstLaunchSnapshot != null) {
-            status.setText("Version refresh failed — using previous versions. Choose Retry.");
+            status.setText(wrappingStatus(
+                    "Version refresh failed — using previous versions. Choose Retry."));
             status.setToolTipText(firstLaunchMetadataFailure);
             return;
         }
         status.setToolTipText(null);
         status.setText(isCurrentEmptyFirstLaunch() && firstLaunchArtworkError != null
-                ? "Artwork unavailable; diagnostics are available in Settings."
+                ? wrappingStatus("Artwork unavailable; diagnostics are available in Settings.")
                 : "");
     }
 
@@ -1142,6 +1162,7 @@ public final class LauncherFrame extends JFrame {
         }
         firstLaunchSnapshot = null;
         firstLaunchMetadataFailure = null;
+        firstLaunchNothingReleased = false;
         firstLaunchMetadataState = FirstLaunchMetadataState.NOT_STARTED;
     }
 
@@ -3086,6 +3107,30 @@ public final class LauncherFrame extends JFrame {
         }
     }
 
+    /** {@code navigation} centered, with the community links on its right (or below when narrow). */
+    private JPanel homeNavigationRow(JPanel navigation) {
+        JPanel links = new JPanel(new java.awt.GridBagLayout());
+        links.setOpaque(false);
+        links.add(communityLinks());
+        JPanel row = new NavigationRow(navigation, links, guiScale.space("md"));
+        row.setAlignmentX(Component.CENTER_ALIGNMENT);
+        return row;
+    }
+
+    /** Empty Home has no installations to manage, but Settings must stay reachable. */
+    private JPanel firstLaunchNavigation() {
+        JButton settings = homeButton("Settings", "settingsButton");
+        settings.setMnemonic(java.awt.event.KeyEvent.VK_S);
+        settings.addActionListener(event -> navigateTo(Page.SETTINGS));
+        JPanel navigation = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.CENTER, 0, 0));
+        navigation.setName("firstLaunchNavigation");
+        navigation.setOpaque(false);
+        navigation.add(settings);
+        JPanel row = homeNavigationRow(navigation);
+        row.setName("firstLaunchNavigationRow");
+        return row;
+    }
+
     private JPanel communityLinks() {
         JButton discord = new LauncherLink("Join Discord", "openDiscordButton", guiScale);
         discord.getAccessibleContext().setAccessibleDescription(
@@ -3234,14 +3279,15 @@ public final class LauncherFrame extends JFrame {
                 LauncherSelfUpdate.consumeReport(launcherUpdateReport(), LauncherSelfUpdate.currentVersion()),
                 launcherUpdater::check), checked -> {
             if (checked.pending()) {
-                status.setText(checked.message());
+                setLauncherUpdateStatus(explicit, checked.message());
                 if (explicit) LauncherAlertDialog.showMessage(this, guiScale,
                         "Launcher update in progress", checked.message());
                 return;
             }
             LauncherSelfUpdate.Candidate candidate = checked.candidate();
             if (candidate == null) {
-                status.setText(checked.message() == null ? "Launcher is up to date." : checked.message());
+                setLauncherUpdateStatus(explicit,
+                        checked.message() == null ? "Launcher is up to date." : checked.message());
                 if (checked.message() != null) LauncherAlertDialog.showMessage(this, guiScale,
                         "Launcher update result", checked.message());
                 return;
@@ -3275,10 +3321,23 @@ public final class LauncherFrame extends JFrame {
             }, error -> progress.append("\nLauncher update failed: " + errorDetail(error) + "\n"), () -> {});
         }, error -> {
             if (!explicit) {
-                status.setText("Launcher update: " + SanitizedErrors.text(error.getMessage()));
+                setLauncherUpdateStatus(false,
+                        "Launcher update: " + SanitizedErrors.text(error.getMessage()));
                 recordErrorAsync("Automatic launcher update check", error, ignored -> {});
             }
         }, () -> {}, explicit, explicit);
+    }
+
+    /**
+     * The automatic check races empty Home's version check on the shared status line; it must
+     * not replace guidance the player still needs to act on.
+     */
+    private void setLauncherUpdateStatus(boolean explicit, String text) {
+        if (!explicit && isCurrentEmptyFirstLaunch() && firstLaunchMetadataFailure != null
+                && !firstLaunchNothingReleased) {
+            return;
+        }
+        status.setText(text);
     }
 
     static boolean confirmLauncherUpdate(Window owner, GuiScale scale,
@@ -4469,8 +4528,7 @@ public final class LauncherFrame extends JFrame {
         } catch (IOException ignored) {
             // The chooser still has a safe platform default when the suggested path is unavailable.
         }
-        JFileChooser chooser = folders("Choose an existing writable parent folder",
-                preferredParent);
+        JFileChooser chooser = installParentChooser(preferredParent);
         if (chooser.showOpenDialog(owner) != JFileChooser.APPROVE_OPTION) return null;
         final String suggestion;
         try {
@@ -4917,6 +4975,25 @@ public final class LauncherFrame extends JFrame {
         return chooser;
     }
 
+    /**
+     * The suggested install parent may not exist yet on a fresh machine. Planning creates such
+     * parents with consent, so pre-select it by name in its nearest existing folder rather than
+     * silently landing one level up.
+     */
+    private static JFileChooser installParentChooser(Path preferredParent) {
+        JFileChooser chooser = folders("Choose where to create the install folder",
+                preferredParent);
+        if (preferredParent == null) return chooser;
+        Path existing = chooser.getCurrentDirectory().toPath();
+        if (existing.equals(preferredParent)) return chooser;
+        Path missing = preferredParent;
+        while (missing.getParent() != null && !missing.getParent().equals(existing)) {
+            missing = missing.getParent();
+        }
+        if (existing.equals(missing.getParent())) chooser.setSelectedFile(missing.toFile());
+        return chooser;
+    }
+
     private static JButton button(String text, String name) {
         return new FirstLaunchButton(text, name, false, GuiScale.DEFAULT,
                 FirstLaunchButton.Size.COMPACT);
@@ -4999,8 +5076,7 @@ public final class LauncherFrame extends JFrame {
             implements NormalInstallLocationPrompts {
         @Override
         public Path choose(Component parent, NormalInstallService.Plan plan) throws IOException {
-            JFileChooser chooser = folders("Choose an existing writable parent folder",
-                    plan.destination().getParent());
+            JFileChooser chooser = installParentChooser(plan.destination().getParent());
             if (chooser.showOpenDialog(parent) != JFileChooser.APPROVE_OPTION) return null;
             String proposedName =
                     NormalInstallService.friendlyName(plan);

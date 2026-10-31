@@ -55,7 +55,10 @@ import java.awt.Component;
 import java.awt.Container;
 import java.awt.Graphics2D;
 import java.awt.GraphicsEnvironment;
+import java.awt.Insets;
 import java.awt.Rectangle;
+import javax.swing.plaf.basic.BasicHTML;
+import javax.swing.text.View;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
 import java.nio.file.Files;
@@ -269,6 +272,40 @@ class FirstLaunchPanelTest {
                     "Get the current", "MEGAMEK SUITE")) {
                 assertTrue(labels.stream().noneMatch(text -> text.contains(removed)), removed);
             }
+            return null;
+        });
+    }
+
+    @Test
+    void longStatusGuidanceWrapsToTheDeckWidthInsteadOfClipping() throws Exception {
+        BufferedImage artwork = FirstLaunchPanel.loadArtwork();
+        onEdt(() -> {
+            JLabel status = new JLabel("");
+            FirstLaunchPanel panel = new FirstLaunchPanel(artwork, GuiScale.DEFAULT,
+                    new FirstLaunchSplitButton(GuiScale.DEFAULT, () -> {}, key -> {}, () -> {}),
+                    new FirstLaunchButton("Use existing installation", "useExistingCopyButton",
+                            false, GuiScale.DEFAULT),
+                    status);
+            panel.setSize(680, 470);
+            layout(panel);
+            status.setText("<html><div style='text-align:center'>"
+                    + "Long translated guidance keeps going past one line. ".repeat(5)
+                    + "</div></html>");
+            invalidateTree(panel);
+            layout(panel);
+            invalidateTree(panel);
+            layout(panel);
+            Insets insets = status.getInsets();
+            int width = status.getWidth() - insets.left - insets.right;
+            assertTrue(width > 0);
+            // A separate view measures the wrapped text without resizing the label's own view.
+            View view = BasicHTML.createHTMLView(status, status.getText());
+            view.setSize(width, 0);
+            int wrapped = (int) Math.ceil(view.getPreferredSpan(View.Y_AXIS));
+            int line = status.getFontMetrics(status.getFont()).getHeight();
+            assertTrue(wrapped > 2 * line, "fixture text must wrap: " + wrapped);
+            assertTrue(status.getHeight() - insets.top - insets.bottom >= wrapped,
+                    "status height " + status.getHeight() + " clips wrapped text " + wrapped);
             return null;
         });
     }
@@ -615,7 +652,7 @@ class FirstLaunchPanelTest {
                     return null;
                 });
                 waitFor(() -> ((JLabel) findComponent(frame, "homeStatusLabel"))
-                        .getText().startsWith("Version refresh failed"));
+                        .getText().contains("Version refresh failed"));
                 assertEquals(2, requests.get());
                 assertFalse(onEdt(() -> find(frame, "downloadAndInstallButton").isEnabled()));
                 assertEquals(capturedLabel, onEdt(() ->
@@ -785,6 +822,13 @@ class FirstLaunchPanelTest {
         int deckCenter = deckBounds.y + deckBounds.height / 2;
         assertTrue(Math.abs(groupCenter - deckCenter) <= 50,
                 "title/action group should be centered in the control deck: " + groupCenter);
+    }
+
+    private static void invalidateTree(Container parent) {
+        parent.invalidate();
+        for (Component child : parent.getComponents()) {
+            if (child instanceof Container container) invalidateTree(container);
+        }
     }
 
     private static void layout(Container parent) {

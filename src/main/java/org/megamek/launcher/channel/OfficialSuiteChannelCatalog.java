@@ -126,14 +126,16 @@ public final class OfficialSuiteChannelCatalog implements ChannelCatalog {
     /**
      * Captures the quick-install choices. Experimental targets are resolved only when the player
      * has opted in to see them.
+     *
+     * @throws UnpublishedChannelException when none of the offered channels has been released yet
      */
     public QuickInstallSnapshot quickInstallSnapshot(boolean showExperimental)
             throws IOException, InterruptedException {
         List<Located> records = records();
-        if (records.isEmpty()) throw new IOException("No complete suite records have been published yet.");
         Map<ReleaseKey, ReleaseCatalog.Release> cache = new HashMap<>();
         Map<FollowChannel, Map<OfficialRepository, Target>> targets = new EnumMap<>(FollowChannel.class);
         Map<FollowChannel, String> failures = new EnumMap<>(FollowChannel.class);
+        boolean onlyUnpublished = true;
         for (FollowChannel channel : FollowChannel.offered(showExperimental)) {
             Located located = newest(records, channel);
             if (located == null) {
@@ -144,9 +146,12 @@ public final class OfficialSuiteChannelCatalog implements ChannelCatalog {
                 targets.put(channel, resolve(located, cache));
             } catch (IOException error) {
                 failures.put(channel, SanitizedErrors.display(error));
+                onlyUnpublished = false;
             }
         }
         if (targets.isEmpty()) {
+            // Nothing offered has been released yet: not a failure that retrying would fix.
+            if (onlyUnpublished) throw new UnpublishedChannelException(FollowChannel.CORE);
             throw new IOException("No supported complete suite is available: " + failures);
         }
         List<QuickInstallOption> options = new ArrayList<>();

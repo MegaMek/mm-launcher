@@ -66,8 +66,10 @@ class OfficialSuiteChannelCatalogTest {
             assertEquals(channel, error.channel());
             assertTrue(error.getMessage().contains("No complete " + channel));
         }
-        assertThrows(IOException.class, () -> catalog(network).quickInstallSnapshot(false));
-        assertThrows(IOException.class, () -> catalog(network).quickInstallSnapshot(true));
+        assertThrows(ChannelCatalog.UnpublishedChannelException.class,
+                () -> catalog(network).quickInstallSnapshot(false));
+        assertThrows(ChannelCatalog.UnpublishedChannelException.class,
+                () -> catalog(network).quickInstallSnapshot(true));
         assertNoPackages(network);
     }
 
@@ -120,7 +122,8 @@ class OfficialSuiteChannelCatalogTest {
     void experimentalOnlyBootstrapLeavesCoreDefaultExplicitlyUnavailable() throws Exception {
         SuiteTestData network = new SuiteTestData();
         network.suite("0.51.02.1", FollowChannel.EXPERIMENTAL);
-        assertThrows(IOException.class, () -> catalog(network).quickInstallSnapshot(false));
+        assertThrows(ChannelCatalog.UnpublishedChannelException.class,
+                () -> catalog(network).quickInstallSnapshot(false));
         QuickInstallSnapshot snapshot = catalog(network).quickInstallSnapshot(true);
         assertEquals(6, snapshot.options().size());
         assertFalse(snapshot.option(QuickInstallSnapshot.DEFAULT_KEY).available());

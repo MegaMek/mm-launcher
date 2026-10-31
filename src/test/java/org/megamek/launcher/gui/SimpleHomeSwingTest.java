@@ -198,6 +198,42 @@ class SimpleHomeSwingTest {
             assertFalse(primary.isEnabled());
             assertTrue(options.isEnabled());
             assertEquals(1, services.catalogRequests.get());
+            JLabel failedStatus = onEdt(() -> find(frame, "homeStatusLabel"));
+            assertTrue(failedStatus.getText().contains("Couldn't check for install versions"),
+                    failedStatus.getText());
+            assertTrue(failedStatus.getToolTipText().contains("fixture metadata unavailable"));
+            // The message arrives after the first layout; the deck must grow without a resize.
+            waitUntil(() -> {
+                javax.swing.JScrollPane scroller = find(frame, "firstLaunchControlsScroller");
+                return scroller != null && scroller.getViewport().getHeight()
+                        >= scroller.getViewport().getView().getPreferredSize().height;
+            });
+            // At the narrowest window long guidance wraps instead of clipping.
+            String original = failedStatus.getText();
+            SwingUtilities.invokeAndWait(() -> {
+                failedStatus.setText(original.replace("</div>",
+                        " " + "Long translated guidance keeps going past one line. ".repeat(4)
+                                + "</div>"));
+                frame.setSize(frame.getMinimumSize());
+                frame.validate();
+            });
+            waitUntil(() -> {
+                javax.swing.JScrollPane scroller = find(frame, "firstLaunchControlsScroller");
+                if (scroller == null) return false;
+                // Measure with a separate view so the check doesn't resize the label's own.
+                javax.swing.text.View view = javax.swing.plaf.basic.BasicHTML.createHTMLView(
+                        failedStatus, failedStatus.getText());
+                java.awt.Insets insets = failedStatus.getInsets();
+                int width = failedStatus.getWidth() - insets.left - insets.right;
+                if (width <= 0) return false;
+                view.setSize(width, 0);
+                int line = failedStatus.getFontMetrics(failedStatus.getFont()).getHeight();
+                return Math.ceil(view.getPreferredSpan(javax.swing.text.View.Y_AXIS)) > 2 * line
+                        && Math.ceil(view.getPreferredSpan(javax.swing.text.View.Y_AXIS))
+                        <= failedStatus.getHeight() - insets.top - insets.bottom
+                        && scroller.getViewport().getHeight()
+                        >= scroller.getViewport().getView().getPreferredSize().height;
+            });
 
             FirstLaunchSplitButton split = waitFor(
                     () -> find(frame, "firstLaunchSplitButton"));
@@ -220,6 +256,52 @@ class SimpleHomeSwingTest {
             });
             assertEquals(2, services.catalogRequests.get());
             assertEquals(0, services.plans.get());
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
+    void nothingReleasedStaysQuietAndStillOffersSettings() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        FakeServices services = new FakeServices(temp.resolve("nothing-released.json"));
+        services.snapshotError = new org.megamek.launcher.channel.ChannelCatalog
+                .UnpublishedChannelException(FollowChannel.CORE);
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            waitFor(() -> {
+                JButton button = find(frame, "downloadAndInstallButton");
+                return button != null && SwingTestSupport.spoken(button).endsWith("(Unavailable)")
+                        ? button : null;
+            });
+            JLabel status = onEdt(() -> find(frame, "homeStatusLabel"));
+            assertEquals("", status.getText());
+            assertNull(status.getToolTipText());
+            SwingUtilities.invokeAndWait(() -> {
+                frame.setSize(1180, 800);
+                frame.validate();
+            });
+            onEdt(() -> {
+                Component panel = find(frame, "firstLaunchPanel");
+                JButton settings = find(frame, "settingsButton");
+                assertTrue(SwingUtilities.isDescendingFrom(settings, panel),
+                        "Settings is reachable before anything is installed");
+                Component links = find(frame, "communityLinks");
+                Rectangle settingsBounds = SwingUtilities.convertRectangle(settings.getParent(),
+                        settings.getBounds(), panel);
+                Rectangle linkBounds = SwingUtilities.convertRectangle(links.getParent(),
+                        links.getBounds(), panel);
+                assertTrue(linkBounds.x >= settingsBounds.x + settingsBounds.width,
+                        "community links sit to the right of Settings: " + linkBounds);
+                assertTrue(Math.abs(settingsBounds.getCenterX() - panel.getWidth() / 2.0) <= 2,
+                        "Settings stays centered");
+                return null;
+            });
+            SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
+            assertNotNull(waitFor(() -> find(frame, "showExperimentalReleasesCheckbox")));
         } finally {
             dispose(frame);
         }
@@ -582,7 +664,7 @@ class SimpleHomeSwingTest {
                     waitDialog(frame, "Install latest MekHQ Core (1.2.3)");
             int catalogBeforeChange = services.catalogRequests.get();
             assertEquals(services.destination.toString(),
-                    ((JTextArea) find(firstQuote, "normalInstallDestination")).getText());
+                    ((javax.swing.text.JTextComponent) find(firstQuote, "normalInstallDestination")).getText());
 
             JButton change = find(firstQuote, "changeNormalLocationButton");
             SwingUtilities.invokeAndWait(() -> {
@@ -597,7 +679,7 @@ class SimpleHomeSwingTest {
             assertEquals(List.of(services.destination, changed),
                     services.plannedDestinations);
             assertEquals(changed.toString(),
-                    ((JTextArea) find(changedQuote, "normalInstallDestination")).getText());
+                    ((javax.swing.text.JTextComponent) find(changedQuote, "normalInstallDestination")).getText());
             assertEquals(0, services.installs.get());
             assertEquals(catalogBeforeChange, services.catalogRequests.get(),
                     "replanning does not briefly resume or reload first-launch choices");
@@ -1725,7 +1807,7 @@ class SimpleHomeSwingTest {
                 NormalInstallService.TargetKind.CAPTURED_CURRENT;
         private volatile String currentBrowsedSource;
         private volatile boolean showExperimental;
-        private final QuickInstallSnapshot quickInstallSnapshot =
+        private volatile QuickInstallSnapshot quickInstallSnapshot =
                 QuickInstallTestData.snapshot("1.2.3", "1.2.4");
         private volatile boolean installed;
         private volatile InstallationRecord installedRecord;
@@ -1747,6 +1829,7 @@ class SimpleHomeSwingTest {
         private volatile CountDownLatch snapshotStarted;
         private volatile CountDownLatch releaseSnapshot;
         private final AtomicInteger snapshotFailures = new AtomicInteger();
+        private volatile IOException snapshotError;
         private volatile CountDownLatch installStarted;
         private volatile CountDownLatch releaseInstall;
         private volatile boolean installBecameMain = true;
@@ -1865,6 +1948,7 @@ class SimpleHomeSwingTest {
             if (snapshotFailures.getAndUpdate(value -> Math.max(0, value - 1)) > 0) {
                 throw new IOException("fixture metadata unavailable");
             }
+            if (snapshotError != null) throw snapshotError;
             return quickInstallSnapshot == null ? null
                     : QuickInstallTestData.offered(quickInstallSnapshot, showExperimental);
         }
@@ -2093,7 +2177,7 @@ class SimpleHomeSwingTest {
                 ((JLabel) find(dialog, "normalInstallDownloadSize")).getText());
         assertNull(find(dialog, "normalInstallChannelMeaning"));
 
-        JTextArea location = find(dialog, "normalInstallDestination");
+        javax.swing.text.JTextComponent location = find(dialog, "normalInstallDestination");
         String exactDestination = destination.toAbsolutePath().normalize().toString();
         assertEquals(exactDestination, location.getText());
         assertEquals(exactDestination, location.getToolTipText());
@@ -2160,7 +2244,9 @@ class SimpleHomeSwingTest {
         StringBuilder text = new StringBuilder();
         for (Component child : root.getComponents()) {
             if (child instanceof JLabel label) text.append(label.getText()).append('\n');
-            if (child instanceof JTextArea area) text.append(area.getText()).append('\n');
+            if (child instanceof javax.swing.text.JTextComponent area) {
+                text.append(area.getText()).append('\n');
+            }
             if (child instanceof Container nested) text.append(componentText(nested));
         }
         return text.toString();
