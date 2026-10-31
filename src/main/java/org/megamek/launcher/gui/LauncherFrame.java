@@ -717,7 +717,7 @@ public final class LauncherFrame extends JFrame {
                 } catch (java.util.concurrent.ExecutionException error) {
                     if (error.getCause() instanceof ChannelCatalog.UnpublishedChannelException) {
                         firstLaunchNothingReleased = true;
-                        firstLaunchOptionsFailed(nothingReleasedMessage());
+                        firstLaunchOptionsFailed("No release is available to install yet.");
                     } else {
                         firstLaunchOptionsFailed(
                                 "Install versions unavailable: "
@@ -784,8 +784,9 @@ public final class LauncherFrame extends JFrame {
             }
             case FAILED -> {
                 firstLaunchSplitButton.setOptionsUnavailable(firstLaunchMetadataFailure);
+                // A missing release is not a failure the player can act on, so it stays quiet.
                 if (firstLaunchNothingReleased) {
-                    status.setText(firstLaunchMetadataFailure);
+                    status.setText("");
                 } else {
                     status.setText("Couldn't check for install versions. Check your connection, "
                             + "then open the arrow menu and choose Retry version check.");
@@ -793,11 +794,6 @@ public final class LauncherFrame extends JFrame {
                 }
             }
         }
-    }
-
-    // Experimental is for testers who opt in, so this never points to it.
-    private static String nothingReleasedMessage() {
-        return "No release is available to install yet. Please check back soon.";
     }
 
     private boolean isCurrentEmptyFirstLaunch() {
@@ -815,12 +811,6 @@ public final class LauncherFrame extends JFrame {
             return;
         }
         status.setToolTipText(null);
-        if (isCurrentEmptyFirstLaunch() && firstLaunchSnapshot != null
-                && !firstLaunchSnapshot.option(QuickInstallSnapshot.DEFAULT_KEY).available()
-                && firstLaunchSnapshot.options().stream().anyMatch(QuickInstallOption::available)) {
-            status.setText("No Core release yet. Open the arrow menu to install an Experimental release.");
-            return;
-        }
         status.setText(isCurrentEmptyFirstLaunch() && firstLaunchArtworkError != null
                 ? "Artwork unavailable; diagnostics are available in Settings."
                 : "");
@@ -4516,8 +4506,7 @@ public final class LauncherFrame extends JFrame {
         } catch (IOException ignored) {
             // The chooser still has a safe platform default when the suggested path is unavailable.
         }
-        JFileChooser chooser = folders("Choose an existing writable parent folder",
-                preferredParent);
+        JFileChooser chooser = installParentChooser(preferredParent);
         if (chooser.showOpenDialog(owner) != JFileChooser.APPROVE_OPTION) return null;
         final String suggestion;
         try {
@@ -4964,6 +4953,25 @@ public final class LauncherFrame extends JFrame {
         return chooser;
     }
 
+    /**
+     * The suggested install parent may not exist yet on a fresh machine. Planning creates such
+     * parents with consent, so pre-select it by name in its nearest existing folder rather than
+     * silently landing one level up.
+     */
+    private static JFileChooser installParentChooser(Path preferredParent) {
+        JFileChooser chooser = folders("Choose where to create the install folder",
+                preferredParent);
+        if (preferredParent == null) return chooser;
+        Path existing = chooser.getCurrentDirectory().toPath();
+        if (existing.equals(preferredParent)) return chooser;
+        Path missing = preferredParent;
+        while (missing.getParent() != null && !missing.getParent().equals(existing)) {
+            missing = missing.getParent();
+        }
+        if (existing.equals(missing.getParent())) chooser.setSelectedFile(missing.toFile());
+        return chooser;
+    }
+
     private static JButton button(String text, String name) {
         return new FirstLaunchButton(text, name, false, GuiScale.DEFAULT,
                 FirstLaunchButton.Size.COMPACT);
@@ -5046,8 +5054,7 @@ public final class LauncherFrame extends JFrame {
             implements NormalInstallLocationPrompts {
         @Override
         public Path choose(Component parent, NormalInstallService.Plan plan) throws IOException {
-            JFileChooser chooser = folders("Choose an existing writable parent folder",
-                    plan.destination().getParent());
+            JFileChooser chooser = installParentChooser(plan.destination().getParent());
             if (chooser.showOpenDialog(parent) != JFileChooser.APPROVE_OPTION) return null;
             String proposedName =
                     NormalInstallService.friendlyName(plan);

@@ -467,8 +467,8 @@ visit loads the matching choices. The record's mandatory SHA-256 remains authori
 There is no website YAML or independent-latest-release fallback. While it loads, both install segments are visibly disabled and removed from
 keyboard focus, while **Use existing installation** remains available. Failure keeps installation
 unavailable and exposes one explicit **Retry version check** command; concurrent retries are
-deduplicated. When the check works but nothing offered has been released yet, Home says so
-instead, without suggesting Experimental, which is only for testers who opt in through **Settings** (empty Home also offers it). The first successful immutable snapshot is retained for the frame lifetime, so Home
+deduplicated. When the check works but nothing offered has been released yet, Home shows no
+message and never suggests Experimental, which is only for testers who opt in through **Settings** (empty Home also offers it). The first successful immutable snapshot is retained for the frame lifetime, so Home
 reloads, confirmation cancellation, location changes, and repeated quote opens preserve the same
 labels without another current-channel request. Missing channels are disabled with explicit reasons;
 with Experimental shown, Experimental-only records remain usable without changing the Core default. Explicit Retry can refresh
@@ -540,9 +540,11 @@ record channel; no selection can substitute a different product, channel, title,
 bundle.
 Before package transfer it shows a dedicated map-style confirmation headed with the selected
 product and channel. Its concise summary gives the validated version, actual included programs,
-binary download size, and full selectable destination.
-**Change location** chooses an existing parent and safe new subfolder, then produces a fresh
-immutable quote for that same product/channel pair. Java is not part of installation planning or
+binary download size, and full selectable destination on a single line.
+**Change location** chooses a parent folder and safe new subfolder, then produces a fresh
+immutable quote for that same product/channel pair. When the suggested parent does not exist yet,
+the folder picker opens in its nearest existing folder with it pre-selected; the quote creates it
+with the rest of the install. Java is not part of installation planning or
 confirmation. There is no update-behavior row or technical-details toggle in this
 simple confirmation. The backend still binds and revalidates the exact repository, source, tag,
 asset identity/digest, destination, registry, and Main snapshot; operation logs retain

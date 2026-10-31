@@ -141,11 +141,10 @@ final class FirstLaunchPanel extends JPanel {
         status.setAlignmentX(CENTER_ALIGNMENT);
         status.setName("homeStatusLabel");
         status.setVisible(true);
-        // One line stays reserved even while empty: the scroll pane is a validate root, so text
-        // that arrives later would otherwise overflow the deck instead of resizing it.
+        // Empty status takes no space; the content panel grows the deck when text arrives.
         JPanel statusRow = new JPanel(new BorderLayout()) {
             @Override public Dimension getPreferredSize() {
-                return new Dimension(0, status.getFontMetrics(status.getFont()).getHeight());
+                return new Dimension(0, super.getPreferredSize().height);
             }
 
             @Override public Dimension getMaximumSize() {
@@ -269,12 +268,15 @@ final class FirstLaunchPanel extends JPanel {
             controls.setBorder(deckPadding(compact));
             controls.revalidate();
         }
-        int minimumDeck = scale.scaleForGUI(compact ? 260 : 150);
-        int deckHeight = Math.min(getHeight(),
-                Math.max(minimumDeck, controls.getPreferredSize().height));
+        int deckHeight = deckHeight();
         int artHeight = Math.max(0, getHeight() - deckHeight);
         artwork.setBounds(0, 0, getWidth(), artHeight);
         scroller.setBounds(0, artHeight, getWidth(), deckHeight);
+    }
+
+    private int deckHeight() {
+        int minimumDeck = scale.scaleForGUI(compact ? 260 : 150);
+        return Math.min(getHeight(), Math.max(minimumDeck, controls.getPreferredSize().height));
     }
 
     /** The controls deck's page padding, tighter vertically when the window is compact. */
@@ -294,6 +296,17 @@ final class FirstLaunchPanel extends JPanel {
         @Override public boolean getScrollableTracksViewportWidth() { return true; }
         @Override public boolean getScrollableTracksViewportHeight() {
             return getParent() != null && getParent().getHeight() >= getPreferredSize().height;
+        }
+
+        /**
+         * The scroll pane is a validate root, so status text that arrives later never reaches the
+         * outer layout that sizes the deck. Ask it to lay out again when the deck would change.
+         */
+        @Override public void doLayout() {
+            super.doLayout();
+            if (FirstLaunchPanel.this.getHeight() > 0 && deckHeight() != scroller.getHeight()) {
+                FirstLaunchPanel.this.revalidate();
+            }
         }
     }
 

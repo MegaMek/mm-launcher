@@ -44,7 +44,7 @@ import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.JTextArea;
+import javax.swing.JTextField;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
@@ -103,7 +103,7 @@ final class NormalInstallConfirmationDialog extends JDialog {
 
         changeLocation = styledButton("Change location", "changeNormalLocationButton", false);
         changeLocation.getAccessibleContext().setAccessibleDescription(
-                "Choose an existing parent and a new subfolder, then review a fresh plan.");
+                "Choose a parent folder and a new subfolder, then review a fresh plan.");
         install = styledButton("Install", "confirmNormalInstallButton", true);
         install.setMnemonic(KeyEvent.VK_I);
         install.getAccessibleContext().setAccessibleDescription(
@@ -175,12 +175,11 @@ final class NormalInstallConfirmationDialog extends JDialog {
                 scale.font(base, "label"), MUTED);
 
         String destinationText = plan.destination().toString();
-        JTextArea destination = new JTextArea(destinationText, 3, 34);
+        JTextField destination = new JTextField(destinationText, 34);
         destination.setName("normalInstallDestination");
         destination.setEditable(false);
-        destination.setLineWrap(true);
-        destination.setWrapStyleWord(false);
-        destination.setCaretPosition(0);
+        // Long paths scroll; keep the folder being created visible.
+        destination.setCaretPosition(destinationText.length());
         destination.setFont(scale.font(base, "body"));
         destination.setBackground(FIELD_BACKGROUND);
         destination.setForeground(TEXT);

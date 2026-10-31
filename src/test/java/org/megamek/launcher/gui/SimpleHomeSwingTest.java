@@ -202,6 +202,12 @@ class SimpleHomeSwingTest {
             assertTrue(failedStatus.getText().startsWith("Couldn't check for install versions"),
                     failedStatus.getText());
             assertTrue(failedStatus.getToolTipText().contains("fixture metadata unavailable"));
+            // The message arrives after the first layout; the deck must grow without a resize.
+            waitUntil(() -> {
+                javax.swing.JScrollPane scroller = find(frame, "firstLaunchControlsScroller");
+                return scroller != null && scroller.getViewport().getHeight()
+                        >= scroller.getViewport().getView().getPreferredSize().height;
+            });
 
             FirstLaunchSplitButton split = waitFor(
                     () -> find(frame, "firstLaunchSplitButton"));
@@ -231,7 +237,7 @@ class SimpleHomeSwingTest {
 
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
-    void nothingReleasedSaysSoWithoutPromotingExperimental() throws Exception {
+    void nothingReleasedStaysQuietAndStillOffersSettings() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
         FakeServices services = new FakeServices(temp.resolve("nothing-released.json"));
@@ -240,19 +246,14 @@ class SimpleHomeSwingTest {
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
-            JLabel status = waitFor(() -> {
-                JLabel label = find(frame, "homeStatusLabel");
-                return label != null && label.getText().startsWith("No release") ? label : null;
+            waitFor(() -> {
+                JButton button = find(frame, "downloadAndInstallButton");
+                return button != null && SwingTestSupport.spoken(button).endsWith("(Unavailable)")
+                        ? button : null;
             });
-            assertEquals("No release is available to install yet. Please check back soon.",
-                    status.getText());
+            JLabel status = onEdt(() -> find(frame, "homeStatusLabel"));
+            assertEquals("", status.getText());
             assertNull(status.getToolTipText());
-            // The message arrives after the first layout; the deck must grow without a resize.
-            waitUntil(() -> {
-                javax.swing.JScrollPane scroller = find(frame, "firstLaunchControlsScroller");
-                return scroller != null && scroller.getViewport().getHeight()
-                        >= scroller.getViewport().getView().getPreferredSize().height;
-            });
             SwingUtilities.invokeAndWait(() -> {
                 frame.setSize(1180, 800);
                 frame.validate();
@@ -275,28 +276,6 @@ class SimpleHomeSwingTest {
             });
             SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
             assertNotNull(waitFor(() -> find(frame, "showExperimentalReleasesCheckbox")));
-        } finally {
-            dispose(frame);
-        }
-    }
-
-    @Test
-    @org.junit.jupiter.api.Tag("native-gui")
-    void experimentalOnlyReleaseTellsThePlayerWhereToFindIt() throws Exception {
-        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
-                "actual Swing controls require a display");
-        FakeServices services = new FakeServices(temp.resolve("experimental-only.json"));
-        services.showExperimental = true;
-        services.quickInstallSnapshot = QuickInstallTestData.experimentalOnly("0.51.01.1");
-        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
-        try {
-            SwingUtilities.invokeAndWait(frame::showWindow);
-            JLabel status = waitFor(() -> {
-                JLabel label = find(frame, "homeStatusLabel");
-                return label != null && !label.getText().isEmpty() ? label : null;
-            });
-            assertEquals("No Core release yet. Open the arrow menu to install an Experimental release.",
-                    status.getText());
         } finally {
             dispose(frame);
         }
@@ -659,7 +638,7 @@ class SimpleHomeSwingTest {
                     waitDialog(frame, "Install latest MekHQ Core (1.2.3)");
             int catalogBeforeChange = services.catalogRequests.get();
             assertEquals(services.destination.toString(),
-                    ((JTextArea) find(firstQuote, "normalInstallDestination")).getText());
+                    ((javax.swing.text.JTextComponent) find(firstQuote, "normalInstallDestination")).getText());
 
             JButton change = find(firstQuote, "changeNormalLocationButton");
             SwingUtilities.invokeAndWait(() -> {
@@ -674,7 +653,7 @@ class SimpleHomeSwingTest {
             assertEquals(List.of(services.destination, changed),
                     services.plannedDestinations);
             assertEquals(changed.toString(),
-                    ((JTextArea) find(changedQuote, "normalInstallDestination")).getText());
+                    ((javax.swing.text.JTextComponent) find(changedQuote, "normalInstallDestination")).getText());
             assertEquals(0, services.installs.get());
             assertEquals(catalogBeforeChange, services.catalogRequests.get(),
                     "replanning does not briefly resume or reload first-launch choices");
@@ -2172,7 +2151,7 @@ class SimpleHomeSwingTest {
                 ((JLabel) find(dialog, "normalInstallDownloadSize")).getText());
         assertNull(find(dialog, "normalInstallChannelMeaning"));
 
-        JTextArea location = find(dialog, "normalInstallDestination");
+        javax.swing.text.JTextComponent location = find(dialog, "normalInstallDestination");
         String exactDestination = destination.toAbsolutePath().normalize().toString();
         assertEquals(exactDestination, location.getText());
         assertEquals(exactDestination, location.getToolTipText());
@@ -2239,7 +2218,9 @@ class SimpleHomeSwingTest {
         StringBuilder text = new StringBuilder();
         for (Component child : root.getComponents()) {
             if (child instanceof JLabel label) text.append(label.getText()).append('\n');
-            if (child instanceof JTextArea area) text.append(area.getText()).append('\n');
+            if (child instanceof javax.swing.text.JTextComponent area) {
+                text.append(area.getText()).append('\n');
+            }
             if (child instanceof Container nested) text.append(componentText(nested));
         }
         return text.toString();
