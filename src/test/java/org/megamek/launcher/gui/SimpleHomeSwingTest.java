@@ -198,6 +198,10 @@ class SimpleHomeSwingTest {
             assertFalse(primary.isEnabled());
             assertTrue(options.isEnabled());
             assertEquals(1, services.catalogRequests.get());
+            JLabel failedStatus = onEdt(() -> find(frame, "homeStatusLabel"));
+            assertTrue(failedStatus.getText().startsWith("Couldn't check for install versions"),
+                    failedStatus.getText());
+            assertTrue(failedStatus.getToolTipText().contains("fixture metadata unavailable"));
 
             FirstLaunchSplitButton split = waitFor(
                     () -> find(frame, "firstLaunchSplitButton"));
@@ -220,6 +224,79 @@ class SimpleHomeSwingTest {
             });
             assertEquals(2, services.catalogRequests.get());
             assertEquals(0, services.plans.get());
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
+    void nothingReleasedPointsToSettingsWhichEmptyHomeStillOffers() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        FakeServices services = new FakeServices(temp.resolve("nothing-released.json"));
+        services.snapshotError = new org.megamek.launcher.channel.ChannelCatalog
+                .UnpublishedChannelException(FollowChannel.CORE);
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            JLabel status = waitFor(() -> {
+                JLabel label = find(frame, "homeStatusLabel");
+                return label != null && label.getText().startsWith("No Core release") ? label : null;
+            });
+            assertEquals("No Core release yet. To try an Experimental release, turn it on in Settings.",
+                    status.getText());
+            assertNull(status.getToolTipText());
+            // The message arrives after the first layout; the deck must grow without a resize.
+            waitUntil(() -> {
+                javax.swing.JScrollPane scroller = find(frame, "firstLaunchControlsScroller");
+                return scroller != null && scroller.getViewport().getHeight()
+                        >= scroller.getViewport().getView().getPreferredSize().height;
+            });
+            SwingUtilities.invokeAndWait(() -> {
+                frame.setSize(1180, 800);
+                frame.validate();
+            });
+            onEdt(() -> {
+                Component panel = find(frame, "firstLaunchPanel");
+                JButton settings = find(frame, "settingsButton");
+                assertTrue(SwingUtilities.isDescendingFrom(settings, panel),
+                        "Settings is reachable before anything is installed");
+                Component links = find(frame, "communityLinks");
+                Rectangle settingsBounds = SwingUtilities.convertRectangle(settings.getParent(),
+                        settings.getBounds(), panel);
+                Rectangle linkBounds = SwingUtilities.convertRectangle(links.getParent(),
+                        links.getBounds(), panel);
+                assertTrue(linkBounds.x >= settingsBounds.x + settingsBounds.width,
+                        "community links sit to the right of Settings: " + linkBounds);
+                assertTrue(Math.abs(settingsBounds.getCenterX() - panel.getWidth() / 2.0) <= 2,
+                        "Settings stays centered");
+                return null;
+            });
+            SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
+            assertNotNull(waitFor(() -> find(frame, "showExperimentalReleasesCheckbox")));
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
+    void experimentalOnlyReleaseTellsThePlayerWhereToFindIt() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        FakeServices services = new FakeServices(temp.resolve("experimental-only.json"));
+        services.showExperimental = true;
+        services.quickInstallSnapshot = QuickInstallTestData.experimentalOnly("0.51.01.1");
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            JLabel status = waitFor(() -> {
+                JLabel label = find(frame, "homeStatusLabel");
+                return label != null && !label.getText().isEmpty() ? label : null;
+            });
+            assertEquals("No Core release yet. Open the arrow menu to install an Experimental release.",
+                    status.getText());
         } finally {
             dispose(frame);
         }
@@ -1725,7 +1802,7 @@ class SimpleHomeSwingTest {
                 NormalInstallService.TargetKind.CAPTURED_CURRENT;
         private volatile String currentBrowsedSource;
         private volatile boolean showExperimental;
-        private final QuickInstallSnapshot quickInstallSnapshot =
+        private volatile QuickInstallSnapshot quickInstallSnapshot =
                 QuickInstallTestData.snapshot("1.2.3", "1.2.4");
         private volatile boolean installed;
         private volatile InstallationRecord installedRecord;
@@ -1747,6 +1824,7 @@ class SimpleHomeSwingTest {
         private volatile CountDownLatch snapshotStarted;
         private volatile CountDownLatch releaseSnapshot;
         private final AtomicInteger snapshotFailures = new AtomicInteger();
+        private volatile IOException snapshotError;
         private volatile CountDownLatch installStarted;
         private volatile CountDownLatch releaseInstall;
         private volatile boolean installBecameMain = true;
@@ -1865,6 +1943,7 @@ class SimpleHomeSwingTest {
             if (snapshotFailures.getAndUpdate(value -> Math.max(0, value - 1)) > 0) {
                 throw new IOException("fixture metadata unavailable");
             }
+            if (snapshotError != null) throw snapshotError;
             return quickInstallSnapshot == null ? null
                     : QuickInstallTestData.offered(quickInstallSnapshot, showExperimental);
         }

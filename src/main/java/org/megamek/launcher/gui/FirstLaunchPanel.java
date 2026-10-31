@@ -90,7 +90,7 @@ final class FirstLaunchPanel extends JPanel {
         this(image, scale, download, useExisting, status, null);
     }
 
-    /** @param links optional row shown centered below the status line, or {@code null} */
+    /** @param links optional navigation row shown below the status line, or {@code null} */
     FirstLaunchPanel(BufferedImage image, GuiScale scale, FirstLaunchSplitButton download,
                      JButton useExisting, JLabel status, JComponent links) {
         this.scale = scale;
@@ -139,11 +139,24 @@ final class FirstLaunchPanel extends JPanel {
         status.setFont(scale.font(base, "small"));
         status.setHorizontalAlignment(SwingConstants.CENTER);
         status.setAlignmentX(CENTER_ALIGNMENT);
-        status.setMaximumSize(new Dimension(Integer.MAX_VALUE,
-                status.getPreferredSize().height));
         status.setName("homeStatusLabel");
         status.setVisible(true);
-        controls.add(status);
+        // One line stays reserved even while empty: the scroll pane is a validate root, so text
+        // that arrives later would otherwise overflow the deck instead of resizing it.
+        JPanel statusRow = new JPanel(new BorderLayout()) {
+            @Override public Dimension getPreferredSize() {
+                return new Dimension(0, status.getFontMetrics(status.getFont()).getHeight());
+            }
+
+            @Override public Dimension getMaximumSize() {
+                return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+            }
+        };
+        statusRow.setName("homeStatusRow");
+        statusRow.setOpaque(false);
+        statusRow.setAlignmentX(CENTER_ALIGNMENT);
+        statusRow.add(status, BorderLayout.CENTER);
+        controls.add(statusRow);
         if (links != null) {
             controls.add(Box.createVerticalStrut(scale.space("xl")));
             links.setAlignmentX(CENTER_ALIGNMENT);

@@ -37,6 +37,7 @@ import org.megamek.launcher.design.swing.TokenPanel;
 
 import org.megamek.launcher.gui.AutomaticInstallationChecks.InstallationCheck;
 
+import org.megamek.launcher.channel.ChannelCatalog;
 import org.megamek.launcher.channel.ChannelPreference;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.ChannelUpdateChecker;
@@ -166,6 +167,8 @@ public final class LauncherFrame extends JFrame {
     private boolean showExperimental;
     private final LatestSettingSave<Boolean> showExperimentalSave;
     private String firstLaunchMetadataFailure;
+    /** The last version check worked but nothing offered has been released yet. */
+    private boolean firstLaunchNothingReleased;
     private long firstLaunchMetadataAttempt;
     private SwingWorker<Map<String, InstallationCheck>, Void> automaticChecksWorker;
     private SwingWorker<InstallationCheck, Void> installationCheckWorker;
@@ -401,12 +404,8 @@ public final class LauncherFrame extends JFrame {
         navigation.setAlignmentX(Component.CENTER_ALIGNMENT);
         navigation.add(manage);
         navigation.add(settings);
-        JPanel links = new JPanel(new java.awt.GridBagLayout());
-        links.setOpaque(false);
-        links.add(communityLinks());
-        JPanel navigationRow = new NavigationRow(navigation, links, guiScale.space("md"));
+        JPanel navigationRow = homeNavigationRow(navigation);
         navigationRow.setName("managedHomeNavigationRow");
-        navigationRow.setAlignmentX(Component.CENTER_ALIGNMENT);
         center.add(navigationRow);
 
         homeNewsBody = new JPanel();
@@ -660,7 +659,7 @@ public final class LauncherFrame extends JFrame {
                 ? ""
                 : "Artwork unavailable; diagnostics are available in Settings.");
         FirstLaunchPanel firstLaunch = new FirstLaunchPanel(firstLaunchArtwork, guiScale,
-                download, useExisting, status, communityLinks());
+                download, useExisting, status, firstLaunchNavigation());
         firstLaunchPanel = firstLaunch;
         content.add(firstLaunch, BorderLayout.CENTER);
         applyFirstLaunchMetadata(true);
@@ -685,6 +684,7 @@ public final class LauncherFrame extends JFrame {
         }
         firstLaunchMetadataState = FirstLaunchMetadataState.LOADING;
         firstLaunchMetadataFailure = null;
+        firstLaunchNothingReleased = false;
         final long attempt = ++firstLaunchMetadataAttempt;
         applyFirstLaunchMetadata(false);
         final boolean experimental = showExperimental;
@@ -715,10 +715,15 @@ public final class LauncherFrame extends JFrame {
                 } catch (java.util.concurrent.CancellationException ignored) {
                     return;
                 } catch (java.util.concurrent.ExecutionException error) {
-                    firstLaunchOptionsFailed(
-                            "Install versions unavailable: "
-                                    + SanitizedErrors.display(error.getCause())
-                                    + ". Choose Retry version check.");
+                    if (error.getCause() instanceof ChannelCatalog.UnpublishedChannelException) {
+                        firstLaunchNothingReleased = true;
+                        firstLaunchOptionsFailed(nothingReleasedMessage());
+                    } else {
+                        firstLaunchOptionsFailed(
+                                "Install versions unavailable: "
+                                        + SanitizedErrors.display(error.getCause())
+                                        + ". Choose Retry version check.");
+                    }
                 } catch (InterruptedException error) {
                     Thread.currentThread().interrupt();
                     firstLaunchOptionsFailed(
@@ -779,9 +784,21 @@ public final class LauncherFrame extends JFrame {
             }
             case FAILED -> {
                 firstLaunchSplitButton.setOptionsUnavailable(firstLaunchMetadataFailure);
-                status.setText("Install versions unavailable — choose Retry.");
+                if (firstLaunchNothingReleased) {
+                    status.setText(firstLaunchMetadataFailure);
+                } else {
+                    status.setText("Couldn't check for install versions. Check your connection, "
+                            + "then open the arrow menu and choose Retry version check.");
+                    status.setToolTipText(firstLaunchMetadataFailure);
+                }
             }
         }
+    }
+
+    private String nothingReleasedMessage() {
+        return showExperimental
+                ? "No release is available to install yet. Please check back soon."
+                : "No Core release yet. To try an Experimental release, turn it on in Settings.";
     }
 
     private boolean isCurrentEmptyFirstLaunch() {
@@ -799,6 +816,12 @@ public final class LauncherFrame extends JFrame {
             return;
         }
         status.setToolTipText(null);
+        if (isCurrentEmptyFirstLaunch() && firstLaunchSnapshot != null
+                && !firstLaunchSnapshot.option(QuickInstallSnapshot.DEFAULT_KEY).available()
+                && firstLaunchSnapshot.options().stream().anyMatch(QuickInstallOption::available)) {
+            status.setText("No Core release yet. Open the arrow menu to install an Experimental release.");
+            return;
+        }
         status.setText(isCurrentEmptyFirstLaunch() && firstLaunchArtworkError != null
                 ? "Artwork unavailable; diagnostics are available in Settings."
                 : "");
@@ -1142,6 +1165,7 @@ public final class LauncherFrame extends JFrame {
         }
         firstLaunchSnapshot = null;
         firstLaunchMetadataFailure = null;
+        firstLaunchNothingReleased = false;
         firstLaunchMetadataState = FirstLaunchMetadataState.NOT_STARTED;
     }
 
@@ -3084,6 +3108,30 @@ public final class LauncherFrame extends JFrame {
                 links.setBounds(x + width - link.width, y + (height - link.height) / 2, link.width, link.height);
             }
         }
+    }
+
+    /** {@code navigation} centered, with the community links on its right (or below when narrow). */
+    private JPanel homeNavigationRow(JPanel navigation) {
+        JPanel links = new JPanel(new java.awt.GridBagLayout());
+        links.setOpaque(false);
+        links.add(communityLinks());
+        JPanel row = new NavigationRow(navigation, links, guiScale.space("md"));
+        row.setAlignmentX(Component.CENTER_ALIGNMENT);
+        return row;
+    }
+
+    /** Empty Home has no installations to manage, but Settings must stay reachable. */
+    private JPanel firstLaunchNavigation() {
+        JButton settings = homeButton("Settings", "settingsButton");
+        settings.setMnemonic(java.awt.event.KeyEvent.VK_S);
+        settings.addActionListener(event -> navigateTo(Page.SETTINGS));
+        JPanel navigation = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.CENTER, 0, 0));
+        navigation.setName("firstLaunchNavigation");
+        navigation.setOpaque(false);
+        navigation.add(settings);
+        JPanel row = homeNavigationRow(navigation);
+        row.setName("firstLaunchNavigationRow");
+        return row;
     }
 
     private JPanel communityLinks() {
