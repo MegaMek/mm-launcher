@@ -279,7 +279,8 @@ class LauncherSwingSmokeTest {
                 int buttonsCenter = (manageBounds.x + settingsBounds.x + settingsBounds.width) / 2;
                 assertTrue(Math.abs(buttonsCenter - deck.getWidth() / 2) <= 2,
                         "the navigation buttons stay centered beside the community links");
-                for (String name : new String[]{"openDiscordButton", "playOnlineButton"}) {
+                for (String name : new String[]{"openDiscordButton", "playOnlineButton",
+                        "reportBugButton"}) {
                     LauncherLink community = assertInstanceOf(LauncherLink.class, find(frame, name));
                     java.awt.Rectangle bounds = SwingUtilities.convertRectangle(community.getParent(),
                             community.getBounds(), deck);
@@ -343,7 +344,8 @@ class LauncherSwingSmokeTest {
                 Component row = component(frame, "managedHomeNavigationRow");
                 java.awt.Rectangle nav = SwingUtilities.convertRectangle(navigation.getParent(),
                         navigation.getBounds(), row);
-                for (String name : new String[]{"openDiscordButton", "playOnlineButton"}) {
+                for (String name : new String[]{"openDiscordButton", "playOnlineButton",
+                        "reportBugButton"}) {
                     Component community = find(frame, name);
                     assertTrue(community.isShowing(), name + " stays visible");
                     java.awt.Rectangle bounds = SwingUtilities.convertRectangle(community.getParent(),
@@ -383,6 +385,7 @@ class LauncherSwingSmokeTest {
                     JButton java = find(frame, "changeDefaultJavaButton");
                     JButton logs = find(frame, "viewOperationLogsButton");
                     assertEquals(java.getSize(), logs.getSize());
+                    assertEquals(java.getSize(), find(frame, "reportBugSettingsButton").getSize());
                     JButton update = find(frame, "checkLauncherUpdateButton");
                     if (update != null) assertEquals(java.getSize(), update.getSize());
                     return null;
@@ -740,6 +743,17 @@ class LauncherSwingSmokeTest {
             waitFor(() -> findText(logViewer, "operationLogViewer").getText()
                     .contains("fixture install failure"));
             SwingUtilities.invokeAndWait(logViewer::dispose);
+            JButton report = find(failureDetails, "reportErrorButton");
+            assertInstanceOf(LauncherLink.class, report);
+            SwingUtilities.invokeAndWait(report::doClick);
+            JDialog bugReport = owned(frame, "Report a bug");
+            assertNotNull(find(bugReport, "openBugReportFormButton"));
+            SwingUtilities.invokeAndWait(report::doClick);
+            assertEquals(1, java.util.Arrays.stream(frame.getOwnedWindows())
+                    .filter(window -> "bugReportDialog".equals(window.getName())
+                            && window.isDisplayable())
+                    .count(), "reporting again reuses the open helper");
+            SwingUtilities.invokeAndWait(bugReport::dispose);
             SwingUtilities.invokeAndWait(failureDetails::dispose);
             assertEquals(1, services.attempts,
                     "failure does not expose an implicit retry");

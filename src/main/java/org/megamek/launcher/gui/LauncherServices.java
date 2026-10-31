@@ -41,6 +41,7 @@ import org.megamek.launcher.channel.OfficialSuiteChannelCatalog;
 import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.channel.QuickInstallSnapshot;
 import org.megamek.launcher.channel.SelectedChannelReleaseCatalog;
+import org.megamek.launcher.diagnostics.BugReport;
 import org.megamek.launcher.diagnostics.OperationLogStore;
 import org.megamek.launcher.diagnostics.SanitizedErrors;
 import org.megamek.launcher.launch.ApplicationLauncher;
@@ -188,6 +189,22 @@ public class LauncherServices {
 
     public Path operationLogLocation() {
         return operationLogs.defaultDirectory();
+    }
+
+    public BugReport.Environment bugReportEnvironment() {
+        return BugReport.Environment.current();
+    }
+
+    /** Saves the bug report archive; unreadable logs are described in it rather than failing the save. */
+    public void writeBugReport(Path target) throws IOException {
+        String logs;
+        try {
+            logs = operationLogsForViewer();
+        } catch (IOException | RuntimeException problem) {
+            logs = "Local logs could not be read safely.\n\n" + SanitizedErrors.display(problem)
+                    + "\n\nExpected location: " + operationLogLocation();
+        }
+        BugReport.writeArchive(target, bugReportEnvironment(), logs);
     }
 
     public LauncherUpdateCheck checkLauncherUpdate(LauncherSelfUpdate.ReportResult report,

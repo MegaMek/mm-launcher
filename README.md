@@ -383,6 +383,9 @@ appearance and is rewritten as version 4 only on the next settings change. Older
 still rejected without migration. Settings presents unboxed,
 left-aligned sections; the Java version and regular-font path appear above
 the left-aligned change action, and **View logs** opens a styled local viewer.
+**Report a bug** (Settings → Diagnostics, the Home community links, and **Report this problem** in
+error dialogs) opens a helper that saves a sanitized diagnostics ZIP and opens this repository's
+bug report form with the launcher version, install type, operating system, and Java filled in.
 Settings displays the effective runtime whether it is automatic or explicitly selected. The
 selector uses the same map-style controls. No JRE is
 downloaded or installed by the application; installed/native launcher
@@ -726,7 +729,11 @@ The default retention is 20 closed logs of at most 1 MiB each. Matching files ar
 after their schema, registry binding, and operation UUID prove launcher ownership; unknown files
 and links are retained. **View logs** is available in Settings and reads logs
 asynchronously into bounded plain text. **Copy sanitized details/log** is explicit; there is no
-automatic clipboard use, upload, telemetry, browser launch, or file-browser path input.
+automatic clipboard use, upload, telemetry, browser launch, or file-browser path input. **Report a
+bug** only acts when its buttons are pressed: **Save diagnostics ZIP…** writes `system-info.txt`
+and `operation-logs.txt`, both sanitized as below, to a location chosen in a save dialog, and
+**Open bug report form** opens GitHub in the browser. Nothing is uploaded; the reporter attaches
+the ZIP themselves.
 
 Persisted and copied details remove URL user information/query/fragment data, bearer values,
 password/secret/token fields, and configuration-source snippets from Jackson parse chains before

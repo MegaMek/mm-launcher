@@ -112,8 +112,9 @@ uses equal-width, top-aligned columns at wide window sizes: Game Java, Diagnosti
 Launcher update (supported native installations) on the left; the launcher-wide Launch options
 form on the right. At narrow sizes these groups stack in that reading order, with the bottom navigation
 remaining visible and the sections scrolling vertically as needed. Settings utility buttons
-share the dimensions needed by their longest label. News titles, All news, Join Discord, and
-Play online are unboxed accent-color links with underlines, keyboard activation, visible focus, and accessible link roles.
+share the dimensions needed by their longest label; Diagnostics holds **View logs** and **Report a
+bug**. News titles, All news, Join Discord,
+Play online, and Report a bug are unboxed accent-color links with underlines, keyboard activation, visible focus, and accessible link roles.
 Custom links explicitly repaint on both focus gain and loss and draw the token focus ring around
 the whole link. Check boxes use the look and feel's focus indication in checked and unchecked
 states; selection color never replaces the keyboard-focus cue.
@@ -153,8 +154,9 @@ than being truncated; tooltips and accessible names retain the date and title. T
 hidden when the window is too small for it to fit over the artwork. Remote article HTML is not
 rendered in the launcher and news loading never delays navigation.
 
-Home offers two community links: **Join Discord** opens the MegaMek Discord invitation and
-**Play online** opens megamek.games, which lists public MegaMek servers. On the managed home they
+Home offers three community links: **Join Discord** opens the MegaMek Discord invitation,
+**Play online** opens megamek.games, which lists public MegaMek servers, and **Report a bug** opens
+the bug report helper. On the managed home they
 sit on the right of the Installations/Settings row, which stays centered; when the window is too
 narrow for both, the links move centered below that row so the buttons never wrap or clip. The
 first-run home uses the same row with a single **Settings** button, so testers can opt in to
@@ -195,7 +197,13 @@ before atomic publication. It is the sole explicit runtime for every registered 
 take effect on the next launch. If no default is saved, the exact Java runtime executing MM
 Launcher is displayed and used automatically without persistence. Invalid or corrupt explicit
 settings fail visibly; absence is healthy. Settings sections use spacing rather than framed backplates. **View logs** opens a
-map-style local viewer with selectable text and styled Copy/Close controls. The Game Java
+map-style local viewer with selectable text and styled Copy/Close controls. **Report a bug** opens
+a single modeless helper (opening it again focuses the existing one) with two steps: **Save
+diagnostics ZIP…** (sanitized system details and operation logs, written off the EDT through a
+temporary file, with a replace confirmation) and the primary **Open bug report form**, which opens
+the repository's `bug_report.yml` form with environment fields prefilled and never sets `labels`.
+It points game problems to each program's own Help → Report a Bug and offers **Ask on Discord**.
+Error dialogs offer the same helper through a **Report this problem** link. The Game Java
 selector uses the same launcher styling. No Java download, installation,
 bundle, or generic Save settings action exists; Java acquisition remains deferred.
 
