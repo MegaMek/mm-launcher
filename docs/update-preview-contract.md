@@ -37,20 +37,26 @@ The receipt trusts launcher-local state derived from HTTPS plus GitHub's same-so
 detects transfer corruption but is not an independent signature. Hostile same-user modification of
 both registry and receipt is outside this model; structural and binding errors still fail closed.
 
-## Ownership policy version 1
+## Ownership policy
 
-Archive membership alone never establishes ownership. The allowlist manages root suite launch
-binaries named `MegaMek`, `MekHQ`, or `MegaMekLab` with `.jar`, `.exe`, or `.sh`; ordinary files
-below `lib/`, `docs/`, and `licenses/`; and ordinary official files below `data/` except protected
-descendants.
+Archive membership alone never establishes ownership. Policy version 2 (written for new
+installations and every update) manages every official regular file directly in the installation
+root (launch binaries, `.l4j.ini`, `README.md`, licence files, `sentry.properties`, and similar
+package files) plus ordinary files below `bin/`, `lib/`, `docs/`, and `licenses/`, and ordinary
+official files below `data/` except protected descendants. Unknown top-level folders stay unowned.
+Policy version 1 receipts remain valid and keep their narrower allowlist: root suite launch
+binaries named `MegaMek`, `MekHQ`, or `MegaMekLab` with `.jar`, `.exe`, or `.sh`, plus the same
+`lib/`, `docs/`, `licenses/`, and `data/` rules. Repair rebuilds with the source receipt's policy.
 
 The stable ordered protected contract is `campaigns`, `saves`, `userdata`, `custom`, `mmconf`,
 `logs`, `backups`, and `data/campaigns`, `data/saves`, `data/userdata`, `data/custom`,
 `data/logs`, and `data/backups`. These stay protected even when an official package ships a
-byte-identical sample campaign, save, or configuration. Root `.l4j.ini`, configuration
-`.properties`, defaults, and every unknown root location are excluded unless a future policy
-explicitly assesses them. Excluded package paths are reported so the manifest never implies that
-the launcher manages the whole archive.
+byte-identical sample campaign, save, or configuration; they are never replaced by updates.
+Policy 2 receipts and current provenance additionally record `protectedPackageFiles`: each
+official package file under a protected path with the SHA-256 of every official version seen by
+install and update (unioned across updates). Uninstall uses this only to remove still-untouched
+shipped defaults. Provenance written before this field existed reads it as empty. Excluded package
+paths are reported so the manifest never implies that the launcher manages the whole archive.
 
 Both manifests use the fixed repository-derived product/package identity and identical
 policy/protected contract. Safe extraction and manifest validation reject links, reparse points,

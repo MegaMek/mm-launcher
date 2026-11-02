@@ -79,13 +79,16 @@ records, install a payload directly as the shared `MegaMek` support root, or pla
 `MegaMek Launcher.app`. Registry/receipt files remain outside each product/channel child. Leaf names
 include the selected product and channel, such as
 `MekHQ Core`, `MegaMek Experimental`, or `MegaMekLab Core`, so different quick choices
-do not collide or misdescribe their contents.
+do not collide or misdescribe their contents. Installing the same product, channel, or exact
+release again is supported (Experimental testers commonly keep several copies): the suggested
+folder becomes the first nonexistent `Name`, `Name (2)`, `Name (3)`, … sibling, and the
+registered name gets the first free ` #2`, ` #3`, … suffix when the friendly name is taken.
 After the native parent chooser, a styled folder-name dialog preselects the friendly
 `Program Channel (Version)` name and keeps invalid input in place with an inline error. Cancel or
 Escape changes no state. There is no separate installation-name prompt: the same friendly value
 is registered automatically. The destination must be wholly
 nonexistent—even an empty directory is refused. Registry/destination/registered-root
-overlaps, duplicate names, and linked or special ancestors fail preflight. Extraction occurs in a
+overlaps, explicit duplicate names, and linked or special ancestors fail preflight. Extraction occurs in a
 random create-new sibling staging directory. Final move has no replace option and refuses a target
 that appears concurrently.
 
@@ -147,7 +150,7 @@ package publication. Java is resolved only for launch or explicit launch preview
 default, the exact Java runtime executing MegaMek Launcher is validated and used automatically without
 being persisted; an explicit default remains launcher-wide and has no per-copy override.
 
-Before publication, policy-version-1 hashes are made only from the pristine verified extracted
+Before publication, current-policy hashes are made only from the pristine verified extracted
 package. After registration generates its UUID, a receipt bound to that UUID, canonical root,
 registration time, fixed repository/tag/asset identity, size, GitHub SHA-256, protected-path
 contract, complete managed manifest, and excluded-file inventory is created beside the registry

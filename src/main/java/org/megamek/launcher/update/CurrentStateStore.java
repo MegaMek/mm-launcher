@@ -94,8 +94,8 @@ final class CurrentStateStore {
             throw new IOException("current provenance size is invalid");
         }
         try {
-            CurrentUpdateState state = mapper.readValue(Files.readAllBytes(file),
-                    CurrentUpdateState.class);
+            CurrentUpdateState state = LegacyProvenanceJson.read(mapper,
+                    Files.readAllBytes(file), CurrentUpdateState.class);
             validate(state, record, original);
             return state;
         } catch (IOException | RuntimeException | ManifestException e) {
@@ -145,7 +145,8 @@ final class CurrentStateStore {
         if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) return;
         CurrentUpdateState current;
         try {
-            current = mapper.readValue(Files.readAllBytes(file), CurrentUpdateState.class);
+            current = LegacyProvenanceJson.read(mapper, Files.readAllBytes(file),
+                    CurrentUpdateState.class);
         } catch (IOException e) {
             throw new IOException("refusing to remove unreadable current provenance", e);
         }
@@ -163,7 +164,8 @@ final class CurrentStateStore {
         StrictPathSafety.requireFile(staging, "current provenance staging");
         final CurrentUpdateState candidate;
         try {
-            candidate = mapper.readValue(Files.readAllBytes(staging), CurrentUpdateState.class);
+            candidate = LegacyProvenanceJson.read(mapper, Files.readAllBytes(staging),
+                    CurrentUpdateState.class);
         } catch (IOException e) {
             throw new IOException("corrupt current-provenance staging blocks recovery", e);
         }
@@ -176,7 +178,7 @@ final class CurrentStateStore {
     void validate(CurrentUpdateState state, InstallationRecord record,
                   OwnershipReceipt original) throws IOException, ManifestException {
         if (state == null || state.schemaVersion() != SCHEMA
-                || state.ownershipPolicyVersion() != OwnershipPolicy.VERSION
+                || !OwnershipPolicy.SUPPORTED_VERSIONS.contains(state.ownershipPolicyVersion())
                 || state.installationId() == null || state.canonicalRoot() == null
                 || state.registeredAt() == null || state.repository() == null
                 || state.tag() == null || state.assetName() == null
@@ -192,6 +194,7 @@ final class CurrentStateStore {
             throw new IOException("current provenance does not preserve original ownership binding");
         }
         receipts.validate(state.asReceipt(), record);
+        int policy = state.ownershipPolicyVersion();
         Set<String> aliases = new HashSet<>();
         for (OverrideEntry override : state.overrides()) {
             if (override == null || override.path() == null || override.kind() == null
@@ -200,7 +203,8 @@ final class CurrentStateStore {
             }
             ManifestReader.validatePortablePath(override.path(), "override path",
                     "current provenance");
-            if (!OwnershipPolicy.managed(override.path()) || !aliases.add(key(override.path()))) {
+            if (!OwnershipPolicy.managed(override.path(), policy)
+                    || !aliases.add(key(override.path()))) {
                 throw new IOException("override history is outside ownership or duplicated");
             }
             for (String hash : override.officialHashes()) {
@@ -220,8 +224,9 @@ final class CurrentStateStore {
             String folded = key(item.localPrefix());
             // Managed directory roots can themselves be the outermost case-only prefix.
             if (!folded.equals(item.foldedPrefix())
-                    || !(OwnershipPolicy.managed(item.localPrefix())
-                    || Set.of("data", "docs", "licenses").contains(folded))
+                    || !(OwnershipPolicy.managed(item.localPrefix(), policy)
+                    || Set.of("data", "docs", "licenses").contains(folded)
+                    || policy >= 2 && folded.equals("bin"))
                     || !caseKeys.add(folded) || item.officialSpellings().isEmpty()) {
                 throw new IOException("invalid case-prefix override binding");
             }

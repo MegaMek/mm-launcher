@@ -392,25 +392,25 @@ class RealUpdateServiceTest {
                 "lib/runtime.txt", bytes("runtime-1"),
                 "data/images/units/meks/Archer.png", bytes("archer"),
                 "data/Icons/icon.png", bytes("icon"),
-                "bin/MegaMek.bat", bytes("old-script"),
-                "bin/MegaMekLab.bat", bytes("old-lab-script"),
-                "bin/MekHQ.bat", bytes("old-hq-script")));
+                "tools/MegaMek.bat", bytes("old-script"),
+                "tools/MegaMekLab.bat", bytes("old-lab-script"),
+                "tools/MekHQ.bat", bytes("old-hq-script")));
         Fixture managed = install("case-reimport", "v1.0.0", v1);
-        for (String script : List.of("bin/MegaMek.bat", "bin/MegaMekLab.bat",
-                "bin/MekHQ.bat")) {
+        for (String script : List.of("tools/MegaMek.bat", "tools/MegaMekLab.bat",
+                "tools/MekHQ.bat")) {
             Files.writeString(managed.root.resolve(script), "local-" + script);
         }
         Map<String, byte[]> v2 = packageFiles(2, Map.of(
                 "lib/runtime.txt", bytes("runtime-2"),
                 "data/images/units/meks/archer.png", bytes("archer"),
                 "data/icons/icon.png", bytes("icon"),
-                "bin/MegaMek.bat", bytes("new-script"),
-                "bin/MegaMekLab.bat", bytes("new-lab-script"),
-                "bin/MekHQ.bat", bytes("new-hq-script")));
+                "tools/MegaMek.bat", bytes("new-script"),
+                "tools/MegaMekLab.bat", bytes("new-lab-script"),
+                "tools/MekHQ.bat", bytes("new-hq-script")));
         RealUpdateService.ApplyResult updated = apply(managed, "v2.0.0", v2, point -> {});
         assertEquals(2, updated.state().caseOverrides().size());
-        for (String script : List.of("bin/MegaMek.bat", "bin/MegaMekLab.bat",
-                "bin/MekHQ.bat")) {
+        for (String script : List.of("tools/MegaMek.bat", "tools/MegaMekLab.bat",
+                "tools/MekHQ.bat")) {
             assertEquals("local-" + script, Files.readString(managed.root.resolve(script)));
             assertTrue(updated.state().excludedOfficialPaths().contains(script));
         }
@@ -439,8 +439,8 @@ class RealUpdateServiceTest {
             assertTrue(prepared.report().eligible(), prepared.report().message());
             assertEquals(updated.state().caseOverrides(),
                     prepared.comparison().caseOverrides());
-            for (String script : List.of("bin/MegaMek.bat", "bin/MegaMekLab.bat",
-                    "bin/MekHQ.bat")) {
+            for (String script : List.of("tools/MegaMek.bat", "tools/MegaMekLab.bat",
+                    "tools/MekHQ.bat")) {
                 assertTrue(prepared.comparison().unknown().contains(script));
             }
             adoption.commit(prepared);
@@ -454,8 +454,8 @@ class RealUpdateServiceTest {
                 importedRegistry, data, imported, receipt);
         assertEquals(updated.state().caseOverrides(), current.caseOverrides());
         assertTrue(current.overrides().isEmpty());
-        for (String script : List.of("bin/MegaMek.bat", "bin/MegaMekLab.bat",
-                "bin/MekHQ.bat")) {
+        for (String script : List.of("tools/MegaMek.bat", "tools/MegaMekLab.bat",
+                "tools/MekHQ.bat")) {
             assertTrue(current.excludedOfficialPaths().contains(script));
             assertFalse(current.officialManifest().files().stream().anyMatch(
                     file -> file.path().equals(script)));
@@ -466,9 +466,9 @@ class RealUpdateServiceTest {
                 "lib/runtime.txt", bytes("runtime-3"),
                 "data/images/units/meks/archer.png", bytes("new-archer"),
                 "data/icons/icon.png", bytes("new-icon"),
-                "bin/MegaMek.bat", bytes("third-script"),
-                "bin/MegaMekLab.bat", bytes("third-lab-script"),
-                "bin/MekHQ.bat", bytes("third-hq-script")));
+                "tools/MegaMek.bat", bytes("third-script"),
+                "tools/MegaMekLab.bat", bytes("third-lab-script"),
+                "tools/MekHQ.bat", bytes("third-hq-script")));
         UpdatePreviewService.Preview preview = new UpdatePreviewService(
                 transport("v3.0.0", v3)).preview(
                 importedRegistry, imported.id(), "v3.0.0", quiet());

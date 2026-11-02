@@ -103,7 +103,7 @@ class ReceiptValidationTest {
         cases.put("malformed syntax", (bytes, tree) ->
                 java.util.Arrays.copyOf(bytes, bytes.length - 1));
         cases.put("unsupported schema", json("schemaVersion", 2));
-        cases.put("unsupported policy", json("ownershipPolicyVersion", 2));
+        cases.put("unsupported policy", json("ownershipPolicyVersion", 3));
         return cases.entrySet().stream().map(item -> DynamicTest.dynamicTest(item.getKey(),
                 () -> assertRejectedBeforeNetwork(item.getValue())));
     }
@@ -128,7 +128,8 @@ class ReceiptValidationTest {
         cases.put("protected policy", nested("officialManifest", node ->
                 ((ArrayNode) node.withArray("protectedPaths")).removeAll().add("saves")));
         cases.put("managed path outside allowlist", nested("officialManifest", node ->
-                ((ObjectNode) node.withArray("files").get(0)).put("path", "settings.properties")));
+                ((ObjectNode) node.withArray("files").get(0))
+                        .put("path", "extras/settings.properties")));
         cases.put("managed path protected", nested("officialManifest", node ->
                 ((ObjectNode) node.withArray("files").get(0)).put("path", "mmconf/options.cfg")));
         cases.put("excluded overlap", (bytes, tree) -> {

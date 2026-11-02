@@ -119,7 +119,10 @@ Only ownership-policy managed paths are candidates. Saves, campaigns, configurat
 custom/userdata descendants, excluded package files, and unknown local paths are not migrated or
 written. Modified data, obsolete-modified data, and data collisions are retained as `SKIP`
 overrides instead of unnecessarily aborting Apply. Unknown artifacts are never broadly scanned for
-deletion.
+deletion. Applied updates publish ownership policy 2 state, so a policy-1 copy begins managing
+its package root files and `bin/` on its first update: a local file identical to the target is
+kept, and a differing one is a `SKIP` collision. The new state unions `protectedPackageFiles`
+hashes from the previous state and the target package; protected files themselves are not written.
 
 Runtime is stricter because a partially updated runtime is unsafe. Missing, damaged or modified
 official runtime files (suite-root `.jar`, `.exe`, `.sh`, and ordinary files below `lib/`) are

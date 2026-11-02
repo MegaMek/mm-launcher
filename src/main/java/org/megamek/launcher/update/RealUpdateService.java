@@ -215,7 +215,7 @@ public final class RealUpdateService {
                     throw new IOException("repair archive lacks the receipt application");
                 }
                 OwnershipPolicy.Build target = new OwnershipPolicy().build(workspace.extracted(),
-                        repository, source.tag());
+                        repository, source.tag(), source.ownershipPolicyVersion());
                 if (!source.officialManifest().equals(target.manifest())
                         || !source.excludedOfficialPaths().equals(target.excludedPaths())) {
                     throw new IOException("repair archive layout differs from persisted official "
@@ -649,7 +649,7 @@ public final class RealUpdateService {
             throws IOException, ManifestException {
         return transactInternal(snapshot, extracted,
                 new OwnershipPolicy.Build(snapshot.current().officialManifest(),
-                        snapshot.current().excludedOfficialPaths()),
+                        snapshot.current().excludedOfficialPaths(), List.of()),
                 targetInspection, decisions, true, null, null, null, null);
     }
 
@@ -731,7 +731,7 @@ public final class RealUpdateService {
                 state.assetSha256(), state.officialManifest(), state.excludedOfficialPaths(),
                 state.overrides().stream().filter(override ->
                         !restored.contains(key(override.path()))).toList(),
-                state.caseOverrides(), id);
+                state.caseOverrides(), id, state.protectedPackageFiles());
     }
 
     private Path createNamespace(Snapshot snapshot, String transactionId) throws IOException {
@@ -1211,7 +1211,9 @@ public final class RealUpdateService {
                         OverrideEntry::path, String.CASE_INSENSITIVE_ORDER)).toList(),
                 cases.values().stream().sorted(Comparator.comparing(CaseOverride::foldedPrefix))
                         .toList(),
-                transactionId);
+                transactionId,
+                ProtectedPackageFile.merge(previous.protectedPackageFiles(),
+                        target.protectedFiles()));
     }
 
     private static boolean affectedByCase(String path, List<CaseOverride> prior,
@@ -1505,7 +1507,7 @@ public final class RealUpdateService {
         long size = Files.size(file);
         if (size <= 0 || size > MAX_METADATA) throw new IOException(label + " size is invalid");
         try {
-            return mapper.readValue(Files.readAllBytes(file), type);
+            return LegacyProvenanceJson.read(mapper, Files.readAllBytes(file), type);
         } catch (IOException | RuntimeException e) {
             throw new IOException(label + " is invalid: " + detail(e), e);
         }

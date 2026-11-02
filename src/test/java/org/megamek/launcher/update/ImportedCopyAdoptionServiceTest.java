@@ -780,13 +780,13 @@ class ImportedCopyAdoptionServiceTest {
             throws Exception {
         byte[] jar = jar(null);
         byte[] archive = archive(jar, "official-data", "setting",
-                Map.of("bin/MegaMek.bat", "official-script"));
+                Map.of("tools/MegaMek.bat", "official-script"));
         Fixture fixture = fixture(jar, "official-data", "setting",
                 transport(archive), point -> {});
         Files.delete(fixture.root().resolve("data/base.txt"));
         Files.writeString(fixture.root().resolve("data/Base.txt"), "user-data");
-        Files.createDirectories(fixture.root().resolve("bin"));
-        Files.writeString(fixture.root().resolve("bin/MegaMek.bat"), "user-script");
+        Files.createDirectories(fixture.root().resolve("tools"));
+        Files.writeString(fixture.root().resolve("tools/MegaMek.bat"), "user-script");
         Map<String, Evidence> before = rootEvidence(fixture.root());
 
         try (PreparedAdoption prepared = fixture.service().prepare(fixture.record(),
@@ -797,7 +797,7 @@ class ImportedCopyAdoptionServiceTest {
             assertEquals(List.of(new CaseOverride("data/base.txt", "data/Base.txt",
                     List.of("data/Base.txt", "data/base.txt"))),
                     prepared.comparison().caseOverrides());
-            assertTrue(prepared.comparison().unknown().contains("bin/MegaMek.bat"));
+            assertTrue(prepared.comparison().unknown().contains("tools/MegaMek.bat"));
             fixture.service().commit(prepared);
         }
         RegistryData data = fixture.registries().read(fixture.registry());
@@ -812,7 +812,7 @@ class ImportedCopyAdoptionServiceTest {
                 List.of(receipt.officialManifest().files().stream()
                         .filter(file -> file.path().equals("data/base.txt"))
                         .findFirst().orElseThrow().sha256()))), current.overrides());
-        assertTrue(current.excludedOfficialPaths().contains("bin/MegaMek.bat"));
+        assertTrue(current.excludedOfficialPaths().contains("tools/MegaMek.bat"));
         assertEquals(before, rootEvidence(fixture.root()));
     }
 

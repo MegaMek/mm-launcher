@@ -378,7 +378,7 @@ public final class UpdatePreviewService {
 
     private static OwnershipPolicy.Build copyBuild(OwnershipPolicy.Build build) {
         return new OwnershipPolicy.Build(copyManifest(build.manifest()),
-                List.copyOf(build.excludedPaths()));
+                List.copyOf(build.excludedPaths()), List.copyOf(build.protectedFiles()));
     }
 
     private static OwnershipReceipt copyReceipt(OwnershipReceipt receipt) {
@@ -386,7 +386,7 @@ public final class UpdatePreviewService {
                 receipt.installationId(), receipt.canonicalRoot(), receipt.registeredAt(),
                 receipt.repository(), receipt.tag(), receipt.assetName(), receipt.assetSize(),
                 receipt.assetSha256(), copyManifest(receipt.officialManifest()),
-                List.copyOf(receipt.excludedOfficialPaths()));
+                List.copyOf(receipt.excludedOfficialPaths()), receipt.protectedPackageFiles());
     }
 
     private static CurrentUpdateState copyCurrent(CurrentUpdateState current) {
@@ -404,7 +404,7 @@ public final class UpdatePreviewService {
                 current.tag(), current.assetName(), current.assetSize(),
                 current.assetSha256(), copyManifest(current.officialManifest()),
                 List.copyOf(current.excludedOfficialPaths()), overrides, cases,
-                current.lastTransactionId());
+                current.lastTransactionId(), current.protectedPackageFiles());
     }
 
     private static Manifest copyManifest(Manifest manifest) {

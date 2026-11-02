@@ -60,6 +60,7 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
@@ -125,14 +126,18 @@ public final class NormalInstallService {
     }
 
     /**
-     * Uses a distinct, truthful folder for every fixed product/channel pair. The registered
-     * first copy is still named Main and becomes the default only when Main is empty.
+     * Uses a distinct, truthful folder for every fixed product/channel pair. A folder already
+     * used by another copy (or left behind by one) gets the next numbered sibling instead.
      */
     public Path defaultDestination(OfficialRepository requestedRepository,
                                    FollowChannel requestedChannel) throws IOException {
         OfficialRepository repository = requireAllowedRepository(requestedRepository);
         FollowChannel channel = requireAllowedChannel(requestedChannel);
-        return installLocations.destination(registry, defaultFolderName(repository, channel));
+        Path preferred = installLocations.destination(registry,
+                defaultFolderName(repository, channel));
+        Path parent = preferred.getParent();
+        return parent == null ? preferred
+                : availableFolder(parent, preferred.getFileName().toString());
     }
 
     public static String defaultFolderName(OfficialRepository repository, FollowChannel channel)
@@ -247,12 +252,6 @@ public final class NormalInstallService {
         List<Path> missingParents = validateProposedDestination(destination, snapshot.data());
         ChannelCatalog.Target target = targetResolver.resolve();
         requireTarget(target, repository, channel);
-        String automaticName = friendlyName(repository, channel, target.version());
-        if (snapshot.data().installations().stream()
-                .anyMatch(record -> record.name().equals(automaticName))) {
-            throw new IOException("an installation named " + automaticName
-                    + " is already registered");
-        }
         return new Plan(registry, snapshot, destination, List.copyOf(missingParents),
                 target.channel(), target.repository(), target.version(),
                 requiredProducts(repository), target.release(), target.asset(), target.source(),
@@ -303,7 +302,8 @@ public final class NormalInstallService {
         final FreshInstaller.Result installed;
         try {
             installed = new FreshInstaller(transport).installMatchingProducts(plan.repository(),
-                    plan.release().tag(), plan.destination(), registry, friendlyName(plan), progress,
+                    plan.release().tag(), plan.destination(), registry, installationName(plan),
+                    progress,
                     context, Optional.of(expected), plan.requiredProducts());
         } catch (IOException error) {
             if (Files.exists(plan.destination(), LinkOption.NOFOLLOW_LINKS)) {
@@ -600,6 +600,37 @@ public final class NormalInstallService {
     public static String friendlyName(Plan plan) throws IOException {
         if (plan == null) throw new IOException("normal install plan is required");
         return friendlyName(plan.repository(), plan.channel(), plan.version());
+    }
+
+    /**
+     * The friendly name, numbered when the reviewed registry already has a copy with that name.
+     * Testers routinely keep several copies of the same release side by side.
+     */
+    public static String installationName(Plan plan) throws IOException {
+        String base = friendlyName(plan);
+        Set<String> taken = new HashSet<>();
+        plan.registrySnapshot().data().installations().forEach(record -> taken.add(record.name()));
+        return firstAvailable(base, " #", taken::contains);
+    }
+
+    /**
+     * Returns {@code parent/base}, or the first numbered sibling such as {@code base (2)} that
+     * does not exist yet, so another copy of the same product and channel gets its own folder.
+     */
+    public static Path availableFolder(Path parent, String base) {
+        String name = firstAvailable(base, " (",
+                candidate -> Files.exists(parent.resolve(candidate), LinkOption.NOFOLLOW_LINKS));
+        return parent.resolve(name);
+    }
+
+    private static String firstAvailable(String base, String separator,
+                                         java.util.function.Predicate<String> taken) {
+        if (!taken.test(base)) return base;
+        String suffix = separator.endsWith("(") ? ")" : "";
+        for (int number = 2; ; number++) {
+            String candidate = base + separator + number + suffix;
+            if (!taken.test(candidate)) return candidate;
+        }
     }
 
     private static boolean isExactSource(OfficialRepository repository, String tag,

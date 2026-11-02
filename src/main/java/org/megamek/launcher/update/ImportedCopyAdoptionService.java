@@ -532,7 +532,7 @@ public final class ImportedCopyAdoptionService {
                     prepared.workspace().resolvedDigest().hex(),
                     ownership.manifest(), ownership.excludedPaths(), overrides,
                     comparison.caseOverrides(),
-                    attemptId);
+                    attemptId, receipt.protectedPackageFiles());
             states.write(registry, record, receipt, current);
             currentPublished = true;
             failureHook.hit("AFTER_CURRENT");
