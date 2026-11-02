@@ -57,19 +57,33 @@ public record CurrentUpdateState(
         List<String> excludedOfficialPaths,
         List<OverrideEntry> overrides,
         List<CaseOverride> caseOverrides,
-        String lastTransactionId) {
+        String lastTransactionId,
+        List<ProtectedPackageFile> protectedPackageFiles) {
 
     public CurrentUpdateState {
         excludedOfficialPaths = excludedOfficialPaths == null
                 ? null : List.copyOf(excludedOfficialPaths);
         overrides = overrides == null ? null : List.copyOf(overrides);
         caseOverrides = caseOverrides == null ? null : List.copyOf(caseOverrides);
+        protectedPackageFiles = protectedPackageFiles == null
+                ? List.of() : List.copyOf(protectedPackageFiles);
+    }
+
+    public CurrentUpdateState(int schemaVersion, int ownershipPolicyVersion,
+                              String installationId, String canonicalRoot, String registeredAt,
+                              String repository, String tag, String assetName, long assetSize,
+                              String assetSha256, Manifest officialManifest,
+                              List<String> excludedOfficialPaths, List<OverrideEntry> overrides,
+                              List<CaseOverride> caseOverrides, String lastTransactionId) {
+        this(schemaVersion, ownershipPolicyVersion, installationId, canonicalRoot, registeredAt,
+                repository, tag, assetName, assetSize, assetSha256, officialManifest,
+                excludedOfficialPaths, overrides, caseOverrides, lastTransactionId, List.of());
     }
 
     public OwnershipReceipt asReceipt() {
         return new OwnershipReceipt(schemaVersion, ownershipPolicyVersion, installationId,
                 canonicalRoot, registeredAt, repository, tag, assetName, assetSize, assetSha256,
-                officialManifest, excludedOfficialPaths);
+                officialManifest, excludedOfficialPaths, protectedPackageFiles);
     }
 
     public static CurrentUpdateState initial(OwnershipReceipt receipt) {
@@ -77,6 +91,7 @@ public record CurrentUpdateState(
                 receipt.installationId(), receipt.canonicalRoot(), receipt.registeredAt(),
                 receipt.repository(), receipt.tag(), receipt.assetName(), receipt.assetSize(),
                 receipt.assetSha256(), receipt.officialManifest(),
-                receipt.excludedOfficialPaths(), List.of(), List.of(), null);
+                receipt.excludedOfficialPaths(), List.of(), List.of(), null,
+                receipt.protectedPackageFiles());
     }
 }

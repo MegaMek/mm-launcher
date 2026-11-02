@@ -73,6 +73,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -81,13 +82,17 @@ import java.util.regex.Pattern;
 /**
  * Conservative, ledger-backed removal of launcher-managed application files.
  *
- * <p>Only regular files whose current digest equals the latest official provenance are moved.
- * The move target is an external sibling on the same filesystem. Registration removal is the
- * final commit barrier; every pre-commit failure restores moved files and launcher metadata.</p>
+ * <p>Only regular files whose current digest equals the latest official provenance are moved,
+ * plus untouched official defaults shipped inside protected user-data folders and caches the
+ * applications regenerate. The move target is an external sibling on the same filesystem.
+ * Registration removal is the final commit barrier; every pre-commit failure restores moved
+ * files and launcher metadata.</p>
  */
 public final class UninstallService {
     public static final int JOURNAL_SCHEMA = 1;
     public static final String CONFIRMATION = "UNINSTALL-OFFICIAL-FILES";
+    /** Runtime caches the applications rebuild from package data on the next start. */
+    static final List<String> REGENERABLE_CACHES = List.of("data/mekfiles/units.cache");
     private static final String JOURNAL_ROOT = "uninstall-v1";
     private static final String REMOVAL_ROOT = "registration-removal-v1";
     private static final int MAX_JOURNAL_BYTES = 32 * 1024 * 1024;
@@ -489,6 +494,13 @@ public final class UninstallService {
         int completed = 0;
         for (FileEntry official : current.officialManifest().files()) {
             context.checkpoint();
+            if (regenerableCache(official.path())) {
+                // A shipped cache is rewritten by the applications; it is planned as a cache below.
+                context.progress(OperationPhase.PLAN, ++completed,
+                        current.officialManifest().files().size(), ProgressUnit.FILES,
+                        "Compared official application files");
+                continue;
+            }
             Path file;
             try {
                 file = RealUpdateFiles.resolve(root, official.path(), true);
@@ -519,11 +531,83 @@ public final class UninstallService {
                     current.officialManifest().files().size(), ProgressUnit.FILES,
                     "Compared official application files");
         }
+        Set<String> planned = new HashSet<>();
+        entries.forEach(entry -> planned.add(entry.relativePath().toLowerCase(Locale.ROOT)));
+        for (ProtectedPackageFile shipped : current.protectedPackageFiles()) {
+            context.checkpoint();
+            if (!planned.add(shipped.path().toLowerCase(Locale.ROOT))) continue;
+            PlanEntry entry = planShippedDefault(root, shipped, context);
+            entries.add(entry);
+            // Retained user data may have replaced a shipped folder with a file or link, so only
+            // real directories above removable or already absent defaults become cleanup candidates.
+            if (entry.action() == Action.DELETE || entry.action() == Action.ABSENT) {
+                addDirectoryParents(root, directories, shipped.path());
+            }
+        }
+        for (String cache : REGENERABLE_CACHES) {
+            context.checkpoint();
+            if (!planned.add(cache.toLowerCase(Locale.ROOT))) continue;
+            PlanEntry entry = planRegenerableCache(root, cache, context);
+            if (entry != null) {
+                entries.add(entry);
+                addParents(directories, cache);
+            }
+        }
         List<String> knownDirectories = directories.stream()
                 .sorted(Comparator.comparingInt((String value) -> depth(value)).reversed()
                         .thenComparing(Comparator.naturalOrder()))
                 .toList();
         return new Plan(record, receipt, current, List.copyOf(entries), knownDirectories);
+    }
+
+    /**
+     * Plans an untouched package default inside a protected user-data folder. Only bytes equal to
+     * an official default are removed; anything the user changed is retained.
+     */
+    private static PlanEntry planShippedDefault(Path root, ProtectedPackageFile shipped,
+                                                OperationContext context)
+            throws IOException, InterruptedException, ManifestException {
+        String reference = shipped.officialHashes().get(0);
+        Path file;
+        try {
+            file = RealUpdateFiles.resolve(root, shipped.path(), true);
+        } catch (ManifestException unsafe) {
+            return new PlanEntry(shipped.path(), reference, -1, Action.RETAIN,
+                    "unsafe path or local alias");
+        }
+        if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) {
+            return new PlanEntry(shipped.path(), reference, -1, Action.ABSENT, "already absent");
+        }
+        BasicFileAttributes attrs = Files.readAttributes(file, BasicFileAttributes.class,
+                LinkOption.NOFOLLOW_LINKS);
+        if (!attrs.isRegularFile() || attrs.isSymbolicLink() || attrs.isOther()) {
+            return new PlanEntry(shipped.path(), reference, -1, Action.RETAIN,
+                    "user data (non-regular)");
+        }
+        String hash = RealUpdateFiles.hash(file, context);
+        return shipped.officialHashes().contains(hash)
+                ? new PlanEntry(shipped.path(), hash, attrs.size(), Action.DELETE,
+                        "unchanged official default")
+                : new PlanEntry(shipped.path(), reference, attrs.size(), Action.RETAIN,
+                        "user data (changed from the official default)");
+    }
+
+    /** Plans a cache the applications rebuild on demand; absent caches produce no entry. */
+    private static PlanEntry planRegenerableCache(Path root, String cache,
+                                                  OperationContext context)
+            throws IOException, InterruptedException, ManifestException {
+        Path file;
+        try {
+            file = RealUpdateFiles.resolve(root, cache, true);
+        } catch (ManifestException unsafe) {
+            return null;
+        }
+        if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) return null;
+        BasicFileAttributes attrs = Files.readAttributes(file, BasicFileAttributes.class,
+                LinkOption.NOFOLLOW_LINKS);
+        if (!attrs.isRegularFile() || attrs.isSymbolicLink() || attrs.isOther()) return null;
+        return new PlanEntry(cache, RealUpdateFiles.hash(file, context), attrs.size(),
+                Action.DELETE, "regenerable application cache");
     }
 
     private Result executeLocked(Plan plan, OperationContext context)
@@ -766,7 +850,7 @@ public final class UninstallService {
         if (size <= 0 || size > MAX_JOURNAL_BYTES) {
             throw new IOException("uninstall journal size is invalid");
         }
-        UninstallJournal journal = mapper.readValue(Files.readAllBytes(file),
+        UninstallJournal journal = LegacyProvenanceJson.read(mapper, Files.readAllBytes(file),
                 UninstallJournal.class);
         validateJournal(journal, id);
         return journal;
@@ -1263,6 +1347,24 @@ public final class UninstallService {
                 || !journal.current().canonicalRoot().equals(expected.canonicalRoot())
                 || !journal.current().registeredAt().equals(expected.registeredAt())) {
             throw new IOException("uninstall journal does not match this installation");
+        }
+    }
+
+    private static boolean regenerableCache(String path) {
+        return REGENERABLE_CACHES.stream().anyMatch(cache -> cache.equalsIgnoreCase(path));
+    }
+
+    private static void addDirectoryParents(Path root, Set<String> result, String path) {
+        int slash = path.indexOf('/');
+        while (slash > 0) {
+            String parent = path.substring(0, slash);
+            Path directory = root.resolve(parent.replace('/', java.io.File.separatorChar));
+            if (Files.exists(directory, LinkOption.NOFOLLOW_LINKS)
+                    && !Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) {
+                return;
+            }
+            result.add(parent);
+            slash = path.indexOf('/', slash + 1);
         }
     }
 

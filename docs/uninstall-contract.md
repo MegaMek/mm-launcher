@@ -45,9 +45,15 @@ to the reviewed plan. Cancellation remains available during the single planning 
 
 The uninstall plan is derived from the latest verified official manifest, not the original
 receipt. Only a regular file whose stable size and SHA-256 match that current official entry is
-targeted. Missing files are already absent. Modified files, links, non-regular objects, protected
-paths, excluded package paths, and unknown/custom files are retained. Only manifest-parent
-directories which become empty are removed, deepest first; the installation root is removed only
+targeted. Missing files are already absent. Modified files, links, non-regular objects, excluded
+package paths, and unknown/custom files are retained. Protected paths are retained except for two
+narrow cases: a shipped default recorded in `protectedPackageFiles` whose bytes still equal one
+of its official hashes (an untouched sample campaign or `mmconf` default) is removed, while an
+edited one is retained as user data; and the regenerable `data/mekfiles/units.cache` is removed.
+Logs, saves, and anything else not shipped by the package remain. Copies installed or last
+updated before ownership policy 2 lack this record, so their package root files and defaults are
+retained until their next update or a fresh install. Only manifest, shipped-default, and cache
+parent directories which become empty are removed, deepest first; the installation root is removed only
 when empty. No application-root recursive delete is used and links, reparse points, aliases,
 case collisions, escapes, and noncanonical roots fail closed.
 

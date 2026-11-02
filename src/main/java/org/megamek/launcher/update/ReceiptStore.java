@@ -62,6 +62,7 @@ import java.text.Normalizer;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
@@ -114,7 +115,7 @@ public class ReceiptStore {
             OwnershipReceipt receipt;
             try (InputStream input = new LimitedInputStream(Files.newInputStream(file),
                     MAX_RECEIPT_BYTES)) {
-                receipt = mapper.readValue(input, OwnershipReceipt.class);
+                receipt = LegacyProvenanceJson.read(mapper, input, OwnershipReceipt.class);
             }
             validate(receipt, record);
             return receipt;
@@ -135,7 +136,8 @@ public class ReceiptStore {
                 ? assetDigest.substring("sha256:".length()).toLowerCase(Locale.ROOT) : null;
         OwnershipReceipt receipt = new OwnershipReceipt(SCHEMA_VERSION, OwnershipPolicy.VERSION,
                 record.id(), record.canonicalRoot(), record.registeredAt(), repository.key(), tag,
-                assetName, assetSize, digest, build.manifest(), build.excludedPaths());
+                assetName, assetSize, digest, build.manifest(), build.excludedPaths(),
+                ProtectedPackageFile.merge(List.of(), build.protectedFiles()));
         try {
             validate(receipt, record);
         } catch (ManifestException e) {
@@ -192,7 +194,7 @@ public class ReceiptStore {
         final OwnershipReceipt actual;
         try (InputStream input = new LimitedInputStream(Files.newInputStream(file),
                 MAX_RECEIPT_BYTES)) {
-            actual = mapper.readValue(input, OwnershipReceipt.class);
+            actual = LegacyProvenanceJson.read(mapper, input, OwnershipReceipt.class);
         } catch (IOException | RuntimeException error) {
             throw new IOException("refusing to remove unreadable ownership receipt", error);
         }
@@ -207,9 +209,8 @@ public class ReceiptStore {
         if (receipt == null || receipt.schemaVersion() != SCHEMA_VERSION) {
             throw new IOException("unsupported receipt schema");
         }
-        if (receipt.ownershipPolicyVersion() != OwnershipPolicy.VERSION) {
-            throw new IOException("unsupported ownership policy version");
-        }
+        OwnershipPolicy.requireSupported(receipt.ownershipPolicyVersion());
+        int policy = receipt.ownershipPolicyVersion();
         if (!record.id().equals(receipt.installationId())
                 || !record.canonicalRoot().equals(receipt.canonicalRoot())
                 || !record.registeredAt().equals(receipt.registeredAt())) {
@@ -246,7 +247,7 @@ public class ReceiptStore {
         }
         Set<String> managedAliases = new HashSet<>();
         for (var entry : receipt.officialManifest().files()) {
-            if (!OwnershipPolicy.managed(entry.path())) {
+            if (!OwnershipPolicy.managed(entry.path(), policy)) {
                 throw new IOException("receipt claims a path outside the ownership allowlist: "
                         + entry.path());
             }
@@ -263,7 +264,7 @@ public class ReceiptStore {
         for (String path : receipt.excludedOfficialPaths()) {
             ManifestReader.validatePortablePath(path, "excluded path", "ownership receipt");
             String key = alias(path);
-            if (OwnershipPolicy.managed(path) || managedAliases.contains(key)) {
+            if (OwnershipPolicy.managed(path, policy) || managedAliases.contains(key)) {
                 throw new IOException("receipt exclusion is managed or overlaps managed inventory: "
                         + path);
             }
@@ -272,10 +273,44 @@ public class ReceiptStore {
             }
             previous = key;
         }
+        validateProtectedPackageFiles(receipt.protectedPackageFiles(), "ownership receipt");
         try {
             Instant.parse(receipt.registeredAt());
         } catch (DateTimeParseException e) {
             throw new IOException("receipt registration time is invalid", e);
+        }
+    }
+
+    /** Shared structural check for official defaults recorded inside protected folders. */
+    static void validateProtectedPackageFiles(List<ProtectedPackageFile> files, String source)
+            throws IOException, ManifestException {
+        if (files == null || files.size() > SafeTarExtractor.MAX_ENTRIES) {
+            throw new IOException(source + " protected package inventory is invalid");
+        }
+        Set<String> aliases = new HashSet<>();
+        long hashes = 0;
+        for (ProtectedPackageFile file : files) {
+            if (file == null || file.path() == null || file.officialHashes() == null
+                    || file.officialHashes().isEmpty()) {
+                throw new IOException(source + " protected package entry is incomplete");
+            }
+            ManifestReader.validatePortablePath(file.path(), "protected package path", source);
+            if (!OwnershipPolicy.protectedPackagePath(file.path())
+                    || !aliases.add(alias(file.path()))) {
+                throw new IOException(source + " protected package path is not protected or is "
+                        + "duplicated: " + file.path());
+            }
+            Set<String> unique = new HashSet<>();
+            for (String hash : file.officialHashes()) {
+                if (hash == null || !HASH.matcher(hash).matches() || !unique.add(hash)) {
+                    throw new IOException(source + " protected package hash is invalid: "
+                            + file.path());
+                }
+            }
+            hashes += file.officialHashes().size();
+            if (hashes > SafeTarExtractor.MAX_ENTRIES * 4L) {
+                throw new IOException(source + " protected package inventory exceeds limit");
+            }
         }
     }
 

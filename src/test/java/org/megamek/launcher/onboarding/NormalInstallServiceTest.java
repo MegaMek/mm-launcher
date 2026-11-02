@@ -263,6 +263,47 @@ class NormalInstallServiceTest {
     }
 
     @Test
+    void sameReleaseCanBeInstalledTwiceWithDistinctNamesAndFolders() throws Exception {
+        Fixture fixture = fixture("1.02.03.2");
+        Path first = fixture.service.defaultDestination(OfficialRepository.MEKHQ,
+                FollowChannel.EXPERIMENTAL);
+        NormalInstallService.Result installedFirst = fixture.launcherServices.installNormal(
+                fixture.launcherServices.prepareNormalInstall(FollowChannel.EXPERIMENTAL, first),
+                quiet(), OperationContext.none(OperationType.FRESH_INSTALL));
+
+        Path second = fixture.service.defaultDestination(OfficialRepository.MEKHQ,
+                FollowChannel.EXPERIMENTAL);
+        assertEquals(first.resolveSibling("MekHQ Experimental (2)"), second);
+        NormalInstallService.Plan plan = fixture.launcherServices.prepareNormalInstall(
+                FollowChannel.EXPERIMENTAL, second);
+        assertEquals("MekHQ Experimental (9.09.09.1) #2",
+                NormalInstallService.installationName(plan));
+        NormalInstallService.Result installedSecond = fixture.launcherServices.installNormal(
+                plan, quiet(), OperationContext.none(OperationType.FRESH_INSTALL));
+
+        RegistryData data = fixture.registries.read(fixture.registry);
+        assertEquals(2, data.installations().size());
+        assertEquals("MekHQ Experimental (9.09.09.1)", installedFirst.record().name());
+        assertEquals("MekHQ Experimental (9.09.09.1) #2", installedSecond.record().name());
+        assertEquals(installedFirst.record().observedBuild(),
+                installedSecond.record().observedBuild());
+        assertEquals(fixture.state.resolve("installations").resolve("MekHQ Experimental (3)"),
+                fixture.service.defaultDestination(OfficialRepository.MEKHQ,
+                        FollowChannel.EXPERIMENTAL));
+    }
+
+    @Test
+    void availableFolderSkipsAnyExistingSiblingIncludingFilesLeftBehind() throws Exception {
+        Path parent = Files.createDirectory(temp.resolve("parent"));
+        assertEquals(parent.resolve("MegaMek Core"),
+                NormalInstallService.availableFolder(parent, "MegaMek Core"));
+        Files.createDirectory(parent.resolve("MegaMek Core"));
+        Files.writeString(parent.resolve("MegaMek Core (2)"), "not a folder");
+        assertEquals(parent.resolve("MegaMek Core (3)"),
+                NormalInstallService.availableFolder(parent, "MegaMek Core"));
+    }
+
+    @Test
     void capturedCurrentPlanNeverRereadsPointerAndInstallsOnlyCapturedTarget()
             throws Exception {
         Fixture fixture = fixture("1.02.03.1");

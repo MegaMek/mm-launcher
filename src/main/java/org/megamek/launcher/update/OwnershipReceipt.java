@@ -37,6 +37,10 @@ import org.megamek.launcher.manifest.Manifest;
 
 import java.util.List;
 
+/**
+ * Immutable install-time provenance. {@code protectedPackageFiles} is absent from receipts
+ * written before ownership policy 2 and reads as an empty list.
+ */
 public record OwnershipReceipt(
         int schemaVersion,
         int ownershipPolicyVersion,
@@ -49,5 +53,20 @@ public record OwnershipReceipt(
         long assetSize,
         String assetSha256,
         Manifest officialManifest,
-        List<String> excludedOfficialPaths) {
+        List<String> excludedOfficialPaths,
+        List<ProtectedPackageFile> protectedPackageFiles) {
+
+    public OwnershipReceipt {
+        protectedPackageFiles = protectedPackageFiles == null
+                ? List.of() : List.copyOf(protectedPackageFiles);
+    }
+
+    public OwnershipReceipt(int schemaVersion, int ownershipPolicyVersion, String installationId,
+                            String canonicalRoot, String registeredAt, String repository,
+                            String tag, String assetName, long assetSize, String assetSha256,
+                            Manifest officialManifest, List<String> excludedOfficialPaths) {
+        this(schemaVersion, ownershipPolicyVersion, installationId, canonicalRoot, registeredAt,
+                repository, tag, assetName, assetSize, assetSha256, officialManifest,
+                excludedOfficialPaths, List.of());
+    }
 }

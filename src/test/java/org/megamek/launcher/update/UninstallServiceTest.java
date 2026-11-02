@@ -33,6 +33,9 @@
 
 package org.megamek.launcher.update;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
@@ -823,6 +826,182 @@ class UninstallServiceTest {
         assertFalse(failing.hasPending(fixture.record.id()));
     }
 
+    @Test
+    void uninstallRemovesPackageRootFilesUntouchedProtectedDefaultsAndUnitsCache()
+            throws Exception {
+        Path root = suite(temp.resolve("full-package"));
+        Files.writeString(root.resolve("lib/runtime.txt"), "runtime");
+        Files.writeString(root.resolve("README.md"), "readme");
+        Files.writeString(root.resolve("LICENSE.code"), "license");
+        Files.writeString(root.resolve("MegaMek.l4j.ini"), "-Xmx4096m");
+        Files.writeString(root.resolve("sentry.properties"), "dsn=");
+        Files.createDirectories(root.resolve("bin"));
+        Files.writeString(root.resolve("bin/MegaMek.sh"), "#!/bin/sh");
+        Files.writeString(root.resolve("mmconf/defaults.xml"), "official defaults");
+        Files.writeString(root.resolve("mmconf/edited.xml"), "official settings");
+        Path learning = Files.createDirectories(root.resolve("campaigns/The Learning Ropes"));
+        Files.writeString(learning.resolve("campaign.cpnx"), "tutorial");
+        Fixture fixture = register("full-package", root);
+        OwnershipReceipt receipt = new ReceiptStore().read(fixture.registry,
+                fixture.store.read(fixture.registry), fixture.record);
+        assertEquals(OwnershipPolicy.VERSION, receipt.ownershipPolicyVersion());
+        assertTrue(receipt.officialManifest().files().stream()
+                .anyMatch(file -> file.path().equals("bin/MegaMek.sh")));
+        assertEquals(List.of("campaigns/The Learning Ropes/campaign.cpnx",
+                        "mmconf/defaults.xml", "mmconf/edited.xml"),
+                receipt.protectedPackageFiles().stream()
+                        .map(ProtectedPackageFile::path).toList());
+
+        Files.writeString(root.resolve("mmconf/edited.xml"), "player settings");
+        Files.createDirectories(root.resolve("logs"));
+        Files.writeString(root.resolve("logs/megamek.log"), "log");
+        Files.createDirectories(root.resolve("data/mekfiles"));
+        Files.writeString(root.resolve("data/mekfiles/units.cache"), "cache");
+
+        UninstallService service = fixture.service(point -> { });
+        UninstallService.Plan plan = service.plan(fixture.record, context());
+        assertEquals(UninstallService.Action.DELETE, action(plan, "mmconf/defaults.xml"));
+        assertEquals(UninstallService.Action.RETAIN, action(plan, "mmconf/edited.xml"));
+        assertEquals(UninstallService.Action.DELETE, action(plan, "data/mekfiles/units.cache"));
+        assertTrue(service.uninstall(plan, UninstallService.CONFIRMATION, context()).committed());
+
+        try (var remaining = Files.walk(root)) {
+            assertEquals(List.of("logs/megamek.log", "mmconf/edited.xml"), remaining
+                    .filter(Files::isRegularFile)
+                    .map(path -> root.relativize(path).toString().replace('\\', '/'))
+                    .sorted().toList());
+        }
+        assertEquals("player settings", Files.readString(root.resolve("mmconf/edited.xml")));
+        assertFalse(Files.exists(root.resolve("campaigns")));
+        assertFalse(Files.exists(root.resolve("bin")));
+        assertFalse(Files.exists(root.resolve("data")));
+    }
+
+    @Test
+    void untouchedPackageOnlyInstallationIsRemovedCompletely() throws Exception {
+        Path root = suite(temp.resolve("untouched"));
+        Files.writeString(root.resolve("README.md"), "readme");
+        Files.writeString(root.resolve("lib/runtime.jar"), "runtime");
+        Files.writeString(root.resolve("docs/history.txt"), "history");
+        Files.writeString(root.resolve("mmconf/defaults.xml"), "official defaults");
+        Fixture fixture = register("untouched", root);
+        Files.createDirectories(root.resolve("data/mekfiles"));
+        Files.writeString(root.resolve("data/mekfiles/units.cache"), "cache");
+
+        UninstallService service = fixture.service(point -> { });
+        UninstallService.Result result = service.uninstall(service.plan(fixture.record,
+                context()), UninstallService.CONFIRMATION, context());
+
+        assertTrue(result.committed());
+        assertFalse(Files.exists(root));
+    }
+
+    @Test
+    void legacyPolicyOneReceiptStillUninstallsItsOwnedFilesOnly() throws Exception {
+        Path root = suite(temp.resolve("legacy-policy"));
+        Files.writeString(root.resolve("lib/runtime.txt"), "runtime");
+        Fixture fixture = register("legacy-policy", root);
+        Files.writeString(root.resolve("README.md"), "readme");
+        Path receiptFile = new ReceiptStore().receiptPath(fixture.registry, fixture.record.id());
+        ObjectNode receipt = (ObjectNode) new ObjectMapper().readTree(receiptFile.toFile());
+        receipt.put("ownershipPolicyVersion", OwnershipPolicy.LEGACY_VERSION);
+        receipt.remove("protectedPackageFiles");
+        ((ArrayNode) receipt.withArray("excludedOfficialPaths")).add("README.md");
+        new ObjectMapper().writerWithDefaultPrettyPrinter().writeValue(receiptFile.toFile(),
+                receipt);
+
+        OwnershipReceipt legacy = new ReceiptStore().read(fixture.registry,
+                fixture.store.read(fixture.registry), fixture.record);
+        assertEquals(OwnershipPolicy.LEGACY_VERSION, legacy.ownershipPolicyVersion());
+        assertTrue(legacy.protectedPackageFiles().isEmpty());
+        UninstallService service = fixture.service(point -> { });
+        assertTrue(service.uninstall(service.plan(fixture.record, context()),
+                UninstallService.CONFIRMATION, context()).committed());
+
+        assertFalse(Files.exists(root.resolve("MegaMek.jar")));
+        assertFalse(Files.exists(root.resolve("lib")));
+        assertEquals("readme", Files.readString(root.resolve("README.md")),
+                "policy 1 never recorded root documents, so they are left in place");
+    }
+
+    @Test
+    void userFileReplacingAShippedProtectedFolderIsRetainedWithoutBlockingUninstall()
+            throws Exception {
+        Path root = suite(temp.resolve("replaced-folder"));
+        Path learning = Files.createDirectories(root.resolve("campaigns/The Learning Ropes"));
+        Files.writeString(learning.resolve("campaign.cpnx"), "tutorial");
+        Fixture fixture = register("replaced-folder", root);
+        Files.delete(learning.resolve("campaign.cpnx"));
+        Files.delete(learning);
+        Files.writeString(learning, "player notes");
+
+        UninstallService service = fixture.service(point -> { });
+        UninstallService.Plan plan = service.plan(fixture.record, context());
+        assertTrue(plan.knownDirectories().contains("campaigns"));
+        assertFalse(plan.knownDirectories().contains("campaigns/The Learning Ropes"));
+        assertTrue(service.uninstall(plan, UninstallService.CONFIRMATION, context()).committed());
+
+        assertEquals("player notes", Files.readString(learning));
+        assertFalse(service.hasPending(fixture.record.id()));
+        assertTrue(fixture.store.read(fixture.registry).installations().isEmpty());
+    }
+
+    @Test
+    void packagedUnitsCacheRewrittenByTheApplicationIsStillRemoved() throws Exception {
+        Path root = suite(temp.resolve("packaged-cache"));
+        Files.createDirectories(root.resolve("data/mekfiles"));
+        Files.writeString(root.resolve("data/mekfiles/units.cache"), "shipped cache");
+        Fixture fixture = register("packaged-cache", root);
+        assertTrue(new ReceiptStore().read(fixture.registry, fixture.store.read(fixture.registry),
+                fixture.record).officialManifest().files().stream()
+                .anyMatch(file -> file.path().equals("data/mekfiles/units.cache")));
+        Files.writeString(root.resolve("data/mekfiles/units.cache"), "regenerated cache");
+
+        UninstallService service = fixture.service(point -> { });
+        UninstallService.Plan plan = service.plan(fixture.record, context());
+        assertEquals(UninstallService.Action.DELETE, action(plan, "data/mekfiles/units.cache"));
+        assertEquals(1, plan.entries().stream()
+                .filter(entry -> entry.relativePath().equals("data/mekfiles/units.cache")).count());
+        assertTrue(service.uninstall(plan, UninstallService.CONFIRMATION, context()).committed());
+
+        assertFalse(Files.exists(root.resolve("data")));
+    }
+
+    @Test
+    void uninstallJournalWrittenBeforeProtectedPackageFilesStillRecoversAndStaysStrict()
+            throws Exception {
+        Fixture fixture = managed("legacy-journal");
+        byte[] jar = Files.readAllBytes(fixture.root.resolve("MegaMek.jar"));
+        UninstallService crashing = fixture.service(point -> {
+            if (point.equals("file-moved")) throw new SimulatedCrash();
+        });
+        assertThrows(SimulatedCrash.class, () -> crashing.uninstall(
+                crashing.plan(fixture.record, context()), UninstallService.CONFIRMATION, context()));
+        Path journal = UninstallService.pendingJournalPath(fixture.registry, fixture.record.id());
+        ObjectMapper json = new ObjectMapper();
+        ObjectNode legacy = (ObjectNode) json.readTree(journal.toFile());
+        ObjectNode current = (ObjectNode) legacy.get("current");
+        assertTrue(current.has("protectedPackageFiles"));
+        current.remove("protectedPackageFiles");
+
+        current.put("unexpectedField", true);
+        json.writeValue(journal.toFile(), legacy);
+        assertThrows(IOException.class,
+                () -> fixture.service(point -> { }).recover(fixture.record, context()));
+        current.remove("unexpectedField");
+        json.writeValue(journal.toFile(), legacy);
+
+        assertFalse(fixture.service(point -> { }).recover(fixture.record, context()).committed());
+        assertArrayEquals(jar, Files.readAllBytes(fixture.root.resolve("MegaMek.jar")));
+        assertEquals(List.of(fixture.record), fixture.store.read(fixture.registry).installations());
+        assertFalse(crashing.hasPending(fixture.record.id()));
+    }
+
+    private static UninstallService.Action action(UninstallService.Plan plan, String path) {
+        return plan.entries().stream().filter(entry -> entry.relativePath().equals(path))
+                .findFirst().orElseThrow().action();
+    }
+
     private Fixture managed(String name) throws Exception {
         return managed(name, 0);
     }
@@ -839,8 +1018,15 @@ class UninstallServiceTest {
         }
         Files.writeString(root.resolve("lib/runtime.txt"), "runtime");
         Files.writeString(root.resolve("docs/guide.txt"), "official");
+        Fixture fixture = register(name, root);
+        // User data appears after installation, so it is never part of the official inventory.
         Files.createDirectories(root.resolve("custom"));
         Files.writeString(root.resolve("custom/user.txt"), "custom");
+        return fixture;
+    }
+
+    /** Registers {@code root} as a fresh managed install whose package is its current content. */
+    private Fixture register(String name, Path root) throws Exception {
         Path registry = temp.resolve(name + "-registry.json");
         RegistryStore store = new RegistryStore();
         InstallationRecord record = store.register(registry, name, root, null);

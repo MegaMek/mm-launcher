@@ -159,7 +159,7 @@ class UpdatePreviewTest {
                         "data/modified.txt", bytes("official"),
                         "campaigns/sample.cpnx.gz", bytes("sample"),
                         "mmconf/clientsettings.xml", bytes("official preferences"),
-                        "settings.properties", bytes("default")));
+                        "extras/settings.properties", bytes("default")));
         Path registry = temp.resolve("registry.json");
         Path installed = temp.resolve("installed");
         QueueTransport installing = transportFor("v-old", baseline);
@@ -173,7 +173,7 @@ class UpdatePreviewTest {
         assertTrue(installedResult.ownershipReceipt().excludedOfficialPaths()
                 .contains("mmconf/clientsettings.xml"));
         assertTrue(installedResult.ownershipReceipt().excludedOfficialPaths()
-                .contains("settings.properties"));
+                .contains("extras/settings.properties"));
 
         Files.writeString(installed.resolve("data/modified.txt"), "user edit");
         Files.writeString(installed.resolve("lib/add.txt"), "collision");
@@ -186,7 +186,7 @@ class UpdatePreviewTest {
                         "docs/new.txt", bytes("new"), "data/modified.txt", bytes("new official"),
                         "campaigns/sample.cpnx.gz", bytes("changed sample"),
                         "mmconf/clientsettings.xml", bytes("changed preferences"),
-                        "settings.properties", bytes("new default")));
+                        "extras/settings.properties", bytes("new default")));
         QueueTransport previewing = transportFor("v-new", target);
         UpdatePreviewService.Preview preview = new UpdatePreviewService(previewing).preview(
                 registry, installedResult.record().id(), "v-new",
@@ -204,7 +204,7 @@ class UpdatePreviewTest {
         assertTrue(preview.decisions().stream().noneMatch(decision ->
                 decision.path().startsWith("mmconf/")));
         assertTrue(preview.decisions().stream().noneMatch(decision ->
-                decision.path().equals("settings.properties")));
+                decision.path().equals("extras/settings.properties")));
 
         for (String id : List.of("", installedResult.record().id())) {
             QueueTransport cliNetwork = transportFor("v-new", target);
@@ -217,7 +217,7 @@ class UpdatePreviewTest {
             String report = cliOut.toString(StandardCharsets.UTF_8);
             assertTrue(report.contains("BASELINE id=" + installedResult.record().id()));
             assertTrue(report.contains("TARGET repository=megamek tag=v-new"));
-            assertTrue(report.contains("POLICY version=1"));
+            assertTrue(report.contains("POLICY version=2"));
             assertTrue(report.contains("PROTECTED campaigns"));
             assertTrue(report.contains("EXCLUDED-BASELINE-PATH mmconf/clientsettings.xml"));
             assertTrue(report.contains("EXCLUDED-TARGET-PATH mmconf/clientsettings.xml"));

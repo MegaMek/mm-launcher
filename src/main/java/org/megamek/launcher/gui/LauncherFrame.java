@@ -4545,8 +4545,10 @@ public final class LauncherFrame extends JFrame {
         if (chooser.showOpenDialog(owner) != JFileChooser.APPROVE_OPTION) return null;
         final String suggestion;
         try {
-            suggestion = NormalInstallService.friendlyName(repository, channel, tag);
-        } catch (IOException invalid) {
+            suggestion = NormalInstallService.availableFolder(chooser.getSelectedFile().toPath(),
+                    NormalInstallService.friendlyName(repository, channel, tag))
+                    .getFileName().toString();
+        } catch (IOException | RuntimeException invalid) {
             showError("Preparing install location failed", invalid);
             return null;
         }
@@ -5150,8 +5152,9 @@ public final class LauncherFrame extends JFrame {
         public Path choose(Component parent, NormalInstallService.Plan plan) throws IOException {
             JFileChooser chooser = installParentChooser(plan.destination().getParent());
             if (chooser.showOpenDialog(parent) != JFileChooser.APPROVE_OPTION) return null;
-            String proposedName =
-                    NormalInstallService.friendlyName(plan);
+            String proposedName = NormalInstallService.availableFolder(
+                    chooser.getSelectedFile().toPath(), NormalInstallService.friendlyName(plan))
+                    .getFileName().toString();
             Path folder = SubfolderDialog.show(parent, proposedName, GuiScale.DEFAULT);
             if (folder == null) return null;
             return chooser.getSelectedFile().toPath().resolve(folder);

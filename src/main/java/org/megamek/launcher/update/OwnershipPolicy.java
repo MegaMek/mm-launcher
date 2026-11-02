@@ -61,9 +61,18 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 
-/** Versioned conservative definition of files the launcher may regard as package-owned. */
+/**
+ * Versioned conservative definition of files the launcher may regard as package-owned.
+ *
+ * <p>Version 1 owned only the root application binaries and the {@code lib}, {@code docs},
+ * {@code licenses} and {@code data} trees. Version 2 also owns every root-level package file
+ * (licenses, readme, launcher ini files, build metadata) and the {@code bin} tree. Receipts and
+ * current state keep the version they were built with, so older copies stay valid.</p>
+ */
 public final class OwnershipPolicy {
-    public static final int VERSION = 1;
+    public static final int LEGACY_VERSION = 1;
+    public static final int VERSION = 2;
+    public static final Set<Integer> SUPPORTED_VERSIONS = Set.of(LEGACY_VERSION, VERSION);
     public static final List<String> PROTECTED_PATHS = List.of(
             "campaigns", "saves", "userdata", "custom", "mmconf", "logs", "backups",
             "data/campaigns", "data/saves", "data/userdata", "data/custom", "data/logs",
@@ -75,8 +84,13 @@ public final class OwnershipPolicy {
 
     public Build build(Path root, OfficialRepository repository, String releaseId)
             throws IOException, ManifestException {
+        return build(root, repository, releaseId, VERSION);
+    }
+
+    public Build build(Path root, OfficialRepository repository, String releaseId, int version)
+            throws IOException, ManifestException {
         try {
-            return build(root, repository, releaseId,
+            return build(root, repository, releaseId, version,
                     OperationContext.none(OperationType.UPDATE_PREVIEW), OperationPhase.PLAN);
         } catch (InterruptedException impossible) {
             Thread.currentThread().interrupt();
@@ -87,9 +101,18 @@ public final class OwnershipPolicy {
     public Build build(Path root, OfficialRepository repository, String releaseId,
                        OperationContext context, OperationPhase phase)
             throws IOException, ManifestException, InterruptedException {
+        return build(root, repository, releaseId, VERSION, context, phase);
+    }
+
+    /** Rebuilds an inventory under the exact policy version recorded by an older copy. */
+    public Build build(Path root, OfficialRepository repository, String releaseId, int version,
+                       OperationContext context, OperationPhase phase)
+            throws IOException, ManifestException, InterruptedException {
+        requireSupported(version);
         Path canonical = requireRoot(root);
         List<FileEntry> managed = new ArrayList<>();
         List<String> excluded = new ArrayList<>();
+        List<FileEntry> protectedFiles = new ArrayList<>();
         List<Path> paths = new ArrayList<>();
         try (var walk = Files.walk(canonical)) {
             var iterator = walk.skip(1).iterator();
@@ -122,16 +145,19 @@ public final class OwnershipPolicy {
             }
             previousKey = key;
             if (attrs.isRegularFile()) {
-                if (managed(relative)) {
+                if (managed(relative, version)) {
                     managed.add(new FileEntry(relative, sha256(path, context)));
                 } else {
                     excluded.add(relative);
+                    if (protectedPath(key)) {
+                        protectedFiles.add(new FileEntry(relative, sha256(path, context)));
+                    }
                 }
             }
             context.progress(phase, ++completed, paths.size(), ProgressUnit.FILES,
                     "Inventoried " + completed + " of " + paths.size() + " package entries");
         }
-        return finish(repository, releaseId, managed, excluded);
+        return finish(repository, releaseId, managed, excluded, protectedFiles);
     }
 
     /**
@@ -141,35 +167,55 @@ public final class OwnershipPolicy {
             throws ManifestException {
         List<FileEntry> managed = new ArrayList<>();
         List<String> excluded = new ArrayList<>();
+        List<FileEntry> protectedFiles = new ArrayList<>();
         for (EntryEvidence entry : snapshot.entries()) {
             if (!entry.regularFile()) continue;
             if (managed(entry.path())) {
                 managed.add(new FileEntry(entry.path(), entry.sha256()));
             } else {
                 excluded.add(entry.path());
+                if (protectedPath(entry.path().toLowerCase(Locale.ROOT))) {
+                    protectedFiles.add(new FileEntry(entry.path(), entry.sha256()));
+                }
             }
         }
-        return finish(repository, releaseId, managed, excluded);
+        return finish(repository, releaseId, managed, excluded, protectedFiles);
     }
 
     private static Build finish(OfficialRepository repository, String releaseId,
-                                List<FileEntry> managed, List<String> excluded)
+                                List<FileEntry> managed, List<String> excluded,
+                                List<FileEntry> protectedFiles)
             throws ManifestException {
         Manifest manifest = new Manifest(ManifestReader.SCHEMA_VERSION, repository.key(),
                 repository.key() + "-official-package", releaseId, PROTECTED_PATHS,
                 List.copyOf(managed));
         new ManifestReader().validateInMemory(manifest, "official package inventory");
-        return new Build(manifest, List.copyOf(excluded));
+        return new Build(manifest, List.copyOf(excluded), List.copyOf(protectedFiles));
     }
 
     static boolean managed(String path) {
+        return managed(path, VERSION);
+    }
+
+    static boolean managed(String path, int version) {
         String key = path.toLowerCase(Locale.ROOT);
         if (protectedPath(key)) return false;
         int slash = key.indexOf('/');
-        if (slash < 0) return ROOT_BINARIES.contains(key);
+        if (slash < 0) return version >= 2 || ROOT_BINARIES.contains(key);
         String root = key.substring(0, slash);
         return root.equals("lib") || root.equals("docs") || root.equals("licenses")
-                || root.equals("data");
+                || root.equals("data") || version >= 2 && root.equals("bin");
+    }
+
+    /** True for a package path inside a user-data folder the launcher never updates. */
+    public static boolean protectedPackagePath(String path) {
+        return protectedPath(path.toLowerCase(Locale.ROOT));
+    }
+
+    static void requireSupported(int version) throws IOException {
+        if (!SUPPORTED_VERSIONS.contains(version)) {
+            throw new IOException("unsupported ownership policy version");
+        }
     }
 
     /** Runtime files are an all-or-nothing safety boundary for real updates. */
@@ -236,6 +282,15 @@ public final class OwnershipPolicy {
         }
     }
 
-    public record Build(Manifest manifest, List<String> excludedPaths) {
+    /**
+     * @param protectedFiles package files shipped inside protected user-data folders, with
+     *                       their official hashes; they stay excluded from updates but let
+     *                       uninstall recognise untouched defaults
+     */
+    public record Build(Manifest manifest, List<String> excludedPaths,
+                        List<FileEntry> protectedFiles) {
+        public Build(Manifest manifest, List<String> excludedPaths) {
+            this(manifest, excludedPaths, List.of());
+        }
     }
 }
