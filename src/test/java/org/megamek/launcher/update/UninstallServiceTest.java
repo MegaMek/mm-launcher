@@ -925,6 +925,38 @@ class UninstallServiceTest {
     }
 
     @Test
+    void shippedAndRuntimeEmptyFoldersNoLongerKeepTheInstallationRoot() throws Exception {
+        Path root = suite(temp.resolve("empty-folders"));
+        Files.writeString(root.resolve("lib/runtime.jar"), "runtime");
+        Files.writeString(root.resolve("docs/history.txt"), "history");
+        Files.createDirectories(root.resolve("logs"));
+        Files.createDirectories(root.resolve("userdata/data/campaignPresets"));
+        Fixture fixture = register("empty-folders", root);
+        Files.createDirectories(root.resolve("data/images/portraits/empty"));
+
+        UninstallService service = fixture.service(point -> { });
+        assertTrue(service.uninstall(service.plan(fixture.record, context()),
+                UninstallService.CONFIRMATION, context()).committed());
+        assertFalse(Files.exists(root));
+
+        Path kept = suite(temp.resolve("empty-folders-kept"));
+        Files.createDirectories(kept.resolve("userdata/data/campaignPresets"));
+        Fixture keptFixture = register("empty-folders-kept", kept);
+        Files.writeString(kept.resolve("userdata/data/campaignPresets/mine.xml"), "preset");
+        Files.createDirectories(kept.resolve("userdata/data/unused"));
+        Files.createDirectories(kept.resolve("myStuff/empty"));
+
+        UninstallService keptService = keptFixture.service(point -> { });
+        assertTrue(keptService.uninstall(keptService.plan(keptFixture.record, context()),
+                UninstallService.CONFIRMATION, context()).committed());
+        assertEquals("preset",
+                Files.readString(kept.resolve("userdata/data/campaignPresets/mine.xml")));
+        assertFalse(Files.exists(kept.resolve("userdata/data/unused")));
+        assertTrue(Files.isDirectory(kept.resolve("myStuff/empty")),
+                "unknown top-level folders stay unowned");
+    }
+
+    @Test
     void userFileReplacingAShippedProtectedFolderIsRetainedWithoutBlockingUninstall()
             throws Exception {
         Path root = suite(temp.resolve("replaced-folder"));
