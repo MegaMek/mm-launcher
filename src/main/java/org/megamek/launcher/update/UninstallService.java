@@ -94,6 +94,9 @@ public final class UninstallService {
     public static final String CONFIRMATION = "UNINSTALL-OFFICIAL-FILES";
     /** Runtime caches the applications rebuild from package data on the next start. */
     static final List<String> REGENERABLE_CACHES = List.of("data/mekfiles/units.cache");
+    /** Folders where the applications write their own logs; removed only on explicit request. */
+    public static final List<String> LOG_FOLDERS = List.of("logs", "data/logs");
+    private static final int MAX_LOG_FILES = 10_000;
     private static final String JOURNAL_ROOT = "uninstall-v1";
     private static final String REMOVAL_ROOT = "registration-removal-v1";
     private static final int MAX_JOURNAL_BYTES = 32 * 1024 * 1024;
@@ -140,13 +143,22 @@ public final class UninstallService {
     /** Read-only eligibility and exact-file plan. It also rejects a currently running child. */
     public Plan plan(InstallationRecord expected, OperationContext context)
             throws IOException, InterruptedException, ManifestException {
+        return plan(expected, false, context);
+    }
+
+    /**
+     * Like {@link #plan(InstallationRecord, OperationContext)}; with {@code removeLogs} the
+     * program log files below {@link #LOG_FOLDERS} are also planned for removal.
+     */
+    public Plan plan(InstallationRecord expected, boolean removeLogs, OperationContext context)
+            throws IOException, InterruptedException, ManifestException {
         requireWorker();
         Objects.requireNonNull(context, "context");
         requirePresent(expected);
         try (OperationContext.WorkerRegistration ignored = context.activate();
              RootCoordinator.Lease lease = coordinator.acquire(rootOf(expected), false)) {
             lease.requireNoPendingUpdate();
-            return planLocked(expected, context);
+            return planLocked(expected, removeLogs, context);
         }
     }
 
@@ -162,7 +174,8 @@ public final class UninstallService {
         try (OperationContext.WorkerRegistration ignored = context.activate();
              RootCoordinator.Lease lease = coordinator.acquire(root, false)) {
             lease.requireNoPendingUpdate();
-            Plan currentPlan = planLocked(expectedPlan.record(), context);
+            Plan currentPlan = planLocked(expectedPlan.record(), expectedPlan.removeLogs(),
+                    context);
             if (!expectedPlan.equals(currentPlan)) {
                 throw new IOException("installation files or ownership changed; review uninstall "
                         + "again");
@@ -175,6 +188,13 @@ public final class UninstallService {
     public Result uninstallConfirmed(InstallationRecord expected, String confirmation,
                                      OperationContext context)
             throws IOException, InterruptedException, ManifestException {
+        return uninstallConfirmed(expected, confirmation, false, context);
+    }
+
+    /** As above; {@code removeLogs} also removes the program log files. */
+    public Result uninstallConfirmed(InstallationRecord expected, String confirmation,
+                                     boolean removeLogs, OperationContext context)
+            throws IOException, InterruptedException, ManifestException {
         requireWorker();
         requireConfirmation(confirmation);
         Objects.requireNonNull(context, "context");
@@ -182,7 +202,7 @@ public final class UninstallService {
         try (OperationContext.WorkerRegistration ignored = context.activate();
              RootCoordinator.Lease lease = coordinator.acquire(rootOf(expected), false)) {
             lease.requireNoPendingUpdate();
-            return executeConfirmedPlan(planLocked(expected, context), context);
+            return executeConfirmedPlan(planLocked(expected, removeLogs, context), context);
         }
     }
 
@@ -461,7 +481,8 @@ public final class UninstallService {
         return List.copyOf(warnings);
     }
 
-    private Plan planLocked(InstallationRecord expected, OperationContext context)
+    private Plan planLocked(InstallationRecord expected, boolean removeLogs,
+                            OperationContext context)
             throws IOException, InterruptedException, ManifestException {
         if (context.latest() == null
                 || context.latest().phase().ordinal() < OperationPhase.PLAN.ordinal()) {
@@ -537,6 +558,8 @@ public final class UninstallService {
         entries.forEach(entry -> planned.add(entry.relativePath().toLowerCase(Locale.ROOT)));
         for (ProtectedPackageFile shipped : current.protectedPackageFiles()) {
             context.checkpoint();
+            // Only the opt-in log scan below decides whether log files are removed.
+            if (inLogFolder(shipped.path())) continue;
             if (!planned.add(shipped.path().toLowerCase(Locale.ROOT))) continue;
             PlanEntry entry = planShippedDefault(root, shipped, context);
             entries.add(entry);
@@ -555,13 +578,19 @@ public final class UninstallService {
                 addParents(directories, cache);
             }
         }
+        if (removeLogs) {
+            for (String folder : LOG_FOLDERS) {
+                planLogFiles(root, folder, planned, entries, directories, context);
+            }
+        }
         context.checkpoint();
         addEmptyDirectoryTrees(root, directories, context);
         List<String> knownDirectories = directories.stream()
                 .sorted(Comparator.comparingInt((String value) -> depth(value)).reversed()
                         .thenComparing(Comparator.naturalOrder()))
                 .toList();
-        return new Plan(record, receipt, current, List.copyOf(entries), knownDirectories);
+        return new Plan(record, receipt, current, List.copyOf(entries), knownDirectories,
+                removeLogs);
     }
 
     /**
@@ -612,6 +641,86 @@ public final class UninstallService {
         if (!attrs.isRegularFile() || attrs.isSymbolicLink() || attrs.isOther()) return null;
         return new PlanEntry(cache, RealUpdateFiles.hash(file, context), attrs.size(),
                 Action.DELETE, "regenerable application cache");
+    }
+
+    /**
+     * Plans every regular file below a log folder for removal. Links, special files and paths
+     * that are not portable are left alone, and the walk never follows links.
+     */
+    private static void planLogFiles(Path root, String folder, Set<String> planned,
+                                     List<PlanEntry> entries, Set<String> directories,
+                                     OperationContext context)
+            throws IOException, InterruptedException, ManifestException {
+        context.checkpoint();
+        Path start;
+        try {
+            start = RealUpdateFiles.resolve(root, folder, true);
+        } catch (ManifestException unsafe) {
+            return;
+        }
+        if (!Files.isDirectory(start, LinkOption.NOFOLLOW_LINKS)) return;
+        List<String> files = new ArrayList<>();
+        List<String> folders = new ArrayList<>();
+        int[] visited = new int[1];
+        Files.walkFileTree(start, new java.nio.file.SimpleFileVisitor<>() {
+            @Override
+            public java.nio.file.FileVisitResult preVisitDirectory(Path directory,
+                                                                   BasicFileAttributes attrs) {
+                if (++visited[0] > MAX_LOG_FILES) return java.nio.file.FileVisitResult.TERMINATE;
+                if (attrs.isSymbolicLink() || attrs.isOther()) {
+                    return java.nio.file.FileVisitResult.SKIP_SUBTREE;
+                }
+                folders.add(portable(root, directory));
+                return java.nio.file.FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public java.nio.file.FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                if (++visited[0] > MAX_LOG_FILES) return java.nio.file.FileVisitResult.TERMINATE;
+                if (attrs.isRegularFile() && !attrs.isSymbolicLink() && !attrs.isOther()) {
+                    files.add(portable(root, file));
+                }
+                return java.nio.file.FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public java.nio.file.FileVisitResult visitFileFailed(Path file, IOException error) {
+                return java.nio.file.FileVisitResult.CONTINUE;
+            }
+        });
+        for (String directory : folders) {
+            try {
+                RealUpdateFiles.resolve(root, directory, false);
+            } catch (ManifestException unsafe) {
+                continue;
+            }
+            directories.add(directory);
+            addParents(directories, directory);
+        }
+        for (String relative : files) {
+            context.checkpoint();
+            if (!planned.add(relative.toLowerCase(Locale.ROOT))) continue;
+            Path file;
+            try {
+                file = RealUpdateFiles.resolve(root, relative, false);
+            } catch (ManifestException unsafe) {
+                continue;
+            }
+            BasicFileAttributes attrs = Files.readAttributes(file, BasicFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS);
+            if (!attrs.isRegularFile() || attrs.isSymbolicLink() || attrs.isOther()) continue;
+            entries.add(new PlanEntry(relative, RealUpdateFiles.hash(file, context), attrs.size(),
+                    Action.DELETE, "application log file"));
+        }
+    }
+
+    private static boolean inLogFolder(String path) {
+        String lower = path.toLowerCase(Locale.ROOT);
+        return LOG_FOLDERS.stream().anyMatch(folder -> lower.startsWith(folder + "/"));
+    }
+
+    private static String portable(Path root, Path path) {
+        return root.relativize(path).toString().replace(java.io.File.separatorChar, '/');
     }
 
     private Result executeLocked(Plan plan, OperationContext context)
@@ -1520,10 +1629,16 @@ public final class UninstallService {
 
     public record Plan(InstallationRecord record, OwnershipReceipt original,
                        CurrentUpdateState current, List<PlanEntry> entries,
-                       List<String> knownDirectories) {
+                       List<String> knownDirectories, boolean removeLogs) {
         public Plan {
             entries = List.copyOf(entries);
             knownDirectories = List.copyOf(knownDirectories);
+        }
+
+        public Plan(InstallationRecord record, OwnershipReceipt original,
+                    CurrentUpdateState current, List<PlanEntry> entries,
+                    List<String> knownDirectories) {
+            this(record, original, current, entries, knownDirectories, false);
         }
     }
 

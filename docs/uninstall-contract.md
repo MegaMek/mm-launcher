@@ -50,10 +50,18 @@ package paths, and unknown/custom files are retained. Protected paths are retain
 narrow cases: a shipped default recorded in `protectedPackageFiles` whose bytes still equal one
 of its official hashes (an untouched sample campaign or `mmconf` default) is removed, while an
 edited one is retained as user data; and the regenerable `data/mekfiles/units.cache` is removed.
-Logs, saves, and anything else not shipped by the package remain. Copies installed or last
+Saves and anything else not shipped by the package remain. Program log files remain unless the
+user leaves **Also delete log files (logs and data/logs)** ticked in the GUI confirmation (it is
+ticked by default; API and prepared-plan callers default to keeping logs). When requested, every
+regular file below `logs/` and `data/logs/` is hashed into the plan and removed like any other
+target, with log subfolders treated as known directories. Log files are never planned as shipped
+defaults, even when they existed at installation time, so only this choice decides their removal.
+Links, special files, and non-portable
+names inside those folders are retained, and the walk never follows links and stops after 10,000
+entries. Copies installed or last
 updated before ownership policy 2 lack this record, so their package root files and defaults are
-retained until their next update or a fresh install. Only manifest, shipped-default, and cache
-parent directories which become empty are removed, deepest first, together with any directory
+retained until their next update or a fresh install. Only manifest, shipped-default, cache, and
+requested log parent directories which become empty are removed, deepest first, together with any directory
 below a known package or protected folder whose whole subtree contains no file, link, or other
 object (such as MekHQ's shipped empty `userdata/data/campaignPresets`); unknown top-level folders
 are never scanned. The installation root is removed only

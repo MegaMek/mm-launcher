@@ -2578,17 +2578,18 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void uninstall(InstallationRecord record) {
-        boolean confirmed = LauncherAlertDialog.showConfirm(this, guiScale, "Uninstall",
+        Boolean removeLogs = LauncherAlertDialog.showConfirmWithOption(this, guiScale, "Uninstall",
                 "Uninstall " + record.name() + "?\nOfficial application files will be removed. "
                         + "Saves, settings, custom files, and modified files will be kept.",
-                "Uninstall");
-        if (!confirmed) return;
+                "Also delete log files (logs and data/logs)", true, "Uninstall");
+        if (removeLogs == null) return;
+        boolean deleteLogs = removeLogs;
         OperationProgressDialog progress = new OperationProgressDialog(this,
                 "Uninstalling", "uninstallProgressLog", this::showOperationLogs);
         progress.setVisible(true);
         runOperation("Uninstalling " + record.name(), OperationType.UNINSTALL,
                 List.of(Path.of(record.canonicalRoot())), progress,
-                context -> services.uninstall(record, context), result -> {
+                context -> services.uninstall(record, deleteLogs, context), result -> {
                     progress.dispose();
                     selectedInstallationId = null;
                     transientHomeMessage = result.retainedFiles()
