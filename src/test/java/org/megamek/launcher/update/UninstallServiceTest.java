@@ -925,6 +925,60 @@ class UninstallServiceTest {
     }
 
     @Test
+    void shippedAndRuntimeEmptyFoldersNoLongerKeepTheInstallationRoot() throws Exception {
+        Path root = suite(temp.resolve("empty-folders"));
+        Files.writeString(root.resolve("lib/runtime.jar"), "runtime");
+        Files.writeString(root.resolve("docs/history.txt"), "history");
+        Files.createDirectories(root.resolve("logs"));
+        Files.createDirectories(root.resolve("userdata/data/campaignPresets"));
+        Fixture fixture = register("empty-folders", root);
+        Files.createDirectories(root.resolve("data/images/portraits/empty"));
+
+        UninstallService service = fixture.service(point -> { });
+        assertTrue(service.uninstall(service.plan(fixture.record, context()),
+                UninstallService.CONFIRMATION, context()).committed());
+        assertFalse(Files.exists(root));
+
+        Path kept = suite(temp.resolve("empty-folders-kept"));
+        Files.createDirectories(kept.resolve("userdata/data/campaignPresets"));
+        Fixture keptFixture = register("empty-folders-kept", kept);
+        Files.writeString(kept.resolve("userdata/data/campaignPresets/mine.xml"), "preset");
+        Files.createDirectories(kept.resolve("userdata/data/unused"));
+        Files.createDirectories(kept.resolve("myStuff/empty"));
+
+        UninstallService keptService = keptFixture.service(point -> { });
+        assertTrue(keptService.uninstall(keptService.plan(keptFixture.record, context()),
+                UninstallService.CONFIRMATION, context()).committed());
+        assertEquals("preset",
+                Files.readString(kept.resolve("userdata/data/campaignPresets/mine.xml")));
+        assertFalse(Files.exists(kept.resolve("userdata/data/unused")));
+        assertTrue(Files.isDirectory(kept.resolve("myStuff/empty")),
+                "unknown top-level folders stay unowned");
+    }
+
+    @Test
+    void emptyFolderScanAddsOnlyEmptyTreesAndHonoursCancellation() throws Exception {
+        Path root = Files.createDirectories(temp.resolve("empty-scan"));
+        Files.createDirectories(root.resolve("userdata/occupied/empty"));
+        Files.writeString(root.resolve("userdata/occupied/keep.txt"), "keep");
+        Files.createDirectories(root.resolve("userdata/blank/nested"));
+        Files.createDirectories(root.resolve("unknown/empty"));
+
+        java.util.Set<String> directories = new java.util.HashSet<>(List.of("userdata"));
+        UninstallService.addEmptyDirectoryTrees(root, directories, context());
+        assertEquals(java.util.Set.of("userdata", "userdata/occupied/empty", "userdata/blank",
+                "userdata/blank/nested"), directories,
+                "occupied ancestors and unknown top-level folders are never added");
+
+        OperationContext cancelled = new OperationContext(OperationType.UNINSTALL, event -> { });
+        cancelled.phase(OperationPhase.PLAN, "scanning");
+        assertTrue(cancelled.requestCancellation().accepted());
+        assertThrows(OperationCancelledException.class, () -> UninstallService
+                .addEmptyDirectoryTrees(root, new java.util.HashSet<>(List.of("userdata")),
+                        cancelled));
+    }
+
+    @Test
     void userFileReplacingAShippedProtectedFolderIsRetainedWithoutBlockingUninstall()
             throws Exception {
         Path root = suite(temp.resolve("replaced-folder"));

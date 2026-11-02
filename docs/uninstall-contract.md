@@ -53,7 +53,10 @@ edited one is retained as user data; and the regenerable `data/mekfiles/units.ca
 Logs, saves, and anything else not shipped by the package remain. Copies installed or last
 updated before ownership policy 2 lack this record, so their package root files and defaults are
 retained until their next update or a fresh install. Only manifest, shipped-default, and cache
-parent directories which become empty are removed, deepest first; the installation root is removed only
+parent directories which become empty are removed, deepest first, together with any directory
+below a known package or protected folder whose whole subtree contains no file, link, or other
+object (such as MekHQ's shipped empty `userdata/data/campaignPresets`); unknown top-level folders
+are never scanned. The installation root is removed only
 when empty. No application-root recursive delete is used and links, reparse points, aliases,
 case collisions, escapes, and noncanonical roots fail closed.
 

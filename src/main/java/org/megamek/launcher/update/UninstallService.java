@@ -44,6 +44,7 @@ import org.megamek.launcher.manifest.ManifestException;
 import org.megamek.launcher.manifest.ManifestReader;
 import org.megamek.launcher.onboarding.Inspection;
 import org.megamek.launcher.onboarding.InstallationInspector;
+import org.megamek.launcher.operation.OperationCancelledException;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationPhase;
 import org.megamek.launcher.operation.OperationType;
@@ -96,6 +97,7 @@ public final class UninstallService {
     private static final String JOURNAL_ROOT = "uninstall-v1";
     private static final String REMOVAL_ROOT = "registration-removal-v1";
     private static final int MAX_JOURNAL_BYTES = 32 * 1024 * 1024;
+    private static final int MAX_EMPTY_DIRECTORIES = 10_000;
     private static final Pattern HASH = Pattern.compile("[0-9a-f]{64}");
     private static final Set<String> COMMITTED_PHASES =
             Set.of("COMMIT_AUTHORIZED", "COMMITTED");
@@ -553,6 +555,8 @@ public final class UninstallService {
                 addParents(directories, cache);
             }
         }
+        context.checkpoint();
+        addEmptyDirectoryTrees(root, directories, context);
         List<String> knownDirectories = directories.stream()
                 .sorted(Comparator.comparingInt((String value) -> depth(value)).reversed()
                         .thenComparing(Comparator.naturalOrder()))
@@ -1347,6 +1351,99 @@ public final class UninstallService {
                 || !journal.current().canonicalRoot().equals(expected.canonicalRoot())
                 || !journal.current().registeredAt().equals(expected.registeredAt())) {
             throw new IOException("uninstall journal does not match this installation");
+        }
+    }
+
+    /**
+     * Adds directories below known package and protected folders whose whole subtree holds no
+     * file, link or other object. Packages ship such folders (for example MekHQ's empty
+     * {@code userdata/data/campaignPresets}) and applications create them, yet without them the
+     * installation root can never become empty. Folders holding anything stay untouched.
+     */
+    static void addEmptyDirectoryTrees(Path root, Set<String> directories,
+                                       OperationContext context)
+            throws IOException, InterruptedException {
+        Set<String> tops = new java.util.TreeSet<>();
+        for (String directory : directories) {
+            int slash = directory.indexOf('/');
+            tops.add(slash < 0 ? directory : directory.substring(0, slash));
+        }
+        List<String> found = new ArrayList<>();
+        OperationCancelledException[] cancelled = new OperationCancelledException[1];
+        for (String top : tops) {
+            if (found.size() >= MAX_EMPTY_DIRECTORIES) break;
+            Path start = root.resolve(top);
+            if (!Files.isDirectory(start, LinkOption.NOFOLLOW_LINKS)) continue;
+            Files.walkFileTree(start, new java.nio.file.SimpleFileVisitor<>() {
+                private final java.util.ArrayDeque<boolean[]> occupied = new java.util.ArrayDeque<>();
+
+                @Override
+                public java.nio.file.FileVisitResult preVisitDirectory(
+                        Path directory, BasicFileAttributes attrs) {
+                    if (stop()) return java.nio.file.FileVisitResult.TERMINATE;
+                    if (attrs.isSymbolicLink() || attrs.isOther()) {
+                        markOccupied();
+                        return java.nio.file.FileVisitResult.SKIP_SUBTREE;
+                    }
+                    occupied.push(new boolean[1]);
+                    return java.nio.file.FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public java.nio.file.FileVisitResult visitFile(Path file,
+                                                               BasicFileAttributes attrs) {
+                    markOccupied();
+                    return stop() ? java.nio.file.FileVisitResult.TERMINATE
+                            : java.nio.file.FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public java.nio.file.FileVisitResult visitFileFailed(Path file, IOException error) {
+                    markOccupied();
+                    return stop() ? java.nio.file.FileVisitResult.TERMINATE
+                            : java.nio.file.FileVisitResult.CONTINUE;
+                }
+
+                @Override
+                public java.nio.file.FileVisitResult postVisitDirectory(Path directory,
+                                                                        IOException error) {
+                    boolean busy = occupied.pop()[0] || error != null;
+                    if (busy) {
+                        markOccupied();
+                    } else {
+                        found.add(root.relativize(directory).toString()
+                                .replace(java.io.File.separatorChar, '/'));
+                    }
+                    return stop() ? java.nio.file.FileVisitResult.TERMINATE
+                            : java.nio.file.FileVisitResult.CONTINUE;
+                }
+
+                private void markOccupied() {
+                    if (!occupied.isEmpty()) occupied.peek()[0] = true;
+                }
+
+                private boolean stop() {
+                    if (found.size() >= MAX_EMPTY_DIRECTORIES) return true;
+                    try {
+                        context.checkpoint();
+                        return false;
+                    } catch (OperationCancelledException cancellation) {
+                        cancelled[0] = cancellation;
+                        return true;
+                    }
+                }
+            });
+            if (cancelled[0] != null) throw cancelled[0];
+        }
+        // Ancestors are not expanded: an empty ancestor was itself found by the walk, and one
+        // holding anything else cannot be removed, so the journal stays bounded by this limit.
+        for (String relative : found) {
+            try {
+                ManifestReader.validatePortablePath(relative, "empty directory", "uninstall");
+            } catch (ManifestException unportable) {
+                continue; // The journal could not record it, so it is simply left in place.
+            }
+            directories.add(relative);
         }
     }
 
