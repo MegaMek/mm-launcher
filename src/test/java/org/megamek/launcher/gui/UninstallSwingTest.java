@@ -48,6 +48,8 @@ class UninstallSwingTest {
     void confirmationCallsSingleScanFacadeOnceAndCancellationDoesNotStartRemoval() throws Exception {
         assumeFalse(GraphicsEnvironment.isHeadless(), "actual dialogs require a display");
         AtomicInteger calls = new AtomicInteger();
+        java.util.concurrent.atomic.AtomicReference<Boolean> logChoice =
+                new java.util.concurrent.atomic.AtomicReference<>();
         LauncherServices services = new LauncherServices(temp.resolve("registry.json"), new RegistryStore(),
                 new InstallationInspector(), (uri, accept) -> {
                     throw new AssertionError("uninstall must not use the network");
@@ -65,11 +67,12 @@ class UninstallSwingTest {
             }
 
             @Override public UninstallService.Result uninstall(
-                    InstallationRecord record, OperationContext context)
+                    InstallationRecord record, boolean removeLogs, OperationContext context)
                     throws IOException, InterruptedException,
                     org.megamek.launcher.manifest.ManifestException {
                 calls.incrementAndGet();
-                return super.uninstall(record, context);
+                logChoice.set(removeLogs);
+                return super.uninstall(record, removeLogs, context);
             }
         };
         Path root = suite("managed");
@@ -82,6 +85,8 @@ class UninstallSwingTest {
         // User data appears after installation, so it is never an official shipped default.
         Files.createDirectory(root.resolve("custom"));
         Path custom = Files.writeString(root.resolve("custom/user.txt"), "keep");
+        Files.createDirectories(root.resolve("logs"));
+        Path log = Files.writeString(root.resolve("logs/megamek.log"), "log");
         new ChannelPreferenceStore().initializeManaged(
                 services.registry(), record, receipt, FollowChannel.CORE, false);
         LauncherFrame frame = SwingTestSupport.onEdt(() -> new LauncherFrame(services));
@@ -103,14 +108,23 @@ class UninstallSwingTest {
             menu = SwingTestSupport.installationMenu(frame, record.id());
             SwingTestSupport.startClickText(menu, "Uninstall…");
             confirmation = SwingTestSupport.dialog(frame, "Uninstall");
+            var deleteLogs = SwingTestSupport.find(confirmation, "launcherAlertOption",
+                    javax.swing.JCheckBox.class);
+            SwingTestSupport.onEdt(() -> {
+                assertTrue(deleteLogs.isSelected(), "log removal is offered by default");
+                deleteLogs.doClick();
+                return null;
+            });
             SwingTestSupport.click(confirmation, "launcherAlertButton1");
             SwingTestSupport.awaitCondition("uninstall and refreshed Home", () ->
                     services.readRegistry().installations().equals(List.of(retained))
                             && SwingTestSupport.find(frame, "launch-megamek-button") != null
                             && SwingTestSupport.showingWindow(frame, OperationProgressDialog.class) == null);
             assertEquals(1, calls.get());
+            assertEquals(Boolean.FALSE, logChoice.get());
             assertFalse(Files.exists(root.resolve("MegaMek.jar")));
             assertEquals("keep", Files.readString(custom));
+            assertEquals("log", Files.readString(log));
             assertTrue(Files.exists(Path.of(retained.canonicalRoot()).resolve("MegaMek.jar")));
         } finally {
             SwingTestSupport.dispose(frame);

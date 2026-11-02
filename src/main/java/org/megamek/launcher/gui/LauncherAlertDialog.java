@@ -37,6 +37,7 @@ import javax.swing.AbstractAction;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
@@ -70,6 +71,11 @@ final class LauncherAlertDialog extends JDialog {
 
     private LauncherAlertDialog(Window owner, String title, String message, GuiScale scale,
                                 String... buttons) {
+        this(owner, title, message, scale, null, buttons);
+    }
+
+    private LauncherAlertDialog(Window owner, String title, String message, GuiScale scale,
+                                JComponent option, String... buttons) {
         super(owner, title, ModalityType.APPLICATION_MODAL);
         this.scale = scale;
         setName("launcherAlertDialog");
@@ -97,6 +103,11 @@ final class LauncherAlertDialog extends JDialog {
         fields.add(heading);
         fields.add(Box.createVerticalStrut(scale.space("lg")));
         fields.add(body);
+        if (option != null) {
+            option.setAlignmentX(Component.LEFT_ALIGNMENT);
+            fields.add(Box.createVerticalStrut(scale.space("lg")));
+            fields.add(option);
+        }
 
         JPanel actions = new JPanel();
         actions.setName("launcherAlertActions");
@@ -158,6 +169,22 @@ final class LauncherAlertDialog extends JDialog {
     static boolean showConfirm(Window owner, GuiScale scale, String title, String message,
                                 String confirmText) {
         return confirmText.equals(show(owner, title, message, scale, "Cancel", confirmText));
+    }
+
+    /**
+     * Like {@link #showConfirm} with one extra check box below the message. Returns {@code null}
+     * when the user did not confirm, otherwise whether the check box was selected.
+     */
+    static Boolean showConfirmWithOption(Window owner, GuiScale scale, String title,
+                                         String message, String optionText,
+                                         boolean optionSelected, String confirmText) {
+        JCheckBox option = new MapCheckBox(optionText, optionSelected, scale);
+        option.setName("launcherAlertOption");
+        option.setForeground(FirstLaunchPanel.TEXT);
+        LauncherAlertDialog dialog = new LauncherAlertDialog(owner, title, message, scale,
+                option, "Cancel", confirmText);
+        dialog.setVisible(true);
+        return confirmText.equals(dialog.result) ? option.isSelected() : null;
     }
 
     /**

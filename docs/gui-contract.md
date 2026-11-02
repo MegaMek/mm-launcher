@@ -51,6 +51,8 @@ Top-level actions are **Install another version** and **Import existing installa
 **Open location**, and **Remove from launcher…** when applicable. Managed/adopted cards also place
 **Uninstall…** at the destructive bottom; imported cards do not. A pending uninstall exposes only
 **Recover uninstall** instead of a new remove/uninstall action while its folder exists.
+The uninstall confirmation offers a ticked-by-default **Also delete log files (logs and
+data/logs)** check box; unticking it keeps the program logs.
 Confirmed uninstall has one checking pass, labelled **Checking installation files**, and a removal
 stage labelled **Removing official files** in the same progress dialog. Progress refreshes show
 the latest state; a very short stage may finish between refreshes rather than being replayed.

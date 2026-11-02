@@ -979,6 +979,73 @@ class UninstallServiceTest {
     }
 
     @Test
+    void logFilesAreRemovedOnlyWhenRequested() throws Exception {
+        Path root = suite(temp.resolve("logs-removed"));
+        Files.writeString(root.resolve("lib/runtime.jar"), "runtime");
+        Files.writeString(root.resolve("docs/history.txt"), "history");
+        Fixture fixture = register("logs-removed", root);
+        Files.createDirectories(root.resolve("logs/old"));
+        Files.writeString(root.resolve("logs/megamek.log"), "log");
+        Files.writeString(root.resolve("logs/old/archived.log"), "old");
+        Files.createDirectories(root.resolve("data/logs"));
+        Files.writeString(root.resolve("data/logs/mekhq.log"), "log");
+        Path outside = Files.writeString(temp.resolve("outside.log"), "outside");
+        Path link = root.resolve("logs/linked.log");
+        try {
+            Files.createSymbolicLink(link, outside);
+        } catch (UnsupportedOperationException | IOException | SecurityException unavailable) {
+            link = null;
+        }
+
+        UninstallService service = fixture.service(point -> { });
+        UninstallService.Plan plan = service.plan(fixture.record, true, context());
+        assertTrue(plan.removeLogs());
+        assertEquals(UninstallService.Action.DELETE, action(plan, "logs/megamek.log"));
+        assertEquals(UninstallService.Action.DELETE, action(plan, "logs/old/archived.log"));
+        assertEquals(UninstallService.Action.DELETE, action(plan, "data/logs/mekhq.log"));
+        assertTrue(plan.knownDirectories().contains("logs/old"));
+        assertTrue(plan.entries().stream().noneMatch(entry ->
+                entry.relativePath().equals("logs/linked.log")), "links are never planned");
+        UninstallService.Result result = service.uninstall(plan, UninstallService.CONFIRMATION,
+                context());
+        assertTrue(result.committed());
+        assertEquals("outside", Files.readString(outside));
+        if (link == null) {
+            assertFalse(Files.exists(root), () -> {
+                try (var walk = Files.walk(root)) {
+                    return "only logs remained, so the whole folder goes: "
+                            + walk.map(root::relativize).toList();
+                } catch (IOException error) {
+                    return error.toString();
+                }
+            });
+        } else {
+            assertTrue(Files.isSymbolicLink(link));
+            assertFalse(Files.exists(root.resolve("logs/megamek.log")));
+        }
+
+        Path kept = suite(temp.resolve("logs-kept"));
+        Fixture keptFixture = register("logs-kept", kept);
+        Files.createDirectories(kept.resolve("logs"));
+        Files.writeString(kept.resolve("logs/megamek.log"), "log");
+        UninstallService keptService = keptFixture.service(point -> { });
+        assertTrue(keptService.uninstallConfirmed(keptFixture.record,
+                UninstallService.CONFIRMATION, context()).committed());
+        assertEquals("log", Files.readString(kept.resolve("logs/megamek.log")));
+
+        Path direct = suite(temp.resolve("logs-direct"));
+        Files.writeString(direct.resolve("lib/runtime.jar"), "runtime");
+        Files.writeString(direct.resolve("docs/history.txt"), "history");
+        Fixture directFixture = register("logs-direct", direct);
+        Files.createDirectories(direct.resolve("data/logs"));
+        Files.writeString(direct.resolve("data/logs/mekhq.log"), "log");
+        UninstallService directService = directFixture.service(point -> { });
+        assertTrue(directService.uninstallConfirmed(directFixture.record,
+                UninstallService.CONFIRMATION, true, context()).committed());
+        assertFalse(Files.exists(direct));
+    }
+
+    @Test
     void userFileReplacingAShippedProtectedFolderIsRetainedWithoutBlockingUninstall()
             throws Exception {
         Path root = suite(temp.resolve("replaced-folder"));
