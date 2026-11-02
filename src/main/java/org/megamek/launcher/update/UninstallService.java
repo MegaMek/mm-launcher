@@ -558,6 +558,8 @@ public final class UninstallService {
         entries.forEach(entry -> planned.add(entry.relativePath().toLowerCase(Locale.ROOT)));
         for (ProtectedPackageFile shipped : current.protectedPackageFiles()) {
             context.checkpoint();
+            // Only the opt-in log scan below decides whether log files are removed.
+            if (inLogFolder(shipped.path())) continue;
             if (!planned.add(shipped.path().toLowerCase(Locale.ROOT))) continue;
             PlanEntry entry = planShippedDefault(root, shipped, context);
             entries.add(entry);
@@ -710,6 +712,11 @@ public final class UninstallService {
             entries.add(new PlanEntry(relative, RealUpdateFiles.hash(file, context), attrs.size(),
                     Action.DELETE, "application log file"));
         }
+    }
+
+    private static boolean inLogFolder(String path) {
+        String lower = path.toLowerCase(Locale.ROOT);
+        return LOG_FOLDERS.stream().anyMatch(folder -> lower.startsWith(folder + "/"));
     }
 
     private static String portable(Path root, Path path) {

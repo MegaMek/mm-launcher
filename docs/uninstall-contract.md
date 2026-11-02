@@ -54,7 +54,9 @@ Saves and anything else not shipped by the package remain. Program log files rem
 user leaves **Also delete log files (logs and data/logs)** ticked in the GUI confirmation (it is
 ticked by default; API and prepared-plan callers default to keeping logs). When requested, every
 regular file below `logs/` and `data/logs/` is hashed into the plan and removed like any other
-target, with log subfolders treated as known directories; links, special files, and non-portable
+target, with log subfolders treated as known directories. Log files are never planned as shipped
+defaults, even when they existed at installation time, so only this choice decides their removal.
+Links, special files, and non-portable
 names inside those folders are retained, and the walk never follows links and stops after 10,000
 entries. Copies installed or last
 updated before ownership policy 2 lack this record, so their package root files and defaults are

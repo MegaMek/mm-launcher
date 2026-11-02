@@ -1046,6 +1046,35 @@ class UninstallServiceTest {
     }
 
     @Test
+    void logsRecordedAtRegistrationFollowOnlyTheLogChoice() throws Exception {
+        for (boolean removeLogs : new boolean[] {false, true}) {
+            Path root = suite(temp.resolve("packaged-logs-" + removeLogs));
+            Files.createDirectories(root.resolve("logs"));
+            Files.createDirectories(root.resolve("data/logs"));
+            Files.writeString(root.resolve("logs/unchanged.log"), "shipped");
+            Files.writeString(root.resolve("data/logs/edited.log"), "shipped");
+            Fixture fixture = register("packaged-logs-" + removeLogs, root);
+            Files.writeString(root.resolve("data/logs/edited.log"), "appended");
+
+            UninstallService service = fixture.service(point -> { });
+            UninstallService.Plan plan = service.plan(fixture.record, removeLogs, context());
+            if (removeLogs) {
+                assertEquals(UninstallService.Action.DELETE, action(plan, "logs/unchanged.log"));
+                assertEquals(UninstallService.Action.DELETE, action(plan, "data/logs/edited.log"));
+            } else {
+                assertTrue(plan.entries().stream().noneMatch(entry ->
+                        entry.relativePath().startsWith("logs/")
+                                || entry.relativePath().startsWith("data/logs/")),
+                        "unticked logs are not planned, even when recorded at registration");
+            }
+            assertTrue(service.uninstall(plan, UninstallService.CONFIRMATION, context())
+                    .committed());
+            assertEquals(!removeLogs, Files.exists(root.resolve("logs/unchanged.log")));
+            assertEquals(!removeLogs, Files.exists(root.resolve("data/logs/edited.log")));
+        }
+    }
+
+    @Test
     void userFileReplacingAShippedProtectedFolderIsRetainedWithoutBlockingUninstall()
             throws Exception {
         Path root = suite(temp.resolve("replaced-folder"));
