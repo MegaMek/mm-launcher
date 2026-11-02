@@ -73,14 +73,15 @@ class UninstallSwingTest {
             }
         };
         Path root = suite("managed");
-        Files.createDirectory(root.resolve("custom"));
-        Path custom = Files.writeString(root.resolve("custom/user.txt"), "keep");
         InstallationRecord record = services.register("Managed installation", root);
         InstallationRecord retained = services.register("Retained installation", suite("retained"));
         var build = new OwnershipPolicy().build(root, OfficialRepository.MEGAMEK, "v1.0.0");
         var receipt = new ReceiptStore().write(services.registry(), services.readRegistry(), record,
                 OfficialRepository.MEGAMEK, "v1.0.0", "MegaMek-v1.0.0.tar.gz", 10,
                 "sha256:" + "a".repeat(64), build);
+        // User data appears after installation, so it is never an official shipped default.
+        Files.createDirectory(root.resolve("custom"));
+        Path custom = Files.writeString(root.resolve("custom/user.txt"), "keep");
         new ChannelPreferenceStore().initializeManaged(
                 services.registry(), record, receipt, FollowChannel.CORE, false);
         LauncherFrame frame = SwingTestSupport.onEdt(() -> new LauncherFrame(services));

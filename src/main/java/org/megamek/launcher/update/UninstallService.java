@@ -494,6 +494,13 @@ public final class UninstallService {
         int completed = 0;
         for (FileEntry official : current.officialManifest().files()) {
             context.checkpoint();
+            if (regenerableCache(official.path())) {
+                // A shipped cache is rewritten by the applications; it is planned as a cache below.
+                context.progress(OperationPhase.PLAN, ++completed,
+                        current.officialManifest().files().size(), ProgressUnit.FILES,
+                        "Compared official application files");
+                continue;
+            }
             Path file;
             try {
                 file = RealUpdateFiles.resolve(root, official.path(), true);
@@ -529,8 +536,13 @@ public final class UninstallService {
         for (ProtectedPackageFile shipped : current.protectedPackageFiles()) {
             context.checkpoint();
             if (!planned.add(shipped.path().toLowerCase(Locale.ROOT))) continue;
-            addParents(directories, shipped.path());
-            entries.add(planShippedDefault(root, shipped, context));
+            PlanEntry entry = planShippedDefault(root, shipped, context);
+            entries.add(entry);
+            // Retained user data may have replaced a shipped folder with a file or link, so only
+            // real directories above removable or already absent defaults become cleanup candidates.
+            if (entry.action() == Action.DELETE || entry.action() == Action.ABSENT) {
+                addDirectoryParents(root, directories, shipped.path());
+            }
         }
         for (String cache : REGENERABLE_CACHES) {
             context.checkpoint();
@@ -1335,6 +1347,24 @@ public final class UninstallService {
                 || !journal.current().canonicalRoot().equals(expected.canonicalRoot())
                 || !journal.current().registeredAt().equals(expected.registeredAt())) {
             throw new IOException("uninstall journal does not match this installation");
+        }
+    }
+
+    private static boolean regenerableCache(String path) {
+        return REGENERABLE_CACHES.stream().anyMatch(cache -> cache.equalsIgnoreCase(path));
+    }
+
+    private static void addDirectoryParents(Path root, Set<String> result, String path) {
+        int slash = path.indexOf('/');
+        while (slash > 0) {
+            String parent = path.substring(0, slash);
+            Path directory = root.resolve(parent.replace('/', java.io.File.separatorChar));
+            if (Files.exists(directory, LinkOption.NOFOLLOW_LINKS)
+                    && !Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) {
+                return;
+            }
+            result.add(parent);
+            slash = path.indexOf('/', slash + 1);
         }
     }
 

@@ -1706,6 +1706,53 @@ class RealUpdateServiceTest {
                 || invalid.getMessage().contains("external edit"));
     }
 
+    @Test
+    void updateJournalAndStateWrittenBeforeProtectedPackageFilesStillRecover() throws Exception {
+        for (String failurePoint : List.of("BEFORE_APP_MUTATION", "AFTER_APP_MUTATION")) {
+            Fixture fixture = interrupted("legacy-journal-" + failurePoint.toLowerCase(Locale.ROOT),
+                    failurePoint);
+            InstallationRecord record = new RegistryStore().resolve(
+                    new RegistryStore().read(fixture.registry), fixture.id);
+            stripProtectedPackageFiles(new ReceiptStore().receiptPath(fixture.registry, record.id()));
+            Path journal = journal(fixture.root);
+            stripProtectedPackageFiles(journal, "previousState", "nextState");
+
+            byte[] legacy = Files.readAllBytes(journal);
+            Files.writeString(journal, new String(legacy, StandardCharsets.UTF_8)
+                    .replaceFirst("\\{", "{\"unexpectedField\": true,"));
+            RealUpdateService recovery = service(new PackageTransport(), point -> {});
+            assertThrows(IOException.class, () -> recovery.recover(fixture.registry, fixture.id,
+                    RealUpdateService.CONFIRM));
+            Files.write(journal, legacy);
+
+            RealUpdateService.RecoveryResult result = recovery.recover(fixture.registry,
+                    fixture.id, RealUpdateService.CONFIRM);
+            boolean completed = failurePoint.equals("AFTER_APP_MUTATION");
+            assertTrue(result.outcome().contains(completed ? "completed" : "rolled back"));
+            assertEquals(completed ? "new" : "old",
+                    Files.readString(fixture.root.resolve("docs/change.txt")));
+            assertFalse(Files.exists(fixture.root.resolve(RootCoordinator.UPDATE_NAMESPACE)));
+
+            Path state = new CurrentStateStore(new ReceiptStore()).path(fixture.registry, fixture.id);
+            if (Files.exists(state)) stripProtectedPackageFiles(state);
+            assertEquals(completed ? "v2" : "v1",
+                    recovery.snapshot(fixture.registry, fixture.id).current().tag());
+        }
+    }
+
+    private static void stripProtectedPackageFiles(Path file, String... nested) throws IOException {
+        var json = new com.fasterxml.jackson.databind.ObjectMapper();
+        var root = (com.fasterxml.jackson.databind.node.ObjectNode) json.readTree(file.toFile());
+        if (nested.length == 0) {
+            assertTrue(root.remove("protectedPackageFiles") != null);
+        }
+        for (String name : nested) {
+            var state = (com.fasterxml.jackson.databind.node.ObjectNode) root.get(name);
+            if (state != null) assertTrue(state.remove("protectedPackageFiles") != null);
+        }
+        json.writerWithDefaultPrettyPrinter().writeValue(file.toFile(), root);
+    }
+
     private Fixture interrupted(String name, String failurePoint) throws Exception {
         Fixture fixture = install(name, "v1", packageFiles(1, Map.of(
                 "lib/runtime.txt", bytes("runtime-1"),
