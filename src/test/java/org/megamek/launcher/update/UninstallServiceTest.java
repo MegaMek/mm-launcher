@@ -957,6 +957,28 @@ class UninstallServiceTest {
     }
 
     @Test
+    void emptyFolderScanAddsOnlyEmptyTreesAndHonoursCancellation() throws Exception {
+        Path root = Files.createDirectories(temp.resolve("empty-scan"));
+        Files.createDirectories(root.resolve("userdata/occupied/empty"));
+        Files.writeString(root.resolve("userdata/occupied/keep.txt"), "keep");
+        Files.createDirectories(root.resolve("userdata/blank/nested"));
+        Files.createDirectories(root.resolve("unknown/empty"));
+
+        java.util.Set<String> directories = new java.util.HashSet<>(List.of("userdata"));
+        UninstallService.addEmptyDirectoryTrees(root, directories, context());
+        assertEquals(java.util.Set.of("userdata", "userdata/occupied/empty", "userdata/blank",
+                "userdata/blank/nested"), directories,
+                "occupied ancestors and unknown top-level folders are never added");
+
+        OperationContext cancelled = new OperationContext(OperationType.UNINSTALL, event -> { });
+        cancelled.phase(OperationPhase.PLAN, "scanning");
+        assertTrue(cancelled.requestCancellation().accepted());
+        assertThrows(OperationCancelledException.class, () -> UninstallService
+                .addEmptyDirectoryTrees(root, new java.util.HashSet<>(List.of("userdata")),
+                        cancelled));
+    }
+
+    @Test
     void userFileReplacingAShippedProtectedFolderIsRetainedWithoutBlockingUninstall()
             throws Exception {
         Path root = suite(temp.resolve("replaced-folder"));

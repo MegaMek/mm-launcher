@@ -44,6 +44,7 @@ import org.megamek.launcher.manifest.ManifestException;
 import org.megamek.launcher.manifest.ManifestReader;
 import org.megamek.launcher.onboarding.Inspection;
 import org.megamek.launcher.onboarding.InstallationInspector;
+import org.megamek.launcher.operation.OperationCancelledException;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationPhase;
 import org.megamek.launcher.operation.OperationType;
@@ -555,7 +556,7 @@ public final class UninstallService {
             }
         }
         context.checkpoint();
-        addEmptyDirectoryTrees(root, directories);
+        addEmptyDirectoryTrees(root, directories, context);
         List<String> knownDirectories = directories.stream()
                 .sorted(Comparator.comparingInt((String value) -> depth(value)).reversed()
                         .thenComparing(Comparator.naturalOrder()))
@@ -1359,15 +1360,18 @@ public final class UninstallService {
      * {@code userdata/data/campaignPresets}) and applications create them, yet without them the
      * installation root can never become empty. Folders holding anything stay untouched.
      */
-    private static void addEmptyDirectoryTrees(Path root, Set<String> directories)
-            throws IOException {
+    static void addEmptyDirectoryTrees(Path root, Set<String> directories,
+                                       OperationContext context)
+            throws IOException, InterruptedException {
         Set<String> tops = new java.util.TreeSet<>();
         for (String directory : directories) {
             int slash = directory.indexOf('/');
             tops.add(slash < 0 ? directory : directory.substring(0, slash));
         }
         List<String> found = new ArrayList<>();
+        OperationCancelledException[] cancelled = new OperationCancelledException[1];
         for (String top : tops) {
+            if (found.size() >= MAX_EMPTY_DIRECTORIES) break;
             Path start = root.resolve(top);
             if (!Files.isDirectory(start, LinkOption.NOFOLLOW_LINKS)) continue;
             Files.walkFileTree(start, new java.nio.file.SimpleFileVisitor<>() {
@@ -1376,6 +1380,7 @@ public final class UninstallService {
                 @Override
                 public java.nio.file.FileVisitResult preVisitDirectory(
                         Path directory, BasicFileAttributes attrs) {
+                    if (stop()) return java.nio.file.FileVisitResult.TERMINATE;
                     if (attrs.isSymbolicLink() || attrs.isOther()) {
                         markOccupied();
                         return java.nio.file.FileVisitResult.SKIP_SUBTREE;
@@ -1388,13 +1393,15 @@ public final class UninstallService {
                 public java.nio.file.FileVisitResult visitFile(Path file,
                                                                BasicFileAttributes attrs) {
                     markOccupied();
-                    return java.nio.file.FileVisitResult.CONTINUE;
+                    return stop() ? java.nio.file.FileVisitResult.TERMINATE
+                            : java.nio.file.FileVisitResult.CONTINUE;
                 }
 
                 @Override
                 public java.nio.file.FileVisitResult visitFileFailed(Path file, IOException error) {
                     markOccupied();
-                    return java.nio.file.FileVisitResult.CONTINUE;
+                    return stop() ? java.nio.file.FileVisitResult.TERMINATE
+                            : java.nio.file.FileVisitResult.CONTINUE;
                 }
 
                 @Override
@@ -1403,18 +1410,33 @@ public final class UninstallService {
                     boolean busy = occupied.pop()[0] || error != null;
                     if (busy) {
                         markOccupied();
-                    } else if (found.size() < MAX_EMPTY_DIRECTORIES) {
+                    } else {
                         found.add(root.relativize(directory).toString()
                                 .replace(java.io.File.separatorChar, '/'));
                     }
-                    return java.nio.file.FileVisitResult.CONTINUE;
+                    return stop() ? java.nio.file.FileVisitResult.TERMINATE
+                            : java.nio.file.FileVisitResult.CONTINUE;
                 }
 
                 private void markOccupied() {
                     if (!occupied.isEmpty()) occupied.peek()[0] = true;
                 }
+
+                private boolean stop() {
+                    if (found.size() >= MAX_EMPTY_DIRECTORIES) return true;
+                    try {
+                        context.checkpoint();
+                        return false;
+                    } catch (OperationCancelledException cancellation) {
+                        cancelled[0] = cancellation;
+                        return true;
+                    }
+                }
             });
+            if (cancelled[0] != null) throw cancelled[0];
         }
+        // Ancestors are not expanded: an empty ancestor was itself found by the walk, and one
+        // holding anything else cannot be removed, so the journal stays bounded by this limit.
         for (String relative : found) {
             try {
                 ManifestReader.validatePortablePath(relative, "empty directory", "uninstall");
@@ -1422,7 +1444,6 @@ public final class UninstallService {
                 continue; // The journal could not record it, so it is simply left in place.
             }
             directories.add(relative);
-            addParents(directories, relative);
         }
     }
 
