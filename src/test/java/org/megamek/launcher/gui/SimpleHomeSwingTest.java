@@ -1797,7 +1797,7 @@ class SimpleHomeSwingTest {
                 return find(frame, "launchOptionsForm");
             });
             SwingTestSupport.awaitCondition("launch options saved", () ->
-                    "-Dinline=1".equals(services.launchOptions().global().extraJvmArguments()));
+                    "-Dinline=1".equals(services.savedJvmArguments));
             // The saved page is rendered after the operation finishes.
             assertNotNull(waitFor(() -> {
                 Component form = find(frame, "launchOptionsForm");
@@ -1818,7 +1818,7 @@ class SimpleHomeSwingTest {
             });
             gate.countDown();
             SwingTestSupport.awaitCondition("second save finished", () ->
-                    "-Dinline=2".equals(services.launchOptions().global().extraJvmArguments()));
+                    "-Dinline=2".equals(services.savedJvmArguments));
             assertNotNull(waitFor(() -> {
                 Component form = find(frame, "launchOptionsForm");
                 return form != null && form != saving ? form : null;
@@ -1881,6 +1881,7 @@ class SimpleHomeSwingTest {
         private NormalInstallService.TargetKind capturedTargetKind =
                 NormalInstallService.TargetKind.CAPTURED_CURRENT;
         private volatile Path unplannableDestination;
+        private volatile String savedJvmArguments;
         private volatile String currentBrowsedSource;
         private volatile boolean showExperimental;
         private volatile QuickInstallSnapshot quickInstallSnapshot =
@@ -1955,7 +1956,11 @@ class SimpleHomeSwingTest {
                     throw new IOException(interrupted);
                 }
             }
-            return super.saveGlobalLaunchOptions(options);
+            LaunchOptionsStore.Document saved = super.saveGlobalLaunchOptions(options);
+            // Tests poll this instead of re-reading the file: on Windows a concurrent read can
+            // make the store's atomic replace fail.
+            savedJvmArguments = saved.global().extraJvmArguments();
+            return saved;
         }
         @Override public void requireInstallationPresent(InstallationRecord record) {
             assertTrue(records.stream().anyMatch(candidate -> candidate.id().equals(record.id())));
