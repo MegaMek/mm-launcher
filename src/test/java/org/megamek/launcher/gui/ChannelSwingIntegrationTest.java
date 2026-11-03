@@ -453,6 +453,46 @@ class ChannelSwingIntegrationTest {
                     "enableManagedUpdatesButton-" + services.record.id())));
             assertNotNull(onEdt(() -> find(frame,
                     "installCoreButton")));
+            assertNull(SwingTestSupport.enableUpdatesItem(frame, services.record.id()),
+                    "a legacy release cannot be adopted, so More… does not offer it");
+        } finally {
+            services.release.countDown();
+            SwingUtilities.invokeAndWait(frame::dispose);
+        }
+    }
+
+    @Test
+    void onlyPlainDottedVersionsCanMatchAnOfficialRelease() {
+        assertTrue(LauncherFrame.officialVersionShape("0.51.01.1"));
+        assertTrue(LauncherFrame.officialVersionShape("0.51.7"));
+        assertTrue(LauncherFrame.officialVersionShape("v0.51.02"));
+        assertFalse(LauncherFrame.officialVersionShape("0.51.02-SNAPSHOT"));
+        assertFalse(LauncherFrame.officialVersionShape("0.51.02 (nightly)"));
+        assertFalse(LauncherFrame.officialVersionShape("51"));
+        assertFalse(LauncherFrame.officialVersionShape("unknown"));
+        assertFalse(LauncherFrame.officialVersionShape(null));
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
+    void importedSnapshotCopyIsLaunchOnlyWithoutEnableUpdates() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing channel integration requires a display");
+        FakeServices services = new FakeServices(temp.resolve("imported-snapshot.json"),
+                false, "0.51.02-SNAPSHOT");
+        services.preference = new ChannelPreferenceStore.ReadResult(
+                ChannelPreferenceStore.Status.UNKNOWN, null, "No release type");
+        services.importedCopy = true;
+        LauncherFrame frame = SwingTestSupport.createWindow(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
+            SwingUtilities.invokeAndWait(installations::doClick);
+            JLabel provenance = waitFor(() -> (JLabel) findNamed(frame,
+                    "installationProvenance-" + services.record.id()));
+            assertEquals("Imported copy · Launch only", onEdt(provenance::getText));
+            assertNull(SwingTestSupport.enableUpdatesItem(frame, services.record.id()),
+                    "a snapshot build can never match an official release");
         } finally {
             services.release.countDown();
             SwingUtilities.invokeAndWait(frame::dispose);
@@ -651,6 +691,10 @@ class ChannelSwingIntegrationTest {
                     org.megamek.launcher.registry.RegistryStore.SCHEMA,
                     record.id(), java.util.Map.of("megamek", record.id()), List.of(record));
             return new HomeState(data, record, inspection, null, eligible, false, preference);
+        }
+
+        @Override
+        public void requireInstallationPresent(InstallationRecord installation) {
         }
 
         @Override

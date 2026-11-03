@@ -32,6 +32,7 @@
  */
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.design.swing.TokenTooltips;
 import org.megamek.launcher.launch.LaunchOptions;
 
 import javax.swing.BorderFactory;
@@ -98,11 +99,13 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         setOpaque(false);
 
         megamekHeap = heapRow("MegaMek memory", "megamekHeap",
-                current.megamekHeapMb(), inherited.megamekHeapMb(), inheritLabel);
+                current.megamekHeapMb(), inherited.megamekHeapMb(), inheritLabel, null);
+        // One hint for the whole memory group keeps Settings within the default window height.
         mekhqHeap = heapRow("MekHQ memory", "mekhqHeap",
-                current.mekhqHeapMb(), inherited.mekhqHeapMb(), inheritLabel);
+                current.mekhqHeapMb(), inherited.mekhqHeapMb(), inheritLabel,
+                "4 GB suits most games. Big campaigns may need more.");
         labHeap = heapRow("MegaMekLab memory", "labHeap",
-                current.labHeapMb(), inherited.labHeapMb(), inheritLabel);
+                current.labHeapMb(), inherited.labHeapMb(), inheritLabel, null);
 
         StyledComboBox<LaunchOptions.Renderer> rendererBox =
                 new StyledComboBox<>(LaunchOptions.Renderer.values(), scale);
@@ -176,10 +179,12 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         return selected instanceof HeapChoice choice ? choice.megabytes() : null;
     }
 
-    private Row heapRow(String label, String name, Integer own, Integer inheritedValue, String inheritLabel) {
+    private Row heapRow(String label, String name, Integer own, Integer inheritedValue, String inheritLabel,
+                        String hint) {
         int start = clampHeap(own != null ? own : inheritedValue);
         int inheritedHeap = clampHeap(inheritedValue);
-        StyledComboBox<HeapChoice> box = new StyledComboBox<>(HeapChoice.options(start, inheritedHeap), scale);
+        StyledComboBox<HeapChoice> box = new StyledComboBox<>(
+                HeapChoice.options(PHYSICAL_MEMORY_MB, start, inheritedHeap), scale);
         box.setName("launchOptions" + Character.toUpperCase(name.charAt(0)) + name.substring(1));
         box.getAccessibleContext().setAccessibleName(label);
         box.setSelectedItem(new HeapChoice(start));
@@ -190,7 +195,7 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         editor.add(box);
         // The dropdown sits beside the checkbox and already shows the inherited size when following it.
         Row row = row(label, name, editor, own == null, inheritLabel,
-                () -> box.setSelectedItem(new HeapChoice(inheritedHeap)), null, true);
+                () -> box.setSelectedItem(new HeapChoice(inheritedHeap)), hint, true);
         row.editor = box;
         row.extraEditors = List.of(box);
         row.refresh();
@@ -211,7 +216,7 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
                     String inheritText, Runnable resetToInherited, String hintText, boolean inline) {
         int index = rows.size();
         String capitalized = Character.toUpperCase(name.charAt(0)) + name.substring(1);
-        JLabel title = new JLabel(label);
+        JLabel title = TokenTooltips.whenClipped(new JLabel(label));
         title.setForeground(FirstLaunchPanel.TEXT);
         title.setFont(scale.font(title.getFont(), "label"));
         GridBagConstraints labelConstraints = new GridBagConstraints();
@@ -255,7 +260,7 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         }
         add(editor, editorConstraints);
         if (hintText != null) {
-            JLabel hint = new JLabel(hintText);
+            JLabel hint = TokenTooltips.whenClipped(new JLabel(hintText));
             hint.setForeground(FirstLaunchPanel.MUTED);
             hint.setName("launchOptions" + capitalized + "Hint");
             GridBagConstraints hintConstraints = new GridBagConstraints();
@@ -344,14 +349,38 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         return getParent() != null && getParent().getHeight() >= getPreferredSize().height;
     }
 
+    /** This computer's physical memory in MB, or 0 when the Java runtime cannot report it. */
+    static final long PHYSICAL_MEMORY_MB = physicalMemoryMb();
+
+    private static long physicalMemoryMb() {
+        try {
+            if (java.lang.management.ManagementFactory.getOperatingSystemMXBean()
+                    instanceof com.sun.management.OperatingSystemMXBean os) {
+                return Math.max(0, os.getTotalMemorySize() / (1024 * 1024));
+            }
+        } catch (RuntimeException | LinkageError ignored) {
+            // Fall back to offering every preset.
+        }
+        return 0;
+    }
+
     /** A maximum-memory choice; common sizes plus any existing value that is not one of them. */
     record HeapChoice(int megabytes) {
         private static final int[] PRESETS = {512, 1024, 1536, 2048, 3072, 4096, 6144, 8192, 12288, 16384,
                 24576, 32768, 49152, 65536};
 
-        static HeapChoice[] options(int... required) {
+        /**
+         * Presets up to {@code physicalMb} (all of them when it is unknown, i.e. 0 or less), plus the
+         * {@code required} values so a saved or inherited size larger than this computer stays selectable.
+         */
+        static HeapChoice[] options(long physicalMb, int... required) {
             TreeSet<Integer> values = new TreeSet<>();
-            for (int preset : PRESETS) values.add(preset);
+            for (int preset : PRESETS) {
+                // Installed RAM reports slightly under its nominal size (e.g. 16 GB as ~15.9 GB).
+                if (physicalMb <= 0 || preset <= physicalMb * 1.05 || preset <= LaunchOptions.MIN_HEAP_MB) {
+                    values.add(preset);
+                }
+            }
             for (int value : required) values.add(value);
             return values.stream().map(HeapChoice::new).toArray(HeapChoice[]::new);
         }

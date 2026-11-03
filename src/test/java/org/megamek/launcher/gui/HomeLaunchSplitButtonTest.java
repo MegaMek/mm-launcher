@@ -232,6 +232,26 @@ class HomeLaunchSplitButtonTest {
         assertEquals(0, split.popupMenu().getComponentCount(), "no header without alternatives");
     }
 
+    @Test
+    void websiteControlOpensWithoutVersionOrAlternatives() throws Exception {
+        AtomicReference<String> opened = new AtomicReference<>();
+        HomeLaunchSplitButton split = SwingTestSupport.onEdt(() -> HomeLaunchSplitButton.website(
+                GuiScale.DEFAULT, "mekbay", "MekBay", "Web app", "Opens MekBay in your browser",
+                () -> opened.set("mekbay")));
+        assertEquals("open-mekbay-split-button", split.getName());
+        assertEquals("open-mekbay-button", split.primaryButton().getName());
+        assertEquals("Open MekBay", split.primaryButton().getText());
+        assertEquals("Web app", ButtonDetail.detail(split.primaryButton()));
+        assertEquals("Open MekBay · Web app",
+                split.primaryButton().getAccessibleContext().getAccessibleName());
+        assertEquals("Opens MekBay in your browser",
+                split.getAccessibleContext().getAccessibleDescription());
+        assertFalse(split.hasOptions());
+        assertFalse(split.optionsButton().isVisible());
+        SwingUtilities.invokeAndWait(split.primaryButton()::doClick);
+        assertEquals("mekbay", opened.get());
+    }
+
 
 
     private static InstallationRecord record(String id, String name, String version,

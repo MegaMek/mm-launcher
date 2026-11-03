@@ -70,8 +70,9 @@ locked current state has none and initializes only unset preferences for its inc
 Existing or concurrently added preferences win, and all existing record fields are retained.
 Imported records have no ownership receipt, channel sidecar, or provenance and remain launch-only;
 Home includes their detected programs in the application union. Installations labels each one
-**Imported copy · Launch only · Updates unavailable** and exposes launch/preference,
-**Open location**, **Remove from launcher…**, and a separate **Enable Updates** control, but no check, Preview,
+**Imported copy · Launch only** and exposes launch/preference,
+**Open location**, **Remove from launcher…**, and, for a plain dotted version, **Enable updates…** in its
+**More…** menu, but no check, Preview,
 Update, or Recover action. Import itself never prompts for a channel and never starts adoption or
 a download. Successful exact-copy adoption creates the fixed-channel sidecar with check-on-open
 enabled, after which the direct per-card checkbox is the sole automatic-check setting.

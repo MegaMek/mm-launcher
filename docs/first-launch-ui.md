@@ -106,8 +106,9 @@ confirmation, or completion dialog. A name is derived from the detected product 
 without inventing a channel. Import initializes preferences only for included applications that
 remain unset under the registry lock. Home then uses the union across all records. Imported copies
 receive no ownership receipt or channel setting and remain update-ineligible. They are never
-prompted to choose a channel; Installations labels them **Imported copy · Launch only · Updates
-unavailable**. A genuine import later exposes one separate **Enable Updates** action;
+prompted to choose a channel; Installations labels them **Imported copy · Launch only**. A
+genuine import whose version could match an official release later offers **Enable updates…** in
+its **More…** menu;
 it is never part of import and never appears for corrupt/incomplete provenance. That opt-in flow
 starts with a compact **Program (Version)** and update-channel dialog. Cancel/Escape performs no
 network work; Continue automatically searches bounded official release-list metadata and, only
@@ -155,6 +156,8 @@ registry/receipt files that may share the support root; Linux state remains in i
 location. This macOS location is not the `MegaMek Launcher.app` resource tree.
 Explicit `gui --registry` overrides and custom `LauncherServices` registries instead keep the
 isolated `<registry parent>/installations/<product channel>` layout.
+Once a copy is installed somewhere else, later suggestions use that copy's parent folder until it
+disappears or a copy is installed back into the default.
 
 On managed Installations, one Product/Release type/**Fetch releases** row defaults to MekHQ/Core and
 offers Experimental only when **Show Experimental releases** is on. It shows the channel's current

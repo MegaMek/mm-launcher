@@ -131,13 +131,44 @@ public final class NormalInstallService {
      */
     public Path defaultDestination(OfficialRepository requestedRepository,
                                    FollowChannel requestedChannel) throws IOException {
+        return defaultDestination(requestedRepository, requestedChannel, null);
+    }
+
+    /**
+     * Like {@link #defaultDestination(OfficialRepository, FollowChannel)}, but suggests the folder
+     * inside {@code preferredParent} while it is still a real, writable directory. A missing,
+     * unwritable or non-directory parent, or one reached through a link anywhere along its path,
+     * falls back to the platform default.
+     */
+    public Path defaultDestination(OfficialRepository requestedRepository,
+                                   FollowChannel requestedChannel, Path preferredParent)
+            throws IOException {
         OfficialRepository repository = requireAllowedRepository(requestedRepository);
         FollowChannel channel = requireAllowedChannel(requestedChannel);
-        Path preferred = installLocations.destination(registry,
-                defaultFolderName(repository, channel));
+        String folder = defaultFolderName(repository, channel);
+        Path usable = usablePreferredParent(preferredParent);
+        if (usable != null) return availableFolder(usable, folder);
+        Path preferred = installLocations.destination(registry, folder);
         Path parent = preferred.getParent();
         return parent == null ? preferred
                 : availableFolder(parent, preferred.getFileName().toString());
+    }
+
+    /** The platform folder that holds default installs; nothing is created. */
+    public Path defaultParent() throws IOException {
+        return installLocations.destination(registry,
+                defaultFolderName(OfficialRepository.MEKHQ, FollowChannel.CORE)).getParent();
+    }
+
+    private static Path usablePreferredParent(Path preferredParent) {
+        if (preferredParent == null || !preferredParent.isAbsolute()) return null;
+        try {
+            Path parent = StrictPathSafety.requireDirectory(preferredParent,
+                    "remembered install parent");
+            return Files.isWritable(parent) ? parent : null;
+        } catch (IOException | RuntimeException ignored) {
+            return null;
+        }
     }
 
     public static String defaultFolderName(OfficialRepository repository, FollowChannel channel)

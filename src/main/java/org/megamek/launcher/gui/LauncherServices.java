@@ -244,12 +244,43 @@ public class LauncherServices {
     }
 
     public Path normalInstallDestination() throws IOException {
-        return normalInstalls.defaultDestination();
+        return normalInstallDestination(OfficialRepository.MEKHQ, FollowChannel.CORE);
     }
 
+    /** Suggests a new folder next to the last new install, or in the platform default. */
     public Path normalInstallDestination(OfficialRepository repository, FollowChannel channel)
             throws IOException {
-        return normalInstalls.defaultDestination(repository, channel);
+        return normalInstalls.defaultDestination(repository, channel, rememberedInstallParent());
+    }
+
+    private Path rememberedInstallParent() {
+        try {
+            String parent = settings.read().installParent();
+            return parent == null ? null : Path.of(parent);
+        } catch (IOException | RuntimeException unreadable) {
+            return null;
+        }
+    }
+
+    /**
+     * Best effort: the install already succeeded, so a settings problem only loses the
+     * suggestion. The platform default is stored as no preference so it keeps tracking the OS.
+     */
+    private void rememberInstallParent(Path destination) {
+        try {
+            Path parent = destination == null ? null
+                    : destination.toAbsolutePath().normalize().getParent();
+            if (parent == null) return;
+            Path stored = parent.equals(normalInstalls.defaultParent()) ? null : parent;
+            String current = settings.read().installParent();
+            if (java.util.Objects.equals(current, stored == null ? null : stored.toString())) {
+                return;
+            }
+            ensureRegistryParent();
+            settings.writeInstallParent(stored);
+        } catch (IOException | RuntimeException ignored) {
+            // Keep the completed install; the next suggestion uses the previous folder.
+        }
     }
 
     public NormalInstallService.Plan prepareNormalInstall(Path destination)
@@ -293,7 +324,9 @@ public class LauncherServices {
                                                      PrintStream progress,
                                                      OperationContext context)
             throws IOException, InterruptedException {
-        return normalInstalls.install(plan, progress, context);
+        NormalInstallService.Result result = normalInstalls.install(plan, progress, context);
+        rememberInstallParent(result.destination());
+        return result;
     }
 
     /** The saved appearance; unreadable settings fall back to the default look. */
@@ -793,6 +826,7 @@ public class LauncherServices {
                     + detail(error) + ". Keep the retained copy launch-only until setup is "
                     + "repaired; its release type cannot be assigned or changed manually.", error);
         }
+        rememberInstallParent(result.destination());
         return result;
     }
 
@@ -812,6 +846,7 @@ public class LauncherServices {
                     + detail(error) + ". Keep the retained copy launch-only until setup is "
                     + "repaired; its release type cannot be assigned or changed manually.", error);
         }
+        rememberInstallParent(result.destination());
         return result;
     }
 

@@ -142,6 +142,8 @@ class SimpleHomeSwingTest {
                 assertInstanceOf(LauncherLink.class, find(frame, "openDiscordButton"));
                 assertInstanceOf(LauncherLink.class, find(frame, "playOnlineButton"));
                 assertInstanceOf(LauncherLink.class, find(frame, "reportBugButton"));
+                assertNull(find(frame, "open-mekbay-button"),
+                        "MekBay joins Home only once a program is installed");
                 return null;
             });
             SwingUtilities.invokeAndWait(() -> {
@@ -623,7 +625,7 @@ class SimpleHomeSwingTest {
         Path changed = temp.resolve("browsed-new-location").toAbsolutePath().normalize();
         String capturedSource = services.quickInstallSnapshot.option(QuickInstallSnapshot.DEFAULT_KEY)
                 .target().source();
-        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, (parent, plan) -> changed));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, (parent, suggested, name) -> changed));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             JButton primary = waitButton(frame, "downloadAndInstallButton");
@@ -648,6 +650,45 @@ class SimpleHomeSwingTest {
 
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
+    void unplannableSuggestedFolderOffersChangeLocationAndReplans() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        FakeServices services = new FakeServices(temp.resolve("unplannable-location.json"));
+        services.unplannableDestination = services.destination;
+        Path changed = temp.resolve("writable-parent").resolve("MekHQ Core")
+                .toAbsolutePath().normalize();
+        AtomicReference<Path> suggestedParent = new AtomicReference<>();
+        AtomicReference<String> suggestedName = new AtomicReference<>();
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, (parent, suggested, name) -> {
+            suggestedParent.set(suggested);
+            suggestedName.set(name);
+            return changed;
+        }));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            JButton primary = waitButton(frame, "downloadAndInstallButton");
+            waitUntil(primary::isEnabled);
+            SwingUtilities.invokeAndWait(primary::doClick);
+            JDialog failure = waitDialog(frame, "Could not prepare download");
+            assertEquals("Change location", SwingTestSupport.label(
+                    find(failure, "launcherAlertButton1")));
+            SwingTestSupport.click(failure, "launcherAlertButton1");
+            JDialog quote = waitDialog(frame, "Install latest MekHQ Core (1.2.3)");
+            assertEquals(services.destination.getParent(), suggestedParent.get());
+            assertEquals("MekHQ Core (1.2.3)", suggestedName.get());
+            assertEquals(List.of(services.destination, changed), services.plannedDestinations);
+            assertEquals(changed.toString(), ((javax.swing.text.JTextComponent)
+                    find(quote, "normalInstallDestination")).getText());
+            assertEquals(0, services.installs.get());
+            JButton cancel = find(quote, "cancelNormalInstallButton");
+            SwingUtilities.invokeAndWait(cancel::doClick);
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void changeLocationDisposesTheOldQuoteAndReplansBeforeReconfirmation() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
@@ -655,7 +696,7 @@ class SimpleHomeSwingTest {
         Path changed = temp.resolve("chosen-parent").resolve("MekHQ Core")
                 .toAbsolutePath().normalize();
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services,
-                (parent, plan) -> changed));
+                (parent, suggested, name) -> changed));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             JButton primary = waitButton(frame, "downloadAndInstallButton");
@@ -1235,7 +1276,16 @@ class SimpleHomeSwingTest {
                             .mapToInt(button -> button.getMinimumSize().height).max().orElseThrow();
                     int preferred = java.util.Arrays.stream(actions.getComponents())
                             .mapToInt(button -> button.getPreferredSize().height).max().orElseThrow();
-                    for (int[] size : new int[][]{{1100, 1}, {720, 2}, {580, 3}, {720, 2}, {1100, 1}}) {
+                    assertEquals(4, actions.getComponentCount(), "three programs plus MekBay");
+                    assertEquals("open-mekbay-split-button", actions.getComponent(3).getName(),
+                            "MekBay sits right of the installed programs");
+                    int cell = homeLaunchCell(actions);
+                    int gap = layout.getHgap();
+                    java.awt.Insets insets = parent.getInsets();
+                    int oneRow = 4 * cell + 3 * gap + insets.left + insets.right;
+                    int twoRows = 2 * cell + gap + insets.left + insets.right;
+                    for (int[] size : new int[][]{{oneRow, 1}, {oneRow - 1, 2}, {twoRows, 2},
+                            {twoRows - 1, 4}, {twoRows, 2}, {oneRow, 1}}) {
                         parent.setSize(size[0], parent.getHeight());
                         int rows = size[1];
                         int gaps = (rows - 1) * layout.getVgap();
@@ -1300,14 +1350,17 @@ class SimpleHomeSwingTest {
             frame.validate();
             return target;
         });
-        boolean threeColumns = onEdt(() -> {
+        int columns = onEdt(() -> {
             JPanel actions = find(frame, "homeLaunchActions");
             java.awt.Insets frameInsets = frame.getInsets();
             java.awt.Insets controlsInsets = actions.getParent().getInsets();
             int availableWidth = fitted.width - frameInsets.left - frameInsets.right
                     - controlsInsets.left - controlsInsets.right;
             java.awt.GridLayout layout = assertInstanceOf(java.awt.GridLayout.class, actions.getLayout());
-            return availableWidth >= 3 * GuiScale.DEFAULT.scaleForGUI(300) + 2 * layout.getHgap();
+            int cell = homeLaunchCell(actions);
+            int gap = layout.getHgap();
+            return availableWidth >= 4 * cell + 3 * gap ? 4
+                    : availableWidth >= 2 * cell + gap ? 2 : 1;
         });
         AtomicReference<List<Rectangle>> previous = new AtomicReference<>();
         AtomicInteger stableSamples = new AtomicInteger();
@@ -1318,7 +1371,7 @@ class SimpleHomeSwingTest {
             JPanel actions = find(frame, "homeLaunchActions");
             int preferred = actions.getComponent(0).getPreferredSize().height;
             javax.swing.JScrollPane scroller = find(frame, "managedHomeDeckScroller");
-            observed.set("actual=" + frame.getSize() + ", threeColumns=" + threeColumns
+            observed.set("actual=" + frame.getSize() + ", columns=" + columns
                     + ", viewport=" + scroller.getViewport().getViewRect()
                     + ", buttons=" + java.util.Arrays.stream(actions.getComponents())
                     .map(button -> button.getBounds() + " min=" + button.getMinimumSize()
@@ -1327,9 +1380,7 @@ class SimpleHomeSwingTest {
                     && java.util.Arrays.stream(actions.getComponents())
                     .allMatch(button -> button.getHeight() >= button.getMinimumSize().height
                             && button.getHeight() <= preferred + 2)
-                    && (threeColumns
-                    ? actions.getComponent(0).getY() == actions.getComponent(2).getY()
-                    : actions.getComponent(2).getY() > actions.getComponent(0).getY())
+                    && launchesInColumns(actions, columns)
                     && homeActionsVisible(frame);
             if (!ready) {
                 previous.set(null);
@@ -1351,7 +1402,7 @@ class SimpleHomeSwingTest {
                 stableSamples.set(1);
             }
             if (stableSamples.get() < 3) return false;
-            assertCompactLaunches(frame, threeColumns);
+            assertCompactLaunches(frame, columns);
             assertHomeActionsVisible(frame);
             return true;
         });
@@ -1389,9 +1440,34 @@ class SimpleHomeSwingTest {
         }
     }
 
-    private static void assertCompactLaunches(LauncherFrame frame, boolean threeColumns) {
+    private static int homeLaunchCell(JPanel actions) {
+        return java.util.Arrays.stream(actions.getComponents())
+                .mapToInt(button -> button.getPreferredSize().width).max().orElseThrow();
+    }
+
+    /** True when the launch controls form rows of {@code columns}, in order, with nothing orphaned. */
+    private static boolean launchesInColumns(JPanel actions, int columns) {
+        Component[] buttons = actions.getComponents();
+        for (int index = 0; index < buttons.length; index++) {
+            Component first = buttons[index - index % columns];
+            Component top = buttons[index % columns];
+            if (buttons[index].getY() != first.getY() || buttons[index].getX() != top.getX()) {
+                return false;
+            }
+            if (index % columns == 0 && index > 0
+                    && buttons[index].getY() <= buttons[index - columns].getY()) {
+                return false;
+            }
+            if (index % columns > 0 && buttons[index].getX() <= buttons[index - 1].getX()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static void assertCompactLaunches(LauncherFrame frame, int columns) {
         JPanel actions = find(frame, "homeLaunchActions");
-        assertEquals(3, actions.getComponentCount());
+        assertEquals(4, actions.getComponentCount());
         int buttonHeight = actions.getComponent(0).getPreferredSize().height;
         for (Component button : actions.getComponents()) {
             assertTrue(button.getHeight() >= button.getMinimumSize().height,
@@ -1403,12 +1479,10 @@ class SimpleHomeSwingTest {
                             + button.getHeight() + " > " + (buttonHeight + 2)
                             + " at window " + frame.getSize());
         }
-        if (threeColumns) {
-            assertEquals(actions.getComponent(0).getY(), actions.getComponent(2).getY());
-            assertTrue(actions.getComponent(0).getX() < actions.getComponent(2).getX());
-        } else {
-            assertTrue(actions.getComponent(2).getY() > actions.getComponent(0).getY());
-        }
+        assertTrue(launchesInColumns(actions, columns),
+                () -> "launch buttons must form rows of " + columns + " at window " + frame.getSize()
+                        + ": " + java.util.Arrays.stream(actions.getComponents())
+                        .map(Component::getBounds).toList());
     }
 
     @Test
@@ -1723,7 +1797,7 @@ class SimpleHomeSwingTest {
                 return find(frame, "launchOptionsForm");
             });
             SwingTestSupport.awaitCondition("launch options saved", () ->
-                    "-Dinline=1".equals(services.launchOptions().global().extraJvmArguments()));
+                    "-Dinline=1".equals(services.savedJvmArguments));
             // The saved page is rendered after the operation finishes.
             assertNotNull(waitFor(() -> {
                 Component form = find(frame, "launchOptionsForm");
@@ -1744,7 +1818,7 @@ class SimpleHomeSwingTest {
             });
             gate.countDown();
             SwingTestSupport.awaitCondition("second save finished", () ->
-                    "-Dinline=2".equals(services.launchOptions().global().extraJvmArguments()));
+                    "-Dinline=2".equals(services.savedJvmArguments));
             assertNotNull(waitFor(() -> {
                 Component form = find(frame, "launchOptionsForm");
                 return form != null && form != saving ? form : null;
@@ -1806,6 +1880,8 @@ class SimpleHomeSwingTest {
                 new java.util.concurrent.CopyOnWriteArrayList<>();
         private NormalInstallService.TargetKind capturedTargetKind =
                 NormalInstallService.TargetKind.CAPTURED_CURRENT;
+        private volatile Path unplannableDestination;
+        private volatile String savedJvmArguments;
         private volatile String currentBrowsedSource;
         private volatile boolean showExperimental;
         private volatile QuickInstallSnapshot quickInstallSnapshot =
@@ -1880,7 +1956,11 @@ class SimpleHomeSwingTest {
                     throw new IOException(interrupted);
                 }
             }
-            return super.saveGlobalLaunchOptions(options);
+            LaunchOptionsStore.Document saved = super.saveGlobalLaunchOptions(options);
+            // Tests poll this instead of re-reading the file: on Windows a concurrent read can
+            // make the store's atomic replace fail.
+            savedJvmArguments = saved.global().extraJvmArguments();
+            return saved;
         }
         @Override public void requireInstallationPresent(InstallationRecord record) {
             assertTrue(records.stream().anyMatch(candidate -> candidate.id().equals(record.id())));
@@ -1971,9 +2051,17 @@ class SimpleHomeSwingTest {
         @Override
         public NormalInstallService.Plan prepareCapturedNormalInstall(QuickInstallOption option,
                                                                       Path target)
-                throws InterruptedException {
+                throws IOException, InterruptedException {
+            rejectDestination(target);
             return plan(option.key(), target,
                     capturedTargetKind);
+        }
+
+        private void rejectDestination(Path target) throws IOException {
+            if (target != null && target.equals(unplannableDestination)) {
+                plannedDestinations.add(target.toAbsolutePath().normalize());
+                throw new IOException("install parent is not writable: " + target.getParent());
+            }
         }
 
         @Override

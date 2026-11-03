@@ -719,6 +719,16 @@ class NormalInstallServiceTest {
         Fixture linked = fixture("1.02.03.1");
         Path real = Files.createDirectory(linked.state.resolve("real-parent"));
         Path link = linked.state.resolve("linked-parent");
+        linkOrAbort(link, real);
+        IOException linkError = assertThrows(IOException.class,
+                () -> linked.service.prepare(link.resolve("Main")));
+        assertTrue(linkError.getMessage().contains("linked")
+                || linkError.getMessage().contains("noncanonical"));
+        assertEquals(0, linked.transport.binaryRequests);
+    }
+
+    /** Creates a symbolic link, or a junction on Windows, aborting when neither is possible. */
+    private static void linkOrAbort(Path link, Path real) throws Exception {
         try {
             Files.createSymbolicLink(link, real);
         } catch (IOException | UnsupportedOperationException error) {
@@ -735,11 +745,6 @@ class NormalInstallServiceTest {
                 Assumptions.abort("links unavailable for this fixture: " + output);
             }
         }
-        IOException linkError = assertThrows(IOException.class,
-                () -> linked.service.prepare(link.resolve("Main")));
-        assertTrue(linkError.getMessage().contains("linked")
-                || linkError.getMessage().contains("noncanonical"));
-        assertEquals(0, linked.transport.binaryRequests);
     }
 
     @Test
@@ -809,6 +814,72 @@ class NormalInstallServiceTest {
         assertEquals(fixture.destination, result.destination());
         assertEquals(1, fixture.transport.binaryRequests);
         assertEquals("{broken", Files.readString(settings));
+    }
+
+    @Test
+    void newInstallSuggestionsFollowTheLastChosenParentFolder() throws Exception {
+        Fixture fixture = fixture("6.07.08.1");
+        Path defaultParent = fixture.state.resolve("installations");
+        assertEquals(defaultParent.resolve("MegaMek Core"), fixture.launcherServices
+                .normalInstallDestination(OfficialRepository.MEGAMEK, FollowChannel.CORE));
+
+        Path games = Files.createDirectory(temp.resolve("games"));
+        NormalInstallService.Plan plan = fixture.launcherServices.prepareNormalInstall(
+                games.resolve("MekHQ Core"));
+        fixture.launcherServices.installNormal(plan, quiet(),
+                OperationContext.none(OperationType.FRESH_INSTALL));
+
+        assertEquals(games.resolve("MegaMek Core"), fixture.launcherServices
+                .normalInstallDestination(OfficialRepository.MEGAMEK, FollowChannel.CORE));
+        assertEquals(games.resolve("MekHQ Core (2)"), fixture.launcherServices
+                .normalInstallDestination(OfficialRepository.MEKHQ, FollowChannel.CORE),
+                "an occupied folder still gets the next numbered sibling");
+        assertTrue(Files.readString(settingsPath(fixture.registry)).contains("games"));
+    }
+
+    @Test
+    void missingRememberedParentFallsBackToThePlatformDefault() throws Exception {
+        Fixture fixture = fixture("6.07.08.1");
+        Path removable = Files.createDirectory(temp.resolve("removable"));
+        NormalInstallService.Plan plan = fixture.launcherServices.prepareNormalInstall(
+                removable.resolve("MekHQ Core"));
+        fixture.launcherServices.installNormal(plan, quiet(),
+                OperationContext.none(OperationType.FRESH_INSTALL));
+        Files.move(removable, temp.resolve("unplugged"));
+
+        assertEquals(fixture.state.resolve("installations").resolve("MegaMek Core"),
+                fixture.launcherServices.normalInstallDestination(
+                        OfficialRepository.MEGAMEK, FollowChannel.CORE));
+    }
+
+    @Test
+    void rememberedParentBehindALinkedAncestorFallsBackToThePlatformDefault() throws Exception {
+        Fixture fixture = fixture("6.07.08.1");
+        Path real = Files.createDirectories(temp.resolve("real-games").resolve("mm"));
+        Path link = temp.resolve("linked-games");
+        linkOrAbort(link, real.getParent());
+        Path remembered = link.resolve("mm");
+        assertTrue(Files.isDirectory(remembered, LinkOption.NOFOLLOW_LINKS),
+                "only an ancestor is linked, so a last-component check would accept it");
+
+        assertEquals(fixture.state.resolve("installations").resolve("MegaMek Core"),
+                fixture.service.defaultDestination(
+                        OfficialRepository.MEGAMEK, FollowChannel.CORE, remembered));
+        assertEquals(real.resolve("MegaMek Core"), fixture.service.defaultDestination(
+                OfficialRepository.MEGAMEK, FollowChannel.CORE, real));
+    }
+
+    @Test
+    void installingIntoThePlatformDefaultStoresNoFolderPreference() throws Exception {
+        Fixture fixture = fixture("6.07.08.1");
+        NormalInstallService.Plan plan =
+                fixture.launcherServices.prepareNormalInstall(fixture.destination);
+
+        fixture.launcherServices.installNormal(plan, quiet(),
+                OperationContext.none(OperationType.FRESH_INSTALL));
+
+        assertFalse(Files.exists(settingsPath(fixture.registry)),
+                "the default folder keeps tracking the platform rather than being pinned");
     }
 
     @Test

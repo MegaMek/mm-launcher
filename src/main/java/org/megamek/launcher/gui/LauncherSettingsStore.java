@@ -58,10 +58,12 @@ import java.util.function.UnaryOperator;
  * Per-copy automatic-check choices live solely in ChannelPreferenceStore.
  */
 final class LauncherSettingsStore {
-    static final int SCHEMA = 5;
+    static final int SCHEMA = 6;
+    private static final int INSTALL_PARENT_FREE_SCHEMA = 5;
     private static final int RELEASE_CHOICE_FREE_SCHEMA = 4;
     private static final int APPEARANCE_FREE_SCHEMA = 3;
-    private static final int MAX_BYTES = 4096;
+    private static final int MAX_PATH_LENGTH = 2048;
+    private static final int MAX_BYTES = 16384;
     private final Path registry;
     private final ObjectMapper mapper = JsonMapper.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build()
@@ -96,7 +98,8 @@ final class LauncherSettingsStore {
             if (version == null || !version.canConvertToInt()) {
                 throw new IOException("unsupported launcher settings schema");
             }
-            if (version.intValue() != SCHEMA && version.intValue() != RELEASE_CHOICE_FREE_SCHEMA
+            if (version.intValue() != SCHEMA && version.intValue() != INSTALL_PARENT_FREE_SCHEMA
+                    && version.intValue() != RELEASE_CHOICE_FREE_SCHEMA
                     && version.intValue() != APPEARANCE_FREE_SCHEMA) {
                 throw new IOException("unsupported launcher settings schema");
             }
@@ -116,22 +119,35 @@ final class LauncherSettingsStore {
                 AppearanceFreeSettings previous =
                         mapper.treeToValue(tree, AppearanceFreeSettings.class);
                 settings = new Settings(SCHEMA, previous.defaultJavaExecutable(),
-                        previous.defaultJavaFeature(), Appearance.DEFAULT, false);
+                        previous.defaultJavaFeature(), Appearance.DEFAULT, false, null);
             } else {
                 com.fasterxml.jackson.databind.JsonNode appearance = tree.get("appearance");
                 if (appearance == null || !appearance.isObject()
                         || !appearance.path("theme").isTextual()) {
                     throw new IOException("appearance settings have invalid types");
                 }
+                com.fasterxml.jackson.databind.node.ObjectNode object =
+                        (com.fasterxml.jackson.databind.node.ObjectNode) tree;
                 if (version.intValue() == RELEASE_CHOICE_FREE_SCHEMA) {
                     // Schema 4 predates the Experimental opt-in; it reads as Core only.
                     if (tree.has("showExperimental")) {
                         throw new IOException("unsupported launcher settings schema");
                     }
-                    ((com.fasterxml.jackson.databind.node.ObjectNode) tree)
-                            .put("schemaVersion", SCHEMA).put("showExperimental", false);
+                    object.put("showExperimental", false);
                 } else if (!tree.path("showExperimental").isBoolean()) {
                     throw new IOException("release settings have invalid types");
+                }
+                if (version.intValue() != SCHEMA) {
+                    // Schemas 4 and 5 predate the remembered install folder.
+                    if (tree.has("installParent")) {
+                        throw new IOException("unsupported launcher settings schema");
+                    }
+                    object.put("schemaVersion", SCHEMA).putNull("installParent");
+                } else {
+                    com.fasterxml.jackson.databind.JsonNode parent = tree.get("installParent");
+                    if (parent == null || !(parent.isNull() || parent.isTextual())) {
+                        throw new IOException("install folder setting has invalid types");
+                    }
                 }
                 settings = mapper.treeToValue(tree, Settings.class);
             }
@@ -152,18 +168,28 @@ final class LauncherSettingsStore {
             throw new IOException("default Java executable must be canonical");
         }
         return update(settings -> new Settings(SCHEMA, canonical.toString(), feature,
-                settings.appearance(), settings.showExperimental()));
+                settings.appearance(), settings.showExperimental(), settings.installParent()));
     }
 
     Settings writeAppearance(LauncherAppearance appearance) throws IOException {
         Appearance stored = Appearance.of(appearance);
         return update(settings -> new Settings(SCHEMA, settings.defaultJavaExecutable(),
-                settings.defaultJavaFeature(), stored, settings.showExperimental()));
+                settings.defaultJavaFeature(), stored, settings.showExperimental(),
+                settings.installParent()));
     }
 
     Settings writeShowExperimental(boolean showExperimental) throws IOException {
         return update(settings -> new Settings(SCHEMA, settings.defaultJavaExecutable(),
-                settings.defaultJavaFeature(), settings.appearance(), showExperimental));
+                settings.defaultJavaFeature(), settings.appearance(), showExperimental,
+                settings.installParent()));
+    }
+
+    /** Remembers where new installs are suggested; {@code null} returns to the platform default. */
+    Settings writeInstallParent(Path parent) throws IOException {
+        String stored = parent == null ? null : parent.normalize().toString();
+        return update(settings -> new Settings(SCHEMA, settings.defaultJavaExecutable(),
+                settings.defaultJavaFeature(), settings.appearance(),
+                settings.showExperimental(), stored));
     }
 
     private Settings update(UnaryOperator<Settings> change) throws IOException {
@@ -222,10 +248,14 @@ final class LauncherSettingsStore {
         } catch (RuntimeException error) {
             throw new IOException("invalid appearance setting", error);
         }
+        if (settings.installParent() != null
+                && !isCanonicalAbsolutePath(settings.installParent())) {
+            throw new IOException("invalid install folder setting");
+        }
 
         if (settings.defaultJavaExecutable() == null) return;
         if (settings.defaultJavaExecutable().isBlank()
-                || settings.defaultJavaExecutable().length() > 2048
+                || settings.defaultJavaExecutable().length() > MAX_PATH_LENGTH
                 || settings.defaultJavaExecutable().chars().anyMatch(Character::isISOControl)
                 || settings.defaultJavaFeature() < 21) {
             throw new IOException("invalid default Java setting");
@@ -238,6 +268,19 @@ final class LauncherSettingsStore {
             }
         } catch (RuntimeException error) {
             throw new IOException("invalid default Java setting", error);
+        }
+    }
+
+    private static boolean isCanonicalAbsolutePath(String value) {
+        if (value.isBlank() || value.length() > MAX_PATH_LENGTH
+                || value.chars().anyMatch(Character::isISOControl)) {
+            return false;
+        }
+        try {
+            Path path = Path.of(value);
+            return path.isAbsolute() && path.normalize().toString().equals(value);
+        } catch (RuntimeException invalid) {
+            return false;
         }
     }
 
@@ -281,12 +324,16 @@ final class LauncherSettingsStore {
         }
     }
 
-    /** {@code showExperimental} only widens what is offered; installed channels never change. */
+    /**
+     * {@code showExperimental} only widens what is offered; installed channels never change.
+     * {@code installParent} is the folder that holds the last new install, or {@code null} for the
+     * platform default.
+     */
     record Settings(int schemaVersion, String defaultJavaExecutable,
                     Integer defaultJavaFeature, Appearance appearance,
-                    boolean showExperimental) {
+                    boolean showExperimental, String installParent) {
         static final Settings DEFAULT =
-                new Settings(SCHEMA, null, null, Appearance.DEFAULT, false);
+                new Settings(SCHEMA, null, null, Appearance.DEFAULT, false, null);
     }
 
     /**

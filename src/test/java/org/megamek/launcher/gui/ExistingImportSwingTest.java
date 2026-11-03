@@ -350,7 +350,7 @@ class ExistingImportSwingTest {
                 JLabel provenance = waitFor(() -> (JLabel) find(frame,
                         "installationProvenance-" + record.id()));
                 int[] positions = onEdt(() -> {
-                    assertEquals("Imported copy · Launch only · Updates unavailable",
+                    assertEquals("Imported copy · Launch only",
                             provenance.getText());
                     assertNull(find(frame, "installationStatus-" + record.id()),
                             "the imported-copy provenance already explains launch-only status");
@@ -364,8 +364,9 @@ class ExistingImportSwingTest {
                 });
                 assertEquals(positions[0], positions[1], "title and body share the left edge");
                 assertTrue(positions[2] > 0, "the title has space before the body");
-                assertNotNull(waitFor(() -> findButton(frame,
-                        "enableManagedUpdatesButton-" + record.id())));
+                assertNull(onEdt(() -> findButton(frame,
+                        "enableManagedUpdatesButton-" + record.id())),
+                        "Enable updates lives in More…, not on the card");
                 assertNull(onEdt(() -> find(frame, "checkOnOpenCheckbox-" + record.id())));
             }
             assertNull(onEdt(() -> findButton(frame, "chooseChannelButton")));
@@ -430,8 +431,8 @@ class ExistingImportSwingTest {
                     manage.doClick();
                     return null;
                 });
-                JButton enable = waitFor(() -> findButton(frame,
-                        "enableManagedUpdatesButton-" + records.get(0).id()));
+                JButton more = waitFor(() -> findButton(frame,
+                        "installationMenuButton-" + records.get(0).id()));
                 for (int width : new int[]{1180, 680}) {
                     onEdt(() -> {
                         frame.setSize(width, width == 680 ? 470 : 760);
@@ -456,7 +457,7 @@ class ExistingImportSwingTest {
                         for (InstallationRecord record : records) {
                             var card = assertInstanceOf(javax.swing.JPanel.class,
                                     find(frame, "installationCard-" + record.id()));
-                            for (String name : List.of("enableManagedUpdatesButton-", "installationMenuButton-")) {
+                            for (String name : List.of("installationMenuButton-")) {
                                 JButton button = findButton(frame, name + record.id());
                                 var bounds = javax.swing.SwingUtilities.convertRectangle(
                                         button.getParent(), button.getBounds(), card);
@@ -478,7 +479,7 @@ class ExistingImportSwingTest {
                         scroll.getHorizontalScrollBar().setValue(scroll.getHorizontalScrollBar().getMaximum());
                         scroll.getVerticalScrollBar().setValue(scroll.getVerticalScrollBar().getMaximum());
                         assertEquals(headerX, importExisting.getX(), "scrolling must not move the fixed toolbar");
-                        assertTrue(enable.isEnabled());
+                        assertTrue(more.isEnabled());
                         return null;
                     });
                 }
@@ -515,13 +516,10 @@ class ExistingImportSwingTest {
                     manage.doClick();
                     return null;
                 });
-                JButton enable = waitFor(() -> findButton(frame,
-                        "enableManagedUpdatesButton-" + record.id()));
-                assertEquals("Enable Updates", enable.getText());
-                onEdt(() -> {
-                    enable.doClick();
-                    return null;
-                });
+                javax.swing.JMenuItem enable = SwingTestSupport.enableUpdatesItem(frame, record.id());
+                assertNotNull(enable);
+                assertEquals("Enable updates…", enable.getText());
+                SwingTestSupport.enableUpdates(frame, record.id());
                 JDialog dialog = waitFor(() -> findDialog(frame, "adoptionCandidateDialog"));
                 JButton cancel = (JButton) find(dialog, "cancelAdoptionButton");
                 JButton proceed = (JButton) find(dialog, "continueAdoptionButton");
@@ -544,10 +542,7 @@ class ExistingImportSwingTest {
                 });
                 assertEquals(0, requests.get());
 
-                onEdt(() -> {
-                    enable.doClick();
-                    return null;
-                });
+                SwingTestSupport.enableUpdates(frame, record.id());
                 JDialog reopened = waitFor(() -> findDialog(frame, "adoptionCandidateDialog"));
                 onEdt(() -> {
                     ((JButton) find(reopened, "cancelAdoptionButton")).doClick();
@@ -610,12 +605,7 @@ class ExistingImportSwingTest {
                 manage.doClick();
                 return null;
             });
-            JButton enable = waitFor(() -> findButton(frame,
-                    "enableManagedUpdatesButton-" + record.id()));
-            onEdt(() -> {
-                enable.doClick();
-                return null;
-            });
+            SwingTestSupport.enableUpdates(frame, record.id());
             JDialog start = waitFor(() -> findDialog(frame, "adoptionCandidateDialog"));
             onEdt(() -> {
                 ((JButton) find(start, "continueAdoptionButton")).doClick();
@@ -696,12 +686,7 @@ class ExistingImportSwingTest {
                 manage.doClick();
                 return null;
             });
-            JButton enable = waitFor(() -> findButton(frame,
-                    "enableManagedUpdatesButton-" + record.id()));
-            onEdt(() -> {
-                enable.doClick();
-                return null;
-            });
+            SwingTestSupport.enableUpdates(frame, record.id());
             JDialog start = waitFor(() -> findDialog(frame, "adoptionCandidateDialog"));
             onEdt(() -> {
                 JComboBox<?> channel = (JComboBox<?>) find(start, "adoptionChannelCombo");
@@ -787,12 +772,7 @@ class ExistingImportSwingTest {
                 manage.doClick();
                 return null;
             });
-            JButton enable = waitFor(() -> findButton(frame,
-                    "enableManagedUpdatesButton-" + record.id()));
-            onEdt(() -> {
-                enable.doClick();
-                return null;
-            });
+            SwingTestSupport.enableUpdates(frame, record.id());
             JDialog start = waitFor(() -> findDialog(frame, "adoptionCandidateDialog"));
             onEdt(() -> {
                 JComboBox<?> channel = (JComboBox<?>) find(start, "adoptionChannelCombo");
@@ -862,12 +842,7 @@ class ExistingImportSwingTest {
                     manage.doClick();
                     return null;
                 });
-                JButton enable = waitFor(() -> findButton(frame,
-                        "enableManagedUpdatesButton-" + record.id()));
-                onEdt(() -> {
-                    enable.doClick();
-                    return null;
-                });
+                SwingTestSupport.enableUpdates(frame, record.id());
                 JDialog start = waitFor(() -> findDialog(frame, "adoptionCandidateDialog"));
                 JButton proceed = (JButton) find(start, "continueAdoptionButton");
                 onEdt(() -> {

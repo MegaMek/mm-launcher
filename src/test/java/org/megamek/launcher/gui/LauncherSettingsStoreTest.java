@@ -39,6 +39,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -78,7 +79,7 @@ class LauncherSettingsStoreTest {
         assertEquals(java.toString(), saved.defaultJavaExecutable());
         assertEquals(21, saved.defaultJavaFeature());
         assertEquals(saved, store.read());
-        assertTrue(json.contains("\"schemaVersion\" : 5"));
+        assertTrue(json.contains("\"schemaVersion\" : 6"));
         assertTrue(json.contains("\"showExperimental\" : false"));
         assertFalse(json.contains("checkInstalledVersionsOnOpen"));
         assertFalse(json.contains("checkNewInstallsOnOpen"));
@@ -300,7 +301,7 @@ class LauncherSettingsStoreTest {
         assertFalse(read.showExperimental());
         store.writeShowExperimental(true);
         String json = Files.readString(store.path());
-        assertTrue(json.contains("\"schemaVersion\" : 5"));
+        assertTrue(json.contains("\"schemaVersion\" : 6"));
         assertTrue(json.contains("\"showExperimental\" : true"));
         assertEquals(LauncherAppearance.DEFAULT.withTheme(LauncherAppearance.Theme.LIGHT),
                 store.read().appearance().launcherAppearance());
@@ -323,5 +324,74 @@ class LauncherSettingsStoreTest {
 
         assertThrows(IOException.class, store::read);
         assertEquals(malformed, Files.readString(store.path()));
+    }
+
+    @Test
+    void installParentRoundTripsAndKeepsOtherSettings() throws Exception {
+        LauncherSettingsStore store =
+                new LauncherSettingsStore(temp.resolve("registry.json"));
+        store.writeShowExperimental(true);
+        Path games = temp.resolve("games").toAbsolutePath().normalize();
+
+        LauncherSettingsStore.Settings saved = store.writeInstallParent(games);
+
+        assertEquals(games.toString(), saved.installParent());
+        assertEquals(saved, store.read());
+        assertTrue(store.read().showExperimental());
+        assertNull(store.writeInstallParent(null).installParent());
+        assertNull(store.read().installParent());
+    }
+
+    @Test
+    void schemaFiveReadsWithoutAnInstallParentAndIsRewrittenOnTheNextChange() throws Exception {
+        LauncherSettingsStore store =
+                new LauncherSettingsStore(temp.resolve("registry.json"));
+        String previous = """
+                {
+                  "schemaVersion" : 5,
+                  "defaultJavaExecutable" : null,
+                  "defaultJavaFeature" : null,
+                  "appearance" : { "theme" : "light" },
+                  "showExperimental" : true
+                }
+                """;
+        Files.writeString(store.path(), previous);
+
+        LauncherSettingsStore.Settings read = store.read();
+
+        assertEquals(LauncherSettingsStore.SCHEMA, read.schemaVersion());
+        assertNull(read.installParent());
+        assertTrue(read.showExperimental());
+        assertEquals(previous, Files.readString(store.path()), "reading never rewrites");
+        store.writeInstallParent(temp.toAbsolutePath().normalize());
+        String json = Files.readString(store.path());
+        assertTrue(json.contains("\"schemaVersion\" : 6"), json);
+        assertTrue(json.contains("\"installParent\""), json);
+        assertTrue(store.read().showExperimental());
+    }
+
+    @Test
+    void relativeOrMistypedInstallParentIsRejectedWithoutRewrite() throws Exception {
+        LauncherSettingsStore store =
+                new LauncherSettingsStore(temp.resolve("registry.json"));
+        for (String value : List.of("\"games\"", "42")) {
+            String malformed = """
+                    {
+                      "schemaVersion" : 6,
+                      "defaultJavaExecutable" : null,
+                      "defaultJavaFeature" : null,
+                      "appearance" : { "theme" : "light" },
+                      "showExperimental" : false,
+                      "installParent" : %s
+                    }
+                    """.formatted(value);
+            Files.writeString(store.path(), malformed);
+
+            assertThrows(IOException.class, store::read, value);
+            assertEquals(malformed, Files.readString(store.path()));
+        }
+        Files.delete(store.path());
+        assertThrows(IOException.class, () -> store.writeInstallParent(Path.of("games")));
+        assertFalse(Files.exists(store.path()));
     }
 }

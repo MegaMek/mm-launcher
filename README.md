@@ -346,9 +346,9 @@ copies never create a false count. Update, retry, recovery, channel, location, r
 read-only **Channel: Core/Experimental** identity and directly shows
 **Check for updates when the launcher opens**. This per-card checkbox is the sole automatic-check
 setting and saves immediately without changing the fixed channel. An imported card says
-**Imported copy · Launch only · Updates unavailable** and has
-no channel, check, preview, update, or recovery action; only its separate opt-in
-**Enable managed updates…** action is available. There is no bulk update.
+**Imported copy · Launch only** and has
+no channel, check, preview, update, or recovery action; only its opt-in
+**Enable updates…** item in the **More…** menu is available. There is no bulk update.
 Managed Home has one top-left information area for useful aggregate update state:
 **Checking for updates…**, **All installations are up to date**,
 **N installations have updates**, or **Some installations could not be checked**. It does not
@@ -362,7 +362,7 @@ that Experimental builds help us test and may break things. Turning it on first 
 confirmation: Experimental releases are for testing and features may break or be incomplete.
 Cancel leaves it off. Turning it on only adds Experimental
 choices to quick install, the version picker, and adoption; it never changes an installed copy's
-channel. It is saved in launcher settings schema 5. Latest news reads the official MegaMek Atom feed once per launcher window,
+channel. It is saved in launcher settings. Latest news reads the official MegaMek Atom feed once per launcher window,
 independently of installation checks, and shows up to three dated headlines linking to official
 posts. **All news** opens the blog archive even if the feed cannot be loaded; news never blocks
 the launcher. At wide window sizes Settings places Game Java, Diagnostics, and
@@ -580,6 +580,10 @@ installed directly as the `MegaMek` root. An explicit
 `gui --registry` override, and custom registries supplied to `LauncherServices`, intentionally
 retain `<registry parent>/installations/<product channel>` for disposable isolation. The macOS
 path is managed payload/support data, not content inside `MegaMek Launcher.app`.
+After a successful new install outside that default, later new-install suggestions (and the
+**Change location** folder picker) start in the same parent folder, for example `D:\Games`, so a
+games drive only needs choosing once. The parent is kept in launcher settings; installing back into
+the default folder clears it, and a parent that no longer exists falls back to the default.
 Confirmation is required before any package byte or destination/state write. Metadata drift, an
 appeared destination, or registry/Main drift rejects the attempt for fresh consent; no choice
 falls back to another repository/channel, a different tag, or “latest.” MekHQ requires the exact
@@ -774,8 +778,9 @@ the product/channel target itself must be wholly absent.
 
 Import remains immediate, dialog-free after folder choice, and launch-only. A genuine imported
 record with no receipt, current provenance, fixed channel, or pending transaction is labeled
-**Imported copy · Launch only · Updates unavailable** and has a separate
-**Enable managed updates…** action. Incomplete or corrupt managed metadata never gets that action.
+**Imported copy · Launch only**. When its observed version is a plain dotted number, its **More…**
+menu offers **Enable updates…**; suffixed nightly/snapshot or unreadable versions cannot match an
+official release and are not offered it. Incomplete or corrupt managed metadata never gets that action.
 
 The opt-in flow shows the statically detected applications/version and a fixed future channel
 (Core by default, or Experimental when **Show Experimental releases** is on). It treats that information only as a candidate. Before

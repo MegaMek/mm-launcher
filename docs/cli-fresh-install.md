@@ -141,7 +141,8 @@ The launcher coordinates its own current launches but cannot universally detect 
 started by old launchers or external commands. It never kills them. See the
 [real-update contract](real-update-contract.md) before a first trial.
 
-The graphical launcher also has an explicit **Enable Updates** flow for a genuine
+The graphical launcher also has an explicit **Enable updates…** flow (in an imported card's
+**More…** menu) for a genuine
 launch-only import. It verifies one exact official package and publishes only external launcher
 metadata; it does not replace this CLI fresh-install procedure, modify the imported root, add a
 or add a channel-switching command. Old releases without a valid published package
