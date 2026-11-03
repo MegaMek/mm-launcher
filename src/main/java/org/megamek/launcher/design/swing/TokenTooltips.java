@@ -34,6 +34,9 @@
 package org.megamek.launcher.design.swing;
 
 import javax.swing.JComponent;
+import javax.swing.JLabel;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 
 /**
  * The design system's tooltips for Swing (design system, Tooltips). The MegaMek look and feels draw
@@ -73,6 +76,27 @@ public final class TokenTooltips {
 
     private static String blankToNull(String text) {
         return text == null || text.isBlank() ? null : text;
+    }
+
+    /**
+     * Shows {@code label}'s full text as its tooltip whenever the layout gives it less width than the text needs, and
+     * no tooltip otherwise. Only for labels without a tooltip of their own.
+     */
+    public static <T extends JLabel> T whenClipped(T label) {
+        Runnable refresh = () -> {
+            String text = label.getText();
+            boolean clipped = text != null && !text.isBlank() && label.getWidth() > 0
+                    && label.getWidth() < label.getPreferredSize().width;
+            label.setToolTipText(clipped ? text : null);
+        };
+        label.addComponentListener(new ComponentAdapter() {
+            @Override
+            public void componentResized(ComponentEvent event) {
+                refresh.run();
+            }
+        });
+        label.addPropertyChangeListener("text", event -> refresh.run());
+        return label;
     }
 
     /** What a tooltip card shows; {@link #text} is the plain tooltip text the card stands for. */

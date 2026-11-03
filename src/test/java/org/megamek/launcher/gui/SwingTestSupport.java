@@ -160,9 +160,30 @@ final class SwingTestSupport {
 
     static JPopupMenu installationMenu(Container root, String recordId) throws Exception {
         java.awt.Window window = root instanceof java.awt.Window own ? own : SwingUtilities.getWindowAncestor(root);
+        onEdt(() -> {
+            MenuSelectionManager.defaultManager().clearSelectedPath();
+            return null;
+        });
         if (window != null) awaitSettled(window);
         click(root, "installationMenuButton-" + recordId);
         return await("installation menu for " + recordId, () -> showingInstallationMenu(root, recordId));
+    }
+
+    /** Opens the card's More… menu and returns its Enable updates… item, or null when not offered. */
+    static javax.swing.JMenuItem enableUpdatesItem(Container root, String recordId) throws Exception {
+        JPopupMenu menu = installationMenu(root, recordId);
+        return onEdt(() -> find(menu, "enableManagedUpdates-" + recordId, javax.swing.JMenuItem.class));
+    }
+
+    /** Chooses Enable updates… from the card's More… menu the way a keyboard selection would. */
+    static void enableUpdates(Container root, String recordId) throws Exception {
+        javax.swing.JMenuItem item = enableUpdatesItem(root, recordId);
+        if (item == null) throw new AssertionError("Enable updates… is not offered for " + recordId);
+        onEdt(() -> {
+            item.getActionMap().get("doClick").actionPerformed(new java.awt.event.ActionEvent(
+                    item, java.awt.event.ActionEvent.ACTION_PERFORMED, "keyboard-select"));
+            return null;
+        });
     }
 
     static JPopupMenu showingInstallationMenu(Container root, String recordId) {

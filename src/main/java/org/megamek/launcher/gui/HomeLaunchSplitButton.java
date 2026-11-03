@@ -285,6 +285,27 @@ final class HomeLaunchSplitButton extends JPanel {
         popupMenu.removeAll();
     }
 
+    /**
+     * A Home control for a suite tool that runs as a website: same look as the launch controls,
+     * but without alternatives or a version, and captioned as opening rather than launching.
+     */
+    static HomeLaunchSplitButton website(GuiScale scale, String key, String productName,
+                                         String detail, String description, Runnable open) {
+        HomeLaunchSplitButton button = new HomeLaunchSplitButton(scale, key, productName,
+                open, List.of());
+        String caption = "Open " + productName;
+        button.setName("open-" + key + "-split-button");
+        button.getAccessibleContext().setAccessibleName(caption);
+        button.getAccessibleContext().setAccessibleDescription(description);
+        button.primaryButton.setName("open-" + key + "-button");
+        button.primaryButton.setText(caption);
+        ButtonDetail.setDetail(button.primaryButton, detail);
+        button.primaryButton.getAccessibleContext().setAccessibleName(caption + " · " + detail);
+        button.primaryButton.getAccessibleContext().setAccessibleDescription(description);
+        button.primaryButton.setToolTipText(description);
+        return button;
+    }
+
     JButton primaryButton() {
         return primaryButton;
     }

@@ -46,7 +46,7 @@ is not repeated on the applications row. Existing saved names are preserved, whi
 generated version suffix is suppressed in the display to avoid duplication. The **Rename…**
 action changes only the registry label, not the installation folder or application files; names
 must be unique. Imported records show
-**Imported copy · Launch only · Updates unavailable** and omit a channel rather than inferring one.
+**Imported copy · Launch only** and omit a channel rather than inferring one.
 Top-level actions are **Install another version** and **Import existing installation**. Exact actions include **Use as preferred for …**, Check/Retry, Update, update recovery,
 **Open location**, and **Remove from launcher…** when applicable. Managed/adopted cards also place
 **Uninstall…** at the destructive bottom; imported cards do not. A pending uninstall exposes only
@@ -145,7 +145,7 @@ help us test and may break things. Ticking it opens a confirmation (**Show Exper
 releases?**) that repeats that Experimental releases are for testing and features may break or be
 incomplete; **Cancel** or Escape leaves it unticked and saves nothing. Unticking needs no
 confirmation. The option is saved off the event-dispatch thread in launcher
-settings schema 5. It only adds Experimental to quick install, **Install another version**, and
+settings (schema 5 and later). It only adds Experimental to quick install, **Install another version**, and
 adoption; it never changes an installed copy's channel.
 
 Latest news appears on the managed home page as a corner-ticked panel (titled
@@ -166,7 +166,9 @@ Experimental releases before anything is installed.
 
 Launch options set per-application maximum memory (MegaMek, MekHQ, MegaMekLab), a graphics
 renderer (default, Disable Direct3D on Windows, or OpenGL), additional Java arguments, and the MegaMek user
-directory for every installation. Settings edits the launcher-wide values inline: **Revert** and
+directory for every installation. The memory choices stop at this computer's physical memory (all presets
+are offered when it cannot be read), though a saved or inherited larger value stays selectable, and the
+memory group carries one short sizing hint under the MekHQ row. Settings edits the launcher-wide values inline: **Revert** and
 **Save launch options** are enabled only while the form differs from the saved values, unsaved edits
 survive Settings re-renders, and leaving Settings with unsaved edits asks **Discard changes?** first.
 **Launch options…** in an installation's More menu opens a dialog that edits overrides where each field can
@@ -297,8 +299,13 @@ Managed Home uses the same top-art/bottom-deck composition, centered cover crop,
 compact vertical scrolling as first launch. It has no duplicate launcher header/footer, left-side
 art rail, raw registry path, or permanently reserved empty region. The deck contains the optional
 process-local notice, application launch row, aggregate update state, and compact
-Installations/Settings navigation. Three product controls share equal widths when they fit and
-wrap/stack as the viewport narrows. Each column is capped at about 380 px (scaled), so a single
+Installations/Settings navigation. Once any program is installed, the launch row ends with an
+**Open MekBay** control: MekBay is the suite's web force builder, so it has the launch controls'
+look with a **Web app** detail line instead of a version, no alternatives arrow, and opens
+https://mekbay.com/ in the browser. The empty first-launch screen does not show it. Columns
+shrink to the widest control's natural width before wrapping. Three controls go from one row
+to two columns to one column; four controls wrap as a 2x2 grid, never three plus one. Each
+column is capped at about 380 px (scaled), so a single
 launch control stays centered at a button size instead of spanning the window. Deck height is measured from the incoming width before
 laying out the responsive controls, including transitions back to a wider window. All row-size
 requirements use that same width before grid layout. Launch controls
@@ -374,6 +381,13 @@ custom `LauncherServices` registries use
 `<registry parent>/installations/<product channel>` for isolation. Destination selection performs
 no migration or filesystem write.
 
+A successful new install remembers its parent folder in launcher settings schema 6
+(`installParent`). Later suggestions place the new product/channel folder, with the usual numbered
+sibling when taken, inside that parent while it is still a real directory; a missing or linked
+parent falls back to the default above. Installing into the default parent stores no preference,
+so the default keeps tracking the platform. Saving the folder is best effort and never fails a
+completed install.
+
 Installations contains import, exact-release download, independent per-application preference,
 launcher removal, safe uninstall, location, channel/check, Update, and recovery actions on exact
 cards. Merely viewing/focusing a card mutates nothing. **Install another version** defaults to
@@ -404,7 +418,10 @@ shows only loading/errors.
 Eligible rows, including older official assets without a published digest, read
 **Program Channel (Version) — human binary size** with no Available or checksum suffix.
 Ineligible rows are disabled and end only in **— Unavailable**; a sanitized accessible
-description may retain the reason. Destination is enabled only for an eligible exact row. Before
+description may retain the reason. **Install** is enabled only for an eligible exact row. It
+suggests a `Program Channel (Version)` folder in the usual install parent and opens the same
+confirmation as Home quick install, where **Change location** picks another folder; there is no
+separate folder prompt first. Before
 consent, every row is re-fetched by exact repository/tag through the normal planner with the
 selected channel as the new copy's immutable track. It binds destination, registry/default,
 product set, source, release, asset URL/name/size/optional published digest, and fixed channel,
@@ -576,9 +593,12 @@ accurately states that externally/older-started applications cannot be universal
 
 ## Imported-copy adoption
 
-A true imported card says **Imported copy · Launch only · Updates unavailable** and includes one
-styled, keyboard-accessible **Enable Updates** action. It appears only when receipt,
-current state, channel, adoption staging, and pending transaction are all absent. Managed,
+A true imported card says **Imported copy · Launch only** and has no update button. Its **More…**
+menu offers **Enable updates…** in a final group after **Remove from launcher…**. It appears only
+when receipt, current state, channel, adoption staging, and pending transaction are all absent,
+the copy is not a legacy release, and its observed version is a plain dotted number (an optional
+leading `v` is allowed). A suffixed build such as a nightly or snapshot, or an unreadable version,
+can never match an official Core/Experimental release, so it is not offered. Managed,
 managed-incomplete/corrupt, and recovery-pending cards never show it.
 
 The compact first screen shows one **Program (Version)** line and a styled update-channel selector

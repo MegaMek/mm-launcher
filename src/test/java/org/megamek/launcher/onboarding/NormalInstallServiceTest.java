@@ -812,6 +812,55 @@ class NormalInstallServiceTest {
     }
 
     @Test
+    void newInstallSuggestionsFollowTheLastChosenParentFolder() throws Exception {
+        Fixture fixture = fixture("6.07.08.1");
+        Path defaultParent = fixture.state.resolve("installations");
+        assertEquals(defaultParent.resolve("MegaMek Core"), fixture.launcherServices
+                .normalInstallDestination(OfficialRepository.MEGAMEK, FollowChannel.CORE));
+
+        Path games = Files.createDirectory(temp.resolve("games"));
+        NormalInstallService.Plan plan = fixture.launcherServices.prepareNormalInstall(
+                games.resolve("MekHQ Core"));
+        fixture.launcherServices.installNormal(plan, quiet(),
+                OperationContext.none(OperationType.FRESH_INSTALL));
+
+        assertEquals(games.resolve("MegaMek Core"), fixture.launcherServices
+                .normalInstallDestination(OfficialRepository.MEGAMEK, FollowChannel.CORE));
+        assertEquals(games.resolve("MekHQ Core (2)"), fixture.launcherServices
+                .normalInstallDestination(OfficialRepository.MEKHQ, FollowChannel.CORE),
+                "an occupied folder still gets the next numbered sibling");
+        assertTrue(Files.readString(settingsPath(fixture.registry)).contains("games"));
+    }
+
+    @Test
+    void missingRememberedParentFallsBackToThePlatformDefault() throws Exception {
+        Fixture fixture = fixture("6.07.08.1");
+        Path removable = Files.createDirectory(temp.resolve("removable"));
+        NormalInstallService.Plan plan = fixture.launcherServices.prepareNormalInstall(
+                removable.resolve("MekHQ Core"));
+        fixture.launcherServices.installNormal(plan, quiet(),
+                OperationContext.none(OperationType.FRESH_INSTALL));
+        Files.move(removable, temp.resolve("unplugged"));
+
+        assertEquals(fixture.state.resolve("installations").resolve("MegaMek Core"),
+                fixture.launcherServices.normalInstallDestination(
+                        OfficialRepository.MEGAMEK, FollowChannel.CORE));
+    }
+
+    @Test
+    void installingIntoThePlatformDefaultStoresNoFolderPreference() throws Exception {
+        Fixture fixture = fixture("6.07.08.1");
+        NormalInstallService.Plan plan =
+                fixture.launcherServices.prepareNormalInstall(fixture.destination);
+
+        fixture.launcherServices.installNormal(plan, quiet(),
+                OperationContext.none(OperationType.FRESH_INSTALL));
+
+        assertFalse(Files.exists(settingsPath(fixture.registry)),
+                "the default folder keeps tracking the platform rather than being pinned");
+    }
+
+    @Test
     void cancellationDuringPreparationNeverPublishesAndJavaFailureCannotAffectInstall()
             throws Exception {
         Fixture cancelled = fixture("1.02.03.1");

@@ -94,7 +94,7 @@ class UpdatePreviewSwingTest {
             SwingUtilities.invokeAndWait(installations::doClick);
             JLabel status = findLabel(frame, "installationProvenance-" + fixture.record.id());
             assertNotNull(status);
-            assertTrue(status.getText().contains("Updates unavailable"));
+            assertTrue(status.getText().equals("Imported copy · Launch only"));
             JPopupMenu menu = openInstallationMenu(frame, fixture.record.id());
             assertNull(findMenuItem(menu, "Update checks…"),
                     "an imported copy must not offer channel/check configuration");

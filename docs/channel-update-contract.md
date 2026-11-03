@@ -177,7 +177,7 @@ the original **Unable to check** result.
 The main first-run **Install latest MekHQ Core** action explicitly persists Core for the MekHQ
 repository. By default its split menu adds only MegaMek Core and MegaMekLab Core. Settings has a
 **Show Experimental releases** option, off by default and stored in the launcher settings file
-(schema 5), with the warning that Experimental builds may break things. Turning it on requires
+(schema 5 and later), with the warning that Experimental builds may break things. Turning it on requires
 confirming a dialog that says Experimental releases are for testing and features may break or be
 incomplete; cancelling leaves it off. When it is on, the menu
 also offers MekHQ, MegaMek, and MegaMekLab Experimental. The option only widens what is offered;
@@ -194,7 +194,8 @@ adopted managed installations always initialize their per-installation check-on-
 true. There is no configurable global or new-install default. The normal quote binds its exact
 repository/product set/channel/source version and registry/default snapshot without carrying a
 check preference or Settings revision. Settings schemas 3 and 4 hold no channel data; they read
-with **Show Experimental releases** off and are rewritten as schema 5 on the next change. Older
+with **Show Experimental releases** off and are rewritten as the current schema on the next
+change; schemas 3 to 5 also read with no remembered install folder. Older
 Settings schemas are rejected rather than migrated. Absent/corrupt/unknown channels remain Unknown
 or Unavailable and launch-only with no inference or assignment path. The CLI fresh installer
 requires `--channel core` or `--channel experimental` and initializes its check-on-open value to

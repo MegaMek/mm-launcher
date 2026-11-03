@@ -131,13 +131,34 @@ public final class NormalInstallService {
      */
     public Path defaultDestination(OfficialRepository requestedRepository,
                                    FollowChannel requestedChannel) throws IOException {
+        return defaultDestination(requestedRepository, requestedChannel, null);
+    }
+
+    /**
+     * Like {@link #defaultDestination(OfficialRepository, FollowChannel)}, but suggests the folder
+     * inside {@code preferredParent} while it is still a real directory. A missing, linked or
+     * non-directory parent falls back to the platform default.
+     */
+    public Path defaultDestination(OfficialRepository requestedRepository,
+                                   FollowChannel requestedChannel, Path preferredParent)
+            throws IOException {
         OfficialRepository repository = requireAllowedRepository(requestedRepository);
         FollowChannel channel = requireAllowedChannel(requestedChannel);
-        Path preferred = installLocations.destination(registry,
-                defaultFolderName(repository, channel));
+        String folder = defaultFolderName(repository, channel);
+        if (preferredParent != null && preferredParent.isAbsolute()
+                && Files.isDirectory(preferredParent, LinkOption.NOFOLLOW_LINKS)) {
+            return availableFolder(preferredParent.normalize(), folder);
+        }
+        Path preferred = installLocations.destination(registry, folder);
         Path parent = preferred.getParent();
         return parent == null ? preferred
                 : availableFolder(parent, preferred.getFileName().toString());
+    }
+
+    /** The platform folder that holds default installs; nothing is created. */
+    public Path defaultParent() throws IOException {
+        return installLocations.destination(registry,
+                defaultFolderName(OfficialRepository.MEKHQ, FollowChannel.CORE)).getParent();
     }
 
     public static String defaultFolderName(OfficialRepository repository, FollowChannel channel)

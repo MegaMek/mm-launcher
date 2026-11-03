@@ -34,6 +34,7 @@
 package org.megamek.launcher.gui;
 
 import org.megamek.launcher.design.swing.TokenPanel;
+import org.megamek.launcher.design.swing.TokenTooltips;
 
 import org.megamek.launcher.gui.AutomaticInstallationChecks.InstallationCheck;
 
@@ -138,6 +139,7 @@ public final class LauncherFrame extends JFrame {
             DateTimeFormatter.ofPattern("MMM d, uuuu", Locale.ENGLISH);
     static final String DISCORD_INVITE_URL = "https://discord.gg/megamek";
     static final String PLAY_ONLINE_URL = "https://megamek.games/";
+    static final String MEKBAY_URL = "https://mekbay.com/";
     static final String FIRST_CORE_BUILD = "0.51.1";
     static final String RETIRED_CHANNEL_STATUS = "Still launches. Install a new copy to get updates.";
     static final String EXPERIMENTAL_CONFIRM_TITLE = "Show Experimental releases?";
@@ -368,7 +370,7 @@ public final class LauncherFrame extends JFrame {
         center.setName("managedHomeDeck");
         center.setBackground(FirstLaunchPanel.PANEL);
         center.setBorder(BorderFactory.createEmptyBorder());
-        homeInformationLabel = new JLabel();
+        homeInformationLabel = TokenTooltips.whenClipped(new JLabel());
         homeInformationLabel.setName("homeInformationMessage");
         homeInformationLabel.setOpaque(false);
         homeInformationLabel.setForeground(LauncherTheme.ACCENT);
@@ -1012,6 +1014,15 @@ public final class LauncherFrame extends JFrame {
             homeLaunchButtons.add(launch);
             launches.add(launch);
         }
+        if (launches.getComponentCount() > 0) {
+            // MekBay is the suite's web tool; it sits with the programs once any of them is installed
+            HomeLaunchSplitButton mekBay = HomeLaunchSplitButton.website(guiScale, "mekbay",
+                    "MekBay", "Web app",
+                    "Opens MekBay, the BattleTech force builder and record sheets, in your browser",
+                    () -> openWebsite(java.net.URI.create(MEKBAY_URL), "MekBay"));
+            homeLaunchButtons.add(mekBay);
+            launches.add(mekBay);
+        }
         panel.add(launches);
         if (pending || pendingUninstall || unavailable) {
             panel.add(Box.createVerticalStrut(guiScale.space("md")));
@@ -1451,7 +1462,7 @@ public final class LauncherFrame extends JFrame {
                 : legacyRelease(record, local)
                 ? "Legacy release · Launch only"
                 : trueImported
-                ? "Imported copy · Launch only · Updates unavailable"
+                ? "Imported copy · Launch only"
                 : fixedChannel
                 ? products
                 : "Managed setup incomplete · Launch only · Updates unavailable";
@@ -1543,16 +1554,6 @@ public final class LauncherFrame extends JFrame {
                 check.addActionListener(event -> startInstallationCheck(record));
                 actions.add(check);
             }
-        }
-        if (trueImported && !legacyRelease(record, local)) {
-            JButton adopt = homeButton("Enable Updates",
-                    "enableManagedUpdatesButton-" + record.id());
-            adopt.setMnemonic(KeyEvent.VK_E);
-            adopt.getAccessibleContext().setAccessibleDescription(
-                    "Verify this imported copy against one exact official release, without "
-                            + "changing application files.");
-            adopt.addActionListener(event -> beginAdoption(record));
-            actions.add(adopt);
         }
         JButton more = homeButton(missing ? "Remove…" : "More…",
                 "installationMenuButton-" + record.id());
@@ -1761,6 +1762,16 @@ public final class LauncherFrame extends JFrame {
         JMenuItem remove = installationMenuItem("Remove from launcher…");
         remove.addActionListener(event -> removeFromLauncher(record));
         menu.add(remove);
+        if (enableUpdatesOffered(record, local)) {
+            menu.add(installationMenuSeparator());
+            JMenuItem adopt = installationMenuItem("Enable updates…");
+            adopt.setName("enableManagedUpdates-" + record.id());
+            adopt.getAccessibleContext().setAccessibleDescription(
+                    "Verify this imported copy against one exact official release, without "
+                            + "changing application files.");
+            adopt.addActionListener(event -> beginAdoption(record));
+            menu.add(adopt);
+        }
         if (updateManaged) {
             menu.add(installationMenuSeparator());
             if (local != null && local.error() == null && !local.pendingUpdate()
@@ -1857,6 +1868,20 @@ public final class LauncherFrame extends JFrame {
      * A copy from before Core/Experimental: either its channel sidecar names a retired channel,
      * or it has no release type and its build predates the first Core release. Launch-only.
      */
+    /**
+     * Adoption can only match an official Core/Experimental release, whose versions are plain
+     * dotted numbers; suffixed (nightly/snapshot) or unreadable builds could never succeed.
+     */
+    private static boolean enableUpdatesOffered(InstallationRecord record,
+                                        LauncherServices.InstallationStatus local) {
+        return local != null && !local.missing() && trueImported(local)
+                && !legacyRelease(record, local) && officialVersionShape(record.observedBuild());
+    }
+
+    static boolean officialVersionShape(String build) {
+        return build != null && build.strip().matches("[vV]?\\d+(\\.\\d+)+");
+    }
+
     private static boolean legacyRelease(InstallationRecord record,
                                          LauncherServices.InstallationStatus local) {
         if (local == null || local.missing()) return false;
@@ -1913,7 +1938,7 @@ public final class LauncherFrame extends JFrame {
             return "Installation needs attention";
         }
         if (legacyRelease(record, local)) return RETIRED_CHANNEL_STATUS;
-        if (!hasOwnershipProvenance(local)) return "Launch only · updates unavailable";
+        if (!hasOwnershipProvenance(local)) return "Launch only";
         if (!managedUpdatesAvailable(local)) {
             return "Release type information needs repair";
         }
@@ -3987,7 +4012,7 @@ public final class LauncherFrame extends JFrame {
             product.addActionListener(event -> invalidateResults());
             channel.addActionListener(event -> invalidateResults());
             releases.addListSelectionListener(event -> updateInstallEnabled());
-            install.addActionListener(event -> chooseDestination());
+            install.addActionListener(event -> prepareInstall());
         }
 
         private JLabel styledPickerLabel(String text) {
@@ -4076,7 +4101,7 @@ public final class LauncherFrame extends JFrame {
             install.setEnabled(matching && worker == null);
         }
 
-        private void chooseDestination() {
+        private void prepareInstall() {
             PickerReleaseChoice choice = releases.getSelectedValue();
             OfficialRepository repository =
                     (OfficialRepository) product.getSelectedItem();
@@ -4087,13 +4112,12 @@ public final class LauncherFrame extends JFrame {
                     || choice.channel() != selectedChannel) {
                 return;
             }
-            Path destination = chooseNewInstallDestination(dialog, repository,
-                    selectedChannel, choice.release().tag());
-            if (destination == null || !dialog.isDisplayable()) return;
             String tag = choice.release().tag();
+            // Same confirmation as Home: the suggested folder can be changed there.
             startTask("Revalidating exact install plan",
-                    () -> services.prepareExactNormalInstall(
-                            repository, selectedChannel, tag, choice.source(), destination),
+                    () -> services.prepareExactNormalInstall(repository, selectedChannel, tag,
+                            choice.source(), suggestedExactDestination(
+                                    repository, selectedChannel, tag)),
                     plan -> {
                         if (!dialog.isDisplayable() || choice != releases.getSelectedValue()
                                 || product.getSelectedItem() != repository
@@ -4534,27 +4558,14 @@ public final class LauncherFrame extends JFrame {
         dialog.setVisible(true);
     }
 
-    private Path chooseNewInstallDestination(JDialog owner, OfficialRepository repository,
-                                             FollowChannel channel, String tag) {
-        Path preferredParent = null;
-        try {
-            preferredParent = services.normalInstallDestination(repository, channel).getParent();
-        } catch (IOException ignored) {
-            // The chooser still has a safe platform default when the suggested path is unavailable.
-        }
-        JFileChooser chooser = installParentChooser(preferredParent);
-        if (chooser.showOpenDialog(owner) != JFileChooser.APPROVE_OPTION) return null;
-        final String suggestion;
-        try {
-            suggestion = NormalInstallService.availableFolder(chooser.getSelectedFile().toPath(),
-                    NormalInstallService.friendlyName(repository, channel, tag))
-                    .getFileName().toString();
-        } catch (IOException | RuntimeException invalid) {
-            showError("Preparing install location failed", invalid);
-            return null;
-        }
-        Path folder = SubfolderDialog.show(owner, suggestion, guiScale);
-        return folder == null ? null : chooser.getSelectedFile().toPath().resolve(folder);
+    /** The usual suggested parent, with the version-specific folder name the picker used before. */
+    private Path suggestedExactDestination(OfficialRepository repository,
+                                           FollowChannel channel, String tag)
+            throws IOException {
+        Path parent = services.normalInstallDestination(repository, channel).getParent();
+        if (parent == null) throw new IOException("no install folder could be suggested");
+        return NormalInstallService.availableFolder(parent,
+                NormalInstallService.friendlyName(repository, channel, tag));
     }
 
     void install(OfficialRepository repository, String tag, Path destination, String name,
@@ -5276,9 +5287,10 @@ public final class LauncherFrame extends JFrame {
 
     private static final class ResponsiveHomeActions extends JPanel {
         private static final int MAX_CELL = 380;
+        private static final int MAX_COLUMNS = 4;
         private final GuiScale scale;
         private final int gap;
-        private int columns = 3;
+        private int columns = MAX_COLUMNS;
 
         private ResponsiveHomeActions(GuiScale scale) {
             this.scale = scale;
@@ -5286,11 +5298,21 @@ public final class LauncherFrame extends JFrame {
             setLayout(new java.awt.GridLayout(0, columns, gap, gap));
         }
 
+        /**
+         * Columns shrink to the widest control's natural width before wrapping. Four controls wrap
+         * as a 2x2 grid instead of leaving one alone on a second row.
+         */
         private int columnsForWidth(int width, int count) {
             if (width <= 0) return 1;
-            int cell = scale.scaleForGUI(300);
-            return Math.max(1, Math.min(Math.min(3, count),
-                    (width + gap) / (cell + gap)));
+            int cell = 0;
+            for (Component child : getComponents()) {
+                cell = Math.max(cell, child.getPreferredSize().width);
+            }
+            for (int candidate = Math.min(MAX_COLUMNS, count); candidate > 1; candidate--) {
+                if (count == 4 && candidate == 3) continue;
+                if (candidate * cell + (candidate - 1) * gap <= width) return candidate;
+            }
+            return 1;
         }
 
         private int availableWidth() {
