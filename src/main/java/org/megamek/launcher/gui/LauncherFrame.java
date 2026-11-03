@@ -135,6 +135,7 @@ import java.util.function.Consumer;
 
 public final class LauncherFrame extends JFrame {
     private static final int LOG_LIMIT = 64_000;
+    private static final String CHANGE_LOCATION = "Change location";
     private static final DateTimeFormatter NEWS_DATE =
             DateTimeFormatter.ofPattern("MMM d, uuuu", Locale.ENGLISH);
     static final String DISCORD_INVITE_URL = "https://discord.gg/megamek";
@@ -295,7 +296,12 @@ public final class LauncherFrame extends JFrame {
         run("Checking exact " + displayProduct(repository.key()) + " " + tag,
                 () -> services.prepareExactNormalInstall(repository, futureChannel, tag,
                         source, destination),
-                this::showNormalInstallConfirmation);
+                this::showNormalInstallConfirmation,
+                error -> exactPlanFailure(this, repository, futureChannel, tag, source,
+                        destination, error, () -> prepareExactNormalInstall(repository,
+                                futureChannel, tag, source, destination)),
+                () -> {
+                }, false);
     }
 
     public void showWindow() {
@@ -3606,7 +3612,7 @@ public final class LauncherFrame extends JFrame {
         boolean javaProblem = detail.toLowerCase(java.util.Locale.ROOT).contains("java");
         String[] choices = javaProblem
                 ? new String[]{"Cancel", "Retry", "Open Settings"}
-                : new String[]{"Cancel", "Retry"};
+                : new String[]{"Cancel", CHANGE_LOCATION, "Retry"};
         String answer = LauncherAlertDialog.show(this,
                 javaProblem ? "Java setup required" : "Could not prepare download",
                 (javaProblem
@@ -3620,6 +3626,14 @@ public final class LauncherFrame extends JFrame {
             navigateTo(Page.SETTINGS);
         } else if ("Retry".equals(answer)) {
             prepareCapturedNormalInstall(option, target);
+        } else if (CHANGE_LOCATION.equals(answer)) {
+            Path changed = chooseLocationAfterFailure(this, target, key.repository(),
+                    key.channel(), option.version());
+            if (changed == null) {
+                resumeFirstLaunchOptions();
+            } else {
+                prepareCapturedNormalInstall(option, changed);
+            }
         } else {
             resumeFirstLaunchOptions();
         }
@@ -3631,7 +3645,7 @@ public final class LauncherFrame extends JFrame {
         boolean javaProblem = detail.toLowerCase(java.util.Locale.ROOT).contains("java");
         String[] choices = javaProblem
                 ? new String[]{"Cancel", "Retry", "Open Settings"}
-                : new String[]{"Cancel", "Retry"};
+                : new String[]{"Cancel", CHANGE_LOCATION, "Retry"};
         String answer = LauncherAlertDialog.show(this,
                 javaProblem ? "Java setup required" : "Could not prepare download",
                 (javaProblem
@@ -3644,8 +3658,51 @@ public final class LauncherFrame extends JFrame {
             navigateTo(Page.SETTINGS);
         } else if ("Retry".equals(answer)) {
             prepareNormalInstall(repository, channel, target);
+        } else if (CHANGE_LOCATION.equals(answer)) {
+            Path changed = chooseLocationAfterFailure(this, target, repository, channel, null);
+            if (changed == null) {
+                resumeFirstLaunchOptions();
+            } else {
+                prepareNormalInstall(repository, channel, changed);
+            }
         } else {
             resumeFirstLaunchOptions();
+        }
+    }
+
+    /** The exact-release counterpart of {@link #normalPlanFailure}; Retry reruns the same plan. */
+    private void exactPlanFailure(Component owner, OfficialRepository repository,
+                                  FollowChannel channel, String tag, String source,
+                                  Path target, Throwable error, Runnable retry) {
+        Window window = owner instanceof Window w ? w : SwingUtilities.getWindowAncestor(owner);
+        String answer = LauncherAlertDialog.show(window == null ? this : window,
+                "Could not prepare download",
+                displayProduct(repository.key()) + " " + tag + " could not be checked."
+                        + "\n\n" + errorDetail(error)
+                        + "\n\nNo package was downloaded and no destination was created.",
+                guiScale, "Cancel", CHANGE_LOCATION, "Retry");
+        if ("Retry".equals(answer)) {
+            retry.run();
+        } else if (CHANGE_LOCATION.equals(answer)) {
+            Path changed = chooseLocationAfterFailure(owner, target, repository, channel, tag);
+            if (changed != null) {
+                if (window != null && window != this) window.dispose();
+                prepareExactNormalInstall(repository, channel, tag, source, changed);
+            }
+        }
+    }
+
+    /** Lets the user pick another folder when the suggested one could not be planned. */
+    private Path chooseLocationAfterFailure(Component owner, Path target,
+                                            OfficialRepository repository,
+                                            FollowChannel channel, String version) {
+        try {
+            return normalInstallLocationPrompts.choose(owner,
+                    target == null ? null : target.getParent(),
+                    NormalInstallService.friendlyName(repository, channel, version));
+        } catch (IOException error) {
+            showError("Preparing install location failed", error);
+            return null;
         }
     }
 
@@ -3661,7 +3718,9 @@ public final class LauncherFrame extends JFrame {
                 this, plan, product, programs, guiScale, source -> {
                     final Path changed;
                     try {
-                        changed = normalInstallLocationPrompts.choose(source, plan);
+                        changed = normalInstallLocationPrompts.choose(source,
+                                plan.destination().getParent(),
+                                NormalInstallService.friendlyName(plan));
                     } catch (IOException error) {
                         showError("Preparing install location failed", error);
                         return false;
@@ -4113,11 +4172,15 @@ public final class LauncherFrame extends JFrame {
                 return;
             }
             String tag = choice.release().tag();
+            AtomicReference<Path> attempted = new AtomicReference<>();
             // Same confirmation as Home: the suggested folder can be changed there.
             startTask("Revalidating exact install plan",
-                    () -> services.prepareExactNormalInstall(repository, selectedChannel, tag,
-                            choice.source(), suggestedExactDestination(
-                                    repository, selectedChannel, tag)),
+                    () -> {
+                        Path target = suggestedExactDestination(repository, selectedChannel, tag);
+                        attempted.set(target);
+                        return services.prepareExactNormalInstall(repository, selectedChannel,
+                                tag, choice.source(), target);
+                    },
                     plan -> {
                         if (!dialog.isDisplayable() || choice != releases.getSelectedValue()
                                 || product.getSelectedItem() != repository
@@ -4128,11 +4191,19 @@ public final class LauncherFrame extends JFrame {
                         }
                         dialog.dispose();
                         showNormalInstallConfirmation(plan);
-                    });
+                    },
+                    error -> exactPlanFailure(dialog, repository, selectedChannel, tag,
+                            choice.source(), attempted.get(), error, this::prepareInstall));
         }
 
         private <T> void startTask(String description, Callable<T> operation,
                                    Consumer<T> success) {
+            startTask(description, operation, success, null);
+        }
+
+        /** {@code failure}, when given, replaces the generic error dialog for task failures. */
+        private <T> void startTask(String description, Callable<T> operation,
+                                   Consumer<T> success, Consumer<Throwable> failure) {
             if (!gate.tryEnter()) {
                 LauncherAlertDialog.showMessage(dialog, guiScale, "Please wait",
                         "Another operation is already running.");
@@ -4165,7 +4236,12 @@ public final class LauncherFrame extends JFrame {
                         requestStatus.setText("Request failed; controls are available to retry.");
                         previous.setEnabled(displayedPage > 1);
                         next.setEnabled(displayedPage > 0 && displayedMayHaveNext);
-                        showError(description + " failed", error.getCause());
+                        if (failure == null) {
+                            showError(description + " failed", error.getCause());
+                        } else {
+                            updateInstallEnabled();
+                            failure.accept(error.getCause());
+                        }
                     } catch (InterruptedException error) {
                         Thread.currentThread().interrupt();
                         requestStatus.setText(
@@ -5155,17 +5231,23 @@ public final class LauncherFrame extends JFrame {
 
     @FunctionalInterface
     interface NormalInstallLocationPrompts {
-        Path choose(Component parent, NormalInstallService.Plan plan) throws IOException;
+        /**
+         * Asks for a new install folder, starting in {@code suggestedParent} and proposing
+         * {@code folderName}; returns {@code null} when cancelled.
+         */
+        Path choose(Component parent, Path suggestedParent, String folderName)
+                throws IOException;
     }
 
     private static final class SwingNormalInstallLocationPrompts
             implements NormalInstallLocationPrompts {
         @Override
-        public Path choose(Component parent, NormalInstallService.Plan plan) throws IOException {
-            JFileChooser chooser = installParentChooser(plan.destination().getParent());
+        public Path choose(Component parent, Path suggestedParent, String folderName)
+                throws IOException {
+            JFileChooser chooser = installParentChooser(suggestedParent);
             if (chooser.showOpenDialog(parent) != JFileChooser.APPROVE_OPTION) return null;
             String proposedName = NormalInstallService.availableFolder(
-                    chooser.getSelectedFile().toPath(), NormalInstallService.friendlyName(plan))
+                    chooser.getSelectedFile().toPath(), folderName)
                     .getFileName().toString();
             Path folder = SubfolderDialog.show(parent, proposedName, GuiScale.DEFAULT);
             if (folder == null) return null;

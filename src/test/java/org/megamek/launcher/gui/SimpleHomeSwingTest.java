@@ -625,7 +625,7 @@ class SimpleHomeSwingTest {
         Path changed = temp.resolve("browsed-new-location").toAbsolutePath().normalize();
         String capturedSource = services.quickInstallSnapshot.option(QuickInstallSnapshot.DEFAULT_KEY)
                 .target().source();
-        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, (parent, plan) -> changed));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, (parent, suggested, name) -> changed));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             JButton primary = waitButton(frame, "downloadAndInstallButton");
@@ -650,6 +650,45 @@ class SimpleHomeSwingTest {
 
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
+    void unplannableSuggestedFolderOffersChangeLocationAndReplans() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        FakeServices services = new FakeServices(temp.resolve("unplannable-location.json"));
+        services.unplannableDestination = services.destination;
+        Path changed = temp.resolve("writable-parent").resolve("MekHQ Core")
+                .toAbsolutePath().normalize();
+        AtomicReference<Path> suggestedParent = new AtomicReference<>();
+        AtomicReference<String> suggestedName = new AtomicReference<>();
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, (parent, suggested, name) -> {
+            suggestedParent.set(suggested);
+            suggestedName.set(name);
+            return changed;
+        }));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            JButton primary = waitButton(frame, "downloadAndInstallButton");
+            waitUntil(primary::isEnabled);
+            SwingUtilities.invokeAndWait(primary::doClick);
+            JDialog failure = waitDialog(frame, "Could not prepare download");
+            assertEquals("Change location", SwingTestSupport.label(
+                    find(failure, "launcherAlertButton1")));
+            SwingTestSupport.click(failure, "launcherAlertButton1");
+            JDialog quote = waitDialog(frame, "Install latest MekHQ Core (1.2.3)");
+            assertEquals(services.destination.getParent(), suggestedParent.get());
+            assertEquals("MekHQ Core (1.2.3)", suggestedName.get());
+            assertEquals(List.of(services.destination, changed), services.plannedDestinations);
+            assertEquals(changed.toString(), ((javax.swing.text.JTextComponent)
+                    find(quote, "normalInstallDestination")).getText());
+            assertEquals(0, services.installs.get());
+            JButton cancel = find(quote, "cancelNormalInstallButton");
+            SwingUtilities.invokeAndWait(cancel::doClick);
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void changeLocationDisposesTheOldQuoteAndReplansBeforeReconfirmation() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
@@ -657,7 +696,7 @@ class SimpleHomeSwingTest {
         Path changed = temp.resolve("chosen-parent").resolve("MekHQ Core")
                 .toAbsolutePath().normalize();
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services,
-                (parent, plan) -> changed));
+                (parent, suggested, name) -> changed));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             JButton primary = waitButton(frame, "downloadAndInstallButton");
@@ -1841,6 +1880,7 @@ class SimpleHomeSwingTest {
                 new java.util.concurrent.CopyOnWriteArrayList<>();
         private NormalInstallService.TargetKind capturedTargetKind =
                 NormalInstallService.TargetKind.CAPTURED_CURRENT;
+        private volatile Path unplannableDestination;
         private volatile String currentBrowsedSource;
         private volatile boolean showExperimental;
         private volatile QuickInstallSnapshot quickInstallSnapshot =
@@ -2006,9 +2046,17 @@ class SimpleHomeSwingTest {
         @Override
         public NormalInstallService.Plan prepareCapturedNormalInstall(QuickInstallOption option,
                                                                       Path target)
-                throws InterruptedException {
+                throws IOException, InterruptedException {
+            rejectDestination(target);
             return plan(option.key(), target,
                     capturedTargetKind);
+        }
+
+        private void rejectDestination(Path target) throws IOException {
+            if (target != null && target.equals(unplannableDestination)) {
+                plannedDestinations.add(target.toAbsolutePath().normalize());
+                throw new IOException("install parent is not writable: " + target.getParent());
+            }
         }
 
         @Override

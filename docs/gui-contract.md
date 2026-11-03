@@ -383,10 +383,13 @@ no migration or filesystem write.
 
 A successful new install remembers its parent folder in launcher settings schema 6
 (`installParent`). Later suggestions place the new product/channel folder, with the usual numbered
-sibling when taken, inside that parent while it is still a real directory; a missing or linked
-parent falls back to the default above. Installing into the default parent stores no preference,
+sibling when taken, inside that parent while it is still a real, writable directory; a missing,
+unwritable, or non-directory parent, or one reached through a link anywhere along its path, falls
+back to the default above. Installing into the default parent stores no preference,
 so the default keeps tracking the platform. Saving the folder is best effort and never fails a
-completed install.
+completed install. When planning a suggested destination still fails for a reason other than Java,
+the failure dialog offers **Change location** next to Cancel and Retry; it opens the same folder
+and subfolder prompts as the confirmation, then replans the same product, channel, and release.
 
 Installations contains import, exact-release download, independent per-application preference,
 launcher removal, safe uninstall, location, channel/check, Update, and recovery actions on exact

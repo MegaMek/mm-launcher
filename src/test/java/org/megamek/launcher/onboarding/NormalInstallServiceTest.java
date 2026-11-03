@@ -719,6 +719,16 @@ class NormalInstallServiceTest {
         Fixture linked = fixture("1.02.03.1");
         Path real = Files.createDirectory(linked.state.resolve("real-parent"));
         Path link = linked.state.resolve("linked-parent");
+        linkOrAbort(link, real);
+        IOException linkError = assertThrows(IOException.class,
+                () -> linked.service.prepare(link.resolve("Main")));
+        assertTrue(linkError.getMessage().contains("linked")
+                || linkError.getMessage().contains("noncanonical"));
+        assertEquals(0, linked.transport.binaryRequests);
+    }
+
+    /** Creates a symbolic link, or a junction on Windows, aborting when neither is possible. */
+    private static void linkOrAbort(Path link, Path real) throws Exception {
         try {
             Files.createSymbolicLink(link, real);
         } catch (IOException | UnsupportedOperationException error) {
@@ -735,11 +745,6 @@ class NormalInstallServiceTest {
                 Assumptions.abort("links unavailable for this fixture: " + output);
             }
         }
-        IOException linkError = assertThrows(IOException.class,
-                () -> linked.service.prepare(link.resolve("Main")));
-        assertTrue(linkError.getMessage().contains("linked")
-                || linkError.getMessage().contains("noncanonical"));
-        assertEquals(0, linked.transport.binaryRequests);
     }
 
     @Test
@@ -845,6 +850,23 @@ class NormalInstallServiceTest {
         assertEquals(fixture.state.resolve("installations").resolve("MegaMek Core"),
                 fixture.launcherServices.normalInstallDestination(
                         OfficialRepository.MEGAMEK, FollowChannel.CORE));
+    }
+
+    @Test
+    void rememberedParentBehindALinkedAncestorFallsBackToThePlatformDefault() throws Exception {
+        Fixture fixture = fixture("6.07.08.1");
+        Path real = Files.createDirectories(temp.resolve("real-games").resolve("mm"));
+        Path link = temp.resolve("linked-games");
+        linkOrAbort(link, real.getParent());
+        Path remembered = link.resolve("mm");
+        assertTrue(Files.isDirectory(remembered, LinkOption.NOFOLLOW_LINKS),
+                "only an ancestor is linked, so a last-component check would accept it");
+
+        assertEquals(fixture.state.resolve("installations").resolve("MegaMek Core"),
+                fixture.service.defaultDestination(
+                        OfficialRepository.MEGAMEK, FollowChannel.CORE, remembered));
+        assertEquals(real.resolve("MegaMek Core"), fixture.service.defaultDestination(
+                OfficialRepository.MEGAMEK, FollowChannel.CORE, real));
     }
 
     @Test
