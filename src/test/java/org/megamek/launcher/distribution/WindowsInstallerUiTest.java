@@ -46,14 +46,14 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class WindowsInstallerUiTest {
     private static final Path RESOURCES = Path.of("src/distribution/windows/msi");
-    private static final String WIX = "http://schemas.microsoft.com/wix/2006/wi";
+    private static final String WIX = "http://wixtoolset.org/schemas/v4/wxs";
 
     @Test
     void progressLabelDoesNotRenderUnresolvedInstallerActionTokens() throws Exception {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         factory.setNamespaceAware(true);
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxf").toFile());
+        Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxs").toFile());
 
         Element progress = find(doc, "Dialog", "LauncherProgress");
         Element status = find(doc, "Control", "StatusText");
@@ -84,14 +84,14 @@ class WindowsInstallerUiTest {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         factory.setNamespaceAware(true);
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxf").toFile());
+        Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxs").toFile());
 
         Element progress = find(doc, "Dialog", "LauncherProgress");
         assertEquals("yes", progress.getAttribute("Modeless"),
                 "A modal Show before ExecuteAction blocks the installation indefinitely");
         Element show = find(doc, "Show", "LauncherProgress");
         assertEquals("ExecuteAction", show.getAttribute("Before"));
-        assertEquals("NOT Installed", show.getTextContent().trim());
+        assertEquals("NOT Installed", show.getAttribute("Condition"));
         assertEquals("success", find(doc, "Show", "Exit").getAttribute("OnExit"));
         assertEquals("error", find(doc, "Show", "FatalError").getAttribute("OnExit"));
 
@@ -101,13 +101,13 @@ class WindowsInstallerUiTest {
         Element launch = find(doc, "Publish", "LaunchMegaMekLauncher");
         assertEquals("DoAction", launch.getAttribute("Event"));
         String launchCondition = "LAUNCH_AFTER_INSTALL = 1 AND UILevel = 5 AND NOT REMOVE";
-        assertEquals(launchCondition, launch.getTextContent().trim());
-        assertEquals(launchCondition, find(doc, "Publish", "SetLauncherTarget").getTextContent().trim(),
+        assertEquals(launchCondition, launch.getAttribute("Condition"));
+        assertEquals(launchCondition, find(doc, "Publish", "SetLauncherTarget").getAttribute("Condition"),
                 "Both finish actions must share the interactive, non-removal condition");
         assertEquals("Finish", ((Element) launch.getParentNode()).getAttribute("Id"));
         Element desktop = find(doc, "Control", "DesktopShortcut");
         assertEquals("LauncherWelcome", ((Element) desktop.getParentNode()).getAttribute("Id"));
-        assertEquals("JP_INSTALL_DESKTOP_SHORTCUT", desktop.getAttribute("Property"));
+        assertEquals("LAUNCHER_DESKTOP_SHORTCUT", desktop.getAttribute("Property"));
         assertEquals("1", desktop.getAttribute("CheckBoxValue"));
         assertEquals("Create a desktop shortcut", desktop.getAttribute("Text"));
         Element finish = find(doc, "Dialog", "Exit");
@@ -133,21 +133,24 @@ class WindowsInstallerUiTest {
         assertEquals("1", preference.getAttribute("Value"));
         assertEquals("string", preference.getAttribute("Type"),
                 "A raw registry search of a DWORD adds a # prefix, breaking the comparison");
-        assertEquals("NOT JP_INSTALL_DESKTOP_SHORTCUT",
-                find(doc, "Component", "DesktopOptOutPreference")
-                        .getElementsByTagNameNS(WIX, "Condition").item(0).getTextContent().trim());
+        assertEquals("NOT LAUNCHER_DESKTOP_SHORTCUT",
+                find(doc, "Component", "DesktopOptOutPreference").getAttribute("Condition"));
         assertEquals("{}", find(doc, "CustomAction", "RestoreDesktopOptOut").getAttribute("Value"));
-        assertEquals("DesktopOptOutPreference",
-                find(doc, "ComponentRef", "DesktopOptOutPreference").getAttribute("Id"));
+        assertEquals("1", find(doc, "Property", "LAUNCHER_DESKTOP_SHORTCUT").getAttribute("Value"),
+                "The desktop shortcut defaults to on; only a stored opt-out clears it");
+        Element uiState = find(doc, "ComponentGroup", "LauncherUiState");
+        assertSame(uiState, find(doc, "Component", "DesktopOptOutPreference").getParentNode());
+        assertEquals("Launcher",
+                ((Element) find(doc, "ComponentGroupRef", "LauncherUiState").getParentNode()).getAttribute("Id"));
         var restores = doc.getElementsByTagNameNS(WIX, "Custom");
         int count = 0;
         for (int i = 0; i < restores.getLength(); i++) {
             Element action = (Element) restores.item(i);
             if ("RestoreDesktopOptOut".equals(action.getAttribute("Action"))) {
                 assertEquals("AppSearch", action.getAttribute("After"));
-                assertTrue(action.getTextContent().contains("LAUNCHER_DESKTOP_OPTOUT = 1"));
+                assertTrue(action.getAttribute("Condition").contains("LAUNCHER_DESKTOP_OPTOUT = 1"));
                 if ("InstallExecuteSequence".equals(((Element) action.getParentNode()).getTagName())) {
-                    assertTrue(action.getTextContent().contains("UILevel < 5"),
+                    assertTrue(action.getAttribute("Condition").contains("UILevel < 5"),
                             "Execute sequence must not overwrite the interactive Welcome choice");
                 }
                 count++;
@@ -161,7 +164,7 @@ class WindowsInstallerUiTest {
         DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
         factory.setNamespaceAware(true);
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxf").toFile());
+        Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxs").toFile());
         for (String dialogId : new String[] {"LauncherWelcome", "Exit"}) {
             Element dialogElement = find(doc, "Dialog", dialogId);
             var controls = dialogElement.getElementsByTagNameNS(WIX, "Control");
@@ -199,10 +202,10 @@ class WindowsInstallerUiTest {
             DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
             factory.setNamespaceAware(true);
             factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-            Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxf").toFile());
+            Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxs").toFile());
 
             // These map to ICE20's Property, Dialog, InstallUISequence and
-            // AdminUISequence checks; don't silence ICE20 in light.exe instead.
+            // AdminUISequence checks; don't suppress ICE20 instead.
             assertEquals("LauncherError", find(doc, "Property", "ErrorDialog").getAttribute("Value"));
             Element error = find(doc, "Dialog", "LauncherError");
             assertEquals("yes", error.getAttribute("ErrorDialog"),
@@ -243,7 +246,7 @@ class WindowsInstallerUiTest {
             for (String action : new String[] {"FatalError", "UserExit", "Exit"}) {
                 find(doc, "Dialog", action);
                 for (String sequence : new String[] {"InstallUISequence", "AdminUISequence"}) {
-                    Element ui = find(doc, "UI", "JpUI");
+                    Element ui = find(doc, "UI", "LauncherUI");
                     var sequences = ui.getElementsByTagNameNS(WIX, sequence);
                     assertEquals(1, sequences.getLength());
                     var shows = ((Element) sequences.item(0)).getElementsByTagNameNS(WIX, "Show");
@@ -255,15 +258,16 @@ class WindowsInstallerUiTest {
                 }
             }
 
-            // This RemoveFolder becomes a RemoveFile row keyed to the generated
+            // This RemoveFolder becomes a RemoveFile row keyed to the installer-owned
             // Programs directory, not to the shared LocalAppDataFolder or Start Menu.
-            String programsId = "dir3b50371ef2d03bb0b1971278ecbab3a3";
-            assertTrue(Files.readString(Path.of("build.gradle.kts"))
-                            .contains("\"--install-dir\", \"Programs/MegaMek Launcher\""),
-                    "Inspect the generated MSI Directory table and update this ID if --install-dir changes");
-            Element directory = find(doc, "DirectoryRef", programsId);
+            Document product = factory.newDocumentBuilder()
+                    .parse(RESOURCES.resolve("MegaMekLauncher.wxs").toFile());
+            Element programs = find(product, "Directory", "LauncherProgramsFolder");
+            assertEquals("Programs", programs.getAttribute("Name"));
+            assertEquals("LocalAppDataFolder", ((Element) programs.getParentNode()).getAttribute("Id"));
+            assertSame(programs, find(product, "Directory", "INSTALLDIR").getParentNode());
             Element cleanup = find(doc, "Component", "LauncherProgramsFolderCleanup");
-            assertSame(directory, cleanup.getParentNode());
+            assertEquals("LauncherProgramsFolder", cleanup.getAttribute("Directory"));
             Element remove = find(doc, "RemoveFolder", "RemoveEmptyLauncherProgramsFolder");
             assertSame(cleanup, remove.getParentNode());
             assertEquals("uninstall", remove.getAttribute("On"));
@@ -272,8 +276,55 @@ class WindowsInstallerUiTest {
             assertSame(cleanup, marker.getParentNode());
             assertEquals("HKCU", marker.getAttribute("Root"));
             assertEquals("yes", marker.getAttribute("KeyPath"));
-            find(doc, "ComponentRef", "LauncherProgramsFolderCleanup");
+            assertSame(find(doc, "ComponentGroup", "LauncherUiState"), cleanup.getParentNode());
         }
+
+    @Test
+    void packageKeepsTheSelfUpdateIdentityAndUpgradePolicy() throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        Document doc = factory.newDocumentBuilder()
+                .parse(RESOURCES.resolve("MegaMekLauncher.wxs").toFile());
+        Element pkg = (Element) doc.getElementsByTagNameNS(WIX, "Package").item(0);
+        assertEquals("MegaMek Launcher", pkg.getAttribute("Name"),
+                "LauncherSelfUpdate matches the installed product by this name");
+        assertEquals("perUser", pkg.getAttribute("Scope"), "Silent self-updates must not need UAC");
+        assertEquals("$(LauncherUpgradeCode)", pkg.getAttribute("UpgradeCode"));
+        assertEquals("$(LauncherProductCode)", pkg.getAttribute("ProductCode"));
+        String gradle = Files.readString(Path.of("build.gradle.kts"));
+        assertTrue(gradle.contains("val windowsInstallerUpgradeCode = \"616FFD64-0D7F-4FBE-9BB9-63FD6D9D32FA\""),
+                "The UpgradeCode must never change");
+        assertTrue(gradle.contains("\"ProductCode/MegaMek/MegaMek Launcher/$version\""),
+                "Keep the former jpackage ProductCode scheme so one version is one product");
+
+        Element upgrade = find(doc, "Upgrade", "$(LauncherUpgradeCode)");
+        var versions = upgrade.getElementsByTagNameNS(WIX, "UpgradeVersion");
+        assertEquals(2, versions.getLength(), "Remove both older and newer installs, like jpackage did");
+        Element older = find(doc, "UpgradeVersion", "LAUNCHER_OLDER_FOUND");
+        assertEquals("$(LauncherVersion)", older.getAttribute("Maximum"));
+        assertEquals("no", older.getAttribute("IncludeMaximum"));
+        Element newer = find(doc, "UpgradeVersion", "LAUNCHER_NEWER_FOUND");
+        assertEquals("$(LauncherVersion)", newer.getAttribute("Minimum"));
+        assertEquals("no", newer.getAttribute("IncludeMinimum"));
+        Element remove = (Element) doc.getElementsByTagNameNS(WIX, "RemoveExistingProducts").item(0);
+        assertEquals("CostInitialize", remove.getAttribute("Before"),
+                "The old product must be gone before the new one is costed");
+
+        Element menu = find(doc, "Directory", "LauncherMenuFolder");
+        assertEquals("MegaMek", menu.getAttribute("Name"));
+        assertEquals("ProgramMenuFolder", ((Element) menu.getParentNode()).getAttribute("Id"));
+        Element desktop = find(doc, "Component", "DesktopShortcut");
+        assertEquals("DesktopFolder", desktop.getAttribute("Directory"));
+        assertEquals("LAUNCHER_DESKTOP_SHORTCUT", desktop.getAttribute("Condition"));
+        assertEquals("MegaMek Launcher.exe", find(doc, "File", "LauncherExe").getAttribute("Name"),
+                "A bind-path Source would otherwise leak into the MSI file name");
+        Element cleanup = find(doc, "Component", "InstallDirCleanup");
+        assertEquals("INSTALLDIR", cleanup.getAttribute("Directory"));
+        assertEquals(1, cleanup.getElementsByTagNameNS(
+                "http://wixtoolset.org/schemas/v4/wxs/util", "RemoveFolderEx").getLength(),
+                "Uninstall must remove files the runtime created under INSTALLDIR");
+    }
 
     private static Element find(Document doc, String tag, String id) {
         var elements = doc.getElementsByTagNameNS(WIX, tag);
@@ -282,6 +333,7 @@ class WindowsInstallerUiTest {
             if (id.equals(element.getAttribute("Id"))
                     || ("RegistryValue".equals(tag) && id.equals(element.getAttribute("Name")))
                     || ("Show".equals(tag) && id.equals(element.getAttribute("Dialog")))
+                    || ("UpgradeVersion".equals(tag) && id.equals(element.getAttribute("Property")))
                     || ("Publish".equals(tag) && id.equals(element.getAttribute("Value")))) {
                 return element;
             }

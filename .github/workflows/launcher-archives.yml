@@ -130,20 +130,16 @@ jobs:
           java-version: "21"
       - uses: gradle/actions/setup-gradle@v4
 
-      - name: Install verified WiX 3.14 binaries
+      - uses: actions/setup-dotnet@v4
+        if: runner.os == 'Windows'
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Install verified WiX 7 toolset
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          $url = 'https://github.com/wixtoolset/wix3/releases/download/wix3141rtm/wix314-binaries.zip'
-          Invoke-WebRequest -Uri $url -OutFile "$env:RUNNER_TEMP/wix314-binaries.zip"
-          $expected = '6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31'
-          $actual = (Get-FileHash -LiteralPath "$env:RUNNER_TEMP/wix314-binaries.zip" -Algorithm SHA256).Hash.ToLowerInvariant()
-          if ($actual -cne $expected) { throw "WiX archive SHA-256 mismatch: $actual" }
-          New-Item -ItemType Directory -Force .tools/wix314 | Out-Null
-          Expand-Archive "$env:RUNNER_TEMP/wix314-binaries.zip" -DestinationPath .tools/wix314
-          if (!(Test-Path .tools/wix314/candle.exe) -or !(Test-Path .tools/wix314/light.exe)) {
-            throw 'WiX binaries are missing after extraction.'
-          }
+        # Pinned nuget.org packages, SHA-256 checked by the script before extraction.
+        run: ./scripts/install_wix.ps1
 
       - name: Install Linux packaging tools
         if: runner.os == 'Linux'

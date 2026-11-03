@@ -17,7 +17,9 @@ for games launched by the application; no external Java is required.
 Run `./gradlew test buildDebInstaller buildRpmInstaller` on Linux,
 `./gradlew test buildPkgInstaller` on macOS, or
 `.\gradlew.bat test buildWindowsInstaller` on Windows. Windows packaging requires
-WiX 3.14 in `.tools/wix314`; CI verifies the downloaded binaries.
+a .NET 8+ runtime and WiX 7 in `.tools/wix7`: run `scripts/install_wix.ps1` once to
+install the pinned, SHA-256-verified version (CI runs the same script). The build
+accepts the WiX Open Source Maintenance Fee EULA on the project's behalf.
 The former archive tasks remain available for development but are not CI outputs.
 
 After a release updates `main`, the native-installer workflow still appears, but its

@@ -30,7 +30,7 @@
 # affiliated with Microsoft.
 #
 
-"""Rebuild the WiX 3 wizard BMPs from the repository's licensed first-launch art.
+"""Rebuild the WiX wizard BMPs from the repository's licensed first-launch art.
 
 Run from the repository root with: python src/distribution/windows/msi/generate_art.py
 Requires Pillow. MSI bitmap dimensions are physical pixels for 180x234 and

@@ -34,6 +34,7 @@
 import java.io.File
 import java.nio.file.Files
 import java.security.MessageDigest
+import java.util.UUID
 import java.util.zip.ZipFile
 import javax.inject.Inject
 import org.gradle.api.DefaultTask
@@ -175,7 +176,7 @@ abstract class LinkPortableRuntime : DefaultTask() {
     }
 }
 
-abstract class WindowsInstallerMsi : DefaultTask() {
+abstract class WindowsAppImage : DefaultTask() {
     @get:InputDirectory
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val inputDirectory: DirectoryProperty
@@ -183,14 +184,6 @@ abstract class WindowsInstallerMsi : DefaultTask() {
     @get:InputFile
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val iconFile: RegularFileProperty
-
-    @get:InputDirectory
-    @get:PathSensitive(PathSensitivity.RELATIVE)
-    abstract val wixResources: DirectoryProperty
-
-    // Checked explicitly at execution time so missing local tools get actionable errors.
-    @get:Internal
-    abstract val wixBinaryDirectory: DirectoryProperty
 
     @get:Internal
     abstract val jpackageExecutable: RegularFileProperty
@@ -201,25 +194,20 @@ abstract class WindowsInstallerMsi : DefaultTask() {
     @get:Input
     abstract val appVersion: Property<String>
 
-    @get:Input
-    abstract val upgradeCode: Property<String>
-
-    @get:OutputFile
-    abstract val installerFile: RegularFileProperty
+    // jpackage writes the image into "<outputDirectory>/MegaMek Launcher".
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
 
     @get:Inject
     abstract val execOperations: ExecOperations
 
+    @get:Inject
+    abstract val fileSystemOperations: FileSystemOperations
+
     @TaskAction
-    fun packageInstaller() {
+    fun packageAppImage() {
         check(OperatingSystem.current().isWindows) {
-            "The Windows MSI can only be built on Windows."
-        }
-        val wix = wixBinaryDirectory.get().asFile
-        check(wix.isDirectory && File(wix, "candle.exe").isFile && File(wix, "light.exe").isFile) {
-            "WiX Toolset 3.x binaries (candle.exe/light.exe) are required at " +
-                "${wix.absolutePath}. Download wix314-binaries.zip from " +
-                "https://github.com/wixtoolset/wix3/releases and extract it there."
+            "The Windows app image can only be built on Windows."
         }
         val icon = iconFile.get().asFile
         check(icon.isFile) { "The Windows installer icon is missing at ${icon.absolutePath}." }
@@ -227,25 +215,15 @@ abstract class WindowsInstallerMsi : DefaultTask() {
         check(jpackage.isFile) {
             "jpackage was not found next to the configured Java toolchain at $jpackage."
         }
-
-        val installer = installerFile.get().asFile
-        val destination = inputDirectory.get().asFile.parentFile
+        val destination = outputDirectory.get().asFile
+        // jpackage refuses to overwrite an existing app image.
+        fileSystemOperations.delete { delete(destination) }
         destination.mkdirs()
-        // --input is a sibling within this directory; never delete the destination tree.
-        // Remove only the previous MSI so jpackage cannot reuse or reject an existing output.
-        check(!installer.exists() || installer.delete()) {
-            "Could not remove previous Windows installer at ${installer.absolutePath}."
-        }
-        val generated = File(destination, "MegaMek Launcher-${appVersion.get()}.msi")
-        check(!generated.exists() || generated.delete()) {
-            "Could not remove previous jpackage output at ${generated.absolutePath}."
-        }
         execOperations.exec {
             executable = jpackage.absolutePath
             args(
-                // Surface WiX light diagnostics on CI failures instead of only its exit code.
                 "--verbose",
-                "--type", "msi",
+                "--type", "app-image",
                 "--input", inputDirectory.get().asFile.absolutePath,
                 "--dest", destination.absolutePath,
                 "--name", "MegaMek Launcher",
@@ -256,28 +234,118 @@ abstract class WindowsInstallerMsi : DefaultTask() {
                 "--main-jar", mainJarFileName.get(),
                 "--main-class", "org.megamek.launcher.DesktopLauncher",
                 "--icon", icon.absolutePath,
-                "--resource-dir", wixResources.get().asFile.absolutePath,
                 // Games launched from the bundled JVM need modules beyond the launcher's own set.
                 "--add-modules", "ALL-MODULE-PATH",
                 // Keep bin/java.exe for the launcher to run games with the bundled runtime.
-                "--jlink-options", "--strip-debug --no-header-files --no-man-pages",
-                "--win-per-user-install",
-                // Keep installer-owned files away from %LOCALAPPDATA%\MegaMek Launcher
-                // (the mutable registry and its sidecars).
-                "--install-dir", "Programs/MegaMek Launcher",
-                "--win-menu",
-                "--win-shortcut",
-                "--win-upgrade-uuid", upgradeCode.get()
+                "--jlink-options", "--strip-debug --no-header-files --no-man-pages"
             )
-            environment(
-                "PATH",
-                wix.absolutePath + File.pathSeparator + (System.getenv("PATH") ?: "")
-            )
-            environment("MM_LAUNCHER_ART_DIR", wixResources.get().asFile.absolutePath)
         }
-        check(generated.isFile) { "jpackage did not produce ${generated.absolutePath}." }
+        val image = File(destination, "MegaMek Launcher")
+        check(File(image, "MegaMek Launcher.exe").isFile) {
+            "jpackage did not produce ${image.absolutePath}\\MegaMek Launcher.exe."
+        }
+        check(File(image, "runtime/bin/java.exe").isFile) {
+            "The app image runtime must contain bin/java.exe for launched games."
+        }
+    }
+}
+
+abstract class WindowsInstallerMsi : DefaultTask() {
+    // The "MegaMek Launcher" directory produced by WindowsAppImage.
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val appImageDirectory: DirectoryProperty
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val iconFile: RegularFileProperty
+
+    // WiX sources (*.wxs) and the dialog bitmaps they bind.
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val wixSources: DirectoryProperty
+
+    // Checked explicitly at execution time so missing local tools get actionable errors.
+    @get:Internal
+    abstract val wixToolDirectory: DirectoryProperty
+
+    @get:Input
+    abstract val appVersion: Property<String>
+
+    @get:Input
+    abstract val upgradeCode: Property<String>
+
+    @get:Internal
+    abstract val intermediateDirectory: DirectoryProperty
+
+    @get:OutputFile
+    abstract val installerFile: RegularFileProperty
+
+    @get:Inject
+    abstract val execOperations: ExecOperations
+
+    @get:Inject
+    abstract val fileSystemOperations: FileSystemOperations
+
+    @TaskAction
+    fun packageInstaller() {
+        check(OperatingSystem.current().isWindows) {
+            "The Windows MSI can only be built on Windows."
+        }
+        val wix = wixToolDirectory.get().asFile
+        val wixDll = File(wix, "wix.dll")
+        val utilExtension = File(wix, "WixToolset.Util.wixext.dll")
+        check(wixDll.isFile && utilExtension.isFile) {
+            "WiX Toolset 7 (wix.dll and WixToolset.Util.wixext.dll) is required at " +
+                "${wix.absolutePath}. Run scripts/install_wix.ps1 to install the pinned, " +
+                "hash-verified version there."
+        }
+        val icon = iconFile.get().asFile
+        check(icon.isFile) { "The Windows installer icon is missing at ${icon.absolutePath}." }
+        val appImage = appImageDirectory.get().asFile
+        check(File(appImage, "MegaMek Launcher.exe").isFile) {
+            "The Windows app image is missing at ${appImage.absolutePath}."
+        }
+        val version = appVersion.get()
+        // Same deterministic ProductCode scheme as the former jpackage MSI, so
+        // rebuilding one version never yields a second, side-by-side product.
+        val productCode = UUID.nameUUIDFromBytes(
+            "ProductCode/MegaMek/MegaMek Launcher/$version".toByteArray(Charsets.UTF_8)
+        ).toString().uppercase()
+
+        val sources = wixSources.get().asFile
+        val intermediate = intermediateDirectory.get().asFile
+        fileSystemOperations.delete { delete(intermediate) }
+        intermediate.mkdirs()
+        val installer = installerFile.get().asFile
         installer.parentFile.mkdirs()
-        Files.move(generated.toPath(), installer.toPath())
+        check(!installer.exists() || installer.delete()) {
+            "Could not remove previous Windows installer at ${installer.absolutePath}."
+        }
+        execOperations.exec {
+            // WiX 7 ships as a framework-dependent .NET 8 tool.
+            executable = "dotnet"
+            args(
+                wixDll.absolutePath, "build",
+                // The MegaMek project accepted the Open Source Maintenance Fee
+                // EULA (v1.1) for WiX 7: https://wixtoolset.org/osmf/
+                "-acceptEula", "wix7",
+                "-arch", "x64",
+                "-ext", utilExtension.absolutePath,
+                "-d", "LauncherVersion=$version",
+                "-d", "LauncherProductCode={$productCode}",
+                "-d", "LauncherUpgradeCode={${upgradeCode.get()}}",
+                "-d", "LauncherIcon=${icon.absolutePath}",
+                "-bindpath", "AppImage=${appImage.absolutePath}",
+                "-bindpath", "Resources=${sources.absolutePath}",
+                "-intermediatefolder", intermediate.absolutePath,
+                "-pdbtype", "none",
+                "-o", installer.absolutePath,
+                File(sources, "MegaMekLauncher.wxs").absolutePath,
+                File(sources, "ui.wxs").absolutePath
+            )
+        }
+        check(installer.isFile) { "WiX did not produce ${installer.absolutePath}." }
     }
 }
 
@@ -1042,8 +1110,9 @@ tasks.register<Test>("verifyPortableArchive") {
 }
 
 // ---------------------------------------------------------------------------
-// Windows MSI installer (jpackage). Preserve the existing per-user upgrade
-// identity and unattended self-update behavior independently of other packages.
+// Windows MSI installer (jpackage app image + WiX 7). Preserve the existing
+// per-user upgrade identity and unattended self-update behavior independently
+// of other packages.
 //
 // It bundles a jlink-trimmed Java runtime (via jpackage's automatic runtime
 // detection) so installed users never need a system Java. It always installs
@@ -1068,8 +1137,6 @@ val stageWindowsInstallerInput = tasks.register<Sync>("stageWindowsInstallerInpu
     from("LICENSE.code")
 }
 
-// jpackage first writes "MegaMek Launcher-<app-version>.msi" into the packaging
-// directory; WindowsInstallerMsi moves it to this versioned CI artifact name.
 val windowsInstallerFileName = "MegaMek-Launcher-${project.version}-windows-x64.msi"
 // ProductVersion must be numeric even when the Gradle artifact is a SNAPSHOT.
 val windowsInstallerAppVersion = project.version.toString().substringBefore('-')
@@ -1082,26 +1149,44 @@ val macInstallerAppVersion = windowsInstallerAppVersion.split(".").let { compone
     "${Math.addExact(components[0].toInt(), 1)}.${components[1]}.${components[2]}"
 }
 
-val windowsInstallerMsi = tasks.register<WindowsInstallerMsi>("windowsInstallerMsi") {
+// Borrowed from the MegaMek project icon until a dedicated launcher icon exists.
+val windowsInstallerIcon = layout.projectDirectory.file("src/distribution/windows/icon.ico")
+val windowsAppImageDirectory = layout.buildDirectory.dir("packaging/windows-installer/app-image")
+
+val windowsAppImage = tasks.register<WindowsAppImage>("windowsAppImage") {
     group = "distribution"
-    description = "Builds the per-user Windows MSI installer with a bundled Java runtime via jpackage."
+    description = "Builds the Windows app image (launcher exe + bundled Java runtime) via jpackage."
     dependsOn(stageWindowsInstallerInput)
 
     val toolchainLauncher = project.extensions
         .getByType(JavaToolchainService::class.java)
         .launcherFor(java.toolchain)
-    wixBinaryDirectory.set(layout.projectDirectory.dir(".tools/wix314"))
     jpackageExecutable.set(layout.file(toolchainLauncher.map {
         File(it.executablePath.asFile.parentFile, "jpackage.exe")
     }))
     mainJarFileName.set(tasks.named<Jar>("jar").flatMap { it.archiveFileName })
     inputDirectory.set(windowsInstallerInputDirectory)
+    appVersion.set(windowsInstallerAppVersion)
+    iconFile.set(windowsInstallerIcon)
+    outputDirectory.set(windowsAppImageDirectory)
+    outputs.cacheIf { false }
+}
+
+// The MSI itself is authored in src/distribution/windows/msi and built with
+// WiX 7 directly; jpackage only produces the app image above.
+val windowsInstallerMsi = tasks.register<WindowsInstallerMsi>("windowsInstallerMsi") {
+    group = "distribution"
+    description = "Builds the per-user Windows MSI installer from the app image with WiX 7."
+    dependsOn(windowsAppImage)
+
+    wixToolDirectory.set(layout.projectDirectory.dir(".tools/wix7"))
+    appImageDirectory.set(windowsAppImageDirectory.map { it.dir("MegaMek Launcher") })
     installerFile.set(distributionsDirectory.map { it.file(windowsInstallerFileName) })
+    intermediateDirectory.set(layout.buildDirectory.dir("tmp/windowsInstallerMsi/wix"))
     appVersion.set(windowsInstallerAppVersion)
     upgradeCode.set(windowsInstallerUpgradeCode)
-    // Borrowed from the MegaMek project icon until a dedicated launcher icon exists.
-    iconFile.set(layout.projectDirectory.file("src/distribution/windows/icon.ico"))
-    wixResources.set(layout.projectDirectory.dir("src/distribution/windows/msi"))
+    iconFile.set(windowsInstallerIcon)
+    wixSources.set(layout.projectDirectory.dir("src/distribution/windows/msi"))
     outputs.cacheIf { false }
 }
 

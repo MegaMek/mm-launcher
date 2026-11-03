@@ -9,8 +9,9 @@ installer/checksum pairs, each on its target host:
 `MegaMek-Launcher-<version>-linux-x64.deb`,
 `MegaMek-Launcher-<version>-linux-x64.rpm`, and
 `MegaMek-Launcher-<version>-macos-{intel,apple-silicon}.pkg`.
-Each has an exact-name `.sha256` counterpart. MSI uses jpackage's
-full-module runtime and WiX 3.14; Linux and macOS use a host-native
+Each has an exact-name `.sha256` counterpart. The MSI packages a jpackage
+`app-image` (launcher EXE plus full-module runtime) with WiX 7 sources in
+`src/distribution/windows/msi`; Linux and macOS use a host-native
 `ALL-MODULE-PATH` jlink image passed to jpackage via `--runtime-image`.
 These images retain `bin/java` for games, `lib/modules`, and upstream
 `legal/` notices. CI only inspects installer contents and checksums;
@@ -30,17 +31,17 @@ but are not part of the CI installer contract.
 The MSI keeps the permanent upgrade UUID and per-user fixed binary directory
 `%LOCALAPPDATA%\Programs\MegaMek Launcher` (no folder chooser). This is
 separate from mutable registry state under `%LOCALAPPDATA%\MegaMek Launcher`,
-which MSI removal must not own. Its self-contained WiX 3 UI override shows
+which MSI removal must not own. Its self-contained WiX 7 UI shows
 `[INSTALLDIR]` on Welcome after MSI directory costing, then a modeless progress
 dialog before `ExecuteAction` (a modal dialog there would block the install).
-Welcome has a checked-by-default Create a desktop shortcut option. This uses
-jpackage's own conditional `DesktopFolder` shortcut component, not a shell
+Welcome has a checked-by-default Create a desktop shortcut option. This drives
+the MSI's own conditional `DesktopFolder` shortcut component, not a shell
 script: unchecking it disables that component. An HKCU installer-owned opt-out
 registry component records only the unchecked choice; AppSearch restores it
-before jpackage's early `RemoveExistingProducts` during silent `/qn` upgrades.
+before the early `RemoveExistingProducts` during silent `/qn` upgrades.
 An interactive upgrade may change that choice on Welcome. Removing the MSI
 removes only its owned shortcut and preference component, not unrelated desktop
-entries. The Start menu shortcut is independent. The interactive completion
+entries. The Start menu shortcut, in a **MegaMek** Start menu folder, is independent. The interactive completion
 screen displays a checked Launch MegaMek Launcher box on the interactive finish
 dialog; only the finish button publishes the launcher custom action. Both
 options use one native WiX CheckBox control each, with the label inside its
@@ -51,7 +52,8 @@ The installed EXE and MSI icon share an ICO derivative of MegaMek.png; the
 left-strip wizard BMP and progress banner derive from bundled first-launch art.
 The MSI artifact keeps the Gradle version in its filename, while Windows
 Installer ProductVersion uses the numeric portion (for example, `0.1.0` for
-`0.1.0-SNAPSHOT`), as required by jpackage/MSI.
+`0.1.0-SNAPSHOT`), as required by MSI. The ProductCode is derived from that
+version exactly as jpackage did, so jpackage-built installs upgrade in place.
 Regenerate the BMPs with Pillow using
 `python src/distribution/windows/msi/generate_art.py`; the source artwork stays
 in `artwork/`. Static MSI table inspection cannot certify an interactive
