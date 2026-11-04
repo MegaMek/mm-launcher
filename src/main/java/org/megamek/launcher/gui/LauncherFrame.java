@@ -3372,6 +3372,10 @@ public final class LauncherFrame extends JFrame {
                 System.exit(0);
             }, error -> progress.append("\nLauncher update failed: " + errorDetail(error) + "\n"), () -> {});
         }, error -> {
+            if (toolsUnavailable(error)) {
+                checkLauncherRelease(explicit);
+                return;
+            }
             if (!explicit) {
                 setLauncherUpdateStatus(false,
                         "Launcher update: " + SanitizedErrors.text(error.getMessage()));
@@ -3380,7 +3384,14 @@ public final class LauncherFrame extends JFrame {
         }, () -> {}, explicit, explicit);
     }
 
-    /** Notify-only installations can't update in place, so a newer release links to its page. */
+    static boolean toolsUnavailable(Throwable error) {
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (cause instanceof LauncherSelfUpdate.InstallerToolsUnavailableException) return true;
+        }
+        return false;
+    }
+
+    /** Copies that can't update in place link a newer release to its page instead. */
     private void checkLauncherRelease(boolean explicit) {
         run("Checking launcher release", launcherUpdater::checkRelease, release -> {
             if (release == null) {
@@ -3404,8 +3415,9 @@ public final class LauncherFrame extends JFrame {
         return LauncherAlertDialog.showConfirm(owner, scale, "Update MegaMek Launcher",
                 "Version " + release.version() + " is available.\n\n"
                         + "This copy of the launcher can't update itself. Download the new version "
-                        + "from its release page and replace this folder with it. Your games and "
-                        + "settings are stored separately and are kept.",
+                        + "from its release page and install it the same way as this one. For the "
+                        + "portable archive, extract it to a new folder rather than over this one, "
+                        + "and keep any games or settings stored inside the old folder.",
                 "Open release page");
     }
 

@@ -307,8 +307,8 @@ class NativeLauncherUpdateTest {
         var missing = new NativeLauncherUpdate(NativeLauncherUpdate.Platform.LINUX, entry, runner,
                 path -> path.getFileName().toString().equals("dpkg-query"));
         missing.verifyInstalledVersion("0.1.0");
-        assertTrue(assertThrows(IOException.class, missing::verifyInstallerTools)
-                .getMessage().contains("PolicyKit"));
+        assertTrue(assertThrows(LauncherSelfUpdate.InstallerToolsUnavailableException.class,
+                missing::verifyInstallerTools).getMessage().contains("PolicyKit"));
     }
 
     @Test void downloadedDebIdentityMustMatchTheUnrevisionedVersionAndArchitecture() throws Exception {

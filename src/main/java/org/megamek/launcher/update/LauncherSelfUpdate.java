@@ -86,6 +86,14 @@ public final class LauncherSelfUpdate {
     /** A newer official release that a notify-only installation can only point the player to. */
     public record Release(String version, URI page) {}
 
+    /**
+     * A verified native installation whose package tools can't apply updates here (for example
+     * an RPM install without dnf). It can still be pointed at the newer release's page.
+     */
+    public static final class InstallerToolsUnavailableException extends IOException {
+        public InstallerToolsUnavailableException(String message) { super(message); }
+    }
+
     public static boolean available() {
         return windowsAvailable() || NativeLauncherUpdate.available();
     }
@@ -208,7 +216,10 @@ public final class LauncherSelfUpdate {
                 ? "windows-x64.msi" : nativeUpdater.suffix(currentVersion()));
     }
 
-    /** Finds a newer official release for a {@link #notifyOnly()} installation; null when current. */
+    /**
+     * Finds a newer official release for a copy that can't update in place ({@link #notifyOnly()}
+     * or {@link InstallerToolsUnavailableException}); null when current.
+     */
     public Release checkRelease() throws IOException, InterruptedException {
         if (!VERSION.matcher(currentVersion()).matches()) {
             throw new IOException("Launcher update checks require a released launcher version");
