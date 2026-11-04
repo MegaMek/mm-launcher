@@ -125,9 +125,10 @@
     <!-- Like the jpackage MSI, uninstall removes everything under INSTALLDIR,
          including files the runtime created there after installation. The
          path is persisted at install time because RemoveFolderEx resolves it
-         from a property during uninstall. -->
-    <Property Id="LAUNCHER_INSTALLDIR_TO_REMOVE">
-      <RegistrySearch Id="InstallDirToRemove" Root="HKCU"
+         from a property during uninstall. Upgrades also use it to stay in the
+         chosen folder (ui.wxs). -->
+    <Property Id="LAUNCHER_PREVIOUS_INSTALLDIR">
+      <RegistrySearch Id="PreviousInstallDir" Root="HKCU"
                       Key="Software\MegaMek\MegaMek Launcher\Installer"
                       Name="InstallDir" Type="raw"/>
     </Property>
@@ -135,7 +136,7 @@
       <Component Id="InstallDirCleanup" Directory="INSTALLDIR">
         <RegistryValue Root="HKCU" Key="Software\MegaMek\MegaMek Launcher\Installer"
                        Name="InstallDir" Type="string" Value="[INSTALLDIR]" KeyPath="yes"/>
-        <util:RemoveFolderEx On="uninstall" Property="LAUNCHER_INSTALLDIR_TO_REMOVE"/>
+        <util:RemoveFolderEx On="uninstall" Property="LAUNCHER_PREVIOUS_INSTALLDIR"/>
       </Component>
     </ComponentGroup>
   </Fragment>

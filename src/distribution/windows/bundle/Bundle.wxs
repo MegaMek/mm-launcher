@@ -53,12 +53,25 @@
     <SetVariable Id="SeedDesktopShortcutCheckbox" Variable="DesktopShortcutCheckbox" Value="0"
         Type="numeric" After="PreviousDesktopOptOut" Condition="PreviousDesktopOptOut = &quot;1&quot;"/>
 
+    <!-- The install page's CHANGE... button browses into this variable. It
+         starts from the folder the MSI recorded, so upgrades (including the
+         launcher's silent self-update) stay there. The MSI's folder check always
+         installs into a "MegaMek Launcher" folder inside the user's pick.
+         ("InstallFolder" is reserved by WixStdBA.) -->
+    <util:RegistrySearch Id="PreviousInstallFolder" Variable="LauncherInstallFolder"
+        Root="HKCU" Key="Software\MegaMek\MegaMek Launcher\Installer"
+        Value="InstallDir" Result="value"/>
+    <SetVariable Id="DefaultInstallFolder" Variable="LauncherInstallFolder" Type="string"
+        Value="[LocalAppDataFolder]Programs\MegaMek Launcher\" After="PreviousInstallFolder"
+        Condition="NOT LauncherInstallFolder"/>
+
     <Chain>
       <MsiPackage Id="LauncherMsi" SourceFile="$(LauncherMsi)">
         <!-- The bundle owns the choice; stops the MSI restoring the old opt-out. -->
         <MsiProperty Name="LAUNCHER_DESKTOP_CHOSEN" Value="1"/>
         <!-- MSI treats any non-empty value as true, so an opt-out clears it. -->
         <MsiProperty Name="LAUNCHER_DESKTOP_SHORTCUT" Value="" Condition="NOT DesktopShortcutCheckbox"/>
+        <MsiProperty Name="LAUNCHER_INSTALL_FOLDER" Value="[LauncherInstallFolder]"/>
       </MsiPackage>
     </Chain>
   </Bundle>

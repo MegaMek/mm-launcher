@@ -3,12 +3,17 @@
 ## Native installer CI
 
 The generic archive described below remains a developer-only prototype;
-CI does not build, verify or upload any archives. CI builds five native
+CI does not build, verify or upload it. CI builds five native
 installer/checksum pairs, each on its target host:
 `MegaMek-Launcher-<version>-windows-x64.exe`,
 `MegaMek-Launcher-<version>-linux-x64.deb`,
 `MegaMek-Launcher-<version>-linux-x64.rpm`, and
 `MegaMek-Launcher-<version>-macos-{intel,apple-silicon}.pkg`.
+The Linux job also builds and runs `verifyPortableArchive` on
+`MegaMek-Launcher-<version>-linux-x64-portable.tar.gz`, the Java-bundled host-native archive
+for distributions the `.deb`/`.rpm` packages and self-update do not serve. It is a release
+asset alongside the installers but is never self-updated: released portable copies only
+offer to open the newer release's page.
 Each has an exact-name `.sha256` counterpart. The Windows setup `.exe` is a WiX 7
 Burn bundle (sources and theme in `src/distribution/windows/bundle`) that chains an
 intermediate MSI. The MSI packages a jpackage `app-image` (launcher EXE plus
@@ -29,12 +34,30 @@ Linux's stable package name is `megamek-launcher` under `/opt`; the macOS
 bundle identifier is `org.megamek.launcher` under `/Applications`.
 Both own only application files. Registry, settings, logs and installed
 games live in independent user paths and must not be overwritten by package
-upgrades. The Windows MSI retains its stable per-user installation path and
+upgrades. The Windows MSI retains its per-user installation folder and
 upgrade UUID described below. The archive tasks are still available for
-development (including `verifyPortableArchive` and `verifyProvidedArchive`),
-but are not part of the CI installer contract.
-The MSI keeps the permanent upgrade UUID and per-user fixed binary directory
-`%LOCALAPPDATA%\Programs\MegaMek Launcher` (no folder chooser). This is
+development (including `verifyProvidedArchive`), but are not part of the CI installer contract.
+The MSI keeps the permanent upgrade UUID and the per-user default binary directory
+`%LOCALAPPDATA%\Programs\MegaMek Launcher`. The setup bundle's install page shows the
+folder with a **Change...** button (a Burn `BrowseDirectoryAction`) that opens the standard
+Windows folder dialog, and passes the pick to the MSI as `LAUNCHER_INSTALL_FOLDER`. An
+immediate WiX 7 DTF custom action (built by the `windowsInstallerFolderCheck` Gradle task
+from `src/distribution/windows/install-folder`) runs before anything changes and turns it
+into `INSTALLDIR`. The result is always a dedicated
+`MegaMek Launcher` folder inside the user's pick, because uninstall
+removes `INSTALLDIR` recursively; folders the user cannot write to without
+elevation are rejected, and so is any pick that overlaps the launcher's own state
+folders under `%LOCALAPPDATA%` (`MegaMek Launcher` or legacy `MegaMek`) or that already
+holds other files, unless it is the current or recorded install (or a launcher in the
+jpackage default folder). A rejection shows its reason and fails setup with the existing
+installation untouched; the user runs setup again to pick another folder, because Burn
+needs a fresh detect before it can plan again and the stock WixStdBA only detects at
+startup. A grey hint under the folder tells users that games can be
+installed anywhere from the launcher later, since game payloads use their own folders.
+An HKCU `InstallDir`
+value records the folder; the bundle seeds its folder from it, and AppSearch restores it
+for direct-MSI and silent upgrades unless the command line sets `INSTALLDIR`, and the
+launcher's self-update accepts the recorded folder. This is
 separate from mutable registry state under `%LOCALAPPDATA%\MegaMek Launcher`,
 which MSI removal must not own. Its self-contained WiX 7 UI shows
 `[INSTALLDIR]` on Welcome after MSI directory costing, then a modeless progress
@@ -104,7 +127,7 @@ confined to official release preflight and enabled macOS setup, never Windows/Li
 Artifacts come from the current workflow run, not a previous build or independently selected
 latest artifact. A read-only release-assets job validates the complete native build outputs
 and optionally signs the Windows MSI. It also binds both enabled Apple notarization records
-to the Mac packages and their post-stapling checksums. It uploads the final ten-file installer/checksum set as
+to the Mac packages and their post-stapling checksums. It uploads the final twelve-file installer/archive/checksum set as
 one immutable artifact. Publication and finalization both download that exact artifact ID,
 not the unsigned build outputs or a name selected from the newest run. Artifact IDs are captured
 as job outputs, so finalization-only reruns retain the original signed bytes even when the
@@ -185,9 +208,9 @@ platforms (Linux uses Xvfb). Failures stay visibly red with retained reports; th
 required branch checks.
 
 Before any release/tag write, [launcher_release.py](../scripts/launcher_release.py) requires exactly
-the five expected installer/checksum pairs, nonempty regular files, matching SHA-256 values, and
+the six expected installer/archive and checksum pairs, nonempty regular files, matching SHA-256 values, and
 installers no larger than the updater's 300 MiB limit. It creates a new lightweight `v<version>` tag
-at the tested commit, uploads all ten files, and requires GitHub's uploaded state, immutable IDs,
+at the tested commit, uploads all twelve files, and requires GitHub's uploaded state, immutable IDs,
 sizes, exact download URLs, and SHA-256 digests to match. A temporary GitHub draft is only an
 upload implementation detail: no human draft-review gate is added. After all checks, that same
 job publishes a normal stable release and verifies the latest-stable endpoint consumed by the
@@ -243,7 +266,7 @@ read SignPath secrets. Only the official manually dispatched release workflow ca
 production signing; a separate manual onboarding workflow submits test-signing only.
 
 Leave `LAUNCHER_SIGNING_ENABLED` unset or exactly `false` until the account is approved and
-configured. The disabled path preserves all five installer/checksum pairs byte-for-byte and
+configured. The disabled path preserves all six installer/archive and checksum pairs byte-for-byte and
 needs no SignPath account or token. Any other nonempty value except exactly `true` is an error,
 not permission to fall back to unsigned publication.
 
@@ -662,7 +685,8 @@ PolicyKit (`pkexec`, with a desktop authorization agent) authorizes a bounded in
 script. It copies the download into a private root-owned directory, checks its SHA-256,
 then uses `apt-get -y install` or `dnf -y upgrade`. It never enables downgrades,
 disables trust checks, or feeds a mutable user-owned package directly to a privileged
-package manager. Other Linux package-manager setups remain manual.
+package manager. Other Linux package-manager setups remain manual; they can use the
+portable `linux-x64` archive, which only links to newer releases.
 
 The helper waits for launcher shutdown, checks the installed target, and atomically
 records completion before reopening. Failure or denied authorization does not reopen.

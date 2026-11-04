@@ -83,8 +83,8 @@ do not collide or misdescribe their contents. Installing the same product, chann
 release again is supported (Experimental testers commonly keep several copies): the suggested
 folder becomes the first nonexistent `Name`, `Name (2)`, `Name (3)`, … sibling, and the
 registered name gets the first free ` #2`, ` #3`, … suffix when the friendly name is taken.
-After the native parent chooser, a styled folder-name dialog preselects the friendly
-`Program Channel (Version)` name and keeps invalid input in place with an inline error. Cancel or
+After the native parent chooser, a styled folder-name dialog preselects the same
+`Program Channel` folder name (never a version: updates keep the folder, so a version would go stale) and keeps invalid input in place with an inline error. Cancel or
 Escape changes no state. There is no separate installation-name prompt: the same friendly value
 is registered automatically. The destination must be wholly
 nonexistent—even an empty directory is refused. Registry/destination/registered-root

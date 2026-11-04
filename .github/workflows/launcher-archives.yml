@@ -153,10 +153,11 @@ jobs:
         shell: pwsh
         run: .\gradlew.bat "-PbuildIdentifier=$env:SOURCE_COMMIT" buildWindowsInstaller
 
-      - name: Build Linux installers (never install)
+      - name: Build Linux installers and portable archive (never install)
         if: runner.os == 'Linux'
         shell: bash
-        run: ./gradlew "-PbuildIdentifier=${SOURCE_COMMIT}" buildDebInstaller buildRpmInstaller
+        # The portable archive is verified by starting it with only its bundled Java.
+        run: ./gradlew "-PbuildIdentifier=${SOURCE_COMMIT}" buildDebInstaller buildRpmInstaller buildPortableArchive verifyPortableArchive
 
       - name: Import release-only Apple signing credentials
         if: runner.os == 'macOS' && inputs.apple_signing
@@ -365,6 +366,8 @@ jobs:
             build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.deb.sha256
             build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.rpm
             build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.rpm.sha256
+            build/distributions/MegaMek-Launcher-*-linux-x64-portable.tar.gz
+            build/distributions/MegaMek-Launcher-*-linux-x64-portable.tar.gz.sha256
             build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.pkg
             build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.pkg.sha256
           if-no-files-found: error

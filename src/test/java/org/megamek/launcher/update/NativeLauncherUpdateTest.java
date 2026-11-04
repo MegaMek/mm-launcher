@@ -105,6 +105,35 @@ class NativeLauncherUpdateTest {
                 "0.1.0", "windows-x64.exe"));
     }
 
+    @Test
+    void notifyOnlyDiscoveryNeedsNoInstallerAssetAndLinksOnlyTheOfficialReleasePage() throws Exception {
+        String json = """
+                {"tag_name":"v0.1.1","draft":false,"prerelease":false,
+                "html_url":"https://example.org/elsewhere","assets":[]}
+                """;
+        LauncherSelfUpdate updater = new LauncherSelfUpdate();
+        assertEquals(new LauncherSelfUpdate.Release("0.1.1",
+                        URI.create("https://github.com/MegaMek/mm-launcher/releases/tag/v0.1.1")),
+                updater.parseRelease(json.getBytes(StandardCharsets.UTF_8), "0.1.0"));
+        assertNull(updater.parseRelease(json.getBytes(StandardCharsets.UTF_8), "0.1.1"));
+        assertNull(updater.parseRelease(json.getBytes(StandardCharsets.UTF_8), "1.0.0"));
+        assertThrows(IOException.class, () -> updater.parseRelease(json.replace("\"prerelease\":false",
+                "\"prerelease\":true").getBytes(StandardCharsets.UTF_8), "0.1.0"));
+        assertThrows(IOException.class, () -> updater.parseRelease(json.replace("\"draft\":false",
+                "\"draft\":true").getBytes(StandardCharsets.UTF_8), "0.1.0"));
+        assertThrows(IOException.class, () -> updater.parseRelease(json.replace("v0.1.1", "nightly")
+                .getBytes(StandardCharsets.UTF_8), "0.1.0"));
+    }
+
+    @Test
+    void developmentBuildsNeverCheckForNotifyOnlyReleases() {
+        assertFalse(LauncherSelfUpdate.notifyOnly());
+        LauncherSelfUpdate updater = new LauncherSelfUpdate((uri, accept) -> {
+            throw new AssertionError("development builds must not contact the release API");
+        });
+        assertThrows(IOException.class, updater::checkRelease);
+    }
+
     @ParameterizedTest
     @ValueSource(strings = {"linux-x64.deb", "linux-x64.rpm", "macos-intel.pkg", "macos-apple-silicon.pkg"})
     void nativeDownloadsUseTheSharedVerifiedPipelineAndOwnedCleanup(String suffix) throws Exception {
@@ -278,8 +307,8 @@ class NativeLauncherUpdateTest {
         var missing = new NativeLauncherUpdate(NativeLauncherUpdate.Platform.LINUX, entry, runner,
                 path -> path.getFileName().toString().equals("dpkg-query"));
         missing.verifyInstalledVersion("0.1.0");
-        assertTrue(assertThrows(IOException.class, missing::verifyInstallerTools)
-                .getMessage().contains("PolicyKit"));
+        assertTrue(assertThrows(LauncherSelfUpdate.InstallerToolsUnavailableException.class,
+                missing::verifyInstallerTools).getMessage().contains("PolicyKit"));
     }
 
     @Test void downloadedDebIdentityMustMatchTheUnrevisionedVersionAndArchitecture() throws Exception {

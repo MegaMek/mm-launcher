@@ -328,6 +328,76 @@ class WindowsInstallerUiTest {
                 "Uninstall must remove files the runtime created under INSTALLDIR");
     }
 
+    @Test
+    void chosenInstallFolderIsAlwaysOwnedAndRememberedForUpgrades() throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxs").toFile());
+
+        Element resolve = find(doc, "CustomAction", "ResolveInstallFolder");
+        assertEquals("LauncherFolderCA", resolve.getAttribute("BinaryRef"));
+        assertEquals("ResolveInstallFolder", resolve.getAttribute("DllEntry"));
+        assertEquals("immediate", resolve.getAttribute("Execute"));
+        assertEquals("check", resolve.getAttribute("Return"),
+                "An unsafe folder must stop setup before anything changes");
+        assertEquals("$(LauncherFolderCheck)", find(doc, "Binary", "LauncherFolderCA").getAttribute("SourceFile"));
+        assertEquals("[LAUNCHER_PREVIOUS_INSTALLDIR]",
+                find(doc, "CustomAction", "RestoreInstallDir").getAttribute("Value"));
+        var customs = doc.getElementsByTagNameNS(WIX, "Custom");
+        int restores = 0;
+        int resolves = 0;
+        for (int i = 0; i < customs.getLength(); i++) {
+            Element action = (Element) customs.item(i);
+            String condition = action.getAttribute("Condition");
+            if ("RestoreInstallDir".equals(action.getAttribute("Action"))) {
+                assertEquals("AppSearch", action.getAttribute("After"),
+                        "Restore before CostFinalize resolves directories");
+                assertTrue(condition.contains("NOT INSTALLDIR"), "An explicit INSTALLDIR on the command line wins");
+                restores++;
+            } else if ("ResolveInstallFolder".equals(action.getAttribute("Action"))) {
+                assertEquals("RestoreInstallDir", action.getAttribute("After"),
+                        "The bundle's choice overrides the remembered folder");
+                assertTrue(condition.contains("LAUNCHER_INSTALL_FOLDER"));
+                assertTrue(condition.contains("NOT Installed") && condition.contains("NOT REMOVE"));
+                assertEquals("InstallExecuteSequence", ((Element) action.getParentNode()).getLocalName(),
+                        "Must run in silent /passive installs too, before RemoveExistingProducts");
+                resolves++;
+            }
+        }
+        assertEquals(2, restores, "Interactive and silent upgrades must both keep the folder");
+        assertEquals(1, resolves);
+
+        Document product = factory.newDocumentBuilder()
+                .parse(RESOURCES.resolve("MegaMekLauncher.wxs").toFile());
+        Element remembered = find(product, "RegistryValue", "InstallDir");
+        assertEquals("[INSTALLDIR]", remembered.getAttribute("Value"));
+        assertEquals("HKCU", remembered.getAttribute("Root"));
+        assertEquals("string", remembered.getAttribute("Type"));
+        find(product, "RegistrySearch", "PreviousInstallDir");
+
+        String source = Files.readString(RESOURCES.resolveSibling("install-folder")
+                .resolve("LauncherInstallFolder.cs"));
+        assertTrue(source.contains("LauncherFolderName = \"MegaMek Launcher\""));
+        assertTrue(source.contains("folder = InstallFolderFor("),
+                "RemoveFolderEx deletes INSTALLDIR; never install directly into a picked folder");
+        assertTrue(source.contains("FolderProblem(folder,"),
+                "Reject the launcher's state folders and other people's files before INSTALLDIR");
+        assertTrue(source.contains("new[] { \"MegaMek Launcher\", \"MegaMek\" }"),
+                "Both the current and legacy state folders under LOCALAPPDATA are protected");
+        assertTrue(source.contains("session[\"INSTALLDIR\"] = folder"));
+
+        Path bundle = RESOURCES.resolveSibling("bundle");
+        String bundleSource = Files.readString(bundle.resolve("Bundle.wxs"));
+        assertTrue(bundleSource.contains("<MsiProperty Name=\"LAUNCHER_INSTALL_FOLDER\" Value=\"[LauncherInstallFolder]\""));
+        assertTrue(bundleSource.contains("Variable=\"LauncherInstallFolder\""),
+                "The setup must start from the remembered folder");
+        String theme = Files.readString(bundle.resolve("theme.xml"));
+        assertTrue(theme.contains("<BrowseDirectoryAction VariableName=\"LauncherInstallFolder\""),
+                "Change must open the standard Windows folder dialog");
+        assertFalse(theme.contains("DirectoryList"), "The native folder dialog replaces MSI browse controls");
+    }
+
     private static Element find(Document doc, String tag, String id) {
         var elements = doc.getElementsByTagNameNS(WIX, tag);
         for (int i = 0; i < elements.getLength(); i++) {

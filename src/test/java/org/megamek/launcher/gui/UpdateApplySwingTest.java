@@ -130,11 +130,12 @@ class UpdateApplySwingTest {
             assertEquals(FirstLaunchPanel.BACKGROUND,
                     firstConsent.getContentPane().getBackground());
             String firstText = componentText(firstConsent);
-            assertTrue(firstText.contains(
-                    "This will download, verify, plan, and apply the update."));
-            assertTrue(firstText.contains(
-                    "Close MegaMek, MekHQ, and MegaMekLab before continuing."));
-            assertTrue(firstText.contains("Application: MegaMek"));
+            assertTrue(firstText.contains("Update MegaMek?"));
+            assertFalse(firstText.contains("verify, plan"));
+            assertFalse(firstText.contains("JARs"));
+            assertFalse(firstText.contains("Application: "));
+            assertTrue(firstText.contains("Close MegaMek, MekHQ, and MegaMekLab before updating."),
+                    "games started outside the launcher cannot be detected");
             assertTrue(firstText.contains("Current version: 1.0.0"));
             assertTrue(firstText.contains("New version: 2.00.00.1"));
             assertTrue(firstText.contains("Download size: "

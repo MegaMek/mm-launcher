@@ -140,7 +140,7 @@ Recommended Update captures installation binding, fixed channel provenance, fixe
 repository, release/asset IDs, target tag, asset name, size, mandatory record digest, and notes URL. Preparation
 and Apply revalidate the captured source and metadata; a change requires a new attempt and consent.
 The route first shows a simple styled update consent with the application, current and new
-versions, and rounded MiB download size. Its copy and **Update** action authorize download,
+versions, and rounded MB download size. Its copy and **Update** action authorize download,
 verification, internal planning, and Apply as one complete operation. Cancel, Escape, or window
 close fetches no package body; Update is the default action. It downloads the exact full package
 once, retains it only for that active attempt, prepares and verifies the plan internally, then

@@ -897,7 +897,7 @@ class LauncherReleaseTest(unittest.TestCase):
         self.assertNotEqual(COMMIT, github.reference["object"]["sha"])
         self.assertEqual("v0.14.6", github.release["tag_name"])
         self.assertFalse(github.release["draft"])
-        self.assertEqual(10, len(github.release["assets"]))
+        self.assertEqual(12, len(github.release["assets"]))
         self.assertTrue(all(asset["name"].startswith("MegaMek-Launcher-0.14.6-")
                             for asset in github.release["assets"]))
         output.assert_called_once_with(
@@ -943,17 +943,17 @@ class LauncherReleaseTest(unittest.TestCase):
 
     def test_exact_five_installer_and_checksum_pairs_are_verified(self):
         assets = self.assets()
-        self.assertEqual(10, len(assets))
+        self.assertEqual(12, len(assets))
         for asset in assets:
             self.assertEqual(asset.path.stat().st_size, asset.size)
             self.assertEqual(hashlib.sha256(asset.path.read_bytes()).hexdigest(), asset.sha256)
         extra = self.directory / "unexpected.zip"
         extra.write_bytes(b"wrong artifact")
-        with self.assertRaisesRegex(release.ReleaseError, "exactly five"):
+        with self.assertRaisesRegex(release.ReleaseError, "exactly 6"):
             self.assets()
         extra.unlink()
         assets[0].path.unlink()
-        with self.assertRaisesRegex(release.ReleaseError, "exactly five"):
+        with self.assertRaisesRegex(release.ReleaseError, "exactly 6"):
             self.assets()
 
     def test_wrong_checksum_and_empty_installer_fail_before_publication(self):
@@ -1020,13 +1020,13 @@ class LauncherReleaseTest(unittest.TestCase):
         self.assertEqual(COMMIT, writes[0][2]["sha"])
         self.assertTrue(writes[1][2]["draft"], "upload staging is not a draft-review step")
         self.assertEqual(COMMIT, writes[1][2]["target_commitish"])
-        self.assertEqual(10, sum("/assets?name=" in endpoint for _, endpoint, _ in writes))
+        self.assertEqual(12, sum("/assets?name=" in endpoint for _, endpoint, _ in writes))
         self.assertEqual(("PATCH", f"{release.API}/releases/37",
                           {"draft": False, "prerelease": False, "make_latest": "true"}), writes[-1])
         self.assertFalse(github.release["draft"])
         self.assertFalse(github.release["prerelease"])
         self.assertEqual(f"{release.API}/releases/latest", github.calls[-1][1])
-        self.assertEqual(10, len(github.release["assets"]))
+        self.assertEqual(12, len(github.release["assets"]))
         output.assert_called_once_with(
             f"Published https://github.com/{release.REPOSITORY}/releases/tag/v{VERSION}")
 
@@ -1046,7 +1046,7 @@ class LauncherReleaseTest(unittest.TestCase):
         github.draft_tag = "v" + VERSION
         release.publish(github, VERSION, COMMIT, self.assets())
         self.assertFalse(github.release["draft"])
-        self.assertEqual(10, len(github.release["assets"]))
+        self.assertEqual(12, len(github.release["assets"]))
         self.assertEqual(1, sum(method == "PATCH" for method, _, _ in github.calls))
 
     def test_draft_upload_urls_must_match_the_same_release_and_asset(self):

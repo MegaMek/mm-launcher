@@ -32,7 +32,9 @@
   affiliated with Microsoft.
 -->
 
-<!-- WiX v7 installer UI. No InstallDirDlg: per-user folder is fixed. -->
+<!-- WiX v7 installer UI. No InstallDirDlg: the setup bundle offers the folder
+     choice and passes it in LAUNCHER_INSTALL_FOLDER; a direct msiexec install
+     uses the remembered folder or the per-user default. -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Fragment>
     <Binary Id="WizardDialogArt" SourceFile="!(bindpath.Resources)wizard-dialog.bmp"/>
@@ -49,6 +51,19 @@
     </Property>
     <CustomAction Id="RestoreDesktopOptOut" Property="LAUNCHER_DESKTOP_SHORTCUT"
                   Value="{}"/>
+    <!-- Upgrades, including the launcher's silent self-update, stay in the
+         recorded folder (MegaMekLauncher.wxs reads it). Directory properties
+         stay empty until CostFinalize, so an empty INSTALLDIR here means the
+         command line did not choose a folder explicitly. -->
+    <CustomAction Id="RestoreInstallDir" Property="INSTALLDIR"
+                  Value="[LAUNCHER_PREVIOUS_INSTALLDIR]"/>
+    <!-- Built by the windowsInstallerFolderCheck Gradle task (WiX 7 DTF, C#).
+         Turns LAUNCHER_INSTALL_FOLDER into INSTALLDIR (always a dedicated
+         "MegaMek Launcher" folder) or fails setup before anything changes when
+         uninstall could not safely delete that folder. -->
+    <Binary Id="LauncherFolderCA" SourceFile="$(LauncherFolderCheck)"/>
+    <CustomAction Id="ResolveInstallFolder" BinaryRef="LauncherFolderCA"
+                  DllEntry="ResolveInstallFolder" Execute="immediate" Return="check"/>
     <ComponentGroup Id="LauncherUiState" Directory="INSTALLDIR">
       <Component Id="DesktopOptOutPreference" Guid="8B67C1E0-7B4B-4DC3-95D0-F19EBA63BB36"
                  Condition="NOT LAUNCHER_DESKTOP_SHORTCUT">
@@ -68,6 +83,12 @@
       <ComponentGroupRef Id="LauncherUiState"/>
     </FeatureRef>
     <InstallExecuteSequence>
+      <Custom Action="RestoreInstallDir" After="AppSearch"
+              Condition="LAUNCHER_PREVIOUS_INSTALLDIR AND NOT INSTALLDIR AND NOT Installed"/>
+      <!-- Before RemoveExistingProducts, so a rejected folder leaves the
+           current installation untouched. -->
+      <Custom Action="ResolveInstallFolder" After="RestoreInstallDir"
+              Condition="LAUNCHER_INSTALL_FOLDER AND NOT Installed AND NOT REMOVE"/>
       <!-- AppSearch precedes the early RemoveExistingProducts (before CostInitialize).
            UI choice wins in interactive installs; silent upgrades read the old marker.
            The setup bundle seeds its checkbox from the same marker and passes
@@ -210,6 +231,8 @@
         </Control>
       </Dialog>
       <InstallUISequence>
+        <Custom Action="RestoreInstallDir" After="AppSearch"
+                Condition="LAUNCHER_PREVIOUS_INSTALLDIR AND NOT INSTALLDIR AND NOT Installed"/>
         <Custom Action="RestoreDesktopOptOut" After="AppSearch"
                 Condition="LAUNCHER_DESKTOP_OPTOUT = 1 AND NOT Installed"/>
         <Show Dialog="LauncherWelcome" Before="LauncherProgress" Condition="NOT Installed"/>

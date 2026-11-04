@@ -7,7 +7,7 @@
   <String Id="CheckingForUpdatesLabel" Value="Checking for updates" />
   <String Id="UpdateButton" Value="&amp;Update to version [WixStdBAUpdateAvailable]" />
   <String Id="InstallHeader" Value="READY TO DEPLOY" />
-  <String Id="InstallMessage" Value="The launcher installs, updates and starts MegaMek, MegaMekLab and MekHQ. It installs just for you; no administrator rights needed." />
+  <String Id="InstallMessage" Value="Installs, updates and starts MegaMek, MegaMekLab and MekHQ, just for you. No administrator rights needed." />
   <String Id="InstallMessageOptions" Value="Setup will install [WixBundleName] on your computer. Click Install to continue, Options to set installation options, or Cancel to exit." />
   <String Id="InstallVersion" Value="Version [WixBundleVersion]" />
   <String Id="ConfirmCancelMessage" Value="Are you sure you want to cancel?" />
@@ -69,6 +69,9 @@
   <String Id="FilesInUseIgnoreButton" Value="&amp;Ignore" />
   <String Id="FilesInUseExitButton" Value="E&amp;xit" />
 <String Id="Overline" Value="MEGAMEK SUITE" />
+  <String Id="InstallFolderLabel" Value="INSTALL FOLDER" />
+  <String Id="InstallFolderButton" Value="C&amp;HANGE..." />
+  <String Id="InstallFolderHint" Value="Games can be installed anywhere from the launcher later." />
   <String Id="DesktopShortcutCheckbox" Value="Create a desktop shortcut" />
   <String Id="SuccessInstallText" Value="The launcher is installed. Launch it to pick the programs you want; it keeps them up to date." />
   <String Id="ModifyText" Value="This version of the launcher is already installed. The launcher updates itself; you only need this to remove it." />

@@ -7,14 +7,16 @@ The `Launcher native installers` workflow builds on pushes to `main`, pull reque
 and manual dispatch. PR branch pushes run once through the pull-request event rather
 than also starting a duplicate push matrix. Ordinary CI produces **only** five unsigned native installer/checksum
 pairs: Windows x64 setup `.exe`, Linux x64 `.deb` and `.rpm`, and macOS `.pkg` on both
-Intel and Apple Silicon. It does not build, verify, or upload portable archives,
+Intel and Apple Silicon, plus a Java-bundled Linux x64 portable `tar.gz` and its checksum for
+distributions without `apt-get` or `dnf` (for example Arch-based ones). It does not build or upload
+the other portable archives,
 install packages on CI runners, create a release, sign, or notarize. The separate
 manual `Publish launcher release` workflow reuses these same builds and tests before publication,
 with independent, disabled-by-default Windows and Apple signing/notarization modes.
 Only an official release call can opt the reusable Mac packaging jobs into Apple credentials. Each
 installer contains a host-native Java 21 image with all JDK modules and `bin/java`
 for games launched by the application; no external Java is required.
-Run `./gradlew test buildDebInstaller buildRpmInstaller` on Linux,
+Run `./gradlew test buildDebInstaller buildRpmInstaller buildPortableArchive verifyPortableArchive` on Linux,
 `./gradlew test buildPkgInstaller` on macOS, or
 `.\gradlew.bat test buildWindowsInstaller` on Windows. Windows packaging requires
 a .NET 8+ runtime and WiX 7 in `.tools/wix7`: run `scripts/install_wix.ps1` once to
@@ -62,14 +64,20 @@ checks. It must execute tests, not report an all-skipped run as success.
 
 The Windows installer is a setup `.exe`: a WiX 7 Burn bundle with a theme in the
 launcher's look (dark panels, game-style buttons, first-launch artwork) that chains a
-per-user MSI (bundled Java, fixed install folder, persistent upgrade UUID). The bundle
+per-user MSI (bundled Java, user-chosen install folder, persistent upgrade UUID). The bundle
 owns the single Installed Apps entry; the chained MSI's entry is hidden. Installed Apps,
 Start Menu, the desktop shortcut, and executable are named **MegaMek Launcher**; the icon on
 the installed application and installer is derived from MegaMek.png. The macOS
 app bundle uses an ICNS derivative of that same source. The setup window offers a
 **Create a desktop shortcut** option (seeded from a previous opt-out) and **Launch** on
 its completion page; silent `/passive` self-updates never launch the app from setup.
-It does not prompt for an install directory. Theme sources and art live in
+The install page shows the install folder; **Change...** opens the standard Windows folder
+dialog. Setup always installs into a `MegaMek Launcher` folder inside the chosen folder (it must
+be new or empty, and never the launcher's own settings folder) and remembers it for upgrades and
+self-updates. A WiX 7 DTF custom action (`src/distribution/windows/install-folder`) checks the
+folder before anything changes; a rejected folder is explained and setup ends without touching the
+existing installation, so the user runs setup again to choose another folder (the stock Burn UI
+cannot re-plan after a failed apply). Theme sources and art live in
 `src/distribution/windows/bundle` (`python src/distribution/windows/bundle/generate_art.py`
 regenerates the art). The chained MSI keeps its own WiX wizard for direct MSI use.
 `mm-launcher` remains the compatible internal CLI and Linux script name.
@@ -106,7 +114,10 @@ close and confirms the package receipt and app version before reopening.
 Linux selects `.deb` or `.rpm` from the installed package, not whichever tool happens to
 be present. PolicyKit supplies the administrator prompt; `apt-get` or `dnf` performs the
 upgrade using a verified private copy. Linux requires a desktop authorization agent.
-Portable copies and unsupported package-manager setups remain manual.
+Portable copies and unsupported package-manager setups remain manual. Released portable copies,
+and package installs missing PolicyKit or their package manager, still check for a newer official
+release on startup and from Settings; when one exists they offer to open its release page instead of
+installing it. Development builds never check.
 Existing macOS/Linux launchers need one manual upgrade to a release containing this support.
 Active updates are shown as still finishing, not as failed release lookups. Completed
 failures are acknowledged so a later manual check can retry. Incomplete reports are
@@ -127,7 +138,8 @@ as `msi-update-helper.log` and `msi-update-installer.log` on Windows, or
 both locations. Windows PowerShell's atomic completion write uses `[NullString]::Value`,
 not `$null`, which is converted to an invalid empty backup path by its .NET method binding.
 If no compatible
-official release exists, no upgrade is attempted. Portable archives do not self-update.
+official release exists, no upgrade is attempted. Portable archives do not self-update; they only
+link to the newer release.
 Native upgrades replace installer-owned binaries, not launcher registrations, settings,
 logs or installed games. Downloads retain macOS quarantine; self-update does not bypass
 Gatekeeper, package-manager trust policy, or administrator authorization.
@@ -145,7 +157,8 @@ or pull requests. Major/minor version changes remain explicit source changes.
 
 The workflow calls the ordinary native-installer CI at the captured candidate commit and
 waits for all four platforms' builds, package inspections, required headless tests, and release tooling
-tests to pass. A read-only release-assets job stages this run's five installers and five checksum
+tests to pass. A read-only release-assets job stages this run's five installers, the Linux portable
+archive and their six checksum
 files, validates any enabled Apple notarization
 records from the Mac packaging jobs, and retains one immutable final asset
 set. The write-enabled publication job downloads that exact artifact ID, checks the filenames and
@@ -356,7 +369,8 @@ no channel, check, preview, update, or recovery action; only its opt-in
 **Enable updates…** item in the **More…** menu is available. There is no bulk update.
 Managed Home has one top-left information area for useful aggregate update state:
 **Checking for updates…**, **All installations are up to date**,
-**N installations have updates**, or **Some installations could not be checked**. It does not
+or **Some installations could not be checked**. Available updates are shown only by the
+**Installations** count badge, not repeated there. It does not
 repeat an obvious post-install “ready” message or place status text above navigation.
 
 The title bar shows the packaged MegaMek Launcher version (or "development build" outside a

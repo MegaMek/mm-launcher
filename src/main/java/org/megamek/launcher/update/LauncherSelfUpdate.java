@@ -85,20 +85,119 @@ public final class LauncherSelfUpdate {
 
     public record Candidate(String tag, String version, String name, URI url, long size, String sha256) {}
 
+    /** A newer official release that a notify-only installation can only point the player to. */
+    public record Release(String version, URI page) {}
+
+    /**
+     * A verified native installation whose package tools can't apply updates here (for example
+     * an RPM install without dnf). It can still be pointed at the newer release's page.
+     */
+    public static final class InstallerToolsUnavailableException extends IOException {
+        public InstallerToolsUnavailableException(String message) { super(message); }
+    }
+
     public static boolean available() {
         return windowsAvailable() || NativeLauncherUpdate.available();
     }
 
+    /**
+     * Released builds outside a native installer (portable or generic archives) cannot apply
+     * an update, but can still tell the player that one exists. Development builds have no
+     * released version and never check.
+     */
+    public static boolean notifyOnly() {
+        return !available() && VERSION.matcher(currentVersion()).matches();
+    }
+
     private static boolean windowsAvailable() {
-        String location = System.getProperty("jpackage.app-path", "");
-        String local = System.getenv("LOCALAPPDATA");
-        // Portable entry points do not carry this property; also require the
-        // fixed per-user MSI binary location rather than just the executable name.
         return System.getProperty("os.name", "").startsWith("Windows")
-                && local != null && !location.isBlank()
-                && Path.of(location).toAbsolutePath().normalize().toString()
-                .equalsIgnoreCase(Path.of(local, "Programs", "MegaMek Launcher",
-                        "MegaMek Launcher.exe").toAbsolutePath().normalize().toString());
+                && windowsInstallMatches(System.getProperty("jpackage.app-path", ""),
+                        System.getenv("LOCALAPPDATA"), recordedInstallDir());
+    }
+
+    /**
+     * Portable entry points do not carry jpackage.app-path; an MSI install runs
+     * from either the per-user default folder or the folder the installer recorded.
+     */
+    static boolean windowsInstallMatches(String appPath, String localAppData, String recordedInstallDir) {
+        if (appPath == null || appPath.isBlank()) return false;
+        try {
+            String location = Path.of(appPath).toAbsolutePath().normalize().toString();
+            if (localAppData != null && !localAppData.isBlank() && location.equalsIgnoreCase(
+                    launcherExe(Path.of(localAppData, "Programs", "MegaMek Launcher"))))
+                return true;
+            return recordedInstallDir != null && !recordedInstallDir.isBlank()
+                    && Path.of(recordedInstallDir).isAbsolute()
+                    && location.equalsIgnoreCase(launcherExe(Path.of(recordedInstallDir)));
+        } catch (java.nio.file.InvalidPathException invalid) {
+            return false;
+        }
+    }
+
+    private static String launcherExe(Path folder) {
+        return folder.resolve("MegaMek Launcher.exe").toAbsolutePath().normalize().toString();
+    }
+
+    /** Parses the InstallDir string value from {@code reg.exe export} text. */
+    static String parseRecordedInstallDir(String regExport) {
+        var match = Pattern.compile("(?m)^\"InstallDir\"=\"((?:[^\"\\\\]|\\\\.)*)\"\\s*$")
+                .matcher(regExport);
+        return match.find() ? match.group(1).replaceAll("\\\\(.)", "$1") : null;
+    }
+
+    private static boolean recordedInstallDirRead;
+    private static String recordedInstallDir;
+
+    /*
+     * Cached in a plain synchronized method rather than a holder class's static initializer:
+     * any helper thread used by the read must never wait on a class that is still
+     * initializing, or it deadlocks with the caller (the Swing event thread at startup).
+     */
+    static synchronized String recordedInstallDir() {
+        if (!recordedInstallDirRead) {
+            recordedInstallDir = readRecordedInstallDir();
+            recordedInstallDirRead = true;
+        }
+        return recordedInstallDir;
+    }
+
+    private static String readRecordedInstallDir() {
+        if (!System.getProperty("os.name", "").startsWith("Windows")
+                || System.getProperty("jpackage.app-path", "").isBlank()) return null;
+        Path export = null;
+        try {
+            // reg.exe query prints in the console code page; export always writes UTF-16LE.
+            export = Files.createTempFile("megamek-launcher-installdir", ".reg");
+            Process process = new ProcessBuilder("reg.exe", "export",
+                    "HKCU\\Software\\MegaMek\\MegaMek Launcher\\Installer", export.toString(), "/y")
+                    .redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
+            if (!process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                return null;
+            }
+            if (process.exitValue() != 0 || Files.size(export) > 64 * 1024) return null;
+            String text = new String(Files.readAllBytes(export), StandardCharsets.UTF_16LE);
+            return parseRecordedInstallDir(text);
+        } catch (IOException | RuntimeException error) {
+            return null;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return null;
+        } finally {
+            if (export != null) {
+                try {
+                    Files.deleteIfExists(export);
+                } catch (IOException ignored) {
+                    // A leftover temp file is harmless.
+                }
+            }
+        }
+    }
+
+    static synchronized void resetRecordedInstallDirForTest() {
+        recordedInstallDirRead = false;
+        recordedInstallDir = null;
     }
 
     public static String currentVersion() {
@@ -115,14 +214,46 @@ public final class LauncherSelfUpdate {
             nativeUpdater.verifyInstalledVersion(currentVersion());
             nativeUpdater.verifyInstallerTools();
         }
+        return parseCandidate(latestReleaseMetadata(), currentVersion(), nativeUpdater == null
+                ? WINDOWS_SUFFIX : nativeUpdater.suffix(currentVersion()));
+    }
+
+    /**
+     * Finds a newer official release for a copy that can't update in place ({@link #notifyOnly()}
+     * or {@link InstallerToolsUnavailableException}); null when current.
+     */
+    public Release checkRelease() throws IOException, InterruptedException {
+        if (!VERSION.matcher(currentVersion()).matches()) {
+            throw new IOException("Launcher update checks require a released launcher version");
+        }
+        return parseRelease(latestReleaseMetadata(), currentVersion());
+    }
+
+    private byte[] latestReleaseMetadata() throws IOException, InterruptedException {
         try (var response = transport.get(LATEST, "application/vnd.github+json")) {
             if (response.status() != 200) throw new IOException(
                     "Official launcher release lookup returned HTTP " + response.status());
             byte[] metadata = response.body().readNBytes(1024 * 1024 + 1);
             if (metadata.length > 1024 * 1024) throw new IOException("Release metadata exceeds limit");
-            return parseCandidate(metadata, currentVersion(), nativeUpdater == null
-                    ? WINDOWS_SUFFIX : nativeUpdater.suffix(currentVersion()));
+            return metadata;
         }
+    }
+
+    Release parseRelease(byte[] metadata, String installedVersion) throws IOException {
+        String tag = stableTag(json.readTree(metadata));
+        String version = tag.replaceFirst("^v", "");
+        if (compare(version, installedVersion) <= 0) return null;
+        return new Release(version, URI.create("https://github.com/MegaMek/mm-launcher/releases/tag/" + tag));
+    }
+
+    private static String stableTag(JsonNode release) throws IOException {
+        if (release == null || !release.isObject() || release.path("draft").asBoolean(true)
+                || release.path("prerelease").asBoolean(true)) {
+            throw new IOException("No stable official launcher release is available");
+        }
+        String tag = release.path("tag_name").asText("");
+        if (!TAG.matcher(tag).matches()) throw new IOException("Unsupported launcher release tag");
+        return tag;
     }
 
     Candidate parseCandidate(byte[] metadata, String installedVersion) throws IOException {
@@ -131,12 +262,7 @@ public final class LauncherSelfUpdate {
 
     Candidate parseCandidate(byte[] metadata, String installedVersion, String suffix) throws IOException {
             JsonNode release = json.readTree(metadata);
-            if (release == null || !release.isObject() || release.path("draft").asBoolean(true)
-                    || release.path("prerelease").asBoolean(true)) {
-                throw new IOException("No stable official launcher release is available");
-            }
-            String tag = release.path("tag_name").asText("");
-            if (!TAG.matcher(tag).matches()) throw new IOException("Unsupported launcher release tag");
+            String tag = stableTag(release);
             String version = tag.replaceFirst("^v", "");
             if (compare(version, installedVersion) <= 0) return null;
             String name = "MegaMek-Launcher-" + version + "-" + suffix;
@@ -299,6 +425,14 @@ public final class LauncherSelfUpdate {
 
     private static String literal(String value) { return "'" + value.replace("'", "''") + "'"; }
 
+    static String decodeBase64Utf8(String encoded) throws IOException {
+        try {
+            return new String(java.util.Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException invalid) {
+            throw new IOException("Windows Installer returned an unreadable install folder");
+        }
+    }
+
     public static void verifyInstalledVersion() throws IOException, InterruptedException {
         NativeLauncherUpdate nativeUpdate = NativeLauncherUpdate.system();
         if (nativeUpdate != null) {
@@ -309,9 +443,17 @@ public final class LauncherSelfUpdate {
                 + "$i=New-Object -ComObject WindowsInstaller.Installer;"
                 + "$codes=@($i.RelatedProducts(" + literal(UPGRADE) + "));"
                 + "if($codes.Count -ne 1){throw 'Expected one installed MSI product'};"
-                + "$i.ProductInfo($codes[0],'VersionString')";
-        if (!currentVersion().equals(powershell(script).trim()))
+                + "$i.ProductInfo($codes[0],'VersionString');"
+                // Base64 keeps a non-ASCII folder intact whatever the console code page is.
+                + "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("
+                + "[string]$i.ProductInfo($codes[0],'InstallLocation')))";
+        String[] lines = powershell(script).trim().split("\\R", 2);
+        if (!currentVersion().equals(lines[0].trim()))
             throw new IOException("Running launcher version is not the installed MSI version");
+        String location = lines.length > 1 ? decodeBase64Utf8(lines[1].trim()) : "";
+        if (!location.isEmpty() && !windowsInstallMatches(
+                System.getProperty("jpackage.app-path", ""), null, location))
+            throw new IOException("Running launcher is not in the installed MSI folder");
     }
 
     private static String powershell(String script) throws IOException, InterruptedException {

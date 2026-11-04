@@ -346,7 +346,8 @@ public final class LauncherFrame extends JFrame {
                             message -> status.setText("Artwork unavailable. " + message));
                 }
                 maybeCheckManagedCopiesOnOpen();
-                if (!launcherUpdateChecked && LauncherSelfUpdate.available()) {
+                if (!launcherUpdateChecked
+                        && (LauncherSelfUpdate.available() || LauncherSelfUpdate.notifyOnly())) {
                     launcherUpdateChecked = true;
                     checkLauncherUpdate(false);
                 }
@@ -391,6 +392,9 @@ public final class LauncherFrame extends JFrame {
                 guiScale.space("md")));
         homeInformationRow.setAlignmentX(Component.CENTER_ALIGNMENT);
         homeInformationRow.add(homeInformationLabel, BorderLayout.WEST);
+        // Reserve one line of text height so Home does not shift when the message clears.
+        homeInformationRow.add(Box.createVerticalStrut(homeInformationLabel.getFontMetrics(
+                homeInformationLabel.getFont()).getHeight()), BorderLayout.EAST);
         homeInformationRow.setMaximumSize(new Dimension(Integer.MAX_VALUE,
                 homeInformationRow.getPreferredSize().height));
         center.add(homeInformationRow);
@@ -880,7 +884,6 @@ public final class LauncherFrame extends JFrame {
         if (homeInformationLabel == null) return;
         String text = homeInformationText();
         homeInformationLabel.setText(text);
-        homeInformationRow.setVisible(!text.isBlank());
         homeInformationRow.setMaximumSize(new Dimension(Integer.MAX_VALUE,
                 homeInformationRow.getPreferredSize().height));
         homeInformationLabel.getAccessibleContext().setAccessibleName(
@@ -914,8 +917,8 @@ public final class LauncherFrame extends JFrame {
                     && check.result().updateAvailable();
         }).count();
         if (updates > 0) {
-            return updates + (updates == 1
-                    ? " installation has an update" : " installations have updates");
+            // The Installations button's count badge already says this.
+            return "";
         }
         boolean failed = checkedRecords.stream().map(record -> installationChecks.get(record.id()))
                 .filter(java.util.Objects::nonNull)
@@ -2768,7 +2771,7 @@ public final class LauncherFrame extends JFrame {
             utilityButtons.add(report);
             diagnostics.add(report);
             left.add(diagnostics);
-            if (LauncherSelfUpdate.available()) {
+            if (LauncherSelfUpdate.available() || LauncherSelfUpdate.notifyOnly()) {
                 left.add(Box.createVerticalStrut(guiScale.space("lg")));
                 JPanel updater = settingsSection("Launcher update");
                 JButton check = homeButton("Check for launcher update", "checkLauncherUpdateButton");
@@ -3320,6 +3323,10 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void checkLauncherUpdate(boolean explicit) {
+        if (LauncherSelfUpdate.notifyOnly()) {
+            checkLauncherRelease(explicit);
+            return;
+        }
         run("Checking launcher release", () -> services.checkLauncherUpdate(
                 LauncherSelfUpdate.consumeReport(launcherUpdateReport(), LauncherSelfUpdate.currentVersion()),
                 launcherUpdater::check), checked -> {
@@ -3365,12 +3372,53 @@ public final class LauncherFrame extends JFrame {
                 System.exit(0);
             }, error -> progress.append("\nLauncher update failed: " + errorDetail(error) + "\n"), () -> {});
         }, error -> {
+            if (toolsUnavailable(error)) {
+                checkLauncherRelease(explicit);
+                return;
+            }
             if (!explicit) {
                 setLauncherUpdateStatus(false,
                         "Launcher update: " + SanitizedErrors.text(error.getMessage()));
                 recordErrorAsync("Automatic launcher update check", error, ignored -> {});
             }
         }, () -> {}, explicit, explicit);
+    }
+
+    static boolean toolsUnavailable(Throwable error) {
+        for (Throwable cause = error; cause != null; cause = cause.getCause()) {
+            if (cause instanceof LauncherSelfUpdate.InstallerToolsUnavailableException) return true;
+        }
+        return false;
+    }
+
+    /** Copies that can't update in place link a newer release to its page instead. */
+    private void checkLauncherRelease(boolean explicit) {
+        run("Checking launcher release", launcherUpdater::checkRelease, release -> {
+            if (release == null) {
+                setLauncherUpdateStatus(explicit, "Launcher is up to date.");
+                return;
+            }
+            setLauncherUpdateStatus(explicit, "Launcher " + release.version() + " is available.");
+            if (confirmLauncherDownload(this, guiScale, release)) {
+                openWebsite(release.page(), "launcher release page");
+            }
+        }, error -> {
+            if (!explicit) {
+                setLauncherUpdateStatus(false,
+                        "Launcher update: " + SanitizedErrors.text(error.getMessage()));
+                recordErrorAsync("Automatic launcher update check", error, ignored -> {});
+            }
+        }, () -> {}, explicit, explicit);
+    }
+
+    static boolean confirmLauncherDownload(Window owner, GuiScale scale, LauncherSelfUpdate.Release release) {
+        return LauncherAlertDialog.showConfirm(owner, scale, "Update MegaMek Launcher",
+                "Version " + release.version() + " is available.\n\n"
+                        + "This copy of the launcher can't update itself. Download the new version "
+                        + "from its release page and install it the same way as this one. For the "
+                        + "portable archive, extract it to a new folder rather than over this one, "
+                        + "and keep any games or settings stored inside the old folder.",
+                "Open release page");
     }
 
     /**
@@ -3699,7 +3747,7 @@ public final class LauncherFrame extends JFrame {
         try {
             return normalInstallLocationPrompts.choose(owner,
                     target == null ? null : target.getParent(),
-                    NormalInstallService.friendlyName(repository, channel, version));
+                    NormalInstallService.defaultFolderName(repository, channel));
         } catch (IOException error) {
             showError("Preparing install location failed", error);
             return null;
@@ -3720,7 +3768,8 @@ public final class LauncherFrame extends JFrame {
                     try {
                         changed = normalInstallLocationPrompts.choose(source,
                                 plan.destination().getParent(),
-                                NormalInstallService.friendlyName(plan));
+                                NormalInstallService.defaultFolderName(
+                                        plan.repository(), plan.channel()));
                     } catch (IOException error) {
                         showError("Preparing install location failed", error);
                         return false;
@@ -4634,14 +4683,14 @@ public final class LauncherFrame extends JFrame {
         dialog.setVisible(true);
     }
 
-    /** The usual suggested parent, with the version-specific folder name the picker used before. */
+    /** The usual suggested folder; exact releases update later, so the name has no version. */
     private Path suggestedExactDestination(OfficialRepository repository,
                                            FollowChannel channel, String tag)
             throws IOException {
         Path parent = services.normalInstallDestination(repository, channel).getParent();
         if (parent == null) throw new IOException("no install folder could be suggested");
         return NormalInstallService.availableFolder(parent,
-                NormalInstallService.friendlyName(repository, channel, tag));
+                NormalInstallService.defaultFolderName(repository, channel));
     }
 
     void install(OfficialRepository repository, String tag, Path destination, String name,

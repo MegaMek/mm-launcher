@@ -260,6 +260,11 @@ abstract class WindowsInstallerMsi : DefaultTask() {
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val iconFile: RegularFileProperty
 
+    // Packed by WindowsInstallerFolderCheck.
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val folderCheckFile: RegularFileProperty
+
     // WiX sources (*.wxs) and the dialog bitmaps they bind.
     @get:InputDirectory
     @get:PathSensitive(PathSensitivity.RELATIVE)
@@ -336,6 +341,7 @@ abstract class WindowsInstallerMsi : DefaultTask() {
                 "-d", "LauncherProductCode={$productCode}",
                 "-d", "LauncherUpgradeCode={${upgradeCode.get()}}",
                 "-d", "LauncherIcon=${icon.absolutePath}",
+                "-d", "LauncherFolderCheck=${folderCheckFile.get().asFile.absolutePath}",
                 "-bindpath", "AppImage=${appImage.absolutePath}",
                 "-bindpath", "Resources=${sources.absolutePath}",
                 "-intermediatefolder", intermediate.absolutePath,
@@ -430,6 +436,75 @@ abstract class WindowsInstallerBundle : DefaultTask() {
             )
         }
         check(installer.isFile) { "WiX did not produce ${installer.absolutePath}." }
+    }
+}
+
+// Builds the MSI's install-folder check custom action (C# via WiX 7 DTF). It runs
+// before anything changes and rejects folders uninstall could not safely delete.
+// Uses the .NET Framework 4 csc.exe built into Windows, so no .NET SDK is needed.
+abstract class WindowsInstallerFolderCheck : DefaultTask() {
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val sourceDirectory: DirectoryProperty
+
+    @get:Internal
+    abstract val wixToolDirectory: DirectoryProperty
+
+    @get:OutputFile
+    abstract val customActionFile: RegularFileProperty
+
+    @get:Internal
+    abstract val intermediateDirectory: DirectoryProperty
+
+    @get:Inject
+    abstract val execOperations: ExecOperations
+
+    @TaskAction
+    fun buildCustomAction() {
+        check(OperatingSystem.current().isWindows) {
+            "The Windows installer custom action can only be built on Windows."
+        }
+        val dtfDirectory = File(wixToolDirectory.get().asFile, "dtf")
+        val makeSfxCa = File(dtfDirectory, "WixToolset.Dtf.MakeSfxCA.exe")
+        val dtf = File(dtfDirectory, "WixToolset.Dtf.WindowsInstaller.dll")
+        val sfxCa = File(dtfDirectory, "x64/SfxCA.dll")
+        check(makeSfxCa.isFile && dtf.isFile && sfxCa.isFile) {
+            "The WiX 7 DTF tools are required at ${dtfDirectory.absolutePath}. Run " +
+                "scripts/install_wix.ps1 to install the pinned, hash-verified version there."
+        }
+        val windows = System.getenv("WINDIR") ?: "C:\\Windows"
+        val csc = File(windows, "Microsoft.NET/Framework64/v4.0.30319/csc.exe")
+        check(csc.isFile) { "The .NET Framework 4 C# compiler was not found at ${csc.absolutePath}." }
+
+        val source = sourceDirectory.get().asFile
+        val intermediate = intermediateDirectory.get().asFile
+        intermediate.mkdirs()
+        val assembly = File(intermediate, "LauncherInstallFolder.dll")
+        val packed = customActionFile.get().asFile
+        packed.parentFile.mkdirs()
+        check(!packed.exists() || packed.delete()) {
+            "Could not remove previous custom action at ${packed.absolutePath}."
+        }
+        execOperations.exec {
+            executable = csc.absolutePath
+            args(
+                "/nologo", "/target:library", "/optimize",
+                "/out:${assembly.absolutePath}",
+                "/reference:${dtf.absolutePath}",
+                File(source, "LauncherInstallFolder.cs").absolutePath
+            )
+        }
+        execOperations.exec {
+            executable = makeSfxCa.absolutePath
+            args(
+                packed.absolutePath,
+                sfxCa.absolutePath,
+                assembly.absolutePath,
+                File(source, "CustomAction.config").absolutePath,
+                dtf.absolutePath
+            )
+        }
+        check(packed.isFile) { "MakeSfxCA did not produce ${packed.absolutePath}." }
     }
 }
 
@@ -692,7 +767,7 @@ plugins {
 }
 
 group = "org.megamek.launcher"
-version = "0.14.29"
+version = "0.14.30"
 
 repositories {
     mavenCentral()
@@ -1259,6 +1334,16 @@ val windowsAppImage = tasks.register<WindowsAppImage>("windowsAppImage") {
 // The MSI itself is authored in src/distribution/windows/msi and built with
 // WiX 7 directly; jpackage only produces the app image above. The MSI is an
 // intermediate: users get the setup bundle below, which chains it.
+val windowsInstallerFolderCheck = tasks.register<WindowsInstallerFolderCheck>("windowsInstallerFolderCheck") {
+    group = "distribution"
+    description = "Builds the MSI's install-folder check custom action with WiX 7 DTF."
+    wixToolDirectory.set(layout.projectDirectory.dir(".tools/wix7"))
+    sourceDirectory.set(layout.projectDirectory.dir("src/distribution/windows/install-folder"))
+    customActionFile.set(layout.buildDirectory.file("packaging/windows-installer/ca/LauncherInstallFolder.CA.dll"))
+    intermediateDirectory.set(layout.buildDirectory.dir("tmp/windowsInstallerFolderCheck"))
+    outputs.cacheIf { false }
+}
+
 val windowsInstallerMsi = tasks.register<WindowsInstallerMsi>("windowsInstallerMsi") {
     group = "distribution"
     description = "Builds the per-user Windows MSI (chained by the setup bundle) with WiX 7."
@@ -1271,6 +1356,7 @@ val windowsInstallerMsi = tasks.register<WindowsInstallerMsi>("windowsInstallerM
     appVersion.set(windowsInstallerAppVersion)
     upgradeCode.set(windowsInstallerUpgradeCode)
     iconFile.set(windowsInstallerIcon)
+    folderCheckFile.set(windowsInstallerFolderCheck.flatMap { it.customActionFile })
     wixSources.set(layout.projectDirectory.dir("src/distribution/windows/msi"))
     outputs.cacheIf { false }
 }
