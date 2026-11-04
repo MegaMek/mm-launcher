@@ -71,7 +71,7 @@
 <String Id="Overline" Value="MEGAMEK SUITE" />
   <String Id="InstallFolderLabel" Value="INSTALL FOLDER" />
   <String Id="InstallFolderButton" Value="C&amp;HANGE..." />
-  <String Id="InstallFolderHint" Value="You choose where games go later, in the launcher." />
+  <String Id="InstallFolderHint" Value="Games can be installed anywhere with the launcher." />
   <String Id="DesktopShortcutCheckbox" Value="Create a desktop shortcut" />
   <String Id="SuccessInstallText" Value="The installation has completed successfully, Commander." />
   <String Id="ModifyText" Value="This version is already installed." />
