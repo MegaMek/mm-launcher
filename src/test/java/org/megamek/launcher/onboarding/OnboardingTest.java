@@ -37,7 +37,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.megamek.launcher.launch.ApplicationLauncher;
 import org.megamek.launcher.launch.JavaRuntime;
+import org.megamek.launcher.launch.LaunchOptions;
+import org.megamek.launcher.launch.LaunchSignals;
+import org.megamek.launcher.launch.ProcessIdentity;
 import org.megamek.launcher.launch.ProcessRunner;
+import org.megamek.launcher.launch.RootCoordinator;
 import org.megamek.launcher.registry.InstallationRecord;
 import org.megamek.launcher.registry.RegistryData;
 import org.megamek.launcher.registry.RegistryStore;
@@ -52,6 +56,9 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.jar.Attributes;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
@@ -216,6 +223,70 @@ class OnboardingTest {
     }
 
     @Test
+    void launchWaitsForTheReadyFileOfAnApplicationThatReportsReadiness() throws Exception {
+        Path root = suite("ready", true, true);
+        Path java = Files.writeString(Files.createDirectories(temp.resolve("ready-jdk")).resolve("java.exe"), "fixture").toRealPath();
+        InstallationRecord record = record(root);
+        LaunchSignals signals = new LaunchSignals(temp.resolve("signals"));
+        SignallingRunner runner = new SignallingRunner(true);
+        ApplicationLauncher launcher = new ApplicationLauncher(runner, new RootCoordinator(temp.resolve("coordination")),
+                signals);
+
+        assertEquals(0, launcher.launch(record, "megamek",
+                new JavaRuntime(runner).validateExternal(java, root), LaunchOptions.builtIn(),
+                runner.ready::countDown));
+
+        assertEquals(0, runner.ready.getCount());
+        Path readyFile = runner.readyFile;
+        assertEquals(temp.resolve("signals").toAbsolutePath().normalize(), readyFile.getParent());
+        assertFalse(Files.exists(readyFile), "the launcher removes the ready file it saw");
+        assertFalse(launcher.command(record, "megamek",
+                        new JavaRuntime(runner).validateExternal(java, root)).stream()
+                        .anyMatch(value -> value.contains(LaunchSignals.READY_FILE_PROPERTY)),
+                "copied launch commands never carry a launch's ready file");
+    }
+
+    @Test
+    void launchReportsAnApplicationWithoutReadinessAsReadyOnceStarted() throws Exception {
+        Path root = suite("plain", true);
+        Path java = Files.writeString(Files.createDirectories(temp.resolve("plain-jdk")).resolve("java.exe"), "fixture").toRealPath();
+        LaunchSignals signals = new LaunchSignals(temp.resolve("signals"));
+        SignallingRunner runner = new SignallingRunner(false);
+        ApplicationLauncher launcher = new ApplicationLauncher(runner, new RootCoordinator(temp.resolve("coordination")),
+                signals);
+
+        assertEquals(0, launcher.launch(record(root), "megamek",
+                new JavaRuntime(runner).validateExternal(java, root), LaunchOptions.builtIn(),
+                runner.ready::countDown));
+
+        assertEquals(0, runner.ready.getCount());
+        assertEquals(null, runner.readyFile);
+    }
+
+    @Test
+    void manifestAttributeReadsTheProductJarAndToleratesMissingJars() throws Exception {
+        Path root = suite("manifest", true, true);
+        InstallationInspector inspector = new InstallationInspector();
+
+        assertEquals(java.util.Optional.of("1"), inspector.manifestAttribute(root, "MegaMek.jar",
+                LaunchSignals.READY_MANIFEST_ATTRIBUTE));
+        assertEquals(java.util.Optional.empty(), inspector.manifestAttribute(root, "MekHQ.jar",
+                LaunchSignals.READY_MANIFEST_ATTRIBUTE));
+        assertEquals(java.util.Optional.empty(), inspector.manifestAttribute(root, "Missing.jar",
+                LaunchSignals.READY_MANIFEST_ATTRIBUTE));
+        assertEquals(java.util.Optional.empty(), inspector.manifestAttribute(root, "../outside.jar",
+                LaunchSignals.READY_MANIFEST_ATTRIBUTE));
+    }
+
+    private static InstallationRecord record(Path root) throws IOException {
+        Inspection inspection = new InstallationInspector().inspect(root);
+        return new InstallationRecord(
+                "12345678-1234-1234-1234-123456789012", "fixture",
+                inspection.canonicalRoot(), inspection.observedBuild(), inspection.products(),
+                null, false, "2026-01-01T00:00:00Z");
+    }
+
+    @Test
     void benignFixtureActuallyLaunchesAndDoesNotWriteInstallation() throws Exception {
         Path root = layout("smoke");
         byte[] mainClass;
@@ -244,6 +315,10 @@ class OnboardingTest {
     }
 
     private Path suite(String name, boolean version) throws Exception {
+        return suite(name, version, false);
+    }
+
+    private Path suite(String name, boolean version, boolean reportsReady) throws Exception {
         Path root = layout(name);
         Map<String, byte[]> metadata = version ? Map.of(
                 "Version.properties", "major=0\nminor=51\npatch=01\n".getBytes(
@@ -252,7 +327,8 @@ class OnboardingTest {
                         StandardCharsets.ISO_8859_1)) : null;
         jar(root.resolve("lib/dependency.jar"), null, null, null);
         jar(root.resolve("lib/MegaMek.jar"), null, "lib/dependency.jar", metadata);
-        jar(root.resolve("MegaMek.jar"), "megamek.MegaMek", "lib/dependency.jar", metadata);
+        jar(root.resolve("MegaMek.jar"), "megamek.MegaMek", "lib/dependency.jar", metadata,
+                reportsReady ? Map.of(LaunchSignals.READY_MANIFEST_ATTRIBUTE, "1") : Map.of());
         jar(root.resolve("MegaMekLab.jar"), "megameklab.MegaMekLab",
                 "lib/MegaMek.jar lib/dependency.jar", null);
         jar(root.resolve("MekHQ.jar"), "mekhq.MekHQ",
@@ -270,10 +346,16 @@ class OnboardingTest {
 
     private static void jar(Path path, String main, String classPath, Map<String, byte[]> entries)
             throws IOException {
+        jar(path, main, classPath, entries, Map.of());
+    }
+
+    private static void jar(Path path, String main, String classPath, Map<String, byte[]> entries,
+                            Map<String, String> attributes) throws IOException {
         Manifest manifest = new Manifest();
         manifest.getMainAttributes().put(Attributes.Name.MANIFEST_VERSION, "1.0");
         if (main != null) manifest.getMainAttributes().put(Attributes.Name.MAIN_CLASS, main);
         if (classPath != null) manifest.getMainAttributes().put(Attributes.Name.CLASS_PATH, classPath);
+        attributes.forEach(manifest.getMainAttributes()::putValue);
         try (JarOutputStream output = new JarOutputStream(Files.newOutputStream(path), manifest)) {
             if (entries != null) {
                 for (Map.Entry<String, byte[]> entry : entries.entrySet()) {
@@ -293,6 +375,40 @@ class OnboardingTest {
             }
         }
         return result;
+    }
+
+    /** Validates Java, then plays a started game that writes its ready file when asked to. */
+    private static final class SignallingRunner implements ProcessRunner {
+        final CountDownLatch ready = new CountDownLatch(1);
+        private final boolean writeReady;
+        volatile Path readyFile;
+
+        SignallingRunner(boolean writeReady) {
+            this.writeReady = writeReady;
+        }
+
+        @Override
+        public Result run(List<String> command, Path workingDirectory, Duration timeout,
+                          boolean inheritIo) {
+            return new Result(0, "openjdk version \"21.0.4\"", false);
+        }
+
+        @Override
+        public Result runTracked(List<String> command, Path workingDirectory, Duration timeout,
+                                 boolean inheritIo, Consumer<ProcessIdentity> started)
+                throws IOException, InterruptedException {
+            String prefix = "-D" + LaunchSignals.READY_FILE_PROPERTY + "=";
+            readyFile = command.stream().filter(value -> value.startsWith(prefix))
+                    .map(value -> Path.of(value.substring(prefix.length()))).findFirst().orElse(null);
+            started.accept(ProcessIdentity.of(ProcessHandle.current()));
+            if (writeReady) {
+                Files.createFile(readyFile);
+            }
+            if (!ready.await(10, TimeUnit.SECONDS)) {
+                throw new IOException("the launcher never reported the game as ready");
+            }
+            return new Result(0, "", false);
+        }
     }
 
     private static final class RecordingRunner implements ProcessRunner {

@@ -275,6 +275,22 @@ public final class InstallationInspector {
         }
     }
 
+    /**
+     * The main manifest attribute {@code name} of the jar at {@code relative} under {@code root},
+     * trimmed, or empty when the jar, its manifest or the attribute is missing or unreadable.
+     */
+    public Optional<String> manifestAttribute(Path root, String relative, String name) {
+        try (ZipFile zip = new ZipFile(SafePath.existing(root, relative, "product jar").toFile())) {
+            ZipEntry entry = zip.getEntry("META-INF/MANIFEST.MF");
+            if (entry == null) return Optional.empty();
+            Manifest manifest = new Manifest(new java.io.ByteArrayInputStream(readBounded(zip, entry)));
+            String value = manifest.getMainAttributes().getValue(name);
+            return value == null ? Optional.empty() : Optional.of(value.trim());
+        } catch (IOException | IllegalArgumentException e) {
+            return Optional.empty();
+        }
+    }
+
     public static int heapMb(String product) {
         Spec spec = SPECS.get(product);
         if (spec == null) throw new IllegalArgumentException("unknown product: " + product);

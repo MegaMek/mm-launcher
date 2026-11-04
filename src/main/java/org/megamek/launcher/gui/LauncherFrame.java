@@ -49,6 +49,7 @@ import org.megamek.launcher.channel.QuickInstallSnapshot;
 import org.megamek.launcher.channel.SelectedChannelReleaseCatalog;
 import org.megamek.launcher.diagnostics.BugReport;
 import org.megamek.launcher.diagnostics.SanitizedErrors;
+import org.megamek.launcher.launch.LaunchObserver;
 import org.megamek.launcher.launch.LaunchOptions;
 import org.megamek.launcher.launch.LaunchOptionsStore;
 import org.megamek.launcher.onboarding.ExistingImportService;
@@ -191,6 +192,10 @@ public final class LauncherFrame extends JFrame {
     private JLabel homeInformationLabel;
     private boolean homeSizeInitialized;
     private long homeGeneration;
+    private final LaunchCurtain curtain = new LaunchCurtain(guiScale);
+    /** Counts launches so a finished or superseded one cannot move the window. */
+    private long launchGeneration;
+    private long settledLaunch;
     private Page page = Page.HOME;
     private String selectedInstallationId;
     private LauncherServices.SettingsView launcherSettings;
@@ -252,7 +257,16 @@ public final class LauncherFrame extends JFrame {
         setPreferredSize(guiScale.scaleForGUI(1180, 820));
         content.setBorder(guiScale.padding("xxl", "xxl", "xl", "xxl"));
         setContentPane(content);
+        setGlassPane(curtain);
         addWindowListener(new WindowAdapter() {
+            @Override public void windowIconified(WindowEvent event) {
+                curtain.pause();
+            }
+
+            @Override public void windowDeiconified(WindowEvent event) {
+                curtain.reveal();
+            }
+
             @Override public void windowClosing(WindowEvent event) {
                 if (gate.isBusy()) {
                     OperationContext operation = activeOperation.get();
@@ -304,6 +318,14 @@ public final class LauncherFrame extends JFrame {
                 }, false);
     }
 
+    /** Shows the window behind the welcome greeting, which opens on Home once it has loaded. */
+    public void showWindowWithGreeting() {
+        if (!isVisible()) {
+            curtain.greet();
+        }
+        showWindow();
+    }
+
     public void showWindow() {
         if (!isVisible()) {
             setVisible(true);
@@ -341,6 +363,8 @@ public final class LauncherFrame extends JFrame {
                 firstLaunchArtwork = loaded.artwork();
                 firstLaunchArtworkError = loaded.artworkError();
                 renderCurrentPage();
+                curtain.contentReady(state.registry().installations().isEmpty()
+                        ? "Welcome, Commander" : "Welcome back, Commander");
                 if (firstLaunchArtworkError != null) {
                     recordErrorAsync("Loading first-launch artwork", firstLaunchArtworkError,
                             message -> status.setText("Artwork unavailable. " + message));
@@ -353,6 +377,7 @@ public final class LauncherFrame extends JFrame {
                 }
             } else {
                 renderLoadError(loaded.error());
+                curtain.contentReady("");
             }
         });
     }
@@ -3523,28 +3548,24 @@ public final class LauncherFrame extends JFrame {
         InstallationRecord capturedRecord = record;
         String capturedProduct = productKey;
         int restoreState = getExtendedState() & ~JFrame.ICONIFIED;
+        long launch = ++launchGeneration;
         status.setText("Running " + displayProduct(capturedProduct) + "…");
         setActionsEnabled(false);
-        // This EDT state transition is deliberately complete before execute(), so even an
-        // immediate ProcessBuilder/start failure is handled by the restoring done() callback.
-        try {
-            setExtendedState(restoreState | JFrame.ICONIFIED);
-        } catch (RuntimeException error) {
-            gate.leave();
-            setActionsEnabled(true);
-            showError("Launching " + displayProduct(capturedProduct) + " failed", error);
-            status.setText("Launch failed — details shown");
-            return;
-        }
+        // The window stays up behind the "Launching" card until the application reports that it
+        // is on screen (or could not say so), then gets out of its way.
+        LaunchObserver observer = () -> SwingUtilities.invokeLater(() -> applicationReady(launch));
+        curtain.closeForLaunch(displayProduct(capturedProduct));
         SwingWorker<Integer, Void> launchWorker = new SwingWorker<>() {
             @Override
             protected Integer doInBackground() throws Exception {
-                return services.launch(capturedRecord, capturedProduct);
+                return services.launch(capturedRecord, capturedProduct, observer);
             }
 
             @Override
             protected void done() {
                 if (!gate.isBusy()) setActionsEnabled(true);
+                settledLaunch = Math.max(settledLaunch, launch);
+                boolean current = launch == launchGeneration;
                 Integer exit = null;
                 Throwable problem = null;
                 try {
@@ -3558,11 +3579,14 @@ public final class LauncherFrame extends JFrame {
                 if (!isDisplayable()) return;
                 if (problem == null && exit != null && exit == 0) {
                     reloadAfterSuccessfulGameExit(capturedProduct);
+                    // A minimised window opens from the line when the player brings it back.
+                    if (current && (getExtendedState() & JFrame.ICONIFIED) == 0) curtain.reveal();
                     return;
                 }
                 setExtendedState(restoreState);
                 setVisible(true);
                 toFront();
+                if (current) curtain.reveal();
                 if (problem instanceof UninstallService.MissingInstallationException missing) {
                     status.setText("Installation folder not found.");
                     removeMissingInstallation(missing.record());
@@ -3589,11 +3613,35 @@ public final class LauncherFrame extends JFrame {
         } catch (RuntimeException error) {
             gate.leave();
             setActionsEnabled(true);
+            settledLaunch = Math.max(settledLaunch, launch);
+            curtain.hideCurtain();
             setExtendedState(restoreState);
             setVisible(true);
             toFront();
             showError("Launching " + displayProduct(capturedProduct) + " failed", error);
             status.setText("Launch failed — details shown");
+        }
+    }
+
+    /**
+     * Minimises the launcher once launch {@code launch} is on screen, after its transition has
+     * played, unless the launch has already ended or a newer one has started.
+     */
+    private void applicationReady(long launch) {
+        if (launch != launchGeneration || launch <= settledLaunch || !isDisplayable()) return;
+        long wait = curtain.untilLaunchShown();
+        if (wait > 0) {
+            javax.swing.Timer later = new javax.swing.Timer((int) wait,
+                    event -> applicationReady(launch));
+            later.setRepeats(false);
+            later.start();
+            return;
+        }
+        try {
+            setExtendedState(getExtendedState() | JFrame.ICONIFIED);
+        } catch (RuntimeException error) {
+            // The window cannot be minimised here, so give the player the launcher back.
+            curtain.reveal();
         }
     }
 

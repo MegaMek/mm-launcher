@@ -135,6 +135,15 @@ and pack to their content height or use `dialog.*` sizes outright. The launcher 
 size tokens and does not alter the shared values; the only literal metrics left are the main window
 and its artwork geometry, minimum widths, layout breakpoints and scroll increments, which the tokens
 do not yet describe.
+Scene transitions are painted by the launch curtain on the frame's glass pane. Started as the GUI,
+the launcher opens on the background colour, types **Welcome back, Commander** (**Welcome,
+Commander** with no installations) in the condensed display face once Home has loaded, then opens
+the window from a horizontal centre line with accent edges. Launching closes it back to that line
+and shows the launch card described under launch below. The curtain repaints only the strips that
+change and animates only while something moves; a click or key skips the greeting or an opening,
+and the curtain takes clicks, hovers and keys from the page while it covers it. With reduced motion
+the greeting is skipped, openings are instant and the card is still. It uses theme roles, so the
+light theme gets a light curtain. Only the GUI start greets; `showWindow()` alone does not.
 Settings starts with **Appearance**: a Dark/Light theme select. A change applies immediately, re-renders the current page,
 and is saved off the event-dispatch thread; a failed save reports an error without reverting the
 visible appearance. High contrast is not offered until the design tokens define it.
@@ -325,12 +334,18 @@ and unfocusable.
 Primary and alternate clicks directly invoke launch for their captured record/product; the GUI
 has no command/runtime confirmation and no finished dialog. `LauncherServices` still re-reads the
 exact record and `ApplicationLauncher` still reinspects root/build/product, validates Java, and
-acquires the root coordinator. After (and only after) BusyGate admission, the frame is iconified
-on the EDT before the worker can start the child. It stays alive for the full child lifetime so
-the coordinator lease remains held. Exit zero reloads internal state but leaves the frame
-iconified with no foreground request. Nonzero exit or launch/start exception deiconifies, makes
-the frame visible/front, and shows the existing explicit error. BusyGate refusal does not
-iconify and retains **Please wait**. No path disposes, exits, detaches, or uses a system tray.
+acquires the root coordinator. After (and only after) BusyGate admission, the launch curtain closes
+the window to a centre line and shows the **Launching MegaMek** card while the worker starts the
+child; the frame is iconified only once the launch reports it is on screen (see
+[launch-ready-contract.md](launch-ready-contract.md)), and never before the card has closed in and
+shown briefly. An application that does not opt in to the ready signal counts as on screen once its
+process starts; one that opts in is awaited for at most 30 seconds. A launch that ends before it
+reports ready is never iconified. The frame stays alive for the full child lifetime so
+the coordinator lease remains held. Exit zero reloads internal state but leaves an iconified frame
+iconified with no foreground request; a frame that was never iconified opens from the line again.
+Restoring an iconified frame opens it from the line. Nonzero exit or launch/start exception deiconifies, makes
+the frame visible/front, opens the curtain, and shows the existing explicit error. BusyGate refusal
+does not close the curtain and retains **Please wait**. No path disposes, exits, detaches, or uses a system tray.
 
 The primary segment reads **Install latest** with a detail line carrying the validated version, for
 example **MekHQ Core · 0.51.00.1** (accessible name **Install latest MekHQ Core (0.51.00.1)**). There is no separate caption. A single background

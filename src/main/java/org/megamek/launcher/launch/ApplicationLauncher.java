@@ -48,9 +48,10 @@ import java.util.List;
 public final class ApplicationLauncher {
     private final ProcessRunner runner;
     private final RootCoordinator coordinator;
+    private final LaunchSignals signals;
 
     public ApplicationLauncher() {
-        this(new DirectProcessRunner(), new RootCoordinator());
+        this(new DirectProcessRunner(), new RootCoordinator(), new LaunchSignals());
     }
 
     public ApplicationLauncher(ProcessRunner runner) {
@@ -58,8 +59,15 @@ public final class ApplicationLauncher {
     }
 
     public ApplicationLauncher(ProcessRunner runner, RootCoordinator coordinator) {
+        this(runner, coordinator, null);
+    }
+
+    /** {@code signals} may be null: launches then never wait for a ready file. */
+    public ApplicationLauncher(ProcessRunner runner, RootCoordinator coordinator,
+                               LaunchSignals signals) {
         this.runner = runner;
         this.coordinator = coordinator;
+        this.signals = signals;
     }
 
     public List<String> command(InstallationRecord record, String productKey,
@@ -122,6 +130,14 @@ public final class ApplicationLauncher {
         return List.copyOf(command);
     }
 
+    private static boolean reportsReady(Path root, InstallationRecord record, String productKey) {
+        return record.products().stream().filter(item -> item.key().equals(productKey))
+                .findFirst()
+                .flatMap(product -> new InstallationInspector().manifestAttribute(root,
+                        product.jar(), LaunchSignals.READY_MANIFEST_ATTRIBUTE))
+                .filter("1"::equals).isPresent();
+    }
+
     public int launch(InstallationRecord record, String product,
                       JavaRuntime.CurrentJava gameJava)
             throws IOException, InterruptedException {
@@ -157,10 +173,29 @@ public final class ApplicationLauncher {
     public int launch(InstallationRecord record, String product,
                       JavaRuntime.CurrentJava gameJava, LaunchOptions options)
             throws IOException, InterruptedException {
+        return launch(record, product, gameJava, options, LaunchObserver.NONE);
+    }
+
+    /**
+     * Runs {@code product} until it exits, telling {@code observer} when it is on screen. An
+     * application whose jar opts in through {@link LaunchSignals#READY_MANIFEST_ATTRIBUTE} is
+     * awaited through its ready file; any other counts as on screen once its process starts.
+     */
+    public int launch(InstallationRecord record, String product,
+                      JavaRuntime.CurrentJava gameJava, LaunchOptions options,
+                      LaunchObserver observer)
+            throws IOException, InterruptedException {
         Path root = Path.of(record.canonicalRoot());
         try (RootCoordinator.Lease lease = coordinator.acquireForLaunch(root)) {
             lease.requireNoPendingUpdate();
             List<String> command = command(record, product, gameJava, options);
+            Path readyFile = signals != null && reportsReady(root, record, product)
+                    ? signals.allocate() : null;
+            if (readyFile != null) {
+                command = LaunchSignals.withReadyFile(command, readyFile);
+            }
+            java.util.concurrent.atomic.AtomicReference<LaunchSignals.Watch> watch =
+                    new java.util.concurrent.atomic.AtomicReference<>();
             lease.markLaunchStarting();
             boolean childCompleted = false;
             java.util.concurrent.atomic.AtomicReference<IOException> markerFailure =
@@ -179,6 +214,11 @@ public final class ApplicationLauncher {
                             } catch (IOException e) {
                                 markerFailure.compareAndSet(null, e);
                             }
+                            if (readyFile == null) {
+                                LaunchSignals.report(observer);
+                            } else {
+                                watch.set(signals.watch(readyFile, observer));
+                            }
                         });
                 childCompleted = true;
                 if (markerFailure.get() != null) throw markerFailure.get();
@@ -190,6 +230,8 @@ public final class ApplicationLauncher {
                 }
                 return result.exitCode();
             } finally {
+                LaunchSignals.Watch started = watch.get();
+                if (started != null) started.close();
                 // Any runner failure after STARTING is ambiguous: ProcessBuilder.start may have
                 // returned just before callback publication failed or the launcher was
                 // interrupted. Keep STARTING/RUNNING unless the child wait completed.

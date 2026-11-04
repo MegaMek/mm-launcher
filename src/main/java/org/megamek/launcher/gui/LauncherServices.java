@@ -46,6 +46,7 @@ import org.megamek.launcher.diagnostics.OperationLogStore;
 import org.megamek.launcher.diagnostics.SanitizedErrors;
 import org.megamek.launcher.launch.ApplicationLauncher;
 import org.megamek.launcher.launch.JavaRuntime;
+import org.megamek.launcher.launch.LaunchObserver;
 import org.megamek.launcher.launch.LaunchOptions;
 import org.megamek.launcher.launch.LaunchOptionsStore;
 import org.megamek.launcher.launch.RootCoordinator;
@@ -643,10 +644,16 @@ public class LauncherServices {
 
     public int launch(InstallationRecord record, String product)
             throws IOException, InterruptedException {
+        return launch(record, product, LaunchObserver.NONE);
+    }
+
+    /** Runs {@code product} until it exits, telling {@code observer} once it is on screen. */
+    public int launch(InstallationRecord record, String product, LaunchObserver observer)
+            throws IOException, InterruptedException {
         InstallationRecord current = requireCurrentLaunchRecord(record);
         JavaRuntime.CurrentJava java = configuredGameJava(current);
         return applicationLauncher.launch(current, product, java,
-                launchOptions.read().effective(current.id()));
+                launchOptions.read().effective(current.id()), observer);
     }
 
     public LaunchOptionsStore.Document launchOptions() throws IOException {
