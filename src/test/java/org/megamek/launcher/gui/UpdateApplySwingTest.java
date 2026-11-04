@@ -134,6 +134,8 @@ class UpdateApplySwingTest {
             assertFalse(firstText.contains("verify, plan"));
             assertFalse(firstText.contains("JARs"));
             assertFalse(firstText.contains("Application: "));
+            assertTrue(firstText.contains("Close MegaMek, MekHQ, and MegaMekLab before updating."),
+                    "games started outside the launcher cannot be detected");
             assertTrue(firstText.contains("Current version: 1.0.0"));
             assertTrue(firstText.contains("New version: 2.00.00.1"));
             assertTrue(firstText.contains("Download size: "

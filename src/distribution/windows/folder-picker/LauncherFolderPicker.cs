@@ -66,8 +66,25 @@ namespace MegaMek.Launcher.Installer
                     }
                     if (IsWritable(picked))
                     {
-                        session[ResultProperty] = InstallFolderFor(picked);
-                        return ActionResult.Success;
+                        string folder = InstallFolderFor(picked);
+                        string localAppData =
+                            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                        // Launchers older than the InstallDir record sit in the jpackage default.
+                        string legacyDefault = Path.Combine(localAppData, "Programs", LauncherFolderName);
+                        if (!File.Exists(Path.Combine(legacyDefault, LauncherFolderName + ".exe")))
+                        {
+                            legacyDefault = null;
+                        }
+                        string problem = FolderProblem(folder, localAppData,
+                            current, session["LAUNCHER_PREVIOUS_INSTALLDIR"], legacyDefault);
+                        if (problem == null)
+                        {
+                            session[ResultProperty] = folder;
+                            return ActionResult.Success;
+                        }
+                        MessageBox(owner, problem, "MegaMek Launcher Setup", 0x30);
+                        start = picked;
+                        continue;
                     }
                     MessageBox(owner,
                         "Setup can't create files in\n" + picked + "\n\n"
@@ -94,6 +111,60 @@ namespace MegaMek.Launcher.Installer
                 return trimmed + "\\";
             }
             return trimmed + "\\" + LauncherFolderName + "\\";
+        }
+
+        // Uninstall deletes the install folder recursively, so it must never hold the
+        // launcher's own settings or anybody else's files. Returns null when it is safe.
+        public static string FolderProblem(string installFolder, string localAppData,
+            params string[] currentInstallDirs)
+        {
+            string target = Normalize(installFolder);
+            if (!string.IsNullOrEmpty(localAppData))
+            {
+                foreach (string stateName in new[] { "MegaMek Launcher", "MegaMek" })
+                {
+                    string state = Normalize(Path.Combine(localAppData, stateName));
+                    if (Contains(target, state) || Contains(state, target))
+                    {
+                        return target + "\n\nThis is where MegaMek Launcher keeps your settings "
+                            + "and game list, so it can't be installed here.\n\n"
+                            + "Choose another folder, for example your user folder or another drive.";
+                    }
+                }
+            }
+            if (!Directory.Exists(target))
+            {
+                return null;
+            }
+            foreach (string current in currentInstallDirs)
+            {
+                if (!string.IsNullOrEmpty(current)
+                    && string.Equals(Normalize(current), target, StringComparison.OrdinalIgnoreCase))
+                {
+                    return null;
+                }
+            }
+            using (var entries = Directory.EnumerateFileSystemEntries(target).GetEnumerator())
+            {
+                if (!entries.MoveNext())
+                {
+                    return null;
+                }
+            }
+            return target + "\n\nThis folder already has other files in it. Uninstalling the "
+                + "launcher would delete them, so setup needs a new or empty folder.\n\n"
+                + "Choose another folder.";
+        }
+
+        private static string Normalize(string path)
+        {
+            return Path.GetFullPath(path).TrimEnd('\\');
+        }
+
+        private static bool Contains(string outer, string inner)
+        {
+            return string.Equals(outer, inner, StringComparison.OrdinalIgnoreCase)
+                || inner.StartsWith(outer + "\\", StringComparison.OrdinalIgnoreCase);
         }
 
         private static string ParentChoice(string installDir)

@@ -116,11 +116,11 @@ public final class LauncherSelfUpdate {
         return folder.resolve("MegaMek Launcher.exe").toAbsolutePath().normalize().toString();
     }
 
-    /** Parses the InstallDir value from reg.exe query output. */
-    static String parseRecordedInstallDir(String regQueryOutput) {
-        var match = Pattern.compile("(?m)^\\s+InstallDir\\s+REG_(?:EXPAND_)?SZ\\s+(.+?)\\s*$")
-                .matcher(regQueryOutput);
-        return match.find() ? match.group(1) : null;
+    /** Parses the InstallDir string value from {@code reg.exe export} text. */
+    static String parseRecordedInstallDir(String regExport) {
+        var match = Pattern.compile("(?m)^\"InstallDir\"=\"((?:[^\"\\\\]|\\\\.)*)\"\\s*$")
+                .matcher(regExport);
+        return match.find() ? match.group(1).replaceAll("\\\\(.)", "$1") : null;
     }
 
     private static boolean recordedInstallDirRead;
@@ -128,8 +128,8 @@ public final class LauncherSelfUpdate {
 
     /*
      * Cached in a plain synchronized method rather than a holder class's static initializer:
-     * the async drain below must not run code of a class that is still initializing, or it
-     * deadlocks with the caller (which is the Swing event thread at startup).
+     * any helper thread used by the read must never wait on a class that is still
+     * initializing, or it deadlocks with the caller (the Swing event thread at startup).
      */
     static synchronized String recordedInstallDir() {
         if (!recordedInstallDirRead) {
@@ -142,24 +142,34 @@ public final class LauncherSelfUpdate {
     private static String readRecordedInstallDir() {
         if (!System.getProperty("os.name", "").startsWith("Windows")
                 || System.getProperty("jpackage.app-path", "").isBlank()) return null;
+        Path export = null;
         try {
-            Process process = new ProcessBuilder("reg.exe", "query",
-                    "HKCU\\Software\\MegaMek\\MegaMek Launcher\\Installer", "/v", "InstallDir")
-                    .redirectErrorStream(true).start();
-            var output = java.util.concurrent.CompletableFuture.supplyAsync(
-                    () -> drain(process.getInputStream()));
+            // reg.exe query prints in the console code page; export always writes UTF-16LE.
+            export = Files.createTempFile("megamek-launcher-installdir", ".reg");
+            Process process = new ProcessBuilder("reg.exe", "export",
+                    "HKCU\\Software\\MegaMek\\MegaMek Launcher\\Installer", export.toString(), "/y")
+                    .redirectErrorStream(true)
+                    .redirectOutput(ProcessBuilder.Redirect.DISCARD).start();
             if (!process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) {
                 process.destroyForcibly();
                 return null;
             }
-            return process.exitValue() == 0
-                    ? parseRecordedInstallDir(output.get(5, java.util.concurrent.TimeUnit.SECONDS)) : null;
-        } catch (IOException | RuntimeException | java.util.concurrent.ExecutionException
-                 | java.util.concurrent.TimeoutException error) {
+            if (process.exitValue() != 0 || Files.size(export) > 64 * 1024) return null;
+            String text = new String(Files.readAllBytes(export), StandardCharsets.UTF_16LE);
+            return parseRecordedInstallDir(text);
+        } catch (IOException | RuntimeException error) {
             return null;
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             return null;
+        } finally {
+            if (export != null) {
+                try {
+                    Files.deleteIfExists(export);
+                } catch (IOException ignored) {
+                    // A leftover temp file is harmless.
+                }
+            }
         }
     }
 
@@ -366,6 +376,14 @@ public final class LauncherSelfUpdate {
 
     private static String literal(String value) { return "'" + value.replace("'", "''") + "'"; }
 
+    static String decodeBase64Utf8(String encoded) throws IOException {
+        try {
+            return new String(java.util.Base64.getDecoder().decode(encoded), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException invalid) {
+            throw new IOException("Windows Installer returned an unreadable install folder");
+        }
+    }
+
     public static void verifyInstalledVersion() throws IOException, InterruptedException {
         NativeLauncherUpdate nativeUpdate = NativeLauncherUpdate.system();
         if (nativeUpdate != null) {
@@ -377,11 +395,13 @@ public final class LauncherSelfUpdate {
                 + "$codes=@($i.RelatedProducts(" + literal(UPGRADE) + "));"
                 + "if($codes.Count -ne 1){throw 'Expected one installed MSI product'};"
                 + "$i.ProductInfo($codes[0],'VersionString');"
-                + "$i.ProductInfo($codes[0],'InstallLocation')";
+                // Base64 keeps a non-ASCII folder intact whatever the console code page is.
+                + "[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("
+                + "[string]$i.ProductInfo($codes[0],'InstallLocation')))";
         String[] lines = powershell(script).trim().split("\\R", 2);
         if (!currentVersion().equals(lines[0].trim()))
             throw new IOException("Running launcher version is not the installed MSI version");
-        String location = lines.length > 1 ? lines[1].trim() : "";
+        String location = lines.length > 1 ? decodeBase64Utf8(lines[1].trim()) : "";
         if (!location.isEmpty() && !windowsInstallMatches(
                 System.getProperty("jpackage.app-path", ""), null, location))
             throw new IOException("Running launcher is not in the installed MSI folder");

@@ -72,7 +72,8 @@ and offers a checked **Launch MegaMek Launcher** option on its completion screen
 launch is an interactive finish-button action only: `msiexec /qn` self-upgrades
 never launch the app. It does not change the `.msi` file association. Welcome's
 **Change…** opens the standard Windows folder dialog; setup always installs into a
-`MegaMek Launcher` folder inside the chosen folder and remembers it for upgrades
+`MegaMek Launcher` folder inside the chosen folder (it must be new or empty, and never the
+launcher's own settings folder) and remembers it for upgrades
 and self-updates. `mm-launcher` remains the compatible internal CLI
 and Linux script name.
 Version 0.14.5 is a newer MSI for upgrading existing 0.14.4 (or earlier) installations;

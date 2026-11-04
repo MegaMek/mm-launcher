@@ -34,7 +34,10 @@ The MSI keeps the permanent upgrade UUID and the per-user default binary directo
 showing the standard Windows folder dialog. The result is always a dedicated
 `MegaMek Launcher` folder inside the user's pick, because jpackage's uninstall
 removes `INSTALLDIR` recursively; folders the user cannot write to without
-elevation are rejected. A grey hint under the folder tells users that games can be
+elevation are rejected, and so is any pick that overlaps the launcher's own state
+folders under `%LOCALAPPDATA%` (`MegaMek Launcher` or legacy `MegaMek`) or that already
+holds other files, unless it is the current or recorded install (or a launcher in the
+jpackage default folder). A grey hint under the folder tells users that games can be
 installed anywhere from the launcher later, since game payloads use their own folders.
 Because MSI never redraws a dialog after a custom action,
 **Change…** switches between two identical Welcome dialogs. An HKCU `InstallDir`

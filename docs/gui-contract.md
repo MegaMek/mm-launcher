@@ -515,8 +515,7 @@ updates that label in place and never replaces managed Home.
 An available result displays verified installed tag, followed target, status, release-notes URL,
 and full size. **Update to recommended release…** goes directly to that captured target and opens a
 styled update consent showing the application name, current version, new version, and rounded
-human-readable MB download size. It states that the operation will download, verify, plan, and
-apply the update and reminds the user to close suite applications. Its right-aligned actions are
+human-readable MB download size, and reminds the user to close MegaMek, MekHQ, and MegaMekLab. Its right-aligned actions are
 **Cancel** then **Update**, with Update as the default. This one consent authorizes the complete
 attempt; Cancel, Escape, and window close fetch no package body. Before any package request the
 backend rechecks the record, channel sidecar, fixed source, repository, tag, asset name, size, and

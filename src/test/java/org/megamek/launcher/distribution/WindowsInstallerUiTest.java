@@ -330,8 +330,13 @@ class WindowsInstallerUiTest {
         String source = Files.readString(RESOURCES.resolveSibling("folder-picker")
                 .resolve("LauncherFolderPicker.cs"));
         assertTrue(source.contains("LauncherFolderName = \"MegaMek Launcher\""));
-        assertTrue(source.contains("session[ResultProperty] = InstallFolderFor(picked)"),
+        assertTrue(source.contains("session[ResultProperty] = folder"),
                 "RemoveFolderEx deletes INSTALLDIR; never install directly into a picked folder");
+        assertTrue(source.contains("string folder = InstallFolderFor(picked)"));
+        assertTrue(source.contains("FolderProblem(folder,"),
+                "Reject the launcher's state folders and other people's files before INSTALLDIR");
+        assertTrue(source.contains("new[] { \"MegaMek Launcher\", \"MegaMek\" }"),
+                "Both the current and legacy state folders under LOCALAPPDATA are protected");
 
         Element remembered = find(doc, "RegistryValue", "InstallDir");
         assertEquals("[INSTALLDIR]", remembered.getAttribute("Value"));

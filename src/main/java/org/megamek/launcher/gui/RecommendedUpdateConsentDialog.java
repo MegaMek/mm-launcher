@@ -104,6 +104,10 @@ final class RecommendedUpdateConsentDialog extends JDialog {
         JLabel size = label("Download size: " + BinarySizeFormat.mebibytes(downloadBytes),
                 "recommendedUpdateDownloadSize",
                 scale.font(base, "body"), FirstLaunchPanel.TEXT);
+        JLabel closeApplications = label(
+                "Close MegaMek, MekHQ, and MegaMekLab before updating.",
+                "recommendedUpdateCloseApplications",
+                scale.font(base, "body"), FirstLaunchPanel.TEXT);
 
         summary.add(heading);
         summary.add(Box.createVerticalStrut(scale.space("lg")));
@@ -112,6 +116,8 @@ final class RecommendedUpdateConsentDialog extends JDialog {
         summary.add(target);
         summary.add(Box.createVerticalStrut(scale.space("sm")));
         summary.add(size);
+        summary.add(Box.createVerticalStrut(scale.space("lg")));
+        summary.add(closeApplications);
 
         JButton cancel = button("Cancel", "cancelRecommendedUpdateButton", false);
         update = button("Update", "updateRecommendedUpdateButton", true);

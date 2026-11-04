@@ -67,12 +67,23 @@ class WindowsMsiUpdateTest {
                 "relative\\MegaMek Launcher"));
     }
 
-    @Test void recordedInstallFolderIsReadFromRegQueryOutput() {
-        String output = "\r\nHKEY_CURRENT_USER\\Software\\MegaMek\\MegaMek Launcher\\Installer\r\n"
-                + "    InstallDir    REG_SZ    D:\\Games\\MegaMek Launcher\\\r\n\r\n";
-        assertEquals("D:\\Games\\MegaMek Launcher\\", LauncherSelfUpdate.parseRecordedInstallDir(output));
+    @Test void recordedInstallFolderIsReadFromRegExport() {
+        String export = "\uFEFFWindows Registry Editor Version 5.00\r\n\r\n"
+                + "[HKEY_CURRENT_USER\\Software\\MegaMek\\MegaMek Launcher\\Installer]\r\n"
+                + "\"DesktopShortcut\"=\"1\"\r\n"
+                + "\"InstallDir\"=\"D:\\\\Jeux\\\\équipe \\\"A\\\"\\\\MegaMek Launcher\\\\\"\r\n\r\n";
+        assertEquals("D:\\Jeux\\équipe \"A\"\\MegaMek Launcher\\",
+                LauncherSelfUpdate.parseRecordedInstallDir(export),
+                "export is UTF-16, so accented folders survive any console code page");
         assertNull(LauncherSelfUpdate.parseRecordedInstallDir(
-                "ERROR: The system was unable to find the specified registry key or value."));
+                "Windows Registry Editor Version 5.00\r\n\r\n[HKEY_CURRENT_USER\\Software\\X]\r\n"));
+    }
+
+    @Test void installLocationIsDecodedFromBase64Utf8() throws Exception {
+        String folder = "C:\\Users\\Zoë\\AppData\\Local\\Programs\\MegaMek Launcher\\";
+        assertEquals(folder, LauncherSelfUpdate.decodeBase64Utf8(java.util.Base64.getEncoder()
+                .encodeToString(folder.getBytes(java.nio.charset.StandardCharsets.UTF_8))));
+        assertThrows(java.io.IOException.class, () -> LauncherSelfUpdate.decodeBase64Utf8("not base64!"));
     }
 
     @Test void readingTheRecordedInstallFolderDoesNotDeadlock() {
