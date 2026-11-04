@@ -30,7 +30,7 @@ PROVENANCE_ARCHIVE_LIMIT = 64 * 1024
 SIGNING_RECORD_LIMIT = 4096
 RELEASE_RUN = re.compile(r"^Launcher-Release-Run: ([1-9][0-9]{0,19})$", re.MULTILINE)
 INSTALLERS = (
-    "windows-x64.msi", "linux-x64.deb", "linux-x64.rpm",
+    "windows-x64.msi", "linux-x64.deb", "linux-x64.rpm", "linux-x64-portable.tar.gz",
     "macos-intel.pkg", "macos-apple-silicon.pkg",
 )
 APPLE_PLATFORMS = ("macos-intel", "macos-apple-silicon")
@@ -460,7 +460,8 @@ def validate_files(directory, version):
         raise ReleaseError("Installer artifacts must be in a real directory")
     files = list(directory.iterdir())
     if {file.name for file in files} != expected or len(files) != len(expected):
-        raise ReleaseError("Expected exactly five native installers and their five checksum files")
+        raise ReleaseError(f"Expected exactly {len(INSTALLERS)} release packages and their "
+                           f"{len(INSTALLERS)} checksum files")
     assets = []
     for name in names:
         file = directory / name
@@ -511,7 +512,7 @@ def verify_release(release, assets, version, draft, identities=None):
         raise ReleaseError("Release identity or publication state does not match the request")
     metadata = release.get("assets")
     if not isinstance(metadata, list) or len(metadata) != len(assets):
-        raise ReleaseError("Release does not contain the complete ten-file asset set")
+        raise ReleaseError("Release does not contain the complete asset set")
     by_name = {}
     ids = set()
     for item in metadata:
@@ -728,7 +729,7 @@ def verified_release_push(github, root, environment):
             or not positive_id(record.get("run_id")) or record["run_id"] != run_id
             or not positive_id(record.get("run_attempt")) or record["run_attempt"] != attempt
             or not positive_id(record.get("release_id"))
-            or not isinstance(record.get("assets"), list) or len(record["assets"]) != 10):
+            or not isinstance(record.get("assets"), list) or len(record["assets"]) != 2 * len(INSTALLERS)):
         raise ReleaseError("Retained publication record has mismatched provenance")
     expected_names = {f"MegaMek-Launcher-{version}-{suffix}{checksum}"
                       for suffix in INSTALLERS for checksum in ("", ".sha256")}
@@ -791,6 +792,8 @@ def publish(github, version, commit, assets, signing_record=None, certificate_sh
     body = (f"Native installers built and tested from [{commit}](https://github.com/{REPOSITORY}/commit/{commit}).\n\n"
             "Installed launchers support user-authorized self-update on Windows, macOS, and supported "
             "Linux desktops. Linux requires PolicyKit and apt-get or dnf. "
+            "Other Linux distributions can use the Java-bundled portable tar.gz, which checks for new "
+            "versions but is updated manually. "
             f"{signing_notice}"
             "SHA-256 files provide integrity checks, not independent publisher signing.\n")
     release = github.request("POST", f"{API}/releases", {

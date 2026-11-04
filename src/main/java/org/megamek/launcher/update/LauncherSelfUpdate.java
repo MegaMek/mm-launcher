@@ -83,8 +83,20 @@ public final class LauncherSelfUpdate {
 
     public record Candidate(String tag, String version, String name, URI url, long size, String sha256) {}
 
+    /** A newer official release that a notify-only installation can only point the player to. */
+    public record Release(String version, URI page) {}
+
     public static boolean available() {
         return windowsAvailable() || NativeLauncherUpdate.available();
+    }
+
+    /**
+     * Released builds outside a native installer (portable or generic archives) cannot apply
+     * an update, but can still tell the player that one exists. Development builds have no
+     * released version and never check.
+     */
+    public static boolean notifyOnly() {
+        return !available() && VERSION.matcher(currentVersion()).matches();
     }
 
     private static boolean windowsAvailable() {
@@ -192,14 +204,43 @@ public final class LauncherSelfUpdate {
             nativeUpdater.verifyInstalledVersion(currentVersion());
             nativeUpdater.verifyInstallerTools();
         }
+        return parseCandidate(latestReleaseMetadata(), currentVersion(), nativeUpdater == null
+                ? "windows-x64.msi" : nativeUpdater.suffix(currentVersion()));
+    }
+
+    /** Finds a newer official release for a {@link #notifyOnly()} installation; null when current. */
+    public Release checkRelease() throws IOException, InterruptedException {
+        if (!VERSION.matcher(currentVersion()).matches()) {
+            throw new IOException("Launcher update checks require a released launcher version");
+        }
+        return parseRelease(latestReleaseMetadata(), currentVersion());
+    }
+
+    private byte[] latestReleaseMetadata() throws IOException, InterruptedException {
         try (var response = transport.get(LATEST, "application/vnd.github+json")) {
             if (response.status() != 200) throw new IOException(
                     "Official launcher release lookup returned HTTP " + response.status());
             byte[] metadata = response.body().readNBytes(1024 * 1024 + 1);
             if (metadata.length > 1024 * 1024) throw new IOException("Release metadata exceeds limit");
-            return parseCandidate(metadata, currentVersion(), nativeUpdater == null
-                    ? "windows-x64.msi" : nativeUpdater.suffix(currentVersion()));
+            return metadata;
         }
+    }
+
+    Release parseRelease(byte[] metadata, String installedVersion) throws IOException {
+        String tag = stableTag(json.readTree(metadata));
+        String version = tag.replaceFirst("^v", "");
+        if (compare(version, installedVersion) <= 0) return null;
+        return new Release(version, URI.create("https://github.com/MegaMek/mm-launcher/releases/tag/" + tag));
+    }
+
+    private static String stableTag(JsonNode release) throws IOException {
+        if (release == null || !release.isObject() || release.path("draft").asBoolean(true)
+                || release.path("prerelease").asBoolean(true)) {
+            throw new IOException("No stable official launcher release is available");
+        }
+        String tag = release.path("tag_name").asText("");
+        if (!TAG.matcher(tag).matches()) throw new IOException("Unsupported launcher release tag");
+        return tag;
     }
 
     Candidate parseCandidate(byte[] metadata, String installedVersion) throws IOException {
@@ -208,12 +249,7 @@ public final class LauncherSelfUpdate {
 
     Candidate parseCandidate(byte[] metadata, String installedVersion, String suffix) throws IOException {
             JsonNode release = json.readTree(metadata);
-            if (release == null || !release.isObject() || release.path("draft").asBoolean(true)
-                    || release.path("prerelease").asBoolean(true)) {
-                throw new IOException("No stable official launcher release is available");
-            }
-            String tag = release.path("tag_name").asText("");
-            if (!TAG.matcher(tag).matches()) throw new IOException("Unsupported launcher release tag");
+            String tag = stableTag(release);
             String version = tag.replaceFirst("^v", "");
             if (compare(version, installedVersion) <= 0) return null;
             String name = "MegaMek-Launcher-" + version + "-" + suffix;

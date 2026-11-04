@@ -169,7 +169,7 @@ class LauncherSigningTest(unittest.TestCase):
         before = {file.name: file.read_bytes() for file in self.destination.iterdir()}
         record = self.signed_record()
         assets = self.complete()
-        self.assertEqual(10, len(assets))
+        self.assertEqual(12, len(assets))
         for file in self.destination.iterdir():
             if file.name not in (name, name + ".sha256"):
                 self.assertEqual(before[file.name], file.read_bytes())
