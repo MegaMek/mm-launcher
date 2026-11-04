@@ -7,7 +7,7 @@
   <String Id="CheckingForUpdatesLabel" Value="Checking for updates" />
   <String Id="UpdateButton" Value="&amp;Update to version [WixStdBAUpdateAvailable]" />
   <String Id="InstallHeader" Value="READY TO DEPLOY" />
-  <String Id="InstallMessage" Value="Installs, updates and starts MegaMek, MegaMekLab and MekHQ, just for you. No administrator rights needed." />
+  <String Id="InstallMessage" Value="Manages all MegaMek programs." />
   <String Id="InstallMessageOptions" Value="Setup will install [WixBundleName] on your computer. Click Install to continue, Options to set installation options, or Cancel to exit." />
   <String Id="InstallVersion" Value="Version [WixBundleVersion]" />
   <String Id="ConfirmCancelMessage" Value="Are you sure you want to cancel?" />
@@ -37,7 +37,7 @@
   <String Id="ModifyCancelButton" Value="&amp;CLOSE" />
   <String Id="SuccessHeader" Value="DONE" />
   <String Id="SuccessCacheHeader" Value="Cache Successfully Completed" />
-  <String Id="SuccessInstallHeader" Value="READY FOR LAUNCH" />
+  <String Id="SuccessInstallHeader" Value="MISSION COMPLETE" />
   <String Id="SuccessLayoutHeader" Value="Layout Successfully Completed" />
   <String Id="SuccessModifyHeader" Value="Modify Successfully Completed" />
   <String Id="SuccessRepairHeader" Value="REPAIRED" />
@@ -56,7 +56,7 @@
   <String Id="FailureRepairHeader" Value="Repair Failed" />
   <String Id="FailureUninstallHeader" Value="UNINSTALL FAILED" />
   <String Id="FailureUnsafeUninstallHeader" Value="Uninstall Failed" />
-  <String Id="FailureHyperlinkLogText" Value="One or more issues caused the setup to fail. Please fix the issues and then retry setup. For more information see the &lt;a href=&quot;#&quot;&gt;log file&lt;/a&gt;." />
+  <String Id="FailureHyperlinkLogText" Value="Setup could not finish. See the &lt;a href=&quot;#&quot;&gt;log file&lt;/a&gt; for details." />
   <String Id="FailureRestartText" Value="You must restart your computer to complete the rollback of the software." />
   <String Id="FailureRestartButton" Value="&amp;Restart" />
   <String Id="FailureCloseButton" Value="&amp;CLOSE" />
@@ -71,11 +71,11 @@
 <String Id="Overline" Value="MEGAMEK SUITE" />
   <String Id="InstallFolderLabel" Value="INSTALL FOLDER" />
   <String Id="InstallFolderButton" Value="C&amp;HANGE..." />
-  <String Id="InstallFolderHint" Value="Games can be installed anywhere from the launcher later." />
+  <String Id="InstallFolderHint" Value="You choose where games go later, in the launcher." />
   <String Id="DesktopShortcutCheckbox" Value="Create a desktop shortcut" />
-  <String Id="SuccessInstallText" Value="The launcher is installed. Launch it to pick the programs you want; it keeps them up to date." />
-  <String Id="ModifyText" Value="This version of the launcher is already installed. The launcher updates itself; you only need this to remove it." />
-  <String Id="ProgressText" Value="Installing the launcher and its Java runtime." />
+  <String Id="SuccessInstallText" Value="The installation has completed successfully, Commander." />
+  <String Id="ModifyText" Value="This version is already installed." />
+  <String Id="ProgressText" Value="Installing MegaMek Launcher." />
 </WixLocalization>
 
 
