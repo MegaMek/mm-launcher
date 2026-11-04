@@ -296,11 +296,12 @@ class WindowsMsiUpdateTest {
     }
 
     @Test void handoffQuotesSpacedMsiPathWithoutBackslashesAndWaitsForExit() {
+        Path setup = Path.of("C:\\Users\\Example User\\AppData\\Local\\Temp\\mm-launcher-setup-test",
+                "MegaMek-Launcher-0.1.1-windows-x64.exe");
         String script = LauncherSelfUpdate.handoffScript(
-                Path.of("C:\\Users\\Example User\\AppData\\Local\\Temp\\mm-launcher-setup-test",
-                        "MegaMek-Launcher-0.1.1-windows-x64.exe"),
-                "0.1.1", "a".repeat(64), Path.of("C:\\Users\\Example User\\result.txt"), 12345);
-        assertTrue(script.contains("-FilePath 'C:\\Users\\Example User\\AppData\\Local\\Temp\\mm-launcher-setup-test\\MegaMek-Launcher-0.1.1-windows-x64.exe'"),
+                setup, "0.1.1", "a".repeat(64), Path.of("C:\\Users\\Example User\\result.txt"), 12345);
+        // Path joins with the host separator, so derive the expected text from it.
+        assertTrue(script.contains("-FilePath '" + setup + "'"),
                 "the staged setup .exe itself runs the update");
         assertFalse(script.contains("msiexec"));
         assertFalse(script.contains("'\\\"'"));
