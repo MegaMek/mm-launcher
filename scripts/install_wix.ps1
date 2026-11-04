@@ -1,8 +1,9 @@
 # Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Installs the pinned WiX Toolset v7 command-line tool and Util extension into
-# .tools/wix7 for the Windows MSI build. Both come from nuget.org and are
+# Installs the pinned WiX Toolset v7 command-line tool, Util extension and
+# BootstrapperApplications extension (the themed setup .exe bundle) into
+# .tools/wix7 for the Windows installer build. All come from nuget.org and are
 # verified against the SHA-256 pins below before extraction. Running wix.dll
 # needs a .NET 8+ runtime; it is never installed globally.
 
@@ -14,6 +15,8 @@ $packages = @(
     @{ Id = 'wix'; Sha256 = '25209a1f73b20106621f11abe5e1a4e87c1d9f5c596795d246de7bb64446df17'
        Entries = 'tools/net8.0/any/' },
     @{ Id = 'wixtoolset.util.wixext'; Sha256 = 'e654f578e0a7d433819fe4cc343f9e37cb14f600fa061a6480857ba51334a075'
+       Entries = 'wixext7/' },
+    @{ Id = 'wixtoolset.bootstrapperapplications.wixext'; Sha256 = '2941272cb438bbd44798fb655fba9f818480c52044742fccacf3db0695f7fb8d'
        Entries = 'wixext7/' }
 )
 
@@ -50,7 +53,7 @@ foreach ($package in $packages) {
     }
 }
 
-foreach ($required in 'wix.dll', 'WixToolset.Util.wixext.dll') {
+foreach ($required in 'wix.dll', 'WixToolset.Util.wixext.dll', 'WixToolset.BootstrapperApplications.wixext.dll') {
     if (!(Test-Path -LiteralPath (Join-Path $Destination $required))) {
         throw "WiX $wixVersion is incomplete after extraction: $required is missing."
     }

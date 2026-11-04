@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Copyright (C) 2026 The MegaMek Team. All Rights Reserved. SPDX-License-Identifier: GPL-3.0-or-later
+
+     WiX standard bootstrapper (thmutil) theme in the launcher's dark MekBay
+     look. thmutil colors are BGR hex: text.primary #F1F4F0 is "F0F4F1",
+     surface.base #0E1314 is "14130E", accent #82E2CE is "CEE282". Fonts
+     cannot be embedded, so the display face is Windows' Bahnschrift and the
+     body face Segoe UI instead of the launcher's Roboto. Art comes from
+     generate_art.py. Negative X/Y/Width/Height are offsets from the
+     right/bottom edge. -->
+<Theme xmlns="http://wixtoolset.org/schemas/v4/thmutil">
+    <Font Id="0" Height="-14" Weight="400" Foreground="F0F4F1" Background="14130E">Segoe UI</Font>
+    <Font Id="1" Height="-36" Weight="700" Foreground="F0F4F1" Background="14130E">Bahnschrift</Font>
+    <Font Id="2" Height="-13" Weight="700" Foreground="CEE282" Background="14130E">Bahnschrift</Font>
+    <Font Id="3" Height="-21" Weight="600" Foreground="F0F4F1" Background="14130E">Bahnschrift</Font>
+    <Font Id="4" Height="-13" Weight="400" Foreground="A3A69A" Background="14130E">Segoe UI</Font>
+    <Font Id="5" Height="-15" Weight="700" Foreground="1E2016">Bahnschrift</Font>
+    <Font Id="6" Height="-15" Weight="600" Foreground="D0D3CB">Bahnschrift</Font>
+    <Font Id="7" Height="-15" Weight="600" Foreground="F0F4F1">Bahnschrift</Font>
+    <Font Id="8" Height="-21" Weight="600" Foreground="7A77F2" Background="14130E">Bahnschrift</Font>
+
+    <Window Width="720" Height="450" HexStyle="100a0000" FontId="0" Caption="#(loc.Caption)">
+        <ImageControl X="0" Y="0" Width="280" Height="450" ImageFile="side.png" Visible="yes"/>
+        <Label X="312" Y="40" Width="-32" Height="18" FontId="2" Visible="yes" DisablePrefix="yes">#(loc.Overline)</Label>
+        <Label X="312" Y="58" Width="-32" Height="46" FontId="1" Visible="yes" DisablePrefix="yes">#(loc.Title)</Label>
+        <ImageControl X="314" Y="108" Width="56" Height="3" ImageFile="rule.png" Visible="yes"/>
+
+        <Page Name="Help">
+            <Label X="312" Y="130" Width="-32" Height="28" FontId="3" DisablePrefix="yes">#(loc.HelpHeader)</Label>
+            <Label X="312" Y="166" Width="-32" Height="-80" FontId="4" DisablePrefix="yes">#(loc.HelpText)</Label>
+            <Button Name="HelpCloseButton" X="-32" Y="-28" Width="136" Height="38" TabStop="yes" FontId="5" HoverFontId="5" SelectedFontId="5">
+                <ButtonImage ImageFile="primary.png"/>
+                <ButtonFocusImage ImageFile="primary-focus.png"/>
+                <ButtonHoverImage ImageFile="primary-hover.png"/>
+                <ButtonSelectedImage ImageFile="primary-pressed.png"/>
+                <Text>#(loc.HelpCloseButton)</Text>
+                <CloseWindowAction />
+            </Button>
+        </Page>
+        <Page Name="Loading">
+            <Label Name="CheckingForUpdatesLabel" X="312" Y="130" Width="-32" Height="28" FontId="3" DisablePrefix="yes" Visible="no" />
+        </Page>
+        <Page Name="Install">
+            <Label X="312" Y="130" Width="-32" Height="28" FontId="3" DisablePrefix="yes">#(loc.InstallHeader)</Label>
+            <Label X="312" Y="166" Width="-32" Height="80" FontId="0" DisablePrefix="yes">#(loc.InstallMessage)</Label>
+            <Label Name="InstallVersion" X="312" Y="-128" Width="-32" Height="18" FontId="4" DisablePrefix="yes" VisibleCondition="WixStdBAShowVersion">#(loc.InstallVersion)</Label>
+            <!-- Themed checkboxes ignore the font color (black text on the dark
+                 surface), so the box has no text and a label sits beside it. -->
+            <Checkbox Name="DesktopShortcutCheckbox" X="312" Y="-92" Width="16" Height="20" TabStop="yes" FontId="0" />
+            <Label X="336" Y="-92" Width="-32" Height="20" FontId="0" DisablePrefix="yes">#(loc.DesktopShortcutCheckbox)</Label>
+            <Button Name="InstallButton" X="-32" Y="-28" Width="136" Height="38" TabStop="yes" FontId="5" HoverFontId="5" SelectedFontId="5">
+                <ButtonImage ImageFile="primary.png"/>
+                <ButtonFocusImage ImageFile="primary-focus.png"/>
+                <ButtonHoverImage ImageFile="primary-hover.png"/>
+                <ButtonSelectedImage ImageFile="primary-pressed.png"/>
+                <Text>#(loc.InstallInstallButton)</Text>
+            </Button>
+            <Button Name="InstallCancelButton" X="-180" Y="-28" Width="136" Height="38" TabStop="yes" FontId="6" HoverFontId="7" SelectedFontId="7">
+                <ButtonImage ImageFile="secondary.png"/>
+                <ButtonFocusImage ImageFile="secondary-focus.png"/>
+                <ButtonHoverImage ImageFile="secondary-hover.png"/>
+                <ButtonSelectedImage ImageFile="secondary-pressed.png"/>
+                <Text>#(loc.InstallCancelButton)</Text>
+                <CloseWindowAction />
+            </Button>
+        </Page>
+        <Page Name="Progress">
+            <Label X="312" Y="130" Width="-32" Height="28" FontId="3" DisablePrefix="yes">#(loc.ProgressHeader)</Label>
+            <Label X="312" Y="166" Width="-32" Height="40" FontId="0" DisablePrefix="yes">#(loc.ProgressText)</Label>
+            <Label Name="OverallProgressPackageText" X="312" Y="-100" Width="-32" Height="18" FontId="4" DisablePrefix="yes">#(loc.OverallProgressPackageText)</Label>
+            <Progressbar Name="OverallCalculatedProgressbar" X="312" Y="-76" Width="-32" Height="6">
+                <ProgressbarImage ImageFile="progress.png"/>
+            </Progressbar>
+            <Button Name="ProgressCancelButton" X="-32" Y="-28" Width="136" Height="38" TabStop="yes" FontId="6" HoverFontId="7" SelectedFontId="7">
+                <ButtonImage ImageFile="secondary.png"/>
+                <ButtonFocusImage ImageFile="secondary-focus.png"/>
+                <ButtonHoverImage ImageFile="secondary-hover.png"/>
+                <ButtonSelectedImage ImageFile="secondary-pressed.png"/>
+                <Text>#(loc.ProgressCancelButton)</Text>
+            </Button>
+        </Page>
+        <Page Name="Modify">
+            <Label X="312" Y="130" Width="-32" Height="28" FontId="3" DisablePrefix="yes">#(loc.ModifyHeader)</Label>
+            <Label X="312" Y="166" Width="-32" Height="80" FontId="0" DisablePrefix="yes">#(loc.ModifyText)</Label>
+            <Button Name="RepairButton" X="-328" Y="-28" Width="136" Height="38" TabStop="yes" FontId="6" HoverFontId="7" SelectedFontId="7" HideWhenDisabled="yes">
+                <ButtonImage ImageFile="secondary.png"/>
+                <ButtonFocusImage ImageFile="secondary-focus.png"/>
+                <ButtonHoverImage ImageFile="secondary-hover.png"/>
+                <ButtonSelectedImage ImageFile="secondary-pressed.png"/>
+                <Text>#(loc.ModifyRepairButton)</Text>
+            </Button>
+            <Button Name="UninstallButton" X="-180" Y="-28" Width="136" Height="38" TabStop="yes" FontId="6" HoverFontId="7" SelectedFontId="7">
+                <ButtonImage ImageFile="secondary.png"/>
+                <ButtonFocusImage ImageFile="secondary-focus.png"/>
+                <ButtonHoverImage ImageFile="secondary-hover.png"/>
+                <ButtonSelectedImage ImageFile="secondary-pressed.png"/>
+                <Text>#(loc.ModifyUninstallButton)</Text>
+            </Button>
+            <Button Name="ModifyCancelButton" X="-32" Y="-28" Width="136" Height="38" TabStop="yes" FontId="5" HoverFontId="5" SelectedFontId="5">
+                <ButtonImage ImageFile="primary.png"/>
+                <ButtonFocusImage ImageFile="primary-focus.png"/>
+                <ButtonHoverImage ImageFile="primary-hover.png"/>
+                <ButtonSelectedImage ImageFile="primary-pressed.png"/>
+                <Text>#(loc.ModifyCancelButton)</Text>
+                <CloseWindowAction />
+            </Button>
+        </Page>
+        <Page Name="Success">
+            <Label X="312" Y="130" Width="-32" Height="28" FontId="3" DisablePrefix="yes">
+                <Text>#(loc.SuccessHeader)</Text>
+                <Text Condition="WixBundleAction = 3">#(loc.SuccessUnsafeUninstallHeader)</Text>
+                <Text Condition="WixBundleAction = 4">#(loc.SuccessUninstallHeader)</Text>
+                <Text Condition="WixBundleAction = 6">#(loc.SuccessInstallHeader)</Text>
+                <Text Condition="WixBundleAction = 8">#(loc.SuccessRepairHeader)</Text>
+            </Label>
+            <Label X="312" Y="166" Width="-32" Height="60" FontId="0" DisablePrefix="yes" VisibleCondition="WixBundleAction = 6">#(loc.SuccessInstallText)</Label>
+            <Label X="312" Y="-92" Width="-32" Height="40" FontId="4" DisablePrefix="yes" VisibleCondition="WixStdBARestartRequired">
+                <Text>#(loc.SuccessRestartText)</Text>
+                <Text Condition="WixBundleAction = 3">#(loc.SuccessUninstallRestartText)</Text>
+            </Label>
+            <Button Name="LaunchButton" X="-32" Y="-28" Width="136" Height="38" TabStop="yes" FontId="5" HoverFontId="5" SelectedFontId="5" HideWhenDisabled="yes">
+                <ButtonImage ImageFile="primary.png"/>
+                <ButtonFocusImage ImageFile="primary-focus.png"/>
+                <ButtonHoverImage ImageFile="primary-hover.png"/>
+                <ButtonSelectedImage ImageFile="primary-pressed.png"/>
+                <Text>#(loc.SuccessLaunchButton)</Text>
+            </Button>
+            <Button Name="SuccessRestartButton" X="-32" Y="-28" Width="136" Height="38" TabStop="yes" FontId="5" HoverFontId="5" SelectedFontId="5" HideWhenDisabled="yes">
+                <ButtonImage ImageFile="primary.png"/>
+                <ButtonFocusImage ImageFile="primary-focus.png"/>
+                <ButtonHoverImage ImageFile="primary-hover.png"/>
+                <ButtonSelectedImage ImageFile="primary-pressed.png"/>
+                <Text>#(loc.SuccessRestartButton)</Text>
+            </Button>
+            <Button Name="SuccessCloseButton" X="-180" Y="-28" Width="136" Height="38" TabStop="yes" FontId="6" HoverFontId="7" SelectedFontId="7">
+                <ButtonImage ImageFile="secondary.png"/>
+                <ButtonFocusImage ImageFile="secondary-focus.png"/>
+                <ButtonHoverImage ImageFile="secondary-hover.png"/>
+                <ButtonSelectedImage ImageFile="secondary-pressed.png"/>
+                <Text>#(loc.SuccessCloseButton)</Text>
+                <CloseWindowAction />
+            </Button>
+        </Page>
+        <Page Name="Failure">
+            <Label X="312" Y="130" Width="-32" Height="28" FontId="8" DisablePrefix="yes">
+                <Text>#(loc.FailureHeader)</Text>
+                <Text Condition="WixBundleAction = 3">#(loc.FailureUnsafeUninstallHeader)</Text>
+                <Text Condition="WixBundleAction = 4">#(loc.FailureUninstallHeader)</Text>
+                <Text Condition="WixBundleAction = 6">#(loc.FailureInstallHeader)</Text>
+                <Text Condition="WixBundleAction = 8">#(loc.FailureRepairHeader)</Text>
+            </Label>
+            <Hypertext Name="FailureLogFileLink" X="312" Y="166" Width="-32" Height="60" FontId="0" TabStop="yes" HideWhenDisabled="yes">#(loc.FailureHyperlinkLogText)</Hypertext>
+            <Hypertext Name="FailureMessageText" X="312" Y="-150" Width="-32" Height="70" FontId="4" TabStop="yes" HideWhenDisabled="yes" />
+            <Label X="312" Y="-80" Width="-32" Height="36" FontId="4" DisablePrefix="yes" VisibleCondition="WixStdBARestartRequired">#(loc.FailureRestartText)</Label>
+            <Button Name="FailureRestartButton" X="-180" Y="-28" Width="136" Height="38" TabStop="yes" FontId="6" HoverFontId="7" SelectedFontId="7" HideWhenDisabled="yes">
+                <ButtonImage ImageFile="secondary.png"/>
+                <ButtonFocusImage ImageFile="secondary-focus.png"/>
+                <ButtonHoverImage ImageFile="secondary-hover.png"/>
+                <ButtonSelectedImage ImageFile="secondary-pressed.png"/>
+                <Text>#(loc.FailureRestartButton)</Text>
+            </Button>
+            <Button Name="FailureCloseButton" X="-32" Y="-28" Width="136" Height="38" TabStop="yes" FontId="5" HoverFontId="5" SelectedFontId="5">
+                <ButtonImage ImageFile="primary.png"/>
+                <ButtonFocusImage ImageFile="primary-focus.png"/>
+                <ButtonHoverImage ImageFile="primary-hover.png"/>
+                <ButtonSelectedImage ImageFile="primary-pressed.png"/>
+                <Text>#(loc.FailureCloseButton)</Text>
+                <CloseWindowAction />
+            </Button>
+        </Page>
+    </Window>
+</Theme>

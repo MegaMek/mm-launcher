@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
+  SPDX-License-Identifier: GPL-3.0-or-later
+
+  SPIKE: themed setup .exe (WiX Burn bundle) that wraps the launcher MSI in a
+  window styled like the launcher. The MSI stays the unit that installs files;
+  the bundle only provides the UI and its own Apps & features entry (the MSI's
+  entry is hidden because chained MsiPackages default to Visible="no").
+
+  Defines: LauncherVersion, LauncherIcon, LauncherMsi (the built .msi).
+  BundleUpgradeCode MUST NEVER CHANGE once shipped.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+  <Bundle Name="MegaMek Launcher" Manufacturer="MegaMek" Version="$(LauncherVersion)"
+          UpgradeCode="{CA672DAF-9AA9-4BD1-BCCA-B43CB4C6F133}"
+          IconSourceFile="$(LauncherIcon)" DisableModify="button"
+          HelpUrl="https://megamek.org" AboutUrl="https://megamek.org">
+    <!-- Theme="none" means no stock payload group: the BA reads its theme
+         from the thm.xml/thm.wxl payloads and needs a WixStdbaInformation row. -->
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication Theme="none"
+          SuppressOptionsUI="yes" SuppressRepair="yes" ShowVersion="yes"
+          LaunchTarget="[LocalAppDataFolder]Programs\MegaMek Launcher\MegaMek Launcher.exe"/>
+      <Payload Name="thm.xml" SourceFile="theme.xml"/>
+      <Payload Name="thm.wxl" SourceFile="theme.wxl"/>
+      <Payload Name="side.png" SourceFile="art\side.png"/>
+      <Payload Name="rule.png" SourceFile="art\rule.png"/>
+      <Payload Name="progress.png" SourceFile="art\progress.png"/>
+      <Payload Name="primary.png" SourceFile="art\primary.png"/>
+      <Payload Name="primary-hover.png" SourceFile="art\primary-hover.png"/>
+      <Payload Name="primary-pressed.png" SourceFile="art\primary-pressed.png"/>
+      <Payload Name="primary-focus.png" SourceFile="art\primary-focus.png"/>
+      <Payload Name="secondary.png" SourceFile="art\secondary.png"/>
+      <Payload Name="secondary-hover.png" SourceFile="art\secondary-hover.png"/>
+      <Payload Name="secondary-pressed.png" SourceFile="art\secondary-pressed.png"/>
+      <Payload Name="secondary-focus.png" SourceFile="art\secondary-focus.png"/>
+    </BootstrapperApplication>
+    <BundleCustomDataRef Id="WixStdbaInformation">
+      <BundleElement>
+        <BundleAttribute Id="LicenseUrl" Value="https://www.gnu.org/licenses/gpl-3.0.html"/>
+      </BundleElement>
+    </BundleCustomDataRef>
+
+    <!-- The theme's checkbox is bound to the variable of the same name. -->
+    <Variable Name="DesktopShortcutCheckbox" Type="numeric" Value="1"/>
+
+    <Chain>
+      <MsiPackage Id="LauncherMsi" SourceFile="$(LauncherMsi)">
+        <!-- MSI treats any non-empty value as true, so an opt-out clears it. -->
+        <MsiProperty Name="LAUNCHER_DESKTOP_SHORTCUT" Value="" Condition="NOT DesktopShortcutCheckbox"/>
+      </MsiPackage>
+    </Chain>
+  </Bundle>
+</Wix>
