@@ -675,7 +675,8 @@ class SimpleHomeSwingTest {
             SwingTestSupport.click(failure, "launcherAlertButton1");
             JDialog quote = waitDialog(frame, "Install latest MekHQ Core (1.2.3)");
             assertEquals(services.destination.getParent(), suggestedParent.get());
-            assertEquals("MekHQ Core (1.2.3)", suggestedName.get());
+            assertEquals("MekHQ Core", suggestedName.get(),
+                    "folder names carry no version because updates keep the folder");
             assertEquals(List.of(services.destination, changed), services.plannedDestinations);
             assertEquals(changed.toString(), ((javax.swing.text.JTextComponent)
                     find(quote, "normalInstallDestination")).getText());
@@ -746,13 +747,13 @@ class SimpleHomeSwingTest {
     void humanDownloadSizesUseStableBinaryUnitsWithoutOverflow() {
         assertEquals("0 bytes", NormalInstallConfirmationDialog.formatBinaryBytes(0));
         assertEquals("1 byte", NormalInstallConfirmationDialog.formatBinaryBytes(1));
-        assertEquals("1.0 KiB", NormalInstallConfirmationDialog.formatBinaryBytes(1L << 10));
-        assertEquals("657.7 MiB",
+        assertEquals("1.0 KB", NormalInstallConfirmationDialog.formatBinaryBytes(1L << 10));
+        assertEquals("657.7 MB",
                 NormalInstallConfirmationDialog.formatBinaryBytes(689_648_435L));
-        assertEquals("1.0 GiB",
+        assertEquals("1.0 GB",
                 NormalInstallConfirmationDialog.formatBinaryBytes(1L << 30));
         assertTrue(NormalInstallConfirmationDialog.formatBinaryBytes(Long.MAX_VALUE)
-                .endsWith(" GiB"));
+                .endsWith(" GB"));
         assertThrows(IllegalArgumentException.class,
                 () -> NormalInstallConfirmationDialog.formatBinaryBytes(-1));
     }
