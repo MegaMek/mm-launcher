@@ -147,8 +147,9 @@ class WorkflowStructureTest {
 
         assertTrue(step(installers, "Build Windows installer (never install)")
                 .path("run").asText().contains("buildWindowsInstaller"));
-        assertTrue(step(installers, "Build Linux installers (never install)")
-                .path("run").asText().contains("buildDebInstaller buildRpmInstaller"));
+        assertTrue(step(installers, "Build Linux installers and portable archive (never install)")
+                .path("run").asText().contains(
+                        "buildDebInstaller buildRpmInstaller buildPortableArchive verifyPortableArchive"));
         assertTrue(step(installers, "Build macOS installer (never install)")
                 .path("run").asText().contains("buildPkgInstaller"));
         assertEquals(2, count(text, "-PbuildIdentifier=$env:SOURCE_COMMIT"));
@@ -194,6 +195,12 @@ class WorkflowStructureTest {
             String base = "build/distributions/MegaMek-Launcher-*-${{ matrix.id }}." + extension;
             expectedPaths.add(base);
             expectedPaths.add(base + ".sha256");
+            if (extension.equals("rpm")) {
+                // Only the Linux job builds the portable archive; other jobs match nothing here.
+                String portable = "build/distributions/MegaMek-Launcher-*-linux-x64-portable.tar.gz";
+                expectedPaths.add(portable);
+                expectedPaths.add(portable + ".sha256");
+            }
         }
         assertEquals(expectedPaths, paths.lines().map(String::trim).filter(line -> !line.isEmpty()).toList());
         assertTrue(step(installers, "Test source on Windows").path("run").asText().contains(" test"));
@@ -211,9 +218,9 @@ class WorkflowStructureTest {
 
         assertFalse(text.contains("buildArchive"));
         assertFalse(text.contains("verifyProvidedArchive"));
-        assertFalse(text.contains("verifyPortableArchive"));
+        assertEquals(1, count(text, "buildPortableArchive"), "only Linux publishes a portable archive");
+        assertEquals(1, count(text, "verifyPortableArchive"));
         assertFalse(text.contains("actions/download-artifact"));
-        assertFalse(text.contains("-portable"));
         assertFalse(text.contains("windowsArchive"));
         assertFalse(text.contains("linuxArchive"));
         assertFalse(text.contains("macArchive"));

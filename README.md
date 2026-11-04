@@ -7,14 +7,16 @@ The `Launcher native installers` workflow builds on pushes to `main`, pull reque
 and manual dispatch. PR branch pushes run once through the pull-request event rather
 than also starting a duplicate push matrix. Ordinary CI produces **only** five unsigned native installer/checksum
 pairs: Windows x64 `.msi`, Linux x64 `.deb` and `.rpm`, and macOS `.pkg` on both
-Intel and Apple Silicon. It does not build, verify, or upload portable archives,
+Intel and Apple Silicon, plus a Java-bundled Linux x64 portable `tar.gz` and its checksum for
+distributions without `apt-get` or `dnf` (for example Arch-based ones). It does not build or upload
+the other portable archives,
 install packages on CI runners, create a release, sign, or notarize. The separate
 manual `Publish launcher release` workflow reuses these same builds and tests before publication,
 with independent, disabled-by-default Windows MSI and Apple signing/notarization modes.
 Only an official release call can opt the reusable Mac packaging jobs into Apple credentials. Each
 installer contains a host-native Java 21 image with all JDK modules and `bin/java`
 for games launched by the application; no external Java is required.
-Run `./gradlew test buildDebInstaller buildRpmInstaller` on Linux,
+Run `./gradlew test buildDebInstaller buildRpmInstaller buildPortableArchive verifyPortableArchive` on Linux,
 `./gradlew test buildPkgInstaller` on macOS, or
 `.\gradlew.bat test buildWindowsInstaller` on Windows. Windows packaging requires
 WiX 3.14 in `.tools/wix314` (including its `sdk` folder, used to build the installer's
@@ -110,7 +112,10 @@ close and confirms the package receipt and app version before reopening.
 Linux selects `.deb` or `.rpm` from the installed package, not whichever tool happens to
 be present. PolicyKit supplies the administrator prompt; `apt-get` or `dnf` performs the
 upgrade using a verified private copy. Linux requires a desktop authorization agent.
-Portable copies and unsupported package-manager setups remain manual.
+Portable copies and unsupported package-manager setups remain manual. Released portable copies,
+and package installs missing PolicyKit or their package manager, still check for a newer official
+release on startup and from Settings; when one exists they offer to open its release page instead of
+installing it. Development builds never check.
 Existing macOS/Linux launchers need one manual upgrade to a release containing this support.
 Active updates are shown as still finishing, not as failed release lookups. Completed
 failures are acknowledged so a later manual check can retry. Incomplete reports are
@@ -131,7 +136,8 @@ as `msi-update-helper.log` and `msi-update-installer.log` on Windows, or
 both locations. Windows PowerShell's atomic completion write uses `[NullString]::Value`,
 not `$null`, which is converted to an invalid empty backup path by its .NET method binding.
 If no compatible
-official release exists, no upgrade is attempted. Portable archives do not self-update.
+official release exists, no upgrade is attempted. Portable archives do not self-update; they only
+link to the newer release.
 Native upgrades replace installer-owned binaries, not launcher registrations, settings,
 logs or installed games. Downloads retain macOS quarantine; self-update does not bypass
 Gatekeeper, package-manager trust policy, or administrator authorization.
@@ -149,7 +155,8 @@ or pull requests. Major/minor version changes remain explicit source changes.
 
 The workflow calls the ordinary native-installer CI at the captured candidate commit and
 waits for all four platforms' builds, package inspections, required headless tests, and release tooling
-tests to pass. A read-only release-assets job stages this run's five installers and five checksum
+tests to pass. A read-only release-assets job stages this run's five installers, the Linux portable
+archive and their six checksum
 files, optionally signs and verifies the Windows MSI, validates any enabled Apple notarization
 records from the Mac packaging jobs, and retains one immutable final asset
 set. The write-enabled publication job downloads that exact artifact ID, checks the filenames and

@@ -278,7 +278,7 @@ final class NativeLauncherUpdate {
         if (kind == null) throw new IOException("Installed launcher package has not been identified");
         String manager = kind == Kind.DEB ? "/usr/bin/apt-get" : "/usr/bin/dnf";
         if (!executable.test(Path.of("/usr/bin/pkexec")) || !executable.test(Path.of(manager)))
-            throw new IOException("Linux launcher updates require PolicyKit and "
+            throw new LauncherSelfUpdate.InstallerToolsUnavailableException("Linux launcher updates require PolicyKit and "
                     + (kind == Kind.DEB ? "apt-get" : "dnf") + ".");
     }
 
