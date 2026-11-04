@@ -7,7 +7,6 @@
   <String Id="CheckingForUpdatesLabel" Value="Checking for updates" />
   <String Id="UpdateButton" Value="&amp;Update to version [WixStdBAUpdateAvailable]" />
   <String Id="InstallHeader" Value="READY TO DEPLOY" />
-  <String Id="InstallMessage" Value="Manages all MegaMek programs." />
   <String Id="InstallMessageOptions" Value="Setup will install [WixBundleName] on your computer. Click Install to continue, Options to set installation options, or Cancel to exit." />
   <String Id="InstallVersion" Value="Version [WixBundleVersion]" />
   <String Id="ConfirmCancelMessage" Value="Are you sure you want to cancel?" />
@@ -71,7 +70,7 @@
 <String Id="Overline" Value="MEGAMEK SUITE" />
   <String Id="InstallFolderLabel" Value="INSTALL FOLDER" />
   <String Id="InstallFolderButton" Value="C&amp;HANGE..." />
-  <String Id="InstallFolderHint" Value="Games can be installed anywhere with the launcher." />
+  <String Id="InstallFolderHint" Value="MegaMek programs can be installed anywhere with the launcher." />
   <String Id="DesktopShortcutCheckbox" Value="Create a desktop shortcut" />
   <String Id="SuccessInstallText" Value="The installation has completed successfully, Commander." />
   <String Id="ModifyText" Value="This version is already installed." />

@@ -42,18 +42,17 @@
         </Page>
         <Page Name="Install">
             <Label X="312" Y="130" Width="-32" Height="28" FontId="3" DisablePrefix="yes">#(loc.InstallHeader)</Label>
-            <Label X="312" Y="166" Width="-32" Height="20" FontId="0" DisablePrefix="yes">#(loc.InstallMessage)</Label>
-            <Label X="312" Y="206" Width="-32" Height="18" FontId="2" DisablePrefix="yes">#(loc.InstallFolderLabel)</Label>
+            <Label X="312" Y="186" Width="-32" Height="18" FontId="2" DisablePrefix="yes">#(loc.InstallFolderLabel)</Label>
             <!-- Shows the folder setup really uses: the MSI's folder check always
                  installs into a "MegaMek Launcher" folder inside the pick. The
                  first matching condition wins; HexStyle 8000 (SS_PATHELLIPSIS)
                  shortens a long path in the middle instead of clipping it. -->
-            <Label Name="InstallFolderText" X="312" Y="233" Width="-188" Height="20" FontId="0" DisablePrefix="yes" HexStyle="8000">
+            <Label Name="InstallFolderText" X="312" Y="213" Width="-188" Height="20" FontId="0" DisablePrefix="yes" HexStyle="8000">
                 <Text>[LauncherInstallFolder]\MegaMek Launcher</Text>
                 <Text Condition="LauncherInstallFolder ~&gt;&gt; &quot;\MegaMek Launcher\&quot; OR LauncherInstallFolder ~&gt;&gt; &quot;\MegaMek Launcher&quot;">[LauncherInstallFolder]</Text>
                 <Text Condition="LauncherInstallFolder &gt;&gt; &quot;\&quot;">[LauncherInstallFolder]MegaMek Launcher</Text>
             </Label>
-            <Button Name="InstallFolderButton" X="-32" Y="224" Width="136" Height="38" TabStop="yes" FontId="6" HoverFontId="7" SelectedFontId="7">
+            <Button Name="InstallFolderButton" X="-32" Y="204" Width="136" Height="38" TabStop="yes" FontId="6" HoverFontId="7" SelectedFontId="7">
                 <ButtonImage ImageFile="secondary.png"/>
                 <ButtonFocusImage ImageFile="secondary-focus.png"/>
                 <ButtonHoverImage ImageFile="secondary-hover.png"/>
@@ -61,7 +60,7 @@
                 <Text>#(loc.InstallFolderButton)</Text>
                 <BrowseDirectoryAction VariableName="LauncherInstallFolder" />
             </Button>
-            <Label X="312" Y="268" Width="-32" Height="18" FontId="4" DisablePrefix="yes">#(loc.InstallFolderHint)</Label>
+            <Label X="312" Y="248" Width="-32" Height="18" FontId="4" DisablePrefix="yes">#(loc.InstallFolderHint)</Label>
             <Label Name="InstallVersion" X="312" Y="-112" Width="-32" Height="18" FontId="4" DisablePrefix="yes" VisibleCondition="WixStdBAShowVersion">#(loc.InstallVersion)</Label>
             <!-- Themed checkboxes ignore the font color (black text on the dark
                  surface), so the box has no text and a label sits beside it. -->
