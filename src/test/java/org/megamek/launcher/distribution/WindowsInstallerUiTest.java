@@ -152,6 +152,8 @@ class WindowsInstallerUiTest {
                 if ("InstallExecuteSequence".equals(((Element) action.getParentNode()).getTagName())) {
                     assertTrue(action.getAttribute("Condition").contains("UILevel < 5"),
                             "Execute sequence must not overwrite the interactive Welcome choice");
+                    assertTrue(action.getAttribute("Condition").contains("NOT LAUNCHER_DESKTOP_CHOSEN"),
+                            "The setup bundle's explicit desktop choice must win over the stored opt-out");
                 }
                 count++;
             }

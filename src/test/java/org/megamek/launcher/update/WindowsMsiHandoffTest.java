@@ -35,7 +35,7 @@ class WindowsMsiHandoffTest {
         assumeTrue(System.getProperty("os.name", "").startsWith("Windows"),
                 "material helper execution requires Windows PowerShell");
         Path staging = Files.createDirectory(temp.resolve("staged MSI & ' spaces"));
-        msi = staging.resolve("MegaMek-Launcher-0.1.1-windows-x64.msi");
+        msi = staging.resolve("MegaMek-Launcher-0.1.1-windows-x64.exe");
         Files.writeString(msi, "fixture: not an actual installer");
         sha256 = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(Files.readAllBytes(msi)));
         report = temp.resolve("result.txt");
@@ -97,8 +97,9 @@ class WindowsMsiHandoffTest {
         String supplied = Files.readString(arguments);
         assertTrue(supplied.contains("/passive"));
         assertTrue(supplied.contains("/norestart"));
-        assertTrue(supplied.contains("/l*v"));
-        assertTrue(supplied.contains("\"" + msi + "\""), "spaced MSI argument must remain quoted");
+        assertTrue(supplied.contains("/log"));
+        assertTrue(supplied.contains("\"" + LauncherSelfUpdate.installerLog(report) + "\""),
+                "log argument must remain quoted");
         assertFalse(Files.exists(msi.getParent()));
         assertTrue(LauncherSelfUpdate.consumeReport(report, "0.1.1", () -> {}).installed());
         assertFalse(Files.exists(report));
@@ -173,7 +174,7 @@ class WindowsMsiHandoffTest {
         assertFalse(Files.exists(arguments));
         assertFalse(Files.exists(reopened));
         assertTrue(Files.exists(msi), "unrecognized replacement bytes must not be deleted");
-        assertTrue(Files.readString(LauncherSelfUpdate.helperLog(report)).contains("Staged MSI digest changed"));
+        assertTrue(Files.readString(LauncherSelfUpdate.helperLog(report)).contains("Staged installer digest changed"));
     }
 
     @Test void cleanupWarningKeepsUnrelatedFilesAndStillReopensVerifiedUpdate() throws Exception {

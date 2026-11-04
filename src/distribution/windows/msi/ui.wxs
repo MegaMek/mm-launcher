@@ -69,9 +69,11 @@
     </FeatureRef>
     <InstallExecuteSequence>
       <!-- AppSearch precedes the early RemoveExistingProducts (before CostInitialize).
-           UI choice wins in interactive installs; silent upgrades read the old marker. -->
+           UI choice wins in interactive installs; silent upgrades read the old marker.
+           The setup bundle seeds its checkbox from the same marker and passes
+           LAUNCHER_DESKTOP_CHOSEN, so its (possibly re-checked) choice also wins. -->
       <Custom Action="RestoreDesktopOptOut" After="AppSearch"
-              Condition="LAUNCHER_DESKTOP_OPTOUT = 1 AND UILevel &lt; 5 AND NOT Installed"/>
+              Condition="LAUNCHER_DESKTOP_OPTOUT = 1 AND UILevel &lt; 5 AND NOT Installed AND NOT LAUNCHER_DESKTOP_CHOSEN"/>
     </InstallExecuteSequence>
     <CustomAction Id="SetLauncherTarget" Property="WixShellExecTarget"
                   Value="[INSTALLDIR]MegaMek Launcher.exe"/>

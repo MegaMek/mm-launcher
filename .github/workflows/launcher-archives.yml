@@ -106,7 +106,7 @@ jobs:
         include:
           - id: windows-x64
             os: windows-2025
-            extensions: msi
+            extensions: exe
           - id: linux-x64
             os: ubuntu-24.04
             extensions: deb,rpm
@@ -212,7 +212,7 @@ jobs:
           EXTENSIONS: ${{ matrix.extensions }}
         run: |
           $files = @(Get-ChildItem build/distributions -File |
-            Where-Object { $_.Name -match "^MegaMek-Launcher-.+-$([regex]::Escape($env:PLATFORM))\.(msi|deb|rpm|pkg)$" })
+            Where-Object { $_.Name -match "^MegaMek-Launcher-.+-$([regex]::Escape($env:PLATFORM))\.(exe|deb|rpm|pkg)$" })
           $types = $env:EXTENSIONS.Split(',')
           if ($files.Count -ne $types.Count) { throw "Expected $($types.Count) installer(s), found $($files.Count)." }
           foreach ($type in $types) {
@@ -226,10 +226,20 @@ jobs:
             $actual = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($line -cne "$actual  $($file.Name)") { throw "$type checksum mismatch." }
             Write-Host "$type SHA-256: $actual"
-            if ($type -eq 'msi') {
-              # Open the MSI database read-only. Never execute msiexec on CI.
+            if ($type -eq 'exe') {
+              # The setup .exe is a WiX Burn bundle; never run it on CI.
+              $info = (Get-Item -LiteralPath $file.FullName).VersionInfo
+              if ($info.ProductName -cne 'MegaMek Launcher' -or $info.CompanyName -cne 'MegaMek' -or $info.ProductVersion -cne $version) {
+                throw 'Setup .exe product name, company or version is incorrect.'
+              }
+              # Extract the chained MSI (the only payload) and open it read-only.
+              $extracted = Join-Path $env:RUNNER_TEMP 'mm-launcher-bundle'
+              dotnet .tools/wix7/wix.dll burn extract -acceptEula wix7 $file.FullName -o $extracted
+              if ($LASTEXITCODE -ne 0) { throw 'Could not extract the setup bundle.' }
+              $payloads = @(Get-ChildItem $extracted -File -Recurse)
+              if ($payloads.Count -ne 1) { throw 'Setup bundle must contain exactly one payload (the MSI).' }
               $installer = New-Object -ComObject WindowsInstaller.Installer
-              $database = $installer.OpenDatabase($file.FullName, 0)
+              $database = $installer.OpenDatabase($payloads[0].FullName, 0)
               function MsiValues([string]$query) {
                 $view = $database.OpenView($query)
                 [void]$view.Execute()
@@ -237,6 +247,10 @@ jobs:
                 while ($record = $view.Fetch()) { $values += $record.StringData(1) }
                 [void]$view.Close()
                 return $values
+              }
+              $msiVersion = @(MsiValues "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='ProductVersion'")
+              if ($msiVersion.Count -ne 1 -or $msiVersion[0] -cne $version) {
+                throw 'Chained MSI version does not match the setup .exe.'
               }
               $productName = @(MsiValues "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='ProductName'")
               if ($productName.Count -ne 1 -or $productName[0] -cne 'MegaMek Launcher') {
@@ -345,8 +359,8 @@ jobs:
         with:
           name: MegaMek-Launcher-${{ matrix.id }}-installers
           path: |
-            build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.msi
-            build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.msi.sha256
+            build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.exe
+            build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.exe.sha256
             build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.deb
             build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.deb.sha256
             build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.rpm

@@ -349,6 +349,90 @@ abstract class WindowsInstallerMsi : DefaultTask() {
     }
 }
 
+// The shipped Windows installer: a WiX Burn bundle (themed setup .exe) that
+// chains the MSI built by WindowsInstallerMsi.
+abstract class WindowsInstallerBundle : DefaultTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val msiFile: RegularFileProperty
+
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val iconFile: RegularFileProperty
+
+    // Bundle.wxs, the theme and its art.
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val bundleSources: DirectoryProperty
+
+    @get:Internal
+    abstract val wixToolDirectory: DirectoryProperty
+
+    @get:Input
+    abstract val appVersion: Property<String>
+
+    @get:Internal
+    abstract val intermediateDirectory: DirectoryProperty
+
+    @get:OutputFile
+    abstract val installerFile: RegularFileProperty
+
+    @get:Inject
+    abstract val execOperations: ExecOperations
+
+    @get:Inject
+    abstract val fileSystemOperations: FileSystemOperations
+
+    @TaskAction
+    fun packageBundle() {
+        check(OperatingSystem.current().isWindows) {
+            "The Windows setup bundle can only be built on Windows."
+        }
+        val wix = wixToolDirectory.get().asFile
+        val wixDll = File(wix, "wix.dll")
+        val extensions = listOf(
+            File(wix, "WixToolset.Util.wixext.dll"),
+            File(wix, "WixToolset.BootstrapperApplications.wixext.dll")
+        )
+        check(wixDll.isFile && extensions.all { it.isFile }) {
+            "WiX Toolset 7 (wix.dll, WixToolset.Util.wixext.dll and " +
+                "WixToolset.BootstrapperApplications.wixext.dll) is required at " +
+                "${wix.absolutePath}. Run scripts/install_wix.ps1 to install the pinned, " +
+                "hash-verified version there."
+        }
+        val sources = bundleSources.get().asFile
+        val intermediate = intermediateDirectory.get().asFile
+        fileSystemOperations.delete { delete(intermediate) }
+        intermediate.mkdirs()
+        val installer = installerFile.get().asFile
+        installer.parentFile.mkdirs()
+        check(!installer.exists() || installer.delete()) {
+            "Could not remove previous Windows installer at ${installer.absolutePath}."
+        }
+        execOperations.exec {
+            // Bundle.wxs names its theme and art relative to its own directory.
+            workingDir = sources
+            executable = "dotnet"
+            args(
+                wixDll.absolutePath, "build",
+                "-acceptEula", "wix7",
+                "-arch", "x64"
+            )
+            extensions.forEach { args("-ext", it.absolutePath) }
+            args(
+                "-d", "LauncherVersion=${appVersion.get()}",
+                "-d", "LauncherIcon=${iconFile.get().asFile.absolutePath}",
+                "-d", "LauncherMsi=${msiFile.get().asFile.absolutePath}",
+                "-intermediatefolder", intermediate.absolutePath,
+                "-pdbtype", "none",
+                "-o", installer.absolutePath,
+                File(sources, "Bundle.wxs").absolutePath
+            )
+        }
+        check(installer.isFile) { "WiX did not produce ${installer.absolutePath}." }
+    }
+}
+
 abstract class NativeInstaller : DefaultTask() {
     @get:InputDirectory
     @get:PathSensitive(PathSensitivity.RELATIVE)
@@ -1110,14 +1194,14 @@ tasks.register<Test>("verifyPortableArchive") {
 }
 
 // ---------------------------------------------------------------------------
-// Windows MSI installer (jpackage app image + WiX 7). Preserve the existing
-// per-user upgrade identity and unattended self-update behavior independently
-// of other packages.
+// Windows installer: jpackage app image -> WiX 7 MSI -> WiX 7 Burn setup .exe
+// (themed like the launcher). Preserve the existing per-user upgrade identity
+// and unattended self-update behavior independently of other packages.
 //
 // It bundles a jlink-trimmed Java runtime (via jpackage's automatic runtime
 // detection) so installed users never need a system Java. It always installs
-// per-user (no admin/UAC prompt), so the launcher's self-updater can run
-// `msiexec /i ... /qn` unattended after downloading a new version.
+// per-user (no admin/UAC prompt), so the launcher's self-updater can run the
+// setup .exe with /passive unattended after downloading a new version.
 //
 // windowsInstallerUpgradeCode MUST NEVER CHANGE. Windows Installer uses this
 // GUID to recognize "this is the same product, install it in place" during a
@@ -1137,7 +1221,7 @@ val stageWindowsInstallerInput = tasks.register<Sync>("stageWindowsInstallerInpu
     from("LICENSE.code")
 }
 
-val windowsInstallerFileName = "MegaMek-Launcher-${project.version}-windows-x64.msi"
+val windowsInstallerFileName = "MegaMek-Launcher-${project.version}-windows-x64.exe"
 // ProductVersion must be numeric even when the Gradle artifact is a SNAPSHOT.
 val windowsInstallerAppVersion = project.version.toString().substringBefore('-')
 // macOS requires a positive first component; offsetting the major preserves
@@ -1173,15 +1257,16 @@ val windowsAppImage = tasks.register<WindowsAppImage>("windowsAppImage") {
 }
 
 // The MSI itself is authored in src/distribution/windows/msi and built with
-// WiX 7 directly; jpackage only produces the app image above.
+// WiX 7 directly; jpackage only produces the app image above. The MSI is an
+// intermediate: users get the setup bundle below, which chains it.
 val windowsInstallerMsi = tasks.register<WindowsInstallerMsi>("windowsInstallerMsi") {
     group = "distribution"
-    description = "Builds the per-user Windows MSI installer from the app image with WiX 7."
+    description = "Builds the per-user Windows MSI (chained by the setup bundle) with WiX 7."
     dependsOn(windowsAppImage)
 
     wixToolDirectory.set(layout.projectDirectory.dir(".tools/wix7"))
     appImageDirectory.set(windowsAppImageDirectory.map { it.dir("MegaMek Launcher") })
-    installerFile.set(distributionsDirectory.map { it.file(windowsInstallerFileName) })
+    installerFile.set(layout.buildDirectory.file("packaging/windows-installer/msi/MegaMekLauncher.msi"))
     intermediateDirectory.set(layout.buildDirectory.dir("tmp/windowsInstallerMsi/wix"))
     appVersion.set(windowsInstallerAppVersion)
     upgradeCode.set(windowsInstallerUpgradeCode)
@@ -1190,10 +1275,23 @@ val windowsInstallerMsi = tasks.register<WindowsInstallerMsi>("windowsInstallerM
     outputs.cacheIf { false }
 }
 
+val windowsInstallerBundle = tasks.register<WindowsInstallerBundle>("windowsInstallerBundle") {
+    group = "distribution"
+    description = "Builds the themed Windows setup .exe (WiX Burn bundle) around the MSI."
+    wixToolDirectory.set(layout.projectDirectory.dir(".tools/wix7"))
+    msiFile.set(windowsInstallerMsi.flatMap { it.installerFile })
+    installerFile.set(distributionsDirectory.map { it.file(windowsInstallerFileName) })
+    intermediateDirectory.set(layout.buildDirectory.dir("tmp/windowsInstallerBundle/wix"))
+    appVersion.set(windowsInstallerAppVersion)
+    iconFile.set(windowsInstallerIcon)
+    bundleSources.set(layout.projectDirectory.dir("src/distribution/windows/bundle"))
+    outputs.cacheIf { false }
+}
+
 val windowsInstallerChecksum = tasks.register<Sha256File>("windowsInstallerChecksum") {
     group = "distribution"
-    description = "Writes the exact SHA-256 checksum for the Windows MSI installer."
-    dependsOn(windowsInstallerMsi)
+    description = "Writes the exact SHA-256 checksum for the Windows setup .exe."
+    dependsOn(windowsInstallerBundle)
     archiveFile.set(distributionsDirectory.map { it.file(windowsInstallerFileName) })
     checksumFile.set(
         distributionsDirectory.map { it.file("$windowsInstallerFileName.sha256") }
@@ -1202,7 +1300,7 @@ val windowsInstallerChecksum = tasks.register<Sha256File>("windowsInstallerCheck
 
 val buildWindowsInstaller = tasks.register("buildWindowsInstaller") {
     group = "distribution"
-    description = "Builds the Windows MSI installer and its exact SHA-256 file."
+    description = "Builds the Windows setup .exe and its exact SHA-256 file."
     dependsOn(windowsInstallerChecksum)
 }
 

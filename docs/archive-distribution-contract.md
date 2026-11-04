@@ -5,19 +5,24 @@
 The generic archive described below remains a developer-only prototype;
 CI does not build, verify or upload any archives. CI builds five native
 installer/checksum pairs, each on its target host:
-`MegaMek-Launcher-<version>-windows-x64.msi`,
+`MegaMek-Launcher-<version>-windows-x64.exe`,
 `MegaMek-Launcher-<version>-linux-x64.deb`,
 `MegaMek-Launcher-<version>-linux-x64.rpm`, and
 `MegaMek-Launcher-<version>-macos-{intel,apple-silicon}.pkg`.
-Each has an exact-name `.sha256` counterpart. The MSI packages a jpackage
-`app-image` (launcher EXE plus full-module runtime) with WiX 7 sources in
-`src/distribution/windows/msi`; Linux and macOS use a host-native
+Each has an exact-name `.sha256` counterpart. The Windows setup `.exe` is a WiX 7
+Burn bundle (sources and theme in `src/distribution/windows/bundle`) that chains an
+intermediate MSI. The MSI packages a jpackage `app-image` (launcher EXE plus
+full-module runtime) with WiX 7 sources in `src/distribution/windows/msi`. CI reads
+the setup's version resource, extracts the chained MSI with `wix burn extract` and
+inspects its tables read-only; Linux and macOS use a host-native
 `ALL-MODULE-PATH` jlink image passed to jpackage via `--runtime-image`.
 These images retain `bin/java` for games, `lib/modules`, and upstream
 `legal/` notices. CI only inspects installer contents and checksums;
 the native-installer workflow never installs them or publishes a release. A separate manual
-release workflow reuses that complete build/test workflow before publication. Optional Windows MSI
-signing and separate Apple signing/notarization are prepared but disabled by default;
+release workflow reuses that complete build/test workflow before publication. Windows signing
+was prepared for the former single-MSI asset; signing the setup `.exe` (MSI, Burn engine and
+bundle passes) is not implemented yet, so enabling it fails at planning. Apple signing/notarization
+is prepared but disabled by default;
 account setup and live verification remain pending. Linux signing remains outside this integration.
 
 Linux's stable package name is `megamek-launcher` under `/opt`; the macOS
@@ -39,6 +44,10 @@ the MSI's own conditional `DesktopFolder` shortcut component, not a shell
 script: unchecking it disables that component. An HKCU installer-owned opt-out
 registry component records only the unchecked choice; AppSearch restores it
 before the early `RemoveExistingProducts` during silent `/qn` upgrades.
+The setup bundle seeds its own desktop checkbox from that same registry value,
+passes the result as `LAUNCHER_DESKTOP_SHORTCUT` and sets `LAUNCHER_DESKTOP_CHOSEN`
+so the MSI does not override the bundle's choice; silent `/passive` self-updates
+therefore keep a previous opt-out.
 An interactive upgrade may change that choice on Welcome. Removing the MSI
 removes only its owned shortcut and preference component, not unrelated desktop
 entries. The Start menu shortcut, in a **MegaMek** Start menu folder, is independent. The interactive completion
@@ -50,7 +59,7 @@ Finish; the right-side controls sit on the native light dialog background, not
 a baked cream panel. Silent `/qn` MSI upgrades cannot run that UI action.
 The installed EXE and MSI icon share an ICO derivative of MegaMek.png; the
 left-strip wizard BMP and progress banner derive from bundled first-launch art.
-The MSI artifact keeps the Gradle version in its filename, while Windows
+The setup `.exe` keeps the Gradle version in its filename, while Windows
 Installer ProductVersion uses the numeric portion (for example, `0.1.0` for
 `0.1.0-SNAPSHOT`), as required by MSI. The ProductCode is derived from that
 version exactly as jpackage did, so jpackage-built installs upgrade in place.
@@ -216,9 +225,16 @@ candidate: an authorized owner must review manual version synchronization that p
 newer source changes, rather than forcing the old candidate onto main.
 The workflow never installs packages, assembles a game suite, or updates an
 installed launcher on a runner. A real self-update test requires separate explicit authorization
-to publish and to upgrade an older Windows MSI installation.
+to publish and to upgrade an older Windows launcher installation.
 
 ### Optional Windows signing
+
+> **Pending rework for the setup `.exe`.** This section describes the flow built for the
+> former single-MSI Windows asset. The Windows asset is now a WiX Burn setup `.exe`, which
+> must be signed in passes (sign the MSI, rebuild the bundle, `wix burn detach`, sign the
+> engine, `wix burn reattach`, sign the bundle). Until that is implemented,
+> `scripts/launcher_release.py` rejects `LAUNCHER_SIGNING_ENABLED=true` (and the test-signing
+> plan) with an explicit error, and `verify_launcher_signature.ps1` still checks MSI identity.
 
 The production integration remains disabled until service configuration and live verification.
 The initial scope is the **Windows launcher MSI only**, not game archives, Linux/macOS installers

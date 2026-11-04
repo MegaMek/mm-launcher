@@ -121,7 +121,7 @@ class WorkflowStructureTest {
         }
         assertEquals(List.of("windows-x64", "linux-x64", "macos-intel", "macos-apple-silicon"), ids);
         assertEquals(List.of("windows-2025", "ubuntu-24.04", "macos-15-intel", "macos-15"), runners);
-        assertEquals(List.of("msi", "deb,rpm", "pkg", "pkg"), extensions);
+        assertEquals(List.of("exe", "deb,rpm", "pkg", "pkg"), extensions);
         assertEquals(List.of(
                 "actions/checkout@v4",
                 "actions/setup-java@v4",
@@ -175,7 +175,11 @@ class WorkflowStructureTest {
         assertTrue(inspection.contains("$matchesForType.Count -ne 1"));
         assertTrue(inspection.contains("ReadAllText(\"$($file.FullName).sha256\")"));
         assertTrue(inspection.contains("if ($line -cne \"$actual  $($file.Name)\")"));
-        assertTrue(inspection.contains("OpenDatabase($file.FullName, 0)"), "MSI inspection must be read-only");
+        assertTrue(inspection.contains("burn extract -acceptEula wix7 $file.FullName"),
+                "the chained MSI is extracted from the setup bundle, never installed");
+        assertTrue(inspection.contains("OpenDatabase($payloads[0].FullName, 0)"), "MSI inspection must be read-only");
+        assertTrue(inspection.contains(".VersionInfo"), "the setup .exe version resource must match the release");
+        assertFalse(inspection.contains("Start-Process"), "verification must not execute the setup .exe");
         assertTrue(inspection.contains("pkgutil --expand-full"));
         assertTrue(inspection.contains("$file.Length -gt 300MB"));
         assertTrue(inspection.contains("SelectNodes('//pkg-ref[@version]')"));
@@ -203,7 +207,7 @@ class WorkflowStructureTest {
                 "failed-job retries may replace same-run CI artifacts, never published release assets");
         String paths = upload.path("with").path("path").asText();
         List<String> expectedPaths = new ArrayList<>();
-        for (String extension : List.of("msi", "deb", "rpm", "pkg")) {
+        for (String extension : List.of("exe", "deb", "rpm", "pkg")) {
             String base = "build/distributions/MegaMek-Launcher-*-${{ matrix.id }}." + extension;
             expectedPaths.add(base);
             expectedPaths.add(base + ".sha256");

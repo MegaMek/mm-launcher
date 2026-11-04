@@ -3,8 +3,8 @@
   Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
   SPDX-License-Identifier: GPL-3.0-or-later
 
-  SPIKE: themed setup .exe (WiX Burn bundle) that wraps the launcher MSI in a
-  window styled like the launcher. The MSI stays the unit that installs files;
+  The shipped Windows installer: a themed setup .exe (WiX Burn bundle) that
+  wraps the launcher MSI in a window styled like the launcher. The MSI stays the unit that installs files;
   the bundle only provides the UI and its own Apps & features entry (the MSI's
   entry is hidden because chained MsiPackages default to Visible="no").
 
@@ -12,7 +12,8 @@
   BundleUpgradeCode MUST NEVER CHANGE once shipped.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
-     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal">
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
   <Bundle Name="MegaMek Launcher" Manufacturer="MegaMek" Version="$(LauncherVersion)"
           UpgradeCode="{CA672DAF-9AA9-4BD1-BCCA-B43CB4C6F133}"
           IconSourceFile="$(LauncherIcon)" DisableModify="button"
@@ -43,11 +44,19 @@
       </BundleElement>
     </BundleCustomDataRef>
 
-    <!-- The theme's checkbox is bound to the variable of the same name. -->
+    <!-- The theme's checkbox is bound to the variable of the same name. It
+         starts from the opt-out the MSI stores, so silent self-updates keep it. -->
     <Variable Name="DesktopShortcutCheckbox" Type="numeric" Value="1"/>
+    <util:RegistrySearch Id="PreviousDesktopOptOut" Variable="PreviousDesktopOptOut"
+        Root="HKCU" Key="Software\MegaMek\MegaMek Launcher\Installer"
+        Value="DesktopShortcutOptOut" Result="value"/>
+    <SetVariable Id="SeedDesktopShortcutCheckbox" Variable="DesktopShortcutCheckbox" Value="0"
+        Type="numeric" After="PreviousDesktopOptOut" Condition="PreviousDesktopOptOut = &quot;1&quot;"/>
 
     <Chain>
       <MsiPackage Id="LauncherMsi" SourceFile="$(LauncherMsi)">
+        <!-- The bundle owns the choice; stops the MSI restoring the old opt-out. -->
+        <MsiProperty Name="LAUNCHER_DESKTOP_CHOSEN" Value="1"/>
         <!-- MSI treats any non-empty value as true, so an opt-out clears it. -->
         <MsiProperty Name="LAUNCHER_DESKTOP_SHORTCUT" Value="" Condition="NOT DesktopShortcutCheckbox"/>
       </MsiPackage>

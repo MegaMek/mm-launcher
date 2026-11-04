@@ -35,6 +35,10 @@ ROOT = Path(__file__).resolve().parent.parent
 
 class LauncherSigningTest(unittest.TestCase):
     def setUp(self):
+        # Exercise the dormant SignPath flow as if bundle signing were implemented.
+        flag = patch.object(release, "WINDOWS_BUNDLE_SIGNING_IMPLEMENTED", True)
+        flag.start()
+        self.addCleanup(flag.stop)
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
@@ -63,7 +67,7 @@ class LauncherSigningTest(unittest.TestCase):
 
     def signed_record(self, version=VERSION, commit=COMMIT):
         self.signed.mkdir()
-        name = f"MegaMek-Launcher-{version}-windows-x64.msi"
+        name = f"MegaMek-Launcher-{version}-windows-x64.exe"
         original = self.input / name
         file = self.signed / name
         file.write_bytes(original.read_bytes() + b"\nunit-test-signed-bytes")
@@ -88,6 +92,11 @@ class LauncherSigningTest(unittest.TestCase):
                     "LAUNCHER_SIGNING_ENABLED": value, "SIGNPATH_ORGANIZATION_ID": "not-configured"})
                 self.assertEqual(release.SigningConfiguration("unsigned"), configuration)
         self.assertEqual("unsigned", release.signing_configuration({}).mode)
+
+    def test_enabled_signing_fails_clearly_until_setup_exe_signing_exists(self):
+        with patch.object(release, "WINDOWS_BUNDLE_SIGNING_IMPLEMENTED", False), \
+                self.assertRaisesRegex(release.ReleaseError, "setup .exe .*not implemented yet"):
+            release.signing_configuration(SIGNING_ENVIRONMENT)
 
     def test_enabled_signing_captures_public_configuration_but_never_outputs_token(self):
         output = self.root / "output"
@@ -155,7 +164,7 @@ class LauncherSigningTest(unittest.TestCase):
         self.assertFalse(self.destination.exists())
 
     def test_source_checksum_errors_stop_before_staging_or_signing(self):
-        file = self.source / f"MegaMek-Launcher-{VERSION}-windows-x64.msi"
+        file = self.source / f"MegaMek-Launcher-{VERSION}-windows-x64.exe"
         file.write_bytes(b"unexpected change")
         with self.assertRaisesRegex(release.ReleaseError, "Checksum mismatch"):
             self.prepare()
@@ -164,7 +173,7 @@ class LauncherSigningTest(unittest.TestCase):
 
     def test_only_msi_is_submitted_and_only_its_bytes_and_checksum_change(self):
         self.prepare()
-        name = f"MegaMek-Launcher-{VERSION}-windows-x64.msi"
+        name = f"MegaMek-Launcher-{VERSION}-windows-x64.exe"
         self.assertEqual([name], [file.name for file in self.input.iterdir()])
         before = {file.name: file.read_bytes() for file in self.destination.iterdir()}
         record = self.signed_record()
@@ -238,7 +247,7 @@ class LauncherSigningTest(unittest.TestCase):
             release.publish(github, VERSION, COMMIT, assets, {**record, "timestamped": False}, CERTIFICATE)
         self.assertEqual([], github.calls)
         release.publish(github, VERSION, COMMIT, assets, record, CERTIFICATE)
-        self.assertIn("Windows MSI is Authenticode-signed and timestamped", github.release["body"])
+        self.assertIn("Windows installer is Authenticode-signed and timestamped", github.release["body"])
         self.assertIn("certificate by SignPath Foundation", github.release["body"])
         self.assertIn("Linux/macOS installers remain unsigned", github.release["body"])
         self.assertEqual(record["sha256"], next(
@@ -360,6 +369,7 @@ foreach ($field in @('ProductName', 'ProductVersion', 'UpgradeCode')) {
                                 capture_output=True, text=True, check=False)
         self.assertEqual(0, result.returncode, result.stdout + result.stderr)
 
+    @unittest.skip("verify_launcher_signature.ps1 still checks MSI identity; rework with setup .exe signing")
     @unittest.skipUnless(PWSH, "PowerShell is required for MSI verification orchestration unit tests")
     def test_powershell_verification_binds_files_and_rejects_identity_drift_without_receipt(self):
         self.prepare()

@@ -102,7 +102,7 @@ class NativeLauncherUpdateTest {
         assertThrows(IOException.class, () -> updater.parseCandidate(json.replace("github.com",
                 "example.org").getBytes(StandardCharsets.UTF_8), "0.1.0", suffix));
         assertThrows(IOException.class, () -> updater.parseCandidate(json.getBytes(StandardCharsets.UTF_8),
-                "0.1.0", "windows-x64.msi"));
+                "0.1.0", "windows-x64.exe"));
     }
 
     @ParameterizedTest
@@ -121,7 +121,7 @@ class NativeLauncherUpdateTest {
         assertFalse(Files.exists(staged.getParent()));
         assertThrows(IOException.class, () -> updater.stage(candidate(suffix, content), "0.1.0",
                 context, (file, version) -> fail("wrong package family cannot be verified"),
-                "windows-x64.msi"));
+                "windows-x64.exe"));
     }
 
     @Test void macDistributionRequiresExactlyTheLauncherReceiptAndMappedVersion() throws Exception {

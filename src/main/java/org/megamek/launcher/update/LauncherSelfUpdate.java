@@ -64,7 +64,9 @@ import java.util.regex.Pattern;
 
 /** Shared release discovery, verified downloads, and user-authorized native installer handoff. */
 public final class LauncherSelfUpdate {
+    // UpgradeCode of the MSI chained by the Windows setup .exe (WiX Burn bundle).
     private static final String UPGRADE = "{616FFD64-0D7F-4FBE-9BB9-63FD6D9D32FA}";
+    static final String WINDOWS_SUFFIX = "windows-x64.exe";
     private static final URI LATEST = URI.create(
             "https://api.github.com/repos/MegaMek/mm-launcher/releases/latest");
     private static final Pattern VERSION = Pattern.compile("[0-9]+\\.[0-9]+\\.[0-9]+");
@@ -119,12 +121,12 @@ public final class LauncherSelfUpdate {
             byte[] metadata = response.body().readNBytes(1024 * 1024 + 1);
             if (metadata.length > 1024 * 1024) throw new IOException("Release metadata exceeds limit");
             return parseCandidate(metadata, currentVersion(), nativeUpdater == null
-                    ? "windows-x64.msi" : nativeUpdater.suffix(currentVersion()));
+                    ? WINDOWS_SUFFIX : nativeUpdater.suffix(currentVersion()));
         }
     }
 
     Candidate parseCandidate(byte[] metadata, String installedVersion) throws IOException {
-        return parseCandidate(metadata, installedVersion, "windows-x64.msi");
+        return parseCandidate(metadata, installedVersion, WINDOWS_SUFFIX);
     }
 
     Candidate parseCandidate(byte[] metadata, String installedVersion, String suffix) throws IOException {
@@ -198,7 +200,7 @@ public final class LauncherSelfUpdate {
 
     Path stage(Candidate candidate, String installedVersion, OperationContext context,
                InstallerIdentityCheck identityCheck) throws IOException, InterruptedException {
-        return stage(candidate, installedVersion, context, identityCheck, "windows-x64.msi");
+        return stage(candidate, installedVersion, context, identityCheck, WINDOWS_SUFFIX);
     }
 
     Path stage(Candidate candidate, String installedVersion, OperationContext context,
@@ -214,8 +216,8 @@ public final class LauncherSelfUpdate {
                 || !candidate.url().equals(URI.create("https://github.com/MegaMek/mm-launcher/"
                         + "releases/download/" + tag + "/" + candidate.name())))
             throw new IOException("Invalid official launcher installer asset identity");
-        Path directory = Files.createTempDirectory(suffix.equals("windows-x64.msi")
-                ? "mm-launcher-msi-" : "mm-launcher-update-").toRealPath();
+        Path directory = Files.createTempDirectory(suffix.equals(WINDOWS_SUFFIX)
+                ? "mm-launcher-setup-" : "mm-launcher-update-").toRealPath();
         Path file = directory.resolve(candidate.name());
         try {
             context.phase(OperationPhase.DOWNLOAD, "Downloading the official launcher installer");
@@ -350,18 +352,16 @@ public final class LauncherSelfUpdate {
         }
     }
 
+    // Sanity check of the setup .exe version resource; the published SHA-256 is the trust anchor.
     private static void verifyIdentity(Path file, String version) throws IOException, InterruptedException {
-        String script = "$ErrorActionPreference='Stop'; $i=New-Object -ComObject WindowsInstaller.Installer;"
-                + "$d=$i.OpenDatabase(" + literal(file.toString()) + ",0);"
-                + "foreach($p in @('UpgradeCode','ProductVersion','ProductName')){"
-                + "$v=$d.OpenView(\"SELECT Value FROM Property WHERE Property='$p'\");"
-                + "$v.Execute(); $r=$v.Fetch(); if($null -eq $r){throw 'Missing MSI property'};"
-                + "$r.StringData(1)}";
+        String script = "$ErrorActionPreference='Stop';"
+                + "$v=(Get-Item -LiteralPath " + literal(file.toString()) + ").VersionInfo;"
+                + "$v.ProductName;$v.CompanyName;$v.ProductVersion";
         String[] values = powershell(script).lines().toArray(String[]::new);
-        if (values.length != 3 || !UPGRADE.equalsIgnoreCase(values[0].trim())
-                || !version.equals(values[1].trim())
-                || !"MegaMek Launcher".equals(values[2].trim()))
-            throw new IOException("MSI upgrade code, product name or product version does not match release");
+        if (values.length != 3 || !"MegaMek Launcher".equals(values[0].trim())
+                || !"MegaMek".equals(values[1].trim())
+                || !version.equals(values[2].trim()))
+            throw new IOException("Setup product name, company or version does not match release");
     }
 
     /** Only the exact file returned by this instance's stage operation is eligible for deletion. */
@@ -392,10 +392,10 @@ public final class LauncherSelfUpdate {
         }
     }
 
-    static String installerArguments(String msiVariable) {
+    static String installerArguments() {
+        // Burn's /passive shows only the themed progress window; no prompts.
         // PowerShell single quotes here delimit a literal double-quote, not a backslash.
-        return "@('/i',('\"'+" + msiVariable + "+'\"'),'/passive','/norestart',"
-                + "'/l*v',('\"'+$installerLog+'\"'))";
+        return "@('/passive','/norestart','/log',('\"'+$installerLog+'\"'))";
     }
 
     public enum ReportState { INSTALLED, INSTALLED_WARNING, FAILED, PENDING, RECOVERED, INSTALLED_RECOVERED }
@@ -619,7 +619,7 @@ public final class LauncherSelfUpdate {
     static String handoffScript(Path file, String version, String sha256, Path report, long parentPid) {
         return handoffScript(file, version, sha256, report, parentPid,
                 Path.of(System.getProperty("jpackage.app-path", "MegaMek Launcher.exe")),
-                Path.of("msiexec.exe"));
+                file);
     }
 
     public static Path helperLog(Path report) {
@@ -645,9 +645,9 @@ public final class LauncherSelfUpdate {
                 + "Write-Output 'Waiting for launcher shutdown';while(Get-Process -Id " + parentPid
                 + " -ErrorAction SilentlyContinue){Start-Sleep -Milliseconds 500};"
                 + "if((Get-FileHash -LiteralPath $msi -Algorithm SHA256).Hash -ine "
-                + literal(sha256) + "){throw 'Staged MSI digest changed'};"
-                + "Write-Output 'Starting Windows Installer';$p=Start-Process -FilePath " + literal(installer.toString())
-                + " -ArgumentList " + installerArguments("$msi")
+                + literal(sha256) + "){throw 'Staged installer digest changed'};"
+                + "Write-Output 'Starting launcher setup';$p=Start-Process -FilePath " + literal(installer.toString())
+                + " -ArgumentList " + installerArguments()
                 + " -Wait -PassThru; if($p.ExitCode -eq 0)"
                 + " { $outcome=" + literal("installed:" + version) + " }"
                 + " elseif($p.ExitCode -eq 3010)"
@@ -661,7 +661,7 @@ public final class LauncherSelfUpdate {
                 + " -and (Get-FileHash -LiteralPath $msi -Algorithm SHA256).Hash -ieq "
                 + literal(sha256) + ") {"
                 + "[IO.File]::Delete($msi); [IO.Directory]::Delete($dir) }"
-                + "else { throw 'Staged MSI path changed; cleanup refused' }"
+                + "else { throw 'Staged installer path changed; cleanup refused' }"
                 + "} catch { Write-Error $_ -ErrorAction Continue;"
                 + "if($outcome -eq " + literal("installed:" + version) + ")"
                 + " { $outcome=" + literal("installed-cleanup-warning:" + version) + " }"

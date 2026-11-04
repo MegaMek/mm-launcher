@@ -30,10 +30,14 @@ PROVENANCE_ARCHIVE_LIMIT = 64 * 1024
 SIGNING_RECORD_LIMIT = 4096
 RELEASE_RUN = re.compile(r"^Launcher-Release-Run: ([1-9][0-9]{0,19})$", re.MULTILINE)
 INSTALLERS = (
-    "windows-x64.msi", "linux-x64.deb", "linux-x64.rpm",
+    "windows-x64.exe", "linux-x64.deb", "linux-x64.rpm",
     "macos-intel.pkg", "macos-apple-silicon.pkg",
 )
 APPLE_PLATFORMS = ("macos-intel", "macos-apple-silicon")
+# The SignPath flow signs and verifies a single MSI. The Windows asset is now a
+# WiX Burn setup .exe, which first needs MSI, Burn engine and bundle signing
+# passes; until then, enabled Windows signing fails instead of publishing.
+WINDOWS_BUNDLE_SIGNING_IMPLEMENTED = False
 
 
 class ReleaseError(Exception):
@@ -78,6 +82,9 @@ def signing_configuration(environment):
     token = environment.get("SIGNPATH_API_TOKEN")
     if not isinstance(token, str) or not token.strip():
         raise ReleaseError("SIGNPATH_API_TOKEN is required when Windows signing is enabled")
+    if not WINDOWS_BUNDLE_SIGNING_IMPLEMENTED:
+        raise ReleaseError("Windows signing of the setup .exe (WiX Burn bundle) is not implemented yet; "
+                           "unset LAUNCHER_SIGNING_ENABLED to publish an unsigned Windows installer")
     return SigningConfiguration("signpath", **values)
 
 
@@ -93,7 +100,7 @@ def load_signing_record(path):
 
 def verify_signing_record(record, version, commit, assets, certificate_sha256):
     expected_certificate = certificate_digest(certificate_sha256)
-    name = f"MegaMek-Launcher-{version}-windows-x64.msi"
+    name = f"MegaMek-Launcher-{version}-windows-x64.exe"
     matches = [asset for asset in assets if asset.path.name == name]
     fields = {"schema_version", "name", "version", "commit", "unsigned_sha256", "sha256",
               "size", "certificate_sha256", "signature_status", "timestamped"}
@@ -742,7 +749,7 @@ def verified_release_push(github, root, environment):
                 or not isinstance(item.get("sha256"), str)
                 or not re.fullmatch(r"[0-9a-f]{64}", item["sha256"])):
             raise ReleaseError("Retained publication asset metadata is incomplete or malformed")
-        if item["name"].endswith((".msi", ".deb", ".rpm", ".pkg")) and item["size"] > INSTALLER_LIMIT:
+        if item["name"].endswith((".exe", ".msi", ".deb", ".rpm", ".pkg")) and item["size"] > INSTALLER_LIMIT:
             raise ReleaseError("Published installer exceeds the updater size limit")
         assets.append(Asset(Path(item["name"]), item["size"], item["sha256"]))
         identities[item["name"]] = item["id"]
@@ -778,12 +785,12 @@ def publish(github, version, commit, assets, signing_record=None, certificate_sh
     verify_tag(reference, version, commit)
     signing_notice = ("Installers are unsigned; macOS packages are not notarized. "
                       if signing_record is None else
-                      "The Windows MSI is Authenticode-signed and timestamped through SignPath. "
+                      "The Windows installer is Authenticode-signed and timestamped through SignPath. "
                       "Free code signing provided by SignPath.io, certificate by SignPath Foundation. "
                       "Linux/macOS installers remain unsigned; macOS packages are not notarized. ")
     if apple_records is not None:
         signing_notice = (
-            "Windows MSI is Authenticode-signed and timestamped through SignPath. "
+            "Windows installer is Authenticode-signed and timestamped through SignPath. "
             "Free code signing provided by SignPath.io, certificate by SignPath Foundation. "
             if signing_record is not None else "Windows installer remains unsigned. ")
         signing_notice += ("Both macOS packages are Developer ID-signed, notarized by Apple and stapled. "
