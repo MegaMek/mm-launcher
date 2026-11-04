@@ -44,6 +44,7 @@ import java.awt.Graphics2D;
 import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.geom.Rectangle2D;
 
 /**
  * Keeps a token button's framing label short. In game mode the label is upper-cased, so the
@@ -132,7 +133,7 @@ final class ButtonDetail {
         if (badge != null) {
             Font badgeFont = badgeFont(button, scale);
             FontMetrics badgeMetrics = button.getFontMetrics(badgeFont);
-            int badgeHeight = badgeMetrics.getHeight() + scale.space("xxs");
+            int badgeHeight = badgeMetrics.getHeight() + scale.space("xs");
             int badgeX = x + textRectangle.width + badgeGap(scale);
             int badgeY = y + (textRectangle.height - badgeHeight) / 2;
             Color accent = button.isEnabled() ? LauncherTheme.ACCENT : color;
@@ -142,8 +143,13 @@ final class ButtonDetail {
             graphics.drawRoundRect(badgeX, badgeY, badgeWidth - 1, badgeHeight - 1,
                     badgeHeight, badgeHeight);
             graphics.setFont(badgeFont);
-            graphics.drawString(badge, badgeX + (badgeWidth - badgeMetrics.stringWidth(badge)) / 2,
-                    badgeY + (badgeHeight - badgeMetrics.getHeight()) / 2 + badgeMetrics.getAscent());
+            // Center the drawn glyphs, not the font's line box: the line box's leading and
+            // descent otherwise push short text like "1 update" toward the bottom border.
+            Rectangle2D ink = badgeFont.createGlyphVector(graphics.getFontRenderContext(), badge)
+                    .getVisualBounds();
+            graphics.drawString(badge,
+                    (float) (badgeX + (badgeWidth - ink.getWidth()) / 2 - ink.getX()),
+                    (float) (badgeY + (badgeHeight - ink.getHeight()) / 2 - ink.getY()));
         }
     }
 

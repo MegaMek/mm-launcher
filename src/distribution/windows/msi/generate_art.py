@@ -34,7 +34,7 @@
 
 Run from the repository root with: python src/distribution/windows/msi/generate_art.py
 Requires Pillow. MSI bitmap dimensions are physical pixels for 180x234 and
-370x44 dialog units at the standard 96 DPI (240x312 and 493x58).
+490x44 dialog units at the standard 96 DPI (240x312 and 653x58).
 """
 
 from pathlib import Path
@@ -60,5 +60,5 @@ dialog = image.crop((285, 0, 825, 713)).resize((240, 312), Image.Resampling.LANC
 save(dialog, "wizard-dialog.bmp")
 
 # Street-level machinery and the 'Mech torso, not the empty sky at image top.
-banner = image.crop((165, 236, 1170, 355)).resize((493, 58), Image.Resampling.LANCZOS)
+banner = image.crop((0, 240, 1280, 354)).resize((653, 58), Image.Resampling.LANCZOS)
 save(banner, "wizard-banner.bmp")

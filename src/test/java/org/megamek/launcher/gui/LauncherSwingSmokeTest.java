@@ -613,9 +613,9 @@ class LauncherSwingSmokeTest {
             assertEquals(FollowChannel.CORE, services.currentChannel);
             assertEquals(List.of(1), services.pages);
             assertTrue(list.getModel().getElementAt(0).toString()
-                    .equals("MekHQ Core (0.51.0) — 4.0 KiB"));
+                    .equals("MekHQ Core (0.51.0) — 4.0 KB"));
             assertTrue(list.getModel().getElementAt(1).toString()
-                    .equals("MekHQ Core (0.50.1) — 4.0 KiB"));
+                    .equals("MekHQ Core (0.50.1) — 4.0 KB"));
             assertEquals("MekHQ Core (0.49.1) — Unavailable",
                     list.getModel().getElementAt(2).toString());
             assertEquals("Install", find(dialog, "installReleaseButton").getText());

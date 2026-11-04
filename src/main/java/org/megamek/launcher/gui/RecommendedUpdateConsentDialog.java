@@ -79,7 +79,7 @@ final class RecommendedUpdateConsentDialog extends JDialog {
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         getAccessibleContext().setAccessibleName(getTitle());
         getAccessibleContext().setAccessibleDescription(
-                "Confirm downloading, verifying, planning, and applying the displayed update.");
+                "Confirm downloading and installing the displayed update.");
 
         Font base = UIManager.getFont("Label.font");
         if (base == null) base = new Font(Font.DIALOG, Font.PLAIN, 12);
@@ -93,22 +93,8 @@ final class RecommendedUpdateConsentDialog extends JDialog {
                         scale.size("border"), 0, 0, 0, LauncherTheme.BORDER),
                 scale.padding("xl", "xl")));
 
-        JLabel heading = label("Update this application?", "recommendedUpdateHeading",
+        JLabel heading = label("Update " + application + "?", "recommendedUpdateHeading",
                 scale.font(base, "headline"), FirstLaunchPanel.TEXT);
-        JLabel operation = label("This will download, verify, plan, and apply the update.",
-                "recommendedUpdateOperation",
-                scale.font(base, "body"), FirstLaunchPanel.TEXT);
-        JLabel closeApplications = label(
-                "Close MegaMek, MekHQ, and MegaMekLab before continuing.",
-                "recommendedUpdateCloseApplications",
-                scale.font(base, "body"), FirstLaunchPanel.TEXT);
-        JLabel extraJars = label(
-                "Extra unowned JARs in lib, if present, are kept and may affect the game.",
-                "recommendedUpdateExtraJars",
-                scale.font(base, "body"), FirstLaunchPanel.TEXT);
-        JLabel product = label("Application: " + application,
-                "recommendedUpdateApplication",
-                scale.font(base, "body.strong"), FirstLaunchPanel.TEXT);
         JLabel current = label("Current version: " + displayVersion(currentVersion),
                 "recommendedUpdateCurrentVersion",
                 scale.font(base, "body"), FirstLaunchPanel.TEXT);
@@ -121,14 +107,6 @@ final class RecommendedUpdateConsentDialog extends JDialog {
 
         summary.add(heading);
         summary.add(Box.createVerticalStrut(scale.space("lg")));
-        summary.add(operation);
-        summary.add(Box.createVerticalStrut(scale.space("sm")));
-        summary.add(closeApplications);
-        summary.add(Box.createVerticalStrut(scale.space("sm")));
-        summary.add(extraJars);
-        summary.add(Box.createVerticalStrut(scale.space("lg")));
-        summary.add(product);
-        summary.add(Box.createVerticalStrut(scale.space("sm")));
         summary.add(current);
         summary.add(Box.createVerticalStrut(scale.space("sm")));
         summary.add(target);
@@ -141,7 +119,7 @@ final class RecommendedUpdateConsentDialog extends JDialog {
         cancel.getAccessibleContext().setAccessibleDescription(
                 "Close without downloading or applying the update.");
         update.getAccessibleContext().setAccessibleDescription(
-                "Download, verify, plan, and apply the displayed update.");
+                "Download and install the displayed update.");
 
         JPanel actions = new JPanel();
         actions.setName("recommendedUpdateConsentActions");

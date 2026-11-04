@@ -89,7 +89,8 @@ class OtherCopyCheckSwingTest {
                     () -> find(frame, "manageInstallationsButton"));
             waitUntil(() -> "Installations (1 update)".equals(SwingTestSupport.spoken(installations)));
             JLabel information = waitFor(() -> find(frame, "homeInformationMessage"));
-            waitUntil(() -> "1 installation has an update".equals(information.getText()));
+            // The count badge alone announces updates; the information line stays empty.
+            waitUntil(() -> information.getText().isBlank());
             assertSame(originalHome, onEdt(() -> find(frame, "managedHomePanel")),
                     "late other-copy checks update navigation without replacing Home");
             SwingUtilities.invokeAndWait(installations::doClick);

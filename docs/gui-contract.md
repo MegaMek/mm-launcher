@@ -218,8 +218,9 @@ generation-bound and update that button on the EDT without replacing Home. Home 
 Check/Retry/Update buttons or redundant status navigation. Pending recovery and launch
 blockers remain exact-record actions in Installations. One top-left Home information area displays
 only useful aggregate update state: **Checking for updates…**,
-**All installations are up to date**, **N installations have updates**, or
-**Some installations could not be checked**. It makes no all-current claim when imported or
+**All installations are up to date**, or
+**Some installations could not be checked**. Available updates appear only as the Installations
+count badge, not repeated in this area. It makes no all-current claim when imported or
 unchecked installations prevent that conclusion. There is no separate middle status line and no
 post-install “ready” notice.
 A followed channel with no published suite record instead says
@@ -514,7 +515,7 @@ updates that label in place and never replaces managed Home.
 An available result displays verified installed tag, followed target, status, release-notes URL,
 and full size. **Update to recommended release…** goes directly to that captured target and opens a
 styled update consent showing the application name, current version, new version, and rounded
-human-readable MiB download size. It states that the operation will download, verify, plan, and
+human-readable MB download size. It states that the operation will download, verify, plan, and
 apply the update and reminds the user to close suite applications. Its right-aligned actions are
 **Cancel** then **Update**, with Update as the default. This one consent authorizes the complete
 attempt; Cancel, Escape, and window close fetch no package body. Before any package request the

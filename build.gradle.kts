@@ -188,6 +188,10 @@ abstract class WindowsInstallerMsi : DefaultTask() {
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val wixResources: DirectoryProperty
 
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val customActionDirectory: DirectoryProperty
+
     // Checked explicitly at execution time so missing local tools get actionable errors.
     @get:Internal
     abstract val wixBinaryDirectory: DirectoryProperty
@@ -274,10 +278,75 @@ abstract class WindowsInstallerMsi : DefaultTask() {
                 wix.absolutePath + File.pathSeparator + (System.getenv("PATH") ?: "")
             )
             environment("MM_LAUNCHER_ART_DIR", wixResources.get().asFile.absolutePath)
+            environment("MM_LAUNCHER_CA_DIR", customActionDirectory.get().asFile.absolutePath)
         }
         check(generated.isFile) { "jpackage did not produce ${generated.absolutePath}." }
         installer.parentFile.mkdirs()
         Files.move(generated.toPath(), installer.toPath())
+    }
+}
+
+// Builds the installer's folder-picker custom action (C# via WiX DTF) so the MSI can
+// show the standard Windows folder dialog, which native MSI dialogs cannot.
+abstract class WindowsInstallerFolderPicker : DefaultTask() {
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val sourceDirectory: DirectoryProperty
+
+    @get:Internal
+    abstract val wixBinaryDirectory: DirectoryProperty
+
+    @get:OutputDirectory
+    abstract val outputDirectory: DirectoryProperty
+
+    @get:Inject
+    abstract val execOperations: ExecOperations
+
+    @TaskAction
+    fun buildCustomAction() {
+        check(OperatingSystem.current().isWindows) {
+            "The Windows installer custom action can only be built on Windows."
+        }
+        val sdk = File(wixBinaryDirectory.get().asFile, "sdk")
+        val makeSfxCa = File(sdk, "MakeSfxCA.exe")
+        val dtf = File(sdk, "Microsoft.Deployment.WindowsInstaller.dll")
+        val sfxCa = File(sdk, "x64/sfxca.dll")
+        check(makeSfxCa.isFile && dtf.isFile && sfxCa.isFile) {
+            "The WiX 3.x SDK (sdk/MakeSfxCA.exe) is required at ${sdk.absolutePath}. " +
+                "It ships in wix314-binaries.zip from https://github.com/wixtoolset/wix3/releases."
+        }
+        val windows = System.getenv("WINDIR") ?: "C:\\Windows"
+        val csc = File(windows, "Microsoft.NET/Framework64/v4.0.30319/csc.exe")
+        check(csc.isFile) { "The .NET Framework 4 C# compiler was not found at ${csc.absolutePath}." }
+
+        val source = sourceDirectory.get().asFile
+        val output = outputDirectory.get().asFile
+        output.mkdirs()
+        val assembly = File(output, "LauncherFolderPicker.dll")
+        val packed = File(output, "LauncherFolderPicker.CA.dll")
+        check(!packed.exists() || packed.delete()) {
+            "Could not remove previous custom action at ${packed.absolutePath}."
+        }
+        execOperations.exec {
+            executable = csc.absolutePath
+            args(
+                "/nologo", "/target:library", "/optimize",
+                "/out:${assembly.absolutePath}",
+                "/reference:${dtf.absolutePath}",
+                File(source, "LauncherFolderPicker.cs").absolutePath
+            )
+        }
+        execOperations.exec {
+            executable = makeSfxCa.absolutePath
+            args(
+                packed.absolutePath,
+                sfxCa.absolutePath,
+                assembly.absolutePath,
+                File(source, "CustomAction.config").absolutePath,
+                dtf.absolutePath
+            )
+        }
+        check(packed.isFile) { "MakeSfxCA did not produce ${packed.absolutePath}." }
     }
 }
 
@@ -1082,6 +1151,15 @@ val macInstallerAppVersion = windowsInstallerAppVersion.split(".").let { compone
     "${Math.addExact(components[0].toInt(), 1)}.${components[1]}.${components[2]}"
 }
 
+val windowsInstallerFolderPicker =
+    tasks.register<WindowsInstallerFolderPicker>("windowsInstallerFolderPicker") {
+        group = "distribution"
+        description = "Builds the Windows installer's folder-picker custom action."
+        sourceDirectory.set(layout.projectDirectory.dir("src/distribution/windows/folder-picker"))
+        wixBinaryDirectory.set(layout.projectDirectory.dir(".tools/wix314"))
+        outputDirectory.set(layout.buildDirectory.dir("windows-installer-folder-picker"))
+    }
+
 val windowsInstallerMsi = tasks.register<WindowsInstallerMsi>("windowsInstallerMsi") {
     group = "distribution"
     description = "Builds the per-user Windows MSI installer with a bundled Java runtime via jpackage."
@@ -1102,6 +1180,7 @@ val windowsInstallerMsi = tasks.register<WindowsInstallerMsi>("windowsInstallerM
     // Borrowed from the MegaMek project icon until a dedicated launcher icon exists.
     iconFile.set(layout.projectDirectory.file("src/distribution/windows/icon.ico"))
     wixResources.set(layout.projectDirectory.dir("src/distribution/windows/msi"))
+    customActionDirectory.set(windowsInstallerFolderPicker.flatMap { it.outputDirectory })
     outputs.cacheIf { false }
 }
 

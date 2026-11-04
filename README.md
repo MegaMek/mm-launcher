@@ -17,7 +17,9 @@ for games launched by the application; no external Java is required.
 Run `./gradlew test buildDebInstaller buildRpmInstaller` on Linux,
 `./gradlew test buildPkgInstaller` on macOS, or
 `.\gradlew.bat test buildWindowsInstaller` on Windows. Windows packaging requires
-WiX 3.14 in `.tools/wix314`; CI verifies the downloaded binaries.
+WiX 3.14 in `.tools/wix314` (including its `sdk` folder, used to build the installer's
+folder-picker custom action with the .NET Framework 4 `csc.exe`); CI verifies the
+downloaded binaries.
 The former archive tasks remain available for development but are not CI outputs.
 
 After a release updates `main`, the native-installer workflow still appears, but its
@@ -58,8 +60,8 @@ or `xvfb-run -a ./gradlew nativeGuiTest` on Linux. The independent
 platforms, but does not block release publication. Do not make its jobs required branch
 checks. It must execute tests, not report an all-skipped run as success.
 
-The Windows MSI is an additional per-user installation (bundled Java, fixed
-install folder, persistent upgrade UUID). Installed Apps, Start Menu, the
+The Windows MSI is an additional per-user installation (bundled Java,
+user-chosen install folder, persistent upgrade UUID). Installed Apps, Start Menu, the
 desktop shortcut, and executable are named **MegaMek Launcher**; the icon on
 the installed application and installer is derived from MegaMek.png. The macOS
 app bundle uses an ICNS derivative of that same source. The
@@ -68,8 +70,10 @@ shows the costed per-user binary path on Welcome, advances through a modeless
 installation progress dialog with a steady status label and live progress bar,
 and offers a checked **Launch MegaMek Launcher** option on its completion screen. This
 launch is an interactive finish-button action only: `msiexec /qn` self-upgrades
-never launch the app. It does not change the `.msi` file association or prompt
-for an install directory. `mm-launcher` remains the compatible internal CLI
+never launch the app. It does not change the `.msi` file association. Welcome's
+**Change…** opens the standard Windows folder dialog; setup always installs into a
+`MegaMek Launcher` folder inside the chosen folder and remembers it for upgrades
+and self-updates. `mm-launcher` remains the compatible internal CLI
 and Linux script name.
 Version 0.14.5 is a newer MSI for upgrading existing 0.14.4 (or earlier) installations;
 rebuilding the same version does not allow a same-version MSI reinstall. The upgrade
@@ -351,7 +355,8 @@ no channel, check, preview, update, or recovery action; only its opt-in
 **Enable updates…** item in the **More…** menu is available. There is no bulk update.
 Managed Home has one top-left information area for useful aggregate update state:
 **Checking for updates…**, **All installations are up to date**,
-**N installations have updates**, or **Some installations could not be checked**. It does not
+or **Some installations could not be checked**. Available updates are shown only by the
+**Installations** count badge, not repeated there. It does not
 repeat an obvious post-install “ready” message or place status text above navigation.
 
 The title bar shows the packaged MegaMek Launcher version (or "development build" outside a

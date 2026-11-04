@@ -88,15 +88,84 @@ public final class LauncherSelfUpdate {
     }
 
     private static boolean windowsAvailable() {
-        String location = System.getProperty("jpackage.app-path", "");
-        String local = System.getenv("LOCALAPPDATA");
-        // Portable entry points do not carry this property; also require the
-        // fixed per-user MSI binary location rather than just the executable name.
         return System.getProperty("os.name", "").startsWith("Windows")
-                && local != null && !location.isBlank()
-                && Path.of(location).toAbsolutePath().normalize().toString()
-                .equalsIgnoreCase(Path.of(local, "Programs", "MegaMek Launcher",
-                        "MegaMek Launcher.exe").toAbsolutePath().normalize().toString());
+                && windowsInstallMatches(System.getProperty("jpackage.app-path", ""),
+                        System.getenv("LOCALAPPDATA"), recordedInstallDir());
+    }
+
+    /**
+     * Portable entry points do not carry jpackage.app-path; an MSI install runs
+     * from either the per-user default folder or the folder the installer recorded.
+     */
+    static boolean windowsInstallMatches(String appPath, String localAppData, String recordedInstallDir) {
+        if (appPath == null || appPath.isBlank()) return false;
+        try {
+            String location = Path.of(appPath).toAbsolutePath().normalize().toString();
+            if (localAppData != null && !localAppData.isBlank() && location.equalsIgnoreCase(
+                    launcherExe(Path.of(localAppData, "Programs", "MegaMek Launcher"))))
+                return true;
+            return recordedInstallDir != null && !recordedInstallDir.isBlank()
+                    && Path.of(recordedInstallDir).isAbsolute()
+                    && location.equalsIgnoreCase(launcherExe(Path.of(recordedInstallDir)));
+        } catch (java.nio.file.InvalidPathException invalid) {
+            return false;
+        }
+    }
+
+    private static String launcherExe(Path folder) {
+        return folder.resolve("MegaMek Launcher.exe").toAbsolutePath().normalize().toString();
+    }
+
+    /** Parses the InstallDir value from reg.exe query output. */
+    static String parseRecordedInstallDir(String regQueryOutput) {
+        var match = Pattern.compile("(?m)^\\s+InstallDir\\s+REG_(?:EXPAND_)?SZ\\s+(.+?)\\s*$")
+                .matcher(regQueryOutput);
+        return match.find() ? match.group(1) : null;
+    }
+
+    private static boolean recordedInstallDirRead;
+    private static String recordedInstallDir;
+
+    /*
+     * Cached in a plain synchronized method rather than a holder class's static initializer:
+     * the async drain below must not run code of a class that is still initializing, or it
+     * deadlocks with the caller (which is the Swing event thread at startup).
+     */
+    static synchronized String recordedInstallDir() {
+        if (!recordedInstallDirRead) {
+            recordedInstallDir = readRecordedInstallDir();
+            recordedInstallDirRead = true;
+        }
+        return recordedInstallDir;
+    }
+
+    private static String readRecordedInstallDir() {
+        if (!System.getProperty("os.name", "").startsWith("Windows")
+                || System.getProperty("jpackage.app-path", "").isBlank()) return null;
+        try {
+            Process process = new ProcessBuilder("reg.exe", "query",
+                    "HKCU\\Software\\MegaMek\\MegaMek Launcher\\Installer", "/v", "InstallDir")
+                    .redirectErrorStream(true).start();
+            var output = java.util.concurrent.CompletableFuture.supplyAsync(
+                    () -> drain(process.getInputStream()));
+            if (!process.waitFor(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                process.destroyForcibly();
+                return null;
+            }
+            return process.exitValue() == 0
+                    ? parseRecordedInstallDir(output.get(5, java.util.concurrent.TimeUnit.SECONDS)) : null;
+        } catch (IOException | RuntimeException | java.util.concurrent.ExecutionException
+                 | java.util.concurrent.TimeoutException error) {
+            return null;
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return null;
+        }
+    }
+
+    static synchronized void resetRecordedInstallDirForTest() {
+        recordedInstallDirRead = false;
+        recordedInstallDir = null;
     }
 
     public static String currentVersion() {
@@ -307,9 +376,15 @@ public final class LauncherSelfUpdate {
                 + "$i=New-Object -ComObject WindowsInstaller.Installer;"
                 + "$codes=@($i.RelatedProducts(" + literal(UPGRADE) + "));"
                 + "if($codes.Count -ne 1){throw 'Expected one installed MSI product'};"
-                + "$i.ProductInfo($codes[0],'VersionString')";
-        if (!currentVersion().equals(powershell(script).trim()))
+                + "$i.ProductInfo($codes[0],'VersionString');"
+                + "$i.ProductInfo($codes[0],'InstallLocation')";
+        String[] lines = powershell(script).trim().split("\\R", 2);
+        if (!currentVersion().equals(lines[0].trim()))
             throw new IOException("Running launcher version is not the installed MSI version");
+        String location = lines.length > 1 ? lines[1].trim() : "";
+        if (!location.isEmpty() && !windowsInstallMatches(
+                System.getProperty("jpackage.app-path", ""), null, location))
+            throw new IOException("Running launcher is not in the installed MSI folder");
     }
 
     private static String powershell(String script) throws IOException, InterruptedException {

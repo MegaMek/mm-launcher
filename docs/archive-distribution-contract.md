@@ -23,12 +23,24 @@ Linux's stable package name is `megamek-launcher` under `/opt`; the macOS
 bundle identifier is `org.megamek.launcher` under `/Applications`.
 Both own only application files. Registry, settings, logs and installed
 games live in independent user paths and must not be overwritten by package
-upgrades. The Windows MSI retains its stable per-user installation path and
+upgrades. The Windows MSI retains its per-user installation folder and
 upgrade UUID described below. The archive tasks are still available for
 development (including `verifyPortableArchive` and `verifyProvidedArchive`),
 but are not part of the CI installer contract.
-The MSI keeps the permanent upgrade UUID and per-user fixed binary directory
-`%LOCALAPPDATA%\Programs\MegaMek Launcher` (no folder chooser). This is
+The MSI keeps the permanent upgrade UUID and the per-user default binary directory
+`%LOCALAPPDATA%\Programs\MegaMek Launcher`. Welcome shows the folder with a
+**Change…** button that runs an immediate WiX DTF custom action (built by the
+`windowsInstallerFolderPicker` Gradle task from `src/distribution/windows/folder-picker`)
+showing the standard Windows folder dialog. The result is always a dedicated
+`MegaMek Launcher` folder inside the user's pick, because jpackage's uninstall
+removes `INSTALLDIR` recursively; folders the user cannot write to without
+elevation are rejected. A grey hint under the folder tells users that games can be
+installed anywhere from the launcher later, since game payloads use their own folders.
+Because MSI never redraws a dialog after a custom action,
+**Change…** switches between two identical Welcome dialogs. An HKCU `InstallDir`
+value records the folder; AppSearch restores it for interactive and silent upgrades
+unless the command line sets `INSTALLDIR`, and the launcher's self-update accepts
+the recorded folder. This is
 separate from mutable registry state under `%LOCALAPPDATA%\MegaMek Launcher`,
 which MSI removal must not own. Its self-contained WiX 3 UI override shows
 `[INSTALLDIR]` on Welcome after MSI directory costing, then a modeless progress

@@ -96,8 +96,14 @@ class WindowsInstallerUiTest {
         assertEquals("error", find(doc, "Show", "FatalError").getAttribute("OnExit"));
 
         Element detail = find(doc, "Control", "Detail");
-        assertTrue(detail.getAttribute("Text").contains("[INSTALLDIR]"));
+        assertSame(find(doc, "Dialog", "LauncherWelcome"), detail.getParentNode());
+        assertEquals("[INSTALLDIR]", find(doc, "Control", "Folder").getAttribute("Text"));
         assertFalse(detail.getAttribute("Text").contains("folder is fixed"));
+        Element hint = find(doc, "Control", "GamesHint");
+        assertEquals("LauncherWelcome", ((Element) hint.getParentNode()).getAttribute("Id"));
+        assertEquals("{\\LauncherHint}Games can be installed anywhere from the launcher later.",
+                hint.getAttribute("Text"));
+        find(doc, "TextStyle", "LauncherHint");
         Element launch = find(doc, "Publish", "LaunchMegaMekLauncher");
         assertEquals("DoAction", launch.getAttribute("Event"));
         String launchCondition = "LAUNCH_AFTER_INSTALL = 1 AND UILevel = 5 AND NOT REMOVE";
@@ -162,7 +168,7 @@ class WindowsInstallerUiTest {
         factory.setNamespaceAware(true);
         factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
         Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxf").toFile());
-        for (String dialogId : new String[] {"LauncherWelcome", "Exit"}) {
+        for (String dialogId : new String[] {"LauncherWelcome", "LauncherWelcomeRefresh", "Exit"}) {
             Element dialogElement = find(doc, "Dialog", dialogId);
             var controls = dialogElement.getElementsByTagNameNS(WIX, "Control");
             int bitmapCount = 0;
@@ -187,10 +193,10 @@ class WindowsInstallerUiTest {
         var banner = ImageIO.read(RESOURCES.resolve("wizard-banner.bmp").toFile());
         assertEquals(240, dialog.getWidth());
         assertEquals(312, dialog.getHeight());
-        assertEquals(493, banner.getWidth());
+        assertEquals(653, banner.getWidth());
         assertEquals(58, banner.getHeight());
         assertNotEquals(0xffffff, dialog.getRGB(180, 150) & 0xffffff);
-        int bannerCenter = banner.getRGB(250, 29);
+        int bannerCenter = banner.getRGB(326, 29);
         assertTrue(((bannerCenter >> 8) & 255) < 100, "Banner center should contain machinery, not sky");
     }
 
@@ -274,6 +280,117 @@ class WindowsInstallerUiTest {
             assertEquals("yes", marker.getAttribute("KeyPath"));
             find(doc, "ComponentRef", "LauncherProgramsFolderCleanup");
         }
+
+    @Test
+    void chosenInstallFolderIsAlwaysOwnedAndRememberedForUpgrades() throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxf").toFile());
+
+        Element change = find(doc, "Control", "ChangeFolder");
+        assertSame(find(doc, "Dialog", "LauncherWelcome"), change.getParentNode());
+        var events = change.getElementsByTagNameNS(WIX, "Publish");
+        boolean picks = false;
+        boolean assigns = false;
+        boolean retargets = false;
+        for (int i = 0; i < events.getLength(); i++) {
+            Element event = (Element) events.item(i);
+            picks |= "DoAction".equals(event.getAttribute("Event"))
+                    && "LauncherPickFolder".equals(event.getAttribute("Value"));
+            retargets |= "SetTargetPath".equals(event.getAttribute("Event"))
+                    && "INSTALLDIR".equals(event.getAttribute("Value"))
+                    && event.getTextContent().contains("LAUNCHER_PICKED_DIR");
+            if ("INSTALLDIR".equals(event.getAttribute("Property"))) {
+                assertEquals("[LAUNCHER_PICKED_DIR]", event.getAttribute("Value"));
+                assertTrue(event.getTextContent().contains("LAUNCHER_PICKED_DIR"),
+                        "A cancelled picker must keep the current folder");
+                assigns = true;
+            }
+        }
+        assertTrue(picks, "Change must open the standard Windows folder dialog");
+        assertTrue(assigns && retargets, "SetTargetPath must re-resolve the chosen directory");
+        assertEquals("LauncherWelcomeRefresh",
+                find(doc, "Publish", "LauncherWelcomeRefresh").getAttribute("Value"));
+        assertSame(change, find(doc, "Publish", "LauncherWelcomeRefresh").getParentNode(),
+                "MSI never redraws the current dialog; Change must switch to the clone");
+        assertEquals(describeDialog(find(doc, "Dialog", "LauncherWelcome")),
+                describeDialog(find(doc, "Dialog", "LauncherWelcomeRefresh")),
+                "Both welcome dialogs must look and behave the same");
+        assertEquals(0, doc.getElementsByTagNameNS(WIX, "DirectoryList").getLength(),
+                "The native folder dialog replaces the MSI browse controls");
+
+        Element picker = find(doc, "CustomAction", "LauncherPickFolder");
+        assertEquals("LauncherPickerCA", picker.getAttribute("BinaryKey"));
+        assertEquals("PickInstallFolder", picker.getAttribute("DllEntry"));
+        assertEquals("ignore", picker.getAttribute("Return"),
+                "A picker failure must never abort setup");
+        assertTrue(find(doc, "Binary", "LauncherPickerCA").getAttribute("SourceFile")
+                .startsWith("$(env.MM_LAUNCHER_CA_DIR)"));
+        String source = Files.readString(RESOURCES.resolveSibling("folder-picker")
+                .resolve("LauncherFolderPicker.cs"));
+        assertTrue(source.contains("LauncherFolderName = \"MegaMek Launcher\""));
+        assertTrue(source.contains("session[ResultProperty] = InstallFolderFor(picked)"),
+                "RemoveFolderEx deletes INSTALLDIR; never install directly into a picked folder");
+
+        Element remembered = find(doc, "RegistryValue", "InstallDir");
+        assertEquals("[INSTALLDIR]", remembered.getAttribute("Value"));
+        assertEquals("HKCU", remembered.getAttribute("Root"));
+        assertEquals("string", remembered.getAttribute("Type"));
+        find(doc, "ComponentRef", "InstallDirPreference");
+        assertEquals("[LAUNCHER_PREVIOUS_INSTALLDIR]",
+                find(doc, "CustomAction", "RestoreInstallDir").getAttribute("Value"));
+        var customs = doc.getElementsByTagNameNS(WIX, "Custom");
+        int restores = 0;
+        for (int i = 0; i < customs.getLength(); i++) {
+            Element action = (Element) customs.item(i);
+            if ("RestoreInstallDir".equals(action.getAttribute("Action"))) {
+                assertEquals("AppSearch", action.getAttribute("After"),
+                        "Restore before CostFinalize resolves directories");
+                assertTrue(action.getTextContent().contains("NOT INSTALLDIR"),
+                        "An explicit INSTALLDIR on the command line wins");
+                restores++;
+            }
+        }
+        assertEquals(2, restores, "Interactive and silent upgrades must both keep the folder");
+    }
+
+    private static String describeDialog(Element dialog) {
+        StringBuilder description = new StringBuilder();
+        var attributes = dialog.getAttributes();
+        for (int i = 0; i < attributes.getLength(); i++) {
+            if (!"Id".equals(attributes.item(i).getNodeName())) {
+                description.append(attributes.item(i)).append(' ');
+            }
+        }
+        var children = dialog.getElementsByTagNameNS(WIX, "*");
+        for (int i = 0; i < children.getLength(); i++) {
+            Element child = (Element) children.item(i);
+            description.append('\n').append(child.getLocalName());
+            var childAttributes = child.getAttributes();
+            var normalized = new java.util.TreeMap<String, String>();
+            for (int j = 0; j < childAttributes.getLength(); j++) {
+                String name = childAttributes.item(j).getNodeName();
+                // MSI keys the CheckBox table by property, so the clone references it.
+                if ("CheckBoxValue".equals(name)) {
+                    continue;
+                }
+                if ("CheckBoxPropertyRef".equals(name)) {
+                    name = "Property";
+                }
+                String value = childAttributes.item(j).getNodeValue();
+                if (value.startsWith("LauncherWelcome")) {
+                    value = "<other welcome dialog>";
+                }
+                normalized.put(name, value);
+            }
+            description.append(' ').append(normalized);
+            if (child.getElementsByTagNameNS(WIX, "*").getLength() == 0) {
+                description.append(" : ").append(child.getTextContent().trim());
+            }
+        }
+        return description.toString();
+    }
 
     private static Element find(Document doc, String tag, String id) {
         var elements = doc.getElementsByTagNameNS(WIX, tag);

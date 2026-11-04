@@ -46,6 +46,53 @@ import static org.junit.jupiter.api.Assertions.*;
 class WindowsMsiUpdateTest {
     @TempDir Path temp;
 
+    @Test void msiEntryPointMayRunFromTheDefaultOrTheRecordedInstallFolder() {
+        Path local = temp.resolve("Local");
+        Path defaultExe = local.resolve("Programs/MegaMek Launcher/MegaMek Launcher.exe");
+        Path custom = temp.resolve("Games/MegaMek Launcher");
+        Path customExe = custom.resolve("MegaMek Launcher.exe");
+        assertTrue(LauncherSelfUpdate.windowsInstallMatches(defaultExe.toString(), local.toString(), null));
+        assertTrue(LauncherSelfUpdate.windowsInstallMatches(customExe.toString(), local.toString(),
+                custom + java.io.File.separator));
+        assertTrue(LauncherSelfUpdate.windowsInstallMatches(customExe.toString(), null, custom.toString()));
+        assertFalse(LauncherSelfUpdate.windowsInstallMatches(customExe.toString(), local.toString(), null),
+                "A custom folder needs the installer's record");
+        assertFalse(LauncherSelfUpdate.windowsInstallMatches(customExe.toString(), local.toString(),
+                temp.resolve("Elsewhere").toString()));
+        assertFalse(LauncherSelfUpdate.windowsInstallMatches(custom.resolve("Other.exe").toString(),
+                local.toString(), custom.toString()));
+        assertFalse(LauncherSelfUpdate.windowsInstallMatches("", local.toString(), custom.toString()),
+                "Portable entry points have no jpackage.app-path");
+        assertFalse(LauncherSelfUpdate.windowsInstallMatches(customExe.toString(), local.toString(),
+                "relative\\MegaMek Launcher"));
+    }
+
+    @Test void recordedInstallFolderIsReadFromRegQueryOutput() {
+        String output = "\r\nHKEY_CURRENT_USER\\Software\\MegaMek\\MegaMek Launcher\\Installer\r\n"
+                + "    InstallDir    REG_SZ    D:\\Games\\MegaMek Launcher\\\r\n\r\n";
+        assertEquals("D:\\Games\\MegaMek Launcher\\", LauncherSelfUpdate.parseRecordedInstallDir(output));
+        assertNull(LauncherSelfUpdate.parseRecordedInstallDir(
+                "ERROR: The system was unable to find the specified registry key or value."));
+    }
+
+    @Test void readingTheRecordedInstallFolderDoesNotDeadlock() {
+        org.junit.jupiter.api.Assumptions.assumeTrue(System.getProperty("os.name", "").startsWith("Windows"));
+        String previous = System.getProperty("jpackage.app-path");
+        System.setProperty("jpackage.app-path", temp.resolve("MegaMek Launcher.exe").toString());
+        try {
+            LauncherSelfUpdate.resetRecordedInstallDirForTest();
+            // The first read used to deadlock the Swing thread when it ran from a class initializer.
+            assertTimeoutPreemptively(java.time.Duration.ofSeconds(20), () -> {
+                LauncherSelfUpdate.available();
+                LauncherSelfUpdate.recordedInstallDir();
+            });
+        } finally {
+            if (previous == null) System.clearProperty("jpackage.app-path");
+            else System.setProperty("jpackage.app-path", previous);
+            LauncherSelfUpdate.resetRecordedInstallDirForTest();
+        }
+    }
+
     private Path report(String content) throws IOException {
         Path path = temp.resolve("msi-update-result.txt");
         Files.writeString(path, content);
