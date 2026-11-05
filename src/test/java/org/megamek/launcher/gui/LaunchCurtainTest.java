@@ -203,6 +203,44 @@ class LaunchCurtainTest {
     }
 
     @Test
+    void restoringAMinimisedOpeningCarriesOnFromWhereItStopped() throws Exception {
+        onEdt(() -> {
+            LaunchCurtain curtain = curtain();
+            curtain.closeForLaunch("MegaMek");
+            advance(5_000, curtain);
+            curtain.reveal();
+            assertEquals(LaunchCurtain.Phase.OPENING, curtain.phase());
+            advance(1, curtain);
+
+            curtain.pause();
+            assertFalse(curtain.animating());
+            now.addAndGet(60_000);
+            curtain.reveal();
+            assertTrue(curtain.animating(), "the restored window keeps opening");
+            advance(1, curtain);
+            assertEquals(LaunchCurtain.Phase.OPENING, curtain.phase(), "time spent minimised is not counted");
+            advance(5_000, curtain);
+            assertEquals(LaunchCurtain.Phase.SHIMMER, curtain.phase());
+            curtain.hideCurtain();
+        });
+    }
+
+    @Test
+    void removingTheCurtainStopsItsTimer() throws Exception {
+        onEdt(() -> {
+            LaunchCurtain curtain = curtain();
+            curtain.closeForLaunch("MegaMek");
+            advance(5_000, curtain);
+            assertEquals(LaunchCurtain.Phase.DEPLOYING, curtain.phase());
+            assertTrue(curtain.animating());
+
+            curtain.removeNotify();
+            assertFalse(curtain.animating(), "a disposed frame leaves nothing ticking");
+            assertEquals(LaunchCurtain.Phase.HIDDEN, curtain.phase());
+        });
+    }
+
+    @Test
     void contentReadyOutsideTheGreetingAndRevealWhileHiddenDoNothing() throws Exception {
         onEdt(() -> {
             LaunchCurtain curtain = curtain();

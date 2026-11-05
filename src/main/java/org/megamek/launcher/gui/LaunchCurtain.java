@@ -155,6 +155,8 @@ final class LaunchCurtain extends JComponent {
     private final String status;
     private Phase phase = Phase.HIDDEN;
     private long phaseStart;
+    /** When {@link #pause()} stopped a running phase, or -1. */
+    private long pausedAt = -1;
     private String greeting = "";
     private String title = "";
     private Scene scene;
@@ -328,6 +330,14 @@ final class LaunchCurtain extends JComponent {
 
     /** Opens on the content from the centre line, if the curtain covers it. */
     void reveal() {
+        if (phase == Phase.OPENING && pausedAt >= 0) {
+            // Carry on from where minimising stopped the opening.
+            phaseStart += clock.getAsLong() - pausedAt;
+            pausedAt = -1;
+            timer.start();
+            repaint();
+            return;
+        }
         if (phase == Phase.HIDDEN || phase == Phase.OPENING || phase == Phase.SHIMMER) {
             return;
         }
@@ -361,7 +371,15 @@ final class LaunchCurtain extends JComponent {
             hideCurtain();
             return;
         }
+        if (timer.isRunning()) {
+            pausedAt = clock.getAsLong();
+        }
         timer.stop();
+    }
+
+    /** Whether the curtain's frame timer is running; for tests. */
+    boolean animating() {
+        return timer.isRunning();
     }
 
     /**
@@ -386,7 +404,18 @@ final class LaunchCurtain extends JComponent {
 
     /** Removes the curtain at once. */
     void hideCurtain() {
+        release();
+        if (isVisible()) {
+            setVisible(false);
+        }
+        setFocusable(true);
+        restoreFocus();
+    }
+
+    /** Stops the timer and drops the cached images and global listener, so nothing outlives the frame. */
+    private void release() {
         phase = Phase.HIDDEN;
+        pausedAt = -1;
         timer.stop();
         Toolkit.getDefaultToolkit().removeAWTEventListener(goLive);
         scene = null;
@@ -396,11 +425,14 @@ final class LaunchCurtain extends JComponent {
         lastTop = -1;
         lastBottom = -1;
         lastShimmer = null;
-        if (isVisible()) {
-            setVisible(false);
-        }
-        setFocusable(true);
-        restoreFocus();
+    }
+
+    @Override
+    public void removeNotify() {
+        // Disposing the frame mid-launch must not leave the timer ticking on it.
+        release();
+        focusBeforeCover = null;
+        super.removeNotify();
     }
 
     private void restoreFocus() {
@@ -421,6 +453,7 @@ final class LaunchCurtain extends JComponent {
         Toolkit.getDefaultToolkit().removeAWTEventListener(goLive);
         phase = next;
         phaseStart = clock.getAsLong();
+        pausedAt = -1;
         lastTop = -1;
         lastBottom = -1;
         lastShimmer = null;
