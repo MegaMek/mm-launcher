@@ -112,6 +112,22 @@ abstract class ExtractDependencyLicenses : DefaultTask() {
     }
 }
 
+abstract class CopySingleFile : DefaultTask() {
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val sourceFile: RegularFileProperty
+
+    @get:OutputFile
+    abstract val destinationFile: RegularFileProperty
+
+    @TaskAction
+    fun copy() {
+        val target = destinationFile.get().asFile
+        target.parentFile.mkdirs()
+        sourceFile.get().asFile.copyTo(target, overwrite = true)
+    }
+}
+
 abstract class Sha256File : DefaultTask() {
     @get:InputFile
     @get:PathSensitive(PathSensitivity.NONE)
@@ -1332,8 +1348,9 @@ val windowsAppImage = tasks.register<WindowsAppImage>("windowsAppImage") {
 }
 
 // The MSI itself is authored in src/distribution/windows/msi and built with
-// WiX 7 directly; jpackage only produces the app image above. The MSI is an
-// intermediate: users get the setup bundle below, which chains it.
+// WiX 7 directly; jpackage only produces the app image above. New installs use
+// the setup bundle below, which chains it; the MSI is only published on its own
+// for older launchers (see windowsTransitionMsi).
 val windowsInstallerFolderCheck = tasks.register<WindowsInstallerFolderCheck>("windowsInstallerFolderCheck") {
     group = "distribution"
     description = "Builds the MSI's install-folder check custom action with WiX 7 DTF."
@@ -1384,10 +1401,32 @@ val windowsInstallerChecksum = tasks.register<Sha256File>("windowsInstallerCheck
     )
 }
 
+// Transition asset: launchers up to 0.14.32 only self-update from a release's
+// windows-x64.msi, so each release also publishes the exact MSI the setup chains.
+// Installing it directly upgrades their jpackage MSI in place; their next update
+// then uses the setup .exe, which takes the product over. Drop this once those
+// versions are no longer in use.
+val windowsTransitionMsiFileName = "MegaMek-Launcher-${project.version}-windows-x64.msi"
+val windowsTransitionMsi = tasks.register<CopySingleFile>("windowsTransitionMsi") {
+    group = "distribution"
+    description = "Publishes the chained MSI for launchers that only self-update from an MSI."
+    sourceFile.set(windowsInstallerMsi.flatMap { it.installerFile })
+    destinationFile.set(distributionsDirectory.map { it.file(windowsTransitionMsiFileName) })
+}
+
+val windowsTransitionMsiChecksum = tasks.register<Sha256File>("windowsTransitionMsiChecksum") {
+    group = "distribution"
+    description = "Writes the exact SHA-256 checksum for the transition MSI."
+    archiveFile.set(windowsTransitionMsi.flatMap { it.destinationFile })
+    checksumFile.set(
+        distributionsDirectory.map { it.file("$windowsTransitionMsiFileName.sha256") }
+    )
+}
+
 val buildWindowsInstaller = tasks.register("buildWindowsInstaller") {
     group = "distribution"
-    description = "Builds the Windows setup .exe and its exact SHA-256 file."
-    dependsOn(windowsInstallerChecksum)
+    description = "Builds the Windows setup .exe, the transition MSI and their exact SHA-256 files."
+    dependsOn(windowsInstallerChecksum, windowsTransitionMsiChecksum)
 }
 
 // macOS and Linux installers contain only installer-owned application binaries.

@@ -121,7 +121,7 @@ class WorkflowStructureTest {
         }
         assertEquals(List.of("windows-x64", "linux-x64", "macos-intel", "macos-apple-silicon"), ids);
         assertEquals(List.of("windows-2025", "ubuntu-24.04", "macos-15-intel", "macos-15"), runners);
-        assertEquals(List.of("exe", "deb,rpm", "pkg", "pkg"), extensions);
+        assertEquals(List.of("exe,msi", "deb,rpm", "pkg", "pkg"), extensions);
         assertEquals(List.of(
                 "actions/checkout@v4",
                 "actions/setup-java@v4",
@@ -208,7 +208,7 @@ class WorkflowStructureTest {
                 "failed-job retries may replace same-run CI artifacts, never published release assets");
         String paths = upload.path("with").path("path").asText();
         List<String> expectedPaths = new ArrayList<>();
-        for (String extension : List.of("exe", "deb", "rpm", "pkg")) {
+        for (String extension : List.of("exe", "msi", "deb", "rpm", "pkg")) {
             String base = "build/distributions/MegaMek-Launcher-*-${{ matrix.id }}." + extension;
             expectedPaths.add(base);
             expectedPaths.add(base + ".sha256");

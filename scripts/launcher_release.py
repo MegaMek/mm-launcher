@@ -29,8 +29,10 @@ PROVENANCE_LIMIT = 16 * 1024
 PROVENANCE_ARCHIVE_LIMIT = 64 * 1024
 SIGNING_RECORD_LIMIT = 4096
 RELEASE_RUN = re.compile(r"^Launcher-Release-Run: ([1-9][0-9]{0,19})$", re.MULTILINE)
+# windows-x64.msi is a transition asset: launchers up to 0.14.32 only self-update
+# from an MSI. It is the exact MSI the setup .exe chains.
 INSTALLERS = (
-    "windows-x64.exe", "linux-x64.deb", "linux-x64.rpm", "linux-x64-portable.tar.gz",
+    "windows-x64.exe", "windows-x64.msi", "linux-x64.deb", "linux-x64.rpm", "linux-x64-portable.tar.gz",
     "macos-intel.pkg", "macos-apple-silicon.pkg",
 )
 APPLE_PLATFORMS = ("macos-intel", "macos-apple-silicon")
@@ -797,6 +799,8 @@ def publish(github, version, commit, assets, signing_record=None, certificate_sh
         signing_notice += ("Both macOS packages are Developer ID-signed, notarized by Apple and stapled. "
                            "Linux installers remain unsigned. ")
     body = (f"Native installers built and tested from [{commit}](https://github.com/{REPOSITORY}/commit/{commit}).\n\n"
+            "On Windows, install with the setup .exe; the .msi is only there so older launchers "
+            "can update themselves. "
             "Installed launchers support user-authorized self-update on Windows, macOS, and supported "
             "Linux desktops. Linux requires PolicyKit and apt-get or dnf. "
             "Other Linux distributions can use the Java-bundled portable tar.gz, which checks for new "

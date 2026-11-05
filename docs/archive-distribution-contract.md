@@ -3,9 +3,10 @@
 ## Native installer CI
 
 The generic archive described below remains a developer-only prototype;
-CI does not build, verify or upload it. CI builds five native
+CI does not build, verify or upload it. CI builds six native
 installer/checksum pairs, each on its target host:
 `MegaMek-Launcher-<version>-windows-x64.exe`,
+`MegaMek-Launcher-<version>-windows-x64.msi` (transition asset, see below),
 `MegaMek-Launcher-<version>-linux-x64.deb`,
 `MegaMek-Launcher-<version>-linux-x64.rpm`, and
 `MegaMek-Launcher-<version>-macos-{intel,apple-silicon}.pkg`.
@@ -19,7 +20,13 @@ Burn bundle (sources and theme in `src/distribution/windows/bundle`) that chains
 intermediate MSI. The MSI packages a jpackage `app-image` (launcher EXE plus
 full-module runtime) with WiX 7 sources in `src/distribution/windows/msi`. CI reads
 the setup's version resource, extracts the chained MSI with `wix burn extract` and
-inspects its tables read-only; Linux and macOS use a host-native
+inspects its tables read-only. Launchers up to 0.14.32 only self-update from a release's
+`windows-x64.msi`, so the Windows job also publishes that exact chained MSI under that
+name; CI checks it is byte-identical to the MSI inside the setup. Installed directly, it
+upgrades their jpackage MSI in place (same upgrade UUID, folder and shortcuts) and their
+next self-update then uses the setup `.exe`, whose bundle takes the product over and
+leaves a single Installed Apps entry. Drop the asset once those launchers are gone.
+Linux and macOS use a host-native
 `ALL-MODULE-PATH` jlink image passed to jpackage via `--runtime-image`.
 These images retain `bin/java` for games, `lib/modules`, and upstream
 `legal/` notices. CI only inspects installer contents and checksums;
@@ -208,9 +215,9 @@ platforms (Linux uses Xvfb). Failures stay visibly red with retained reports; th
 required branch checks.
 
 Before any release/tag write, [launcher_release.py](../scripts/launcher_release.py) requires exactly
-the six expected installer/archive and checksum pairs, nonempty regular files, matching SHA-256 values, and
+the seven expected installer/archive and checksum pairs, nonempty regular files, matching SHA-256 values, and
 installers no larger than the updater's 300 MiB limit. It creates a new lightweight `v<version>` tag
-at the tested commit, uploads all twelve files, and requires GitHub's uploaded state, immutable IDs,
+at the tested commit, uploads all fourteen files, and requires GitHub's uploaded state, immutable IDs,
 sizes, exact download URLs, and SHA-256 digests to match. A temporary GitHub draft is only an
 upload implementation detail: no human draft-review gate is added. After all checks, that same
 job publishes a normal stable release and verifies the latest-stable endpoint consumed by the
@@ -266,7 +273,7 @@ read SignPath secrets. Only the official manually dispatched release workflow ca
 production signing; a separate manual onboarding workflow submits test-signing only.
 
 Leave `LAUNCHER_SIGNING_ENABLED` unset or exactly `false` until the account is approved and
-configured. The disabled path preserves all six installer/archive and checksum pairs byte-for-byte and
+configured. The disabled path preserves all seven installer/archive and checksum pairs byte-for-byte and
 needs no SignPath account or token. Any other nonempty value except exactly `true` is an error,
 not permission to fall back to unsigned publication.
 
@@ -658,7 +665,7 @@ Run the self-update regressions on Windows; only the second command needs a disp
 #### macOS and Linux
 
 The shared updater selects the exact published native asset, performs one streaming
-size/SHA-256 verification, and stages only the owned installer. All five native installers
+size/SHA-256 verification, and stages only the owned installer. All native installers
 must fit the 300 MiB self-update limit before publication.
 Existing native package inspection also checks the updater's exact entry point,
 package version/release and architecture; macOS's receipt, Distribution and app

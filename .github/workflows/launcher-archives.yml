@@ -106,7 +106,8 @@ jobs:
         include:
           - id: windows-x64
             os: windows-2025
-            extensions: exe
+            # The .msi is a transition asset for launchers that only self-update from an MSI.
+            extensions: exe,msi
           - id: linux-x64
             os: ubuntu-24.04
             extensions: deb,rpm
@@ -213,7 +214,7 @@ jobs:
           EXTENSIONS: ${{ matrix.extensions }}
         run: |
           $files = @(Get-ChildItem build/distributions -File |
-            Where-Object { $_.Name -match "^MegaMek-Launcher-.+-$([regex]::Escape($env:PLATFORM))\.(exe|deb|rpm|pkg)$" })
+            Where-Object { $_.Name -match "^MegaMek-Launcher-.+-$([regex]::Escape($env:PLATFORM))\.(exe|msi|deb|rpm|pkg)$" })
           $types = $env:EXTENSIONS.Split(',')
           if ($files.Count -ne $types.Count) { throw "Expected $($types.Count) installer(s), found $($files.Count)." }
           foreach ($type in $types) {
@@ -239,6 +240,13 @@ jobs:
               if ($LASTEXITCODE -ne 0) { throw 'Could not extract the setup bundle.' }
               $payloads = @(Get-ChildItem $extracted -File -Recurse)
               if ($payloads.Count -ne 1) { throw 'Setup bundle must contain exactly one payload (the MSI).' }
+              # The transition .msi must be exactly the MSI the setup chains.
+              $transition = "$($file.DirectoryName)/$($file.BaseName).msi"
+              if (!(Test-Path -LiteralPath $transition) -or
+                  (Get-FileHash -LiteralPath $transition -Algorithm SHA256).Hash -cne
+                  (Get-FileHash -LiteralPath $payloads[0].FullName -Algorithm SHA256).Hash) {
+                throw 'Transition .msi is not the MSI chained by the setup .exe.'
+              }
               $installer = New-Object -ComObject WindowsInstaller.Installer
               $database = $installer.OpenDatabase($payloads[0].FullName, 0)
               function MsiValues([string]$query) {
@@ -362,6 +370,8 @@ jobs:
           path: |
             build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.exe
             build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.exe.sha256
+            build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.msi
+            build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.msi.sha256
             build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.deb
             build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.deb.sha256
             build/distributions/MegaMek-Launcher-*-${{ matrix.id }}.rpm

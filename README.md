@@ -5,8 +5,9 @@
 The official source repository is [MegaMek/mm-launcher](https://github.com/MegaMek/mm-launcher).
 The `Launcher native installers` workflow builds on pushes to `main`, pull requests,
 and manual dispatch. PR branch pushes run once through the pull-request event rather
-than also starting a duplicate push matrix. Ordinary CI produces **only** five unsigned native installer/checksum
-pairs: Windows x64 setup `.exe`, Linux x64 `.deb` and `.rpm`, and macOS `.pkg` on both
+than also starting a duplicate push matrix. Ordinary CI produces **only** six unsigned native installer/checksum
+pairs: Windows x64 setup `.exe` (plus the `.msi` it chains, published only so launchers up to
+0.14.32 can still self-update), Linux x64 `.deb` and `.rpm`, and macOS `.pkg` on both
 Intel and Apple Silicon, plus a Java-bundled Linux x64 portable `tar.gz` and its checksum for
 distributions without `apt-get` or `dnf` (for example Arch-based ones). It does not build or upload
 the other portable archives,
@@ -157,8 +158,8 @@ or pull requests. Major/minor version changes remain explicit source changes.
 
 The workflow calls the ordinary native-installer CI at the captured candidate commit and
 waits for all four platforms' builds, package inspections, required headless tests, and release tooling
-tests to pass. A read-only release-assets job stages this run's five installers, the Linux portable
-archive and their six checksum
+tests to pass. A read-only release-assets job stages this run's six installers, the Linux portable
+archive and their seven checksum
 files, validates any enabled Apple notarization
 records from the Mac packaging jobs, and retains one immutable final asset
 set. The write-enabled publication job downloads that exact artifact ID, checks the filenames and
