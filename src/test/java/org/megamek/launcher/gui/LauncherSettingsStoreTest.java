@@ -40,6 +40,11 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -410,6 +415,36 @@ class LauncherSettingsStoreTest {
         assertTrue(Files.readString(store.path()).contains("\"playIntro\" : false"));
         assertFalse(store.writeShowExperimental(false).playIntro(), "other writes keep it");
         assertTrue(store.writePlayIntro(true).playIntro());
+    }
+
+    @Test
+    void concurrentSavesOfDifferentSettingsQueueInsteadOfRejectingEachOther() throws Exception {
+        Path registry = temp.resolve("registry.json");
+        LauncherSettingsStore introStore = new LauncherSettingsStore(registry);
+        LauncherSettingsStore experimentalStore = new LauncherSettingsStore(registry);
+        int rounds = 40;
+        CyclicBarrier start = new CyclicBarrier(2);
+        ExecutorService workers = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> intro = workers.submit(() -> {
+                start.await();
+                for (int i = 0; i < rounds; i++) introStore.writePlayIntro(i % 2 == 1);
+                return null;
+            });
+            Future<?> experimental = workers.submit(() -> {
+                start.await();
+                for (int i = 0; i < rounds; i++) experimentalStore.writeShowExperimental(i % 2 == 0);
+                return null;
+            });
+            intro.get(30, TimeUnit.SECONDS);
+            experimental.get(30, TimeUnit.SECONDS);
+        } finally {
+            workers.shutdownNow();
+        }
+
+        LauncherSettingsStore.Settings saved = introStore.read();
+        assertTrue(saved.playIntro(), "the last intro save survives");
+        assertFalse(saved.showExperimental(), "the last Experimental save survives");
     }
 
     @Test

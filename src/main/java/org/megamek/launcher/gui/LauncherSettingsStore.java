@@ -210,7 +210,19 @@ final class LauncherSettingsStore {
                 settings.showExperimental(), stored, settings.playIntro()));
     }
 
+    /**
+     * The file lock only excludes other processes; within this JVM it rejects overlapping holders, so
+     * concurrent setting saves (each with its own background worker) must queue here first.
+     */
+    private static final Object UPDATE_LOCK = new Object();
+
     private Settings update(UnaryOperator<Settings> change) throws IOException {
+        synchronized (UPDATE_LOCK) {
+            return lockedUpdate(change);
+        }
+    }
+
+    private Settings lockedUpdate(UnaryOperator<Settings> change) throws IOException {
         Path file = path();
         Path parent = file.getParent();
         StrictPathSafety.requireDirectory(parent, "launcher settings parent");
