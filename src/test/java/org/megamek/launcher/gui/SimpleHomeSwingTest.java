@@ -42,6 +42,7 @@ import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.channel.QuickInstallSnapshot;
 import org.megamek.launcher.channel.SuiteTestData;
+import org.megamek.launcher.launch.LaunchObserver;
 import org.megamek.launcher.launch.LaunchOptions;
 import org.megamek.launcher.launch.LaunchOptionsStore;
 import org.megamek.launcher.onboarding.Inspection;
@@ -516,6 +517,7 @@ class SimpleHomeSwingTest {
 
             int selections = services.selections.get();
             SwingTestSupport.awaitSettled(frame);
+            services.launchExit = new CountDownLatch(1);
             SwingUtilities.invokeAndWait(megamekSplit.optionsButton()::doClick);
             waitUntil(() -> megamekSplit.popupMenu().isVisible());
             invokeMenuSelection(megamekSplit.menuItems().get(0));
@@ -527,7 +529,11 @@ class SimpleHomeSwingTest {
             assertEquals(selections, services.selections.get(),
                     "alternate launch performs no preference mutation");
             assertEquals(services.first.id(), services.main.id());
-            assertTrue((onEdt(frame::getExtendedState) & javax.swing.JFrame.ICONIFIED) != 0);
+            assertTrue(onEdt(() -> frame.getGlassPane().isVisible()),
+                    "the launcher shows the launching card while the game starts");
+            SwingTestSupport.awaitCondition("launcher minimised once the game is up", () ->
+                    (onEdt(frame::getExtendedState) & javax.swing.JFrame.ICONIFIED) != 0);
+            services.launchExit.countDown();
             assertNoShowingDialog(frame, "Confirm launch");
             assertNoShowingDialog(frame, "Game finished");
             JButton launchedButton = megamekSplit.primaryButton();
@@ -1894,6 +1900,8 @@ class SimpleHomeSwingTest {
         private volatile boolean repairAdopted;
         private volatile IOException repairFailure;
         private volatile boolean launched;
+        /** When set, the launched game keeps running until the test counts it down. */
+        private volatile CountDownLatch launchExit;
         private volatile InstallationRecord previewedRecord;
         private volatile String previewedProduct;
         private volatile InstallationRecord launchedRecord;
@@ -2194,12 +2202,17 @@ class SimpleHomeSwingTest {
         }
 
         @Override
-        public int launch(InstallationRecord record, String product)
+        public int launch(InstallationRecord record, String product, LaunchObserver observer)
                 throws IOException, InterruptedException {
             launchAttempts.incrementAndGet();
             launched = true;
             launchedRecord = record;
             launchedProduct = product;
+            observer.ready();
+            CountDownLatch exit = launchExit;
+            if (exit != null && !exit.await(30, TimeUnit.SECONDS)) {
+                throw new IOException("The test never let the launched game exit");
+            }
             return 0;
         }
 
