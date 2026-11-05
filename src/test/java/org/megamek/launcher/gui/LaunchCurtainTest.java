@@ -168,6 +168,41 @@ class LaunchCurtainTest {
     }
 
     @Test
+    void scanLocksOntoTargetsAsItPassesAndWaitsForTheBrackets() throws Exception {
+        onEdt(() -> {
+            javax.swing.JPanel page = new javax.swing.JPanel(null);
+            page.setSize(800, 600);
+            LaunchCurtain curtain = curtain();
+            page.add(curtain);
+            javax.swing.JPanel left = new javax.swing.JPanel();
+            left.setBounds(80, 260, 160, 80);
+            javax.swing.JPanel right = new javax.swing.JPanel();
+            right.setBounds(560, 260, 160, 80);
+            page.add(left);
+            page.add(right);
+            curtain.setTargets(() -> java.util.List.of(left, right));
+
+            curtain.closeForLaunch("MegaMek");
+            advance(5_000, curtain);
+            curtain.reveal();
+            advance(5_000, curtain);
+            assertEquals(LaunchCurtain.Phase.SHIMMER, curtain.phase());
+            assertEquals(0, curtain.lockedTargets(), "nothing is locked before the scan moves");
+            advance(LaunchCurtain.SHIMMER_DURATION / 2, curtain);
+            paint(curtain);
+            assertEquals(1, curtain.lockedTargets(), "the scan has passed only the left target");
+            advance(LaunchCurtain.SHIMMER_DURATION / 2, curtain);
+            assertEquals(2, curtain.lockedTargets());
+            paint(curtain);
+            assertEquals(LaunchCurtain.Phase.SHIMMER, curtain.phase(),
+                    "the sweep waits for the last brackets to fade");
+            advance(LaunchCurtain.LOCK_DURATION + 1, curtain);
+            assertEquals(LaunchCurtain.Phase.HIDDEN, curtain.phase());
+            assertEquals(0, curtain.lockedTargets());
+        });
+    }
+
+    @Test
     void contentReadyOutsideTheGreetingAndRevealWhileHiddenDoNothing() throws Exception {
         onEdt(() -> {
             LaunchCurtain curtain = curtain();

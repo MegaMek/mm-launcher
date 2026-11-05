@@ -258,6 +258,7 @@ public final class LauncherFrame extends JFrame {
         content.setBorder(guiScale.padding("xxl", "xxl", "xl", "xxl"));
         setContentPane(content);
         setGlassPane(curtain);
+        curtain.setTargets(() -> homeLaunchButtons);
         addWindowListener(new WindowAdapter() {
             @Override public void windowIconified(WindowEvent event) {
                 curtain.pause();

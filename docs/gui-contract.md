@@ -141,8 +141,10 @@ the launcher opens on the plain background. Once Home has loaded, an accent stat
 condensed display face type above it, sharing its left edge, with a block cursor after the
 greeting and a muted rule drawing out under it from the left. The window then opens from a
 horizontal centre line with accent edges, an accent hex grid lighting up over the page just behind
-each edge and fading as the window opens. Once open, a leaning band of lit hexes sweeps once
-across the page from left to right; the page already takes clicks, hovers and keys during the
+each edge and fading as the window opens. Once open, a leaning scan line sweeps once across the
+page from left to right in about 1.6 seconds, trailing lit hexes that fade behind it, and corner
+brackets close in on each Home launch button as the line passes it, hold, and fade; the page
+already takes clicks, hovers and keys during the
 sweep. Launching closes the window back to that line and shows the launch card described under
 launch below. The hex grid is drawn once per window size and theme and dropped when the curtain
 hides. An opening, a closing and the sweep each print the page once, at the screen's resolution,

@@ -74,8 +74,13 @@ import java.awt.event.MouseEvent;
 import java.awt.geom.AffineTransform;
 import java.awt.geom.Path2D;
 import java.awt.image.BufferedImage;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
 import java.util.Locale;
 import java.util.function.LongSupplier;
+import java.util.function.Supplier;
 
 /**
  * The launcher's scene transitions, painted on the frame's glass pane over the live content.
@@ -83,14 +88,16 @@ import java.util.function.LongSupplier;
  * When the launcher opens, a status line and the greeting type themselves on the dark background
  * with a block cursor, above a rule that draws out under them. Then the window opens from a
  * horizontal centre line, like a screen powering on, a hex grid lighting up just behind the
- * opening edges and fading as they pass, and once it is open a band of lit hexes sweeps across it
- * once. Launching an application closes the window back to that line and leaves a "Launching"
- * card that waits until the application is on screen; when the launcher comes back it opens from
- * the line again, without the greeting.
+ * opening edges and fading as they pass, and once it is open a scan line sweeps across it once,
+ * trailing lit hexes, with brackets locking onto each target it passes. Launching an application
+ * closes the window back to that line and leaves a "Launching" card that waits until the
+ * application is on screen; when the launcher comes back it opens from the line again, without
+ * the greeting.
  * <p>
  * Everything is cheap to draw: the hex grid is drawn once into an image per window size, the
- * content underneath is never captured, only the strips that change are repainted each frame,
- * and the timer runs only while something moves. The greeting and opening can be skipped with a
+ * content is printed once per transition and drawn from that image, only the strips that change
+ * are repainted each frame, and the timer runs only while something moves. The greeting and
+ * opening can be skipped with a
  * click or any key; the sweep lets clicks and keys through to the content. With reduce motion on,
  * nothing animates: the greeting and sweep are skipped, openings are instant and the card is
  * still.
@@ -116,8 +123,13 @@ final class LaunchCurtain extends JComponent {
     /** How long after the text starts the rule under it starts drawing out, and how long it takes. */
     private static final int RULE_DELAY = 400;
     private static final int RULE_DURATION = 1200;
-    /** How long the band of lit hexes takes to sweep across the opened window. */
+    /** How long the scan line takes to sweep across the opened window. */
     static final int SHIMMER_DURATION = 1600;
+    /** How long a target's brackets take to close in, hold, and fade once the scan passes it. */
+    static final int LOCK_SNAP = 160;
+    static final int LOCK_HOLD = 340;
+    static final int LOCK_FADE = 300;
+    static final int LOCK_DURATION = LOCK_SNAP + LOCK_HOLD + LOCK_FADE;
     /** One pass of the highlight along the "Launching" card's line. */
     static final int SCAN_PERIOD = 1600;
     /** How many steps the lit hex grid behind a moving edge fades over. */
@@ -156,6 +168,10 @@ final class LaunchCurtain extends JComponent {
     private int snapshotWidth;
     private int snapshotHeight;
     private Point pointer;
+    private Supplier<? extends Collection<? extends Component>> targetSource = List::of;
+    /** Where the sweep's targets sit, and when (in sweep time) the scan locked onto each; -1 not yet. */
+    private List<Rectangle> targets = List.of();
+    private long[] lockedAt = new long[0];
     /**
      * Input in the window during the sweep: drop the snapshot so the content paints itself
      * again, hovers and presses included. A move counts only once the pointer really moves, as
@@ -234,6 +250,16 @@ final class LaunchCurtain extends JComponent {
 
     Phase phase() {
         return phase;
+    }
+
+    /** The components the scan locks onto as it passes them, read each time a sweep starts. */
+    void setTargets(Supplier<? extends Collection<? extends Component>> source) {
+        targetSource = source == null ? List::of : source;
+    }
+
+    /** How many targets the current sweep has locked onto so far. */
+    int lockedTargets() {
+        return (int) Arrays.stream(lockedAt).filter(at -> at >= 0).count();
     }
 
     /** The status line typed above the greeting, for launcher {@code version}. */
@@ -365,6 +391,8 @@ final class LaunchCurtain extends JComponent {
         Toolkit.getDefaultToolkit().removeAWTEventListener(goLive);
         scene = null;
         snapshot = null;
+        targets = List.of();
+        lockedAt = new long[0];
         lastTop = -1;
         lastBottom = -1;
         lastShimmer = null;
@@ -447,11 +475,18 @@ final class LaunchCurtain extends JComponent {
                 }
             }
             case SHIMMER -> {
-                if (elapsed >= SHIMMER_DURATION) {
+                Band band = shimmerBand(progress(elapsed, SHIMMER_DURATION));
+                boolean locking = lockOn(band, elapsed);
+                if (elapsed >= SHIMMER_DURATION && !locking) {
                     hideCurtain();
                     return;
                 }
-                repaintShimmer(shimmerBand(progress(elapsed, SHIMMER_DURATION)));
+                if (elapsed < SHIMMER_DURATION || lastShimmer != null) {
+                    repaintShimmer(band);
+                    if (elapsed >= SHIMMER_DURATION) {
+                        lastShimmer = null;
+                    }
+                }
             }
             case CLOSING -> {
                 if (elapsed >= closeDuration()) {
@@ -504,6 +539,7 @@ final class LaunchCurtain extends JComponent {
         phaseStart = clock.getAsLong();
         lastShimmer = null;
         pointer = null;
+        findTargets();
         // Anything that loaded while the window opened is in the sweep's picture.
         captureContent();
         Toolkit.getDefaultToolkit().addAWTEventListener(goLive, AWTEvent.MOUSE_EVENT_MASK
@@ -574,7 +610,7 @@ final class LaunchCurtain extends JComponent {
     }
 
     Band shimmerBand(double progress) {
-        int width = Math.max(scale.scaleForGUI(140), getWidth() / 6);
+        int width = Math.max(scale.scaleForGUI(180), getWidth() / 5);
         int lean = getHeight() / 3;
         double p = Math.max(0, Math.min(1, progress));
         double travel = p * p * (3 - 2 * p);
@@ -585,8 +621,77 @@ final class LaunchCurtain extends JComponent {
     private void repaintShimmer(Band band) {
         Rectangle bounds = band.bounds(getHeight());
         Rectangle area = lastShimmer == null ? bounds : bounds.union(lastShimmer);
-        repaint(area.x - 1, 0, area.width + 2, getHeight());
+        int edge = lineThickness() + 1;
+        repaint(area.x - edge, 0, area.width + 2 * edge, getHeight());
         lastShimmer = bounds;
+    }
+
+    /** Where the scan line crosses row {@code y}: it leans forward, ahead at the top. */
+    private int scanEdge(Band band, int y) {
+        int height = Math.max(1, getHeight());
+        return band.x() + band.width() + (int) Math.round(band.lean() * (height - y)
+                / (double) height);
+    }
+
+    /** Reads where the targets sit now, in the curtain's coordinates; none locked yet. */
+    private void findTargets() {
+        List<Rectangle> found = new ArrayList<>();
+        Collection<? extends Component> components = targetSource.get();
+        Rectangle window = new Rectangle(0, 0, getWidth(), getHeight());
+        boolean live = isShowing();
+        if (components != null) {
+            for (Component component : components) {
+                if (component == null || component.getParent() == null
+                        || !(live ? component.isShowing() : component.isVisible())) {
+                    continue;
+                }
+                Rectangle bounds = SwingUtilities.convertRectangle(component.getParent(),
+                        component.getBounds(), this);
+                if (!bounds.isEmpty() && window.intersects(bounds)) {
+                    found.add(bounds);
+                }
+            }
+        }
+        targets = List.copyOf(found);
+        lockedAt = new long[targets.size()];
+        Arrays.fill(lockedAt, -1);
+    }
+
+    /**
+     * Locks onto each target the scan line has reached the middle of, and repaints the brackets
+     * still moving; whether any are.
+     */
+    private boolean lockOn(Band band, long elapsed) {
+        boolean active = false;
+        for (int i = 0; i < targets.size(); i++) {
+            Rectangle target = targets.get(i);
+            if (lockedAt[i] < 0 && (elapsed >= SHIMMER_DURATION
+                    || scanEdge(band, (int) target.getCenterY()) >= target.getCenterX())) {
+                lockedAt[i] = elapsed;
+            }
+            if (lockedAt[i] >= 0 && elapsed - lockedAt[i] <= LOCK_DURATION) {
+                Rectangle area = bracketBounds(target, bracketTravel());
+                int edge = lineThickness() + 1;
+                repaint(area.x - edge, area.y - edge, area.width + 2 * edge,
+                        area.height + 2 * edge);
+                active = true;
+            } else if (lockedAt[i] < 0) {
+                active = true;
+            }
+        }
+        return active;
+    }
+
+    /** How far out the brackets start before closing in on a target. */
+    private int bracketTravel() {
+        return scale.scaleForGUI(14);
+    }
+
+    /** The rectangle a target's brackets frame, {@code out} beyond their resting place. */
+    private Rectangle bracketBounds(Rectangle target, int out) {
+        int pad = scale.scaleForGUI(5) + out;
+        return new Rectangle(target.x - pad, target.y - pad, target.width + 2 * pad,
+                target.height + 2 * pad);
     }
 
     /** Repaints only the rows between the band's previous and new edges, with glow and trail. */
@@ -706,7 +811,10 @@ final class LaunchCurtain extends JComponent {
                 }
                 case SHIMMER -> {
                     paintContent(g, 0, 0, width, height);
-                    paintShimmer(g, shimmerBand(progress(elapsed, SHIMMER_DURATION)), height);
+                    if (elapsed < SHIMMER_DURATION) {
+                        paintShimmer(g, shimmerBand(progress(elapsed, SHIMMER_DURATION)), height);
+                    }
+                    paintLocks(g, elapsed);
                 }
                 case DEPLOYING -> paintDeploying(g, width, height, elapsed);
                 default -> {
@@ -822,8 +930,8 @@ final class LaunchCurtain extends JComponent {
     }
 
     /**
-     * Lights the hex grid inside the leaning band, brightest along its middle and fading to
-     * nothing at its edges in a few steps, with a faint wash of the accent under it.
+     * The scan: a bright leaning line at the band's leading edge with a glow just behind it, and
+     * the hex grid it has lit fading out behind it in a few steps.
      */
     private void paintShimmer(Graphics2D g, Band band, int height) {
         Scene current = scene();
@@ -843,21 +951,21 @@ final class LaunchCurtain extends JComponent {
             Color accent = LauncherTheme.ACCENT;
             g.setPaint(new LinearGradientPaint(band.x(), height,
                     band.x() + across * height, height + across * band.lean(),
-                    new float[] {0f, 0.5f, 1f},
-                    new Color[] {withAlpha(accent, 0f), withAlpha(accent, 0.08f),
-                            withAlpha(accent, 0f)}));
+                    new float[] {0f, 0.82f, 1f},
+                    new Color[] {withAlpha(accent, 0f), withAlpha(accent, 0.06f),
+                            withAlpha(accent, 0.24f)}));
             g.fill(whole);
             int step = Math.max(1, band.width() / SHIMMER_STEPS);
             for (int i = 0; i < SHIMMER_STEPS; i++) {
                 double middle = (i + 0.5) / SHIMMER_STEPS;
-                float light = (float) Math.sin(Math.PI * middle);
+                float light = (float) (middle * middle);
                 int left = band.x() + i * step;
                 Polygon strip = new Polygon(
                         new int[] {left + band.lean(), left + step + band.lean(), left + step, left},
                         new int[] {0, 0, height, height}, 4);
                 g.setClip(clip);
                 g.clip(strip);
-                g.setComposite(AlphaComposite.SrcOver.derive(0.6f * light));
+                g.setComposite(AlphaComposite.SrcOver.derive(0.7f * light));
                 Rectangle area = g.getClipBounds();
                 if (area != null && !area.isEmpty()) {
                     int from = Math.max(0, area.x);
@@ -868,9 +976,51 @@ final class LaunchCurtain extends JComponent {
                     }
                 }
             }
+            g.setClip(clip);
+            g.setComposite(composite);
+            int edge = band.x() + band.width();
+            int thickness = lineThickness();
+            g.setColor(withAlpha(accent, 0.9f));
+            g.fillPolygon(new int[] {edge + band.lean() - thickness, edge + band.lean(), edge,
+                    edge - thickness}, new int[] {0, 0, height, height}, 4);
         } finally {
             g.setComposite(composite);
             g.setClip(clip);
+        }
+    }
+
+    /**
+     * Corner brackets on each target the scan has locked onto: they close in from a little
+     * outside, hold, and fade.
+     */
+    private void paintLocks(Graphics2D g, long elapsed) {
+        int thickness = lineThickness();
+        for (int i = 0; i < targets.size(); i++) {
+            long since = lockedAt[i] < 0 ? -1 : elapsed - lockedAt[i];
+            if (since < 0 || since > LOCK_DURATION) {
+                continue;
+            }
+            double snap = easeOut((double) since / LOCK_SNAP);
+            float alpha = since < LOCK_SNAP ? (float) snap
+                    : since < LOCK_SNAP + LOCK_HOLD ? 1f
+                    : 1f - (float) (since - LOCK_SNAP - LOCK_HOLD) / LOCK_FADE;
+            Rectangle frame = bracketBounds(targets.get(i),
+                    (int) Math.round((1 - snap) * bracketTravel()));
+            int arm = Math.max(thickness * 2, Math.min(scale.scaleForGUI(16),
+                    Math.min(frame.width, frame.height) / 3));
+            int left = frame.x;
+            int top = frame.y;
+            int right = frame.x + frame.width - thickness;
+            int bottom = frame.y + frame.height - thickness;
+            g.setColor(withAlpha(LauncherTheme.ACCENT, Math.max(0f, Math.min(1f, alpha))));
+            g.fillRect(left, top, arm, thickness);
+            g.fillRect(left, top, thickness, arm);
+            g.fillRect(right - arm + thickness, top, arm, thickness);
+            g.fillRect(right, top, thickness, arm);
+            g.fillRect(left, bottom, arm, thickness);
+            g.fillRect(left, bottom - arm + thickness, thickness, arm);
+            g.fillRect(right - arm + thickness, bottom, arm, thickness);
+            g.fillRect(right, bottom - arm + thickness, thickness, arm);
         }
     }
 
