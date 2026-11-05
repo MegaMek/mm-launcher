@@ -58,7 +58,8 @@ import java.util.function.UnaryOperator;
  * Per-copy automatic-check choices live solely in ChannelPreferenceStore.
  */
 final class LauncherSettingsStore {
-    static final int SCHEMA = 6;
+    static final int SCHEMA = 7;
+    private static final int INTRO_FREE_SCHEMA = 6;
     private static final int INSTALL_PARENT_FREE_SCHEMA = 5;
     private static final int RELEASE_CHOICE_FREE_SCHEMA = 4;
     private static final int APPEARANCE_FREE_SCHEMA = 3;
@@ -98,7 +99,8 @@ final class LauncherSettingsStore {
             if (version == null || !version.canConvertToInt()) {
                 throw new IOException("unsupported launcher settings schema");
             }
-            if (version.intValue() != SCHEMA && version.intValue() != INSTALL_PARENT_FREE_SCHEMA
+            if (version.intValue() != SCHEMA && version.intValue() != INTRO_FREE_SCHEMA
+                    && version.intValue() != INSTALL_PARENT_FREE_SCHEMA
                     && version.intValue() != RELEASE_CHOICE_FREE_SCHEMA
                     && version.intValue() != APPEARANCE_FREE_SCHEMA) {
                 throw new IOException("unsupported launcher settings schema");
@@ -119,7 +121,7 @@ final class LauncherSettingsStore {
                 AppearanceFreeSettings previous =
                         mapper.treeToValue(tree, AppearanceFreeSettings.class);
                 settings = new Settings(SCHEMA, previous.defaultJavaExecutable(),
-                        previous.defaultJavaFeature(), Appearance.DEFAULT, false, null);
+                        previous.defaultJavaFeature(), Appearance.DEFAULT, false, null, true);
             } else {
                 com.fasterxml.jackson.databind.JsonNode appearance = tree.get("appearance");
                 if (appearance == null || !appearance.isObject()
@@ -137,17 +139,26 @@ final class LauncherSettingsStore {
                 } else if (!tree.path("showExperimental").isBoolean()) {
                     throw new IOException("release settings have invalid types");
                 }
-                if (version.intValue() != SCHEMA) {
+                if (version.intValue() != SCHEMA && version.intValue() != INTRO_FREE_SCHEMA) {
                     // Schemas 4 and 5 predate the remembered install folder.
                     if (tree.has("installParent")) {
                         throw new IOException("unsupported launcher settings schema");
                     }
-                    object.put("schemaVersion", SCHEMA).putNull("installParent");
+                    object.putNull("installParent");
                 } else {
                     com.fasterxml.jackson.databind.JsonNode parent = tree.get("installParent");
                     if (parent == null || !(parent.isNull() || parent.isTextual())) {
                         throw new IOException("install folder setting has invalid types");
                     }
+                }
+                if (version.intValue() != SCHEMA) {
+                    // Schemas 4 to 6 predate the intro setting; they read as playing it.
+                    if (tree.has("playIntro")) {
+                        throw new IOException("unsupported launcher settings schema");
+                    }
+                    object.put("schemaVersion", SCHEMA).put("playIntro", true);
+                } else if (!tree.path("playIntro").isBoolean()) {
+                    throw new IOException("intro setting has invalid types");
                 }
                 settings = mapper.treeToValue(tree, Settings.class);
             }
@@ -168,20 +179,27 @@ final class LauncherSettingsStore {
             throw new IOException("default Java executable must be canonical");
         }
         return update(settings -> new Settings(SCHEMA, canonical.toString(), feature,
-                settings.appearance(), settings.showExperimental(), settings.installParent()));
+                settings.appearance(), settings.showExperimental(), settings.installParent(),
+                settings.playIntro()));
     }
 
     Settings writeAppearance(LauncherAppearance appearance) throws IOException {
         Appearance stored = Appearance.of(appearance);
         return update(settings -> new Settings(SCHEMA, settings.defaultJavaExecutable(),
                 settings.defaultJavaFeature(), stored, settings.showExperimental(),
-                settings.installParent()));
+                settings.installParent(), settings.playIntro()));
     }
 
     Settings writeShowExperimental(boolean showExperimental) throws IOException {
         return update(settings -> new Settings(SCHEMA, settings.defaultJavaExecutable(),
                 settings.defaultJavaFeature(), settings.appearance(), showExperimental,
-                settings.installParent()));
+                settings.installParent(), settings.playIntro()));
+    }
+
+    Settings writePlayIntro(boolean playIntro) throws IOException {
+        return update(settings -> new Settings(SCHEMA, settings.defaultJavaExecutable(),
+                settings.defaultJavaFeature(), settings.appearance(),
+                settings.showExperimental(), settings.installParent(), playIntro));
     }
 
     /** Remembers where new installs are suggested; {@code null} returns to the platform default. */
@@ -189,7 +207,7 @@ final class LauncherSettingsStore {
         String stored = parent == null ? null : parent.normalize().toString();
         return update(settings -> new Settings(SCHEMA, settings.defaultJavaExecutable(),
                 settings.defaultJavaFeature(), settings.appearance(),
-                settings.showExperimental(), stored));
+                settings.showExperimental(), stored, settings.playIntro()));
     }
 
     private Settings update(UnaryOperator<Settings> change) throws IOException {
@@ -327,13 +345,14 @@ final class LauncherSettingsStore {
     /**
      * {@code showExperimental} only widens what is offered; installed channels never change.
      * {@code installParent} is the folder that holds the last new install, or {@code null} for the
-     * platform default.
+     * platform default. {@code playIntro} plays the greeting, opening and scan when the launcher
+     * opens and comes back.
      */
     record Settings(int schemaVersion, String defaultJavaExecutable,
                     Integer defaultJavaFeature, Appearance appearance,
-                    boolean showExperimental, String installParent) {
+                    boolean showExperimental, String installParent, boolean playIntro) {
         static final Settings DEFAULT =
-                new Settings(SCHEMA, null, null, Appearance.DEFAULT, false, null);
+                new Settings(SCHEMA, null, null, Appearance.DEFAULT, false, null, true);
     }
 
     /**

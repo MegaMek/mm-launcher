@@ -252,6 +252,25 @@ class LaunchCurtainTest {
         });
     }
 
+    @Test
+    void withTheIntroOffTheLauncherOpensStraightOnItsContent() throws Exception {
+        onEdt(() -> {
+            LaunchCurtain curtain = curtain();
+            curtain.setIntro(false);
+            curtain.greet();
+            curtain.contentReady("Welcome, Commander");
+            assertEquals(LaunchCurtain.Phase.HIDDEN, curtain.phase(), "no greeting");
+            assertFalse(curtain.isVisible());
+
+            curtain.closeForLaunch("MegaMek");
+            assertEquals(LaunchCurtain.Phase.CLOSING, curtain.phase(), "launches still show the card");
+            advance(5_000, curtain);
+            curtain.reveal();
+            assertEquals(LaunchCurtain.Phase.HIDDEN, curtain.phase(), "no opening or scan on return");
+            assertFalse(curtain.animating());
+        });
+    }
+
     private LaunchCurtain curtain() {
         LaunchCurtain curtain = new LaunchCurtain(GuiScale.DEFAULT, now::get);
         curtain.setSize(800, 600);

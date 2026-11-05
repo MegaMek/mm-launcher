@@ -358,6 +358,20 @@ public class LauncherServices {
         settings.writeShowExperimental(showExperimental);
     }
 
+    /** Whether the launcher plays its intro; unreadable settings keep it on. */
+    boolean playIntro() {
+        try {
+            return settings.read().playIntro();
+        } catch (IOException | RuntimeException error) {
+            return true;
+        }
+    }
+
+    void savePlayIntro(boolean playIntro) throws IOException {
+        ensureRegistryParent();
+        settings.writePlayIntro(playIntro);
+    }
+
     public SettingsView settingsView() throws IOException, InterruptedException {
         LauncherSettingsStore.Settings current = settings.read();
         if (current.defaultJavaExecutable() == null) {

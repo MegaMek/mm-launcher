@@ -171,6 +171,8 @@ public final class LauncherFrame extends JFrame {
     private QuickInstallSnapshot firstLaunchSnapshot;
     private boolean showExperimental;
     private final LatestSettingSave<Boolean> showExperimentalSave;
+    private boolean playIntro;
+    private final LatestSettingSave<Boolean> playIntroSave;
     private String firstLaunchMetadataFailure;
     /** The last version check worked but nothing offered has been released yet. */
     private boolean firstLaunchNothingReleased;
@@ -248,6 +250,9 @@ public final class LauncherFrame extends JFrame {
         this.services = services;
         this.showExperimental = services.showExperimental();
         this.showExperimentalSave = new LatestSettingSave<>(services::saveShowExperimental);
+        this.playIntro = services.playIntro();
+        this.playIntroSave = new LatestSettingSave<>(services::savePlayIntro);
+        curtain.setIntro(playIntro);
         this.newsFeed = newsFeed;
         this.existingImportPrompts = existingImportPrompts;
         this.normalInstallLocationPrompts = normalInstallLocationPrompts;
@@ -2951,6 +2956,17 @@ public final class LauncherFrame extends JFrame {
             }
         });
         section.add(theme);
+        section.add(Box.createVerticalStrut(guiScale.space("md")));
+        JCheckBox intro = new MapCheckBox("Play intro animation", playIntro, guiScale);
+        intro.setName("playIntroCheckbox");
+        intro.setOpaque(false);
+        intro.setAlignmentX(Component.LEFT_ALIGNMENT);
+        intro.setBorder(BorderFactory.createEmptyBorder());
+        intro.setMargin(new java.awt.Insets(0, 0, 0, 0));
+        intro.getAccessibleContext().setAccessibleDescription(
+                "Greet and scan when the launcher opens. Off, it opens straight to Home.");
+        intro.addActionListener(event -> applyPlayIntro(intro.isSelected()));
+        section.add(intro);
         return section;
     }
 
@@ -3007,6 +3023,33 @@ public final class LauncherFrame extends JFrame {
                 } catch (java.util.concurrent.ExecutionException failure) {
                     if (isDisplayable()) {
                         showError("Release setting was not saved", failure.getCause());
+                    }
+                }
+            }
+        }.execute();
+    }
+
+    private void applyPlayIntro(boolean requested) {
+        if (requested == playIntro) return;
+        playIntro = requested;
+        curtain.setIntro(requested);
+        long revision = playIntroSave.request();
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                playIntroSave.saveIfLatest(revision, requested);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    get();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                } catch (java.util.concurrent.ExecutionException failure) {
+                    if (isDisplayable()) {
+                        showError("Intro setting was not saved", failure.getCause());
                     }
                 }
             }
