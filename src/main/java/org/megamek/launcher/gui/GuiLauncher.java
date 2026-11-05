@@ -83,7 +83,7 @@ public final class GuiLauncher {
             if (!saved.equals(LauncherAppearance.DEFAULT)) {
                 LauncherAppearance.install(saved);
             }
-            new LauncherFrame(services).showWindow();
+            new LauncherFrame(services).showWindowWithGreeting();
         });
         return 0;
     }
