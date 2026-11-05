@@ -197,9 +197,10 @@ next to the registry in `<registry>.launch-options.json`, separate from launcher
 unreadable file is reported and never overwritten. Imported installations adopt their existing
 `-Xmx` from the application's `.l4j.ini` as an override. Java arguments must be options starting
 with `-`; class path, module, `-jar`, `-Xmx`, argument-file, and informational flags are rejected.
-Every application starts with generational ZGC (`-XX:+UseZGC`, plus `-XX:+ZGenerational` on Java 21
-and 22 only, since it is the default and deprecated from Java 23). Choosing a collector (`-XX:±Use…GC`)
-in the Java arguments replaces this default, and an explicit `-XX:±ZGenerational` is kept as written.
+The launcher adds no garbage collector option, so applications use the Java runtime's default
+collector (G1). Generational ZGC lagged the user interface noticeably on the bundled Temurin
+21.0.13. A player can still choose a collector (for example `-XX:+UseZGC -XX:+ZGenerational`) in the
+Java arguments.
 The user directory is passed as `-Dmegamek.userDir`, which MegaMek 0.51.01 and later treat as
 a launcher-managed override of the User Directory preference.
 
