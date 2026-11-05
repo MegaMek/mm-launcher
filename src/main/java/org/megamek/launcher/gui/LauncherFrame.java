@@ -172,6 +172,8 @@ public final class LauncherFrame extends JFrame {
     private boolean showExperimental;
     private final LatestSettingSave<Boolean> showExperimentalSave;
     private boolean playIntro;
+    /** The window waits to be shown until Home has loaded, when the intro is off. */
+    private boolean showWhenLoaded;
     private final LatestSettingSave<Boolean> playIntroSave;
     private String firstLaunchMetadataFailure;
     /** The last version check worked but nothing offered has been released yet. */
@@ -324,9 +326,17 @@ public final class LauncherFrame extends JFrame {
                 }, false);
     }
 
-    /** Shows the window behind the welcome greeting, which opens on Home once it has loaded. */
+    /**
+     * Shows the window behind the welcome greeting, which opens on Home once it has loaded. With
+     * the intro off, the window stays hidden until Home has loaded so it opens on its content.
+     */
     public void showWindowWithGreeting() {
         if (!isVisible()) {
+            if (!playIntro) {
+                showWhenLoaded = true;
+                reload();
+                return;
+            }
             curtain.greet();
         }
         showWindow();
@@ -338,6 +348,15 @@ public final class LauncherFrame extends JFrame {
             fitWindowToScreen(getSize());
         }
         reload();
+    }
+
+    private void showIfWaitingForHome() {
+        if (!showWhenLoaded) return;
+        showWhenLoaded = false;
+        if (!isVisible()) {
+            setVisible(true);
+            fitWindowToScreen(getSize());
+        }
     }
 
     private void reload() {
@@ -370,6 +389,7 @@ public final class LauncherFrame extends JFrame {
                 firstLaunchArtworkError = loaded.artworkError();
                 renderCurrentPage();
                 curtain.contentReady("Welcome, Commander");
+                showIfWaitingForHome();
                 if (firstLaunchArtworkError != null) {
                     recordErrorAsync("Loading first-launch artwork", firstLaunchArtworkError,
                             message -> status.setText("Artwork unavailable. " + message));
@@ -383,8 +403,9 @@ public final class LauncherFrame extends JFrame {
             } else {
                 renderLoadError(loaded.error());
                 curtain.contentReady("");
+                showIfWaitingForHome();
             }
-        });
+        }, error -> showIfWaitingForHome());
     }
 
     private void renderHome() {

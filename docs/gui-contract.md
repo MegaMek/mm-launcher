@@ -155,8 +155,9 @@ a click or key skips the greeting or an opening, and the curtain takes clicks, h
 from the page while it covers it. With reduced motion the greeting and the sweep are skipped,
 openings are instant and the card is still. It uses theme roles, so the light theme gets a light
 curtain. Only the GUI start greets; `showWindow()` alone does not. With **Play intro animation**
-off, the greeting, openings and sweep are all skipped: the launcher opens straight on Home and
-comes back from a game without the opening or sweep, while launching still shows the card.
+off, the greeting, openings and sweep are all skipped: the GUI start keeps the window hidden
+until Home has loaded and then shows it on Home, and the launcher comes back from a game without
+the opening or sweep, while launching still shows the card.
 Settings starts with **Appearance**: a Dark/Light theme select and **Play intro animation** (on by
 default). A theme change applies immediately, re-renders the current page,
 and is saved off the event-dispatch thread; a failed save reports an error without reverting the
