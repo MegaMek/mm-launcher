@@ -47,15 +47,32 @@ class LaunchCurtainTest {
     private final AtomicLong now = new AtomicLong(1_000_000);
 
     @Test
-    void greetingTypesOneCharacterPerIntervalAfterTheDarkBeat() {
-        assertEquals(0, LaunchCurtain.typed(0, 20));
-        assertEquals(0, LaunchCurtain.typed(LaunchCurtain.GREETING_PAUSE - 1, 20));
-        assertEquals(1, LaunchCurtain.typed(LaunchCurtain.GREETING_PAUSE, 20));
-        assertEquals(3, LaunchCurtain.typed(LaunchCurtain.GREETING_PAUSE
-                + 2L * LaunchCurtain.TYPE_INTERVAL, 20));
-        assertEquals(20, LaunchCurtain.typed(Long.MAX_VALUE, 20));
-        assertEquals(LaunchCurtain.GREETING_PAUSE + 10L * LaunchCurtain.TYPE_INTERVAL
-                + LaunchCurtain.GREETING_HOLD, LaunchCurtain.greetingDuration(10));
+    void statusLineAndGreetingTypeAfterTheDarkBeat() {
+        assertEquals(0, LaunchCurtain.typed(-1, 20, LaunchCurtain.TYPE_INTERVAL));
+        assertEquals(1, LaunchCurtain.typed(0, 20, LaunchCurtain.TYPE_INTERVAL));
+        assertEquals(3, LaunchCurtain.typed(2L * LaunchCurtain.TYPE_INTERVAL, 20,
+                LaunchCurtain.TYPE_INTERVAL));
+        assertEquals(20, LaunchCurtain.typed(Long.MAX_VALUE, 20, LaunchCurtain.TYPE_INTERVAL));
+        assertEquals(LaunchCurtain.GREETING_PAUSE + LaunchCurtain.GREETING_LEAD
+                + 10L * LaunchCurtain.TYPE_INTERVAL + LaunchCurtain.GREETING_HOLD,
+                LaunchCurtain.greetingDuration(5, 10), "a short status line finishes first");
+        assertEquals(LaunchCurtain.GREETING_PAUSE + 200L * LaunchCurtain.STATUS_INTERVAL
+                + LaunchCurtain.GREETING_HOLD, LaunchCurtain.greetingDuration(200, 1),
+                "a long status line holds the opening");
+    }
+
+    @Test
+    void statusLineNamesTheLauncherVersion() {
+        assertEquals("MegaMek Launcher 0.50.12.3  //  Uplink established",
+                LaunchCurtain.statusLine("0.50.12.3"));
+        assertEquals("MegaMek Launcher dev  //  Uplink established", LaunchCurtain.statusLine(null));
+    }
+
+    @Test
+    void hexGridCoversTheWindow() {
+        java.awt.geom.Rectangle2D bounds = LaunchCurtain.hexGrid(800, 600, 22).getBounds2D();
+        assertTrue(bounds.getMinX() <= 0 && bounds.getMinY() <= 0);
+        assertTrue(bounds.getMaxX() >= 800 && bounds.getMaxY() >= 600);
     }
 
     @Test
@@ -77,10 +94,11 @@ class LaunchCurtainTest {
 
             advance(LaunchCurtain.GREETING_MAX_WAIT - 1, curtain);
             assertEquals(LaunchCurtain.Phase.GREETING, curtain.phase(), "still waiting for Home");
-            curtain.contentReady("Welcome back, Commander");
+            curtain.contentReady("Welcome, Commander");
             paint(curtain);
             // The dark beat has long passed, so typing starts at once.
-            long typing = LaunchCurtain.greetingDuration("Welcome back, Commander".length())
+            long typing = LaunchCurtain.greetingDuration(
+                    LaunchCurtain.statusLine(null).length(), "Welcome, Commander".length())
                     - LaunchCurtain.GREETING_PAUSE;
             advance(typing - 1, curtain);
             assertEquals(LaunchCurtain.Phase.GREETING, curtain.phase(), "the greeting finishes first");
@@ -100,7 +118,7 @@ class LaunchCurtainTest {
             curtain.greet();
             advance(LaunchCurtain.GREETING_MAX_WAIT, curtain);
             assertEquals(LaunchCurtain.Phase.OPENING, curtain.phase());
-            curtain.contentReady("Welcome back, Commander");
+            curtain.contentReady("Welcome, Commander");
             assertEquals(LaunchCurtain.Phase.OPENING, curtain.phase(), "a late load changes nothing");
             curtain.hideCurtain();
         });
@@ -134,7 +152,7 @@ class LaunchCurtainTest {
     void contentReadyOutsideTheGreetingAndRevealWhileHiddenDoNothing() throws Exception {
         onEdt(() -> {
             LaunchCurtain curtain = curtain();
-            curtain.contentReady("Welcome back, Commander");
+            curtain.contentReady("Welcome, Commander");
             curtain.reveal();
             assertEquals(LaunchCurtain.Phase.HIDDEN, curtain.phase());
             assertFalse(curtain.isVisible());

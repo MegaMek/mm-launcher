@@ -363,8 +363,7 @@ public final class LauncherFrame extends JFrame {
                 firstLaunchArtwork = loaded.artwork();
                 firstLaunchArtworkError = loaded.artworkError();
                 renderCurrentPage();
-                curtain.contentReady(state.registry().installations().isEmpty()
-                        ? "Welcome, Commander" : "Welcome back, Commander");
+                curtain.contentReady("Welcome, Commander");
                 if (firstLaunchArtworkError != null) {
                     recordErrorAsync("Loading first-launch artwork", firstLaunchArtworkError,
                             message -> status.setText("Artwork unavailable. " + message));

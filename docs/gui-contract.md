@@ -136,14 +136,19 @@ size tokens and does not alter the shared values; the only literal metrics left 
 and its artwork geometry, minimum widths, layout breakpoints and scroll increments, which the tokens
 do not yet describe.
 Scene transitions are painted by the launch curtain on the frame's glass pane. Started as the GUI,
-the launcher opens on the background colour, types **Welcome back, Commander** (**Welcome,
-Commander** with no installations) in the condensed display face once Home has loaded, then opens
-the window from a horizontal centre line with accent edges. Launching closes it back to that line
-and shows the launch card described under launch below. The curtain repaints only the strips that
-change and animates only while something moves; a click or key skips the greeting or an opening,
-and the curtain takes clicks, hovers and keys from the page while it covers it. With reduced motion
-the greeting is skipped, openings are instant and the card is still. It uses theme roles, so the
-light theme gets a light curtain. Only the GUI start greets; `showWindow()` alone does not.
+the launcher opens on a console drawn in theme roles: a faint hex grid under scanlines, a vignette
+and accent corner brackets. Once Home has loaded, an accent status line (**MegaMek Launcher**
+*version* **// Uplink established**) and then **Welcome, Commander** in the condensed display
+face type over it with a block cursor, above a rule that draws out from the centre. The window then
+opens from a horizontal centre line with accent edges, the console's hex grid lighting up over the
+page just behind each edge and fading as the window opens. Launching closes it back to that line
+and shows the launch card, on the same console, described under launch below. The console is drawn
+once per window size and theme and dropped when the curtain hides; the curtain repaints only the
+strips that change and animates only while something moves; a click or key skips the greeting or
+an opening, and the curtain takes clicks, hovers and keys from the page while it covers it. With
+reduced motion the greeting is skipped, openings are instant and the card is still. It uses theme
+roles, so the light theme gets a light curtain. Only the GUI start greets; `showWindow()` alone
+does not.
 Settings starts with **Appearance**: a Dark/Light theme select. A change applies immediately, re-renders the current page,
 and is saved off the event-dispatch thread; a failed save reports an error without reverting the
 visible appearance. High contrast is not offered until the design tokens define it.

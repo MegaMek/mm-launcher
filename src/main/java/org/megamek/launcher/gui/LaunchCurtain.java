@@ -42,59 +42,93 @@ import javax.accessibility.AccessibleRole;
 import javax.swing.JComponent;
 import javax.swing.Timer;
 import javax.swing.UIManager;
+import java.awt.AlphaComposite;
+import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Component;
+import java.awt.Composite;
+import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.GradientPaint;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.KeyboardFocusManager;
+import java.awt.RadialGradientPaint;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.geom.Path2D;
+import java.awt.geom.Point2D;
+import java.awt.image.BufferedImage;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.function.LongSupplier;
 
 /**
  * The launcher's scene transitions, painted on the frame's glass pane over the live content.
  * <p>
- * When the launcher opens it types a greeting on the background colour, then the window opens
- * from a horizontal centre line, like a screen powering on. Launching an application closes the
- * window back to that line and leaves a "Launching" card that waits until the application is on
- * screen; when the launcher comes back it opens from the line again, without the greeting.
+ * When the launcher opens it shows a console: a faint hex grid under scanlines, a vignette and
+ * corner brackets. A status line and the greeting type themselves over it, above a rule that
+ * draws out from the centre. Then the window opens from a horizontal centre line, like a screen
+ * powering on, the hex grid lighting up just behind the opening edges and fading as they pass.
+ * Launching an application closes the window back to that line and leaves a "Launching" card on
+ * the console that waits until the application is on screen; when the launcher comes back it
+ * opens from the line again, without the greeting.
  * <p>
- * Everything is cheap to draw: the content underneath is never captured, only the strips that
- * change are repainted each frame, and the timer runs only while something moves. The greeting
- * and opening can be skipped with a click or any key. With reduce motion on, nothing animates:
- * the greeting is skipped, openings are instant and the card is still.
+ * Everything is cheap to draw: the console is drawn once into an image per window size, the
+ * content underneath is never captured, only the strips that change are repainted each frame,
+ * and the timer runs only while something moves. The greeting and opening can be skipped with a
+ * click or any key. With reduce motion on, nothing animates: the greeting is skipped, openings
+ * are instant and the card is still.
  */
 final class LaunchCurtain extends JComponent {
     enum Phase { HIDDEN, GREETING, OPENING, CLOSING, DEPLOYING }
 
-    /** The dark beat before the greeting starts typing. */
+    /** The dark beat before the status line starts typing. */
     static final int GREETING_PAUSE = 250;
+    /** How long each status line character takes to type. */
+    static final int STATUS_INTERVAL = 14;
+    /** How long after the status line starts the greeting starts typing. */
+    static final int GREETING_LEAD = 350;
     /** How long each greeting character takes to type. */
     static final int TYPE_INTERVAL = 40;
     /** How long the typed greeting holds before the window opens. */
-    static final int GREETING_HOLD = 550;
+    static final int GREETING_HOLD = 650;
     /** The longest the greeting waits for the home screen before opening anyway. */
     static final int GREETING_MAX_WAIT = 4000;
+    /** How long the rule under the greeting takes to draw out from the centre. */
+    static final int RULE_DURATION = 900;
     static final int CURSOR_BLINK = 530;
     /** One pass of the highlight along the "Launching" card's line. */
     static final int SCAN_PERIOD = 1600;
+    /** How many steps the lit hex grid behind a moving edge fades over. */
+    private static final int TRAIL_STEPS = 6;
     private static final int FRAME = 1000 / 60;
     private static final int SLOW_FRAME = 1000 / 30;
+
+    /** The console drawn once for a window size and theme: its backdrop and the lit hex grid. */
+    private record Scene(int width, int height, int colours, BufferedImage backdrop,
+                         BufferedImage mesh) {
+    }
+
+    /** Where the greeting's lines, rule and repaint band sit for the current size. */
+    private record Layout(Font statusFont, Font greetingFont, String status, String greeting,
+                          int x, int width, int statusBaseline, int greetingBaseline, int ruleY,
+                          int top, int bottom) {
+    }
 
     private final GuiScale scale;
     private final LongSupplier clock;
     private final Timer timer;
+    private final String status;
     private Phase phase = Phase.HIDDEN;
     private long phaseStart;
     private String greeting = "";
     private String title = "";
+    private Scene scene;
     private boolean contentReady;
     private int lastTop = -1;
     private int lastBottom = -1;
@@ -107,6 +141,7 @@ final class LaunchCurtain extends JComponent {
     LaunchCurtain(GuiScale scale, LongSupplier clock) {
         this.scale = scale;
         this.clock = clock;
+        status = statusLine(LaunchCurtain.class.getPackage().getImplementationVersion());
         setName("launchCurtain");
         setOpaque(false);
         setVisible(false);
@@ -135,6 +170,12 @@ final class LaunchCurtain extends JComponent {
 
     Phase phase() {
         return phase;
+    }
+
+    /** The status line typed above the greeting, for launcher {@code version}. */
+    static String statusLine(String version) {
+        return "MegaMek Launcher " + (version == null || version.isBlank() ? "dev" : version)
+                + "  //  Uplink established";
     }
 
     @Override
@@ -247,6 +288,7 @@ final class LaunchCurtain extends JComponent {
     void hideCurtain() {
         phase = Phase.HIDDEN;
         timer.stop();
+        scene = null;
         lastTop = -1;
         lastBottom = -1;
         if (isVisible()) {
@@ -294,7 +336,7 @@ final class LaunchCurtain extends JComponent {
         long elapsed = elapsed();
         switch (phase) {
             case GREETING -> {
-                if (contentReady ? elapsed >= greetingDuration(greeting.length())
+                if (contentReady ? elapsed >= greetingDuration(status.length(), greeting.length())
                         : elapsed >= GREETING_MAX_WAIT) {
                     start(Phase.OPENING);
                     return;
@@ -335,17 +377,22 @@ final class LaunchCurtain extends JComponent {
         }
     }
 
-    /** How long a greeting of {@code characters} takes to type and hold. */
-    static long greetingDuration(int characters) {
-        return GREETING_PAUSE + (long) characters * TYPE_INTERVAL + GREETING_HOLD;
+    /**
+     * How long a status line of {@code statusCharacters} and a greeting of {@code characters}
+     * take to type and hold; the greeting starts {@link #GREETING_LEAD} after the status line.
+     */
+    static long greetingDuration(int statusCharacters, int characters) {
+        long typing = Math.max((long) statusCharacters * STATUS_INTERVAL,
+                GREETING_LEAD + (long) characters * TYPE_INTERVAL);
+        return GREETING_PAUSE + typing + GREETING_HOLD;
     }
 
-    /** How many of {@code length} greeting characters are typed {@code elapsed} ms in. */
-    static int typed(long elapsed, int length) {
-        if (elapsed < GREETING_PAUSE) {
+    /** How many of {@code length} characters typed every {@code interval} ms show {@code since} ms in. */
+    static int typed(long since, int length, int interval) {
+        if (since < 0) {
             return 0;
         }
-        return (int) Math.min(length, (elapsed - GREETING_PAUSE) / TYPE_INTERVAL + 1);
+        return (int) Math.min(length, since / interval + 1);
     }
 
     /** Half the height of the open band at {@code progress} (0 closed, 1 open), eased. */
@@ -382,12 +429,17 @@ final class LaunchCurtain extends JComponent {
         return scale.space("xl");
     }
 
-    private void repaintGreeting() {
-        int line = getFontMetrics(displayFont()).getHeight();
-        repaint(0, getHeight() / 2 - line, getWidth(), line * 2);
+    /** How deep the lit hex grid trails behind a moving edge. */
+    private int trailDepth() {
+        return scale.scaleForGUI(110);
     }
 
-    /** Repaints only the rows between the band's previous and new edges, with their glow. */
+    private void repaintGreeting() {
+        Layout layout = greetingLayout();
+        repaint(0, layout.top(), getWidth(), layout.bottom() - layout.top());
+    }
+
+    /** Repaints only the rows between the band's previous and new edges, with glow and trail. */
     private void repaintAperture(int half) {
         int width = getWidth();
         int height = getHeight();
@@ -397,9 +449,10 @@ final class LaunchCurtain extends JComponent {
             repaint();
         } else {
             int glow = glowHeight() + 2;
+            int inside = Math.max(glow, trailDepth() + 2);
             int from = Math.min(top, lastTop) - glow;
-            repaint(0, from, width, Math.max(top, lastTop) + glow - from);
-            from = Math.min(bottom, lastBottom) - glow;
+            repaint(0, from, width, Math.max(top, lastTop) + inside - from);
+            from = Math.min(bottom, lastBottom) - inside;
             repaint(0, from, width, Math.max(bottom, lastBottom) + glow - from);
         }
         lastTop = top;
@@ -417,14 +470,50 @@ final class LaunchCurtain extends JComponent {
         return Math.max(1, scale.size("border") * 2);
     }
 
-    private java.awt.Font displayFont() {
-        java.awt.Font base = UIManager.getFont("Label.font");
+    private Font baseFont() {
+        Font base = UIManager.getFont("Label.font");
         if (base == null) {
-            base = getFont() != null ? getFont() : new java.awt.Font(java.awt.Font.SANS_SERIF,
-                    java.awt.Font.PLAIN, 12);
+            base = getFont() != null ? getFont() : new Font(Font.SANS_SERIF, Font.PLAIN, 12);
         }
+        return base;
+    }
+
+    private Font displayFont() {
         DesignTokens.TypeStyle display = DesignTokens.shipped().typeStyle("display");
-        return TokenFonts.condensed(scale.font(base, "display"), display, true);
+        return TokenFonts.condensed(scale.font(baseFont(), "display"), display, true);
+    }
+
+    /** The greeting is the console's headline, half again the display size. */
+    private Font greetingFont() {
+        Font display = displayFont();
+        return display.deriveFont(display.getSize2D() * 1.5f);
+    }
+
+    private Font statusFont() {
+        DesignTokens.TypeStyle overline = DesignTokens.shipped().typeStyle("overline");
+        Font font = scale.font(baseFont(), "overline");
+        return TokenFonts.condensed(font.deriveFont(font.getSize2D() * 1.3f), overline, true);
+    }
+
+    /** The status line and greeting share a left edge, centred as a block over their rule. */
+    private Layout greetingLayout() {
+        Font statusFont = statusFont();
+        Font greetingFont = greetingFont();
+        FontMetrics statusMetrics = getFontMetrics(statusFont);
+        FontMetrics greetingMetrics = getFontMetrics(greetingFont);
+        String statusText = status.toUpperCase(Locale.ROOT);
+        String greetingText = greeting.toUpperCase(Locale.ROOT);
+        int width = Math.max(statusMetrics.stringWidth(statusText),
+                greetingMetrics.stringWidth(greetingText));
+        int x = (getWidth() - width) / 2;
+        int greetingBaseline = (getHeight() - greetingMetrics.getHeight()) / 2
+                + greetingMetrics.getAscent();
+        int statusBaseline = greetingBaseline - greetingMetrics.getAscent() - scale.space("sm");
+        int ruleY = greetingBaseline + greetingMetrics.getDescent() + scale.space("sm");
+        int pad = scale.space("lg");
+        return new Layout(statusFont, greetingFont, statusText, greetingText, x, width,
+                statusBaseline, greetingBaseline, ruleY,
+                statusBaseline - statusMetrics.getAscent() - pad, ruleY + lineThickness() + pad);
     }
 
     @Override
@@ -442,15 +531,13 @@ final class LaunchCurtain extends JComponent {
             long elapsed = elapsed();
             switch (phase) {
                 case GREETING -> {
-                    g.setColor(LauncherTheme.BACKGROUND);
-                    g.fillRect(0, 0, width, height);
+                    paintBackdrop(g, 0, 0, width, height);
                     paintGreeting(g, elapsed, 1f);
                 }
                 case OPENING -> {
                     long fade = textFadeDuration();
                     if (elapsed < fade) {
-                        g.setColor(LauncherTheme.BACKGROUND);
-                        g.fillRect(0, 0, width, height);
+                        paintBackdrop(g, 0, 0, width, height);
                         paintGreeting(g, Long.MAX_VALUE, 1f - (float) progress(elapsed, fade));
                     } else {
                         double open = progress(elapsed - fade, openDuration());
@@ -475,34 +562,61 @@ final class LaunchCurtain extends JComponent {
         if (alpha <= 0 || greeting.isEmpty()) {
             return;
         }
-        String text = greeting.toUpperCase(Locale.ROOT);
-        g.setFont(displayFont());
-        FontMetrics metrics = g.getFontMetrics();
-        int count = typed(elapsed, text.length());
-        // Centre on the whole line so typing never shifts what is already there.
-        int x = (getWidth() - metrics.stringWidth(text)) / 2;
-        int baseline = (getHeight() - metrics.getHeight()) / 2 + metrics.getAscent();
+        Layout layout = greetingLayout();
+        long since = elapsed - GREETING_PAUSE;
+        int statusCount = typed(since, layout.status().length(), STATUS_INTERVAL);
+        int greetingCount = typed(since - GREETING_LEAD, layout.greeting().length(), TYPE_INTERVAL);
+        int x = layout.x();
+
+        g.setFont(layout.statusFont());
+        FontMetrics statusMetrics = g.getFontMetrics();
+        g.setColor(withAlpha(LauncherTheme.ACCENT, alpha));
+        g.drawString(layout.status().substring(0, statusCount), x, layout.statusBaseline());
+        g.setFont(layout.greetingFont());
+        FontMetrics greetingMetrics = g.getFontMetrics();
         g.setColor(withAlpha(LauncherTheme.TEXT, alpha));
-        g.drawString(text.substring(0, count), x, baseline);
-        boolean typing = count < text.length();
+        g.drawString(layout.greeting().substring(0, greetingCount), x, layout.greetingBaseline());
+
+        int thickness = lineThickness();
+        float drawn = TokenMotion.ease((float) Math.max(0, progress(since, RULE_DURATION)));
+        int ruleWidth = Math.round(layout.width() * drawn);
+        if (ruleWidth > 0) {
+            int ruleX = x + (layout.width() - ruleWidth) / 2;
+            g.setColor(withAlpha(LauncherTheme.MUTED, 0.6f * alpha));
+            g.fillRect(ruleX, layout.ruleY(), ruleWidth, Math.max(1, thickness / 2));
+            int tick = scale.space("sm");
+            g.setColor(withAlpha(LauncherTheme.ACCENT, alpha));
+            g.fillRect(ruleX, layout.ruleY() - tick / 2, thickness, tick);
+            g.fillRect(ruleX + ruleWidth - thickness, layout.ruleY() - tick / 2, thickness, tick);
+        }
+
+        boolean typing = statusCount < layout.status().length()
+                || greetingCount < layout.greeting().length();
         boolean blinkOn = (elapsed / CURSOR_BLINK) % 2 == 0;
-        if (alpha >= 1f && (typing || blinkOn)) {
-            int cursorX = x + metrics.stringWidth(text.substring(0, count)) + scale.space("xs");
+        if (alpha >= 1f && statusCount > 0 && (typing || blinkOn)) {
+            boolean onGreeting = greetingCount > 0;
+            FontMetrics metrics = onGreeting ? greetingMetrics : statusMetrics;
+            String line = onGreeting ? layout.greeting().substring(0, greetingCount)
+                    : layout.status().substring(0, statusCount);
+            int baseline = onGreeting ? layout.greetingBaseline() : layout.statusBaseline();
+            int cursorX = x + metrics.stringWidth(line) + scale.space("xs");
+            int cursorWidth = Math.max(thickness, metrics.charWidth('M') / 2);
+            int cursorHeight = Math.round(metrics.getAscent() * 0.72f);
             g.setColor(LauncherTheme.ACCENT);
-            g.fillRect(cursorX, baseline - metrics.getAscent(), lineThickness(), metrics.getAscent());
+            g.fillRect(cursorX, baseline - cursorHeight, cursorWidth, cursorHeight);
         }
     }
 
-    /** Covers all but the band of {@code half} above and below the centre, with glowing edges. */
+    /** Covers all but the band of {@code half} above and below the centre, with lit edges. */
     private void paintAperture(Graphics2D g, int width, int height, int half, float glow) {
         int top = Math.max(0, height / 2 - half);
         int bottom = Math.min(height, height / 2 + half);
-        g.setColor(LauncherTheme.BACKGROUND);
-        g.fillRect(0, 0, width, top);
-        g.fillRect(0, bottom, width, height - bottom);
+        paintBackdrop(g, 0, 0, width, top);
+        paintBackdrop(g, 0, bottom, width, height - bottom);
         if (glow <= 0) {
             return;
         }
+        paintHexTrail(g, top, bottom, glow);
         Color accent = LauncherTheme.ACCENT;
         int glowHeight = Math.min(glowHeight(), Math.max(1, half));
         Color strong = withAlpha(accent, 0.45f * glow);
@@ -517,9 +631,161 @@ final class LaunchCurtain extends JComponent {
         g.fillRect(0, bottom - thickness / 2, width, thickness);
     }
 
+    /**
+     * Lights the console's hex grid over the content just inside the band's edges, fading with
+     * distance from them in a few steps, all scaled by {@code strength}.
+     */
+    private void paintHexTrail(Graphics2D g, int top, int bottom, float strength) {
+        Scene current = scene();
+        if (current == null || bottom <= top) {
+            return;
+        }
+        int step = Math.max(1, trailDepth() / TRAIL_STEPS);
+        Composite composite = g.getComposite();
+        try {
+            for (int i = 0; i < TRAIL_STEPS; i++) {
+                float alpha = 0.6f * strength * (1f - (float) i / TRAIL_STEPS);
+                g.setComposite(AlphaComposite.SrcOver.derive(Math.max(0f, Math.min(1f, alpha))));
+                int from = top + i * step;
+                drawMesh(g, current, from, Math.min(bottom, from + step));
+                int to = bottom - i * step;
+                drawMesh(g, current, Math.max(top, to - step), to);
+            }
+        } finally {
+            g.setComposite(composite);
+        }
+    }
+
+    private static void drawMesh(Graphics2D g, Scene current, int from, int to) {
+        if (to > from) {
+            g.drawImage(current.mesh(), 0, from, current.width(), to, 0, from, current.width(), to,
+                    null);
+        }
+    }
+
+    /** Draws the console backdrop over the given area, limited to the clip. */
+    private void paintBackdrop(Graphics2D g, int x, int y, int width, int height) {
+        if (width <= 0 || height <= 0) {
+            return;
+        }
+        Rectangle area = new Rectangle(x, y, width, height);
+        Rectangle clip = g.getClipBounds();
+        if (clip != null) {
+            area = area.intersection(clip);
+        }
+        if (area.isEmpty()) {
+            return;
+        }
+        Scene current = scene();
+        if (current == null) {
+            g.setColor(LauncherTheme.BACKGROUND);
+            g.fill(area);
+            return;
+        }
+        g.drawImage(current.backdrop(), area.x, area.y, area.x + area.width, area.y + area.height,
+                area.x, area.y, area.x + area.width, area.y + area.height, null);
+    }
+
+    /** The console for the current size and colours, drawn once and kept while the curtain shows. */
+    private Scene scene() {
+        int width = getWidth();
+        int height = getHeight();
+        if (width <= 0 || height <= 0) {
+            return null;
+        }
+        int colours = Objects.hash(LauncherTheme.BACKGROUND.getRGB(), LauncherTheme.TEXT.getRGB(),
+                LauncherTheme.ACCENT.getRGB());
+        if (scene == null || scene.width() != width || scene.height() != height
+                || scene.colours() != colours) {
+            scene = buildScene(width, height, colours);
+        }
+        return scene;
+    }
+
+    private Scene buildScene(int width, int height, int colours) {
+        Path2D grid = hexGrid(width, height, scale.scaleForGUI(22));
+        Color background = LauncherTheme.BACKGROUND;
+        boolean dark = (background.getRed() * 299 + background.getGreen() * 587
+                + background.getBlue() * 114) / 1000 < 128;
+
+        BufferedImage backdrop = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = backdrop.createGraphics();
+        try {
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setColor(background);
+            g.fillRect(0, 0, width, height);
+            g.setStroke(new BasicStroke(1f));
+            g.setColor(withAlpha(LauncherTheme.TEXT, dark ? 0.05f : 0.07f));
+            g.draw(grid);
+            g.setPaint(new RadialGradientPaint(new Point2D.Float(width / 2f, height / 2f),
+                    Math.max(width, height) * 0.75f, new float[] {0.45f, 1f},
+                    new Color[] {new Color(0, 0, 0, 0), new Color(0, 0, 0, dark ? 110 : 28)}));
+            g.fillRect(0, 0, width, height);
+            g.setColor(new Color(0, 0, 0, dark ? 40 : 10));
+            int pitch = Math.max(2, scale.scaleForGUI(3));
+            for (int y = 0; y < height; y += pitch) {
+                g.fillRect(0, y, width, 1);
+            }
+            paintCornerBrackets(g, width, height);
+        } finally {
+            g.dispose();
+        }
+
+        BufferedImage mesh = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
+        g = mesh.createGraphics();
+        try {
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setStroke(new BasicStroke(Math.max(1f, scale.size("border") * 1.5f)));
+            g.setColor(LauncherTheme.ACCENT);
+            g.draw(grid);
+        } finally {
+            g.dispose();
+        }
+        return new Scene(width, height, colours, backdrop, mesh);
+    }
+
+    private void paintCornerBrackets(Graphics2D g, int width, int height) {
+        int inset = scale.space("xl");
+        int length = scale.scaleForGUI(28);
+        int thickness = lineThickness();
+        int right = width - inset;
+        int bottom = height - inset;
+        g.setColor(withAlpha(LauncherTheme.ACCENT, 0.7f));
+        g.fillRect(inset, inset, length, thickness);
+        g.fillRect(inset, inset, thickness, length);
+        g.fillRect(right - length, inset, length, thickness);
+        g.fillRect(right - thickness, inset, thickness, length);
+        g.fillRect(inset, bottom - thickness, length, thickness);
+        g.fillRect(inset, bottom - length, thickness, length);
+        g.fillRect(right - length, bottom - thickness, length, thickness);
+        g.fillRect(right - thickness, bottom - length, thickness, length);
+    }
+
+    /** Flat-topped hexes of {@code radius} tiling {@code width} by {@code height}, as outlines. */
+    static Path2D hexGrid(int width, int height, double radius) {
+        Path2D grid = new Path2D.Float();
+        double rowHeight = Math.sqrt(3) * radius;
+        int column = 0;
+        for (double cx = 0; cx < width + radius; cx += 1.5 * radius, column++) {
+            double offset = column % 2 == 0 ? 0 : rowHeight / 2;
+            for (double cy = offset - rowHeight; cy < height + rowHeight; cy += rowHeight) {
+                for (int corner = 0; corner <= 6; corner++) {
+                    double angle = Math.PI / 3 * corner;
+                    double px = cx + radius * Math.cos(angle);
+                    double py = cy + radius * Math.sin(angle);
+                    if (corner == 0) {
+                        grid.moveTo(px, py);
+                    } else {
+                        grid.lineTo(px, py);
+                    }
+                }
+            }
+        }
+        return grid;
+    }
+
     private void paintDeploying(Graphics2D g, int width, int height, long elapsed) {
-        g.setColor(LauncherTheme.BACKGROUND);
-        g.fillRect(0, 0, width, height);
+        paintBackdrop(g, 0, 0, width, height);
         long line = lineDuration();
         int thickness = lineThickness();
         if (elapsed < line) {
