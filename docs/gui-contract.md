@@ -145,7 +145,10 @@ each edge and fading as the window opens. Once open, a leaning band of lit hexes
 across the page from left to right; the page already takes clicks, hovers and keys during the
 sweep. Launching closes the window back to that line and shows the launch card described under
 launch below. The hex grid is drawn once per window size and theme and dropped when the curtain
-hides; the curtain repaints only the strips that change and animates only while something moves;
+hides. An opening, a closing and the sweep each print the page once, at the screen's resolution,
+and draw from that picture with the curtain opaque, so Swing does not repaint the page under every
+frame; input in the window during the sweep drops the picture so hovers and presses show live.
+The curtain repaints only the strips that change and animates only while something moves;
 a click or key skips the greeting or an opening, and the curtain takes clicks, hovers and keys
 from the page while it covers it. With reduced motion the greeting and the sweep are skipped,
 openings are instant and the card is still. It uses theme roles, so the light theme gets a light

@@ -40,8 +40,12 @@ import org.megamek.launcher.design.swing.TokenMotion;
 import javax.accessibility.AccessibleContext;
 import javax.accessibility.AccessibleRole;
 import javax.swing.JComponent;
+import javax.swing.JLayeredPane;
+import javax.swing.JRootPane;
+import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.UIManager;
+import java.awt.AWTEvent;
 import java.awt.AlphaComposite;
 import java.awt.BasicStroke;
 import java.awt.Color;
@@ -52,16 +56,22 @@ import java.awt.FontMetrics;
 import java.awt.GradientPaint;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.GraphicsConfiguration;
 import java.awt.KeyboardFocusManager;
 import java.awt.LinearGradientPaint;
+import java.awt.Point;
 import java.awt.Polygon;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
 import java.awt.Shape;
+import java.awt.Toolkit;
+import java.awt.Window;
+import java.awt.event.AWTEventListener;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.geom.AffineTransform;
 import java.awt.geom.Path2D;
 import java.awt.image.BufferedImage;
 import java.util.Locale;
@@ -107,7 +117,7 @@ final class LaunchCurtain extends JComponent {
     private static final int RULE_DELAY = 400;
     private static final int RULE_DURATION = 1200;
     /** How long the band of lit hexes takes to sweep across the opened window. */
-    static final int SHIMMER_DURATION = 900;
+    static final int SHIMMER_DURATION = 1600;
     /** One pass of the highlight along the "Launching" card's line. */
     static final int SCAN_PERIOD = 1600;
     /** How many steps the lit hex grid behind a moving edge fades over. */
@@ -141,6 +151,52 @@ final class LaunchCurtain extends JComponent {
     private int lastBottom = -1;
     private Rectangle lastShimmer;
     private Component focusBeforeCover;
+    /** The content as it was when the transition started, at the screen's resolution. */
+    private BufferedImage snapshot;
+    private int snapshotWidth;
+    private int snapshotHeight;
+    private Point pointer;
+    /**
+     * Input in the window during the sweep: drop the snapshot so the content paints itself
+     * again, hovers and presses included. A move counts only once the pointer really moves, as
+     * a window shown under a still pointer reports one too.
+     */
+    private final AWTEventListener goLive = event -> {
+        Window window = SwingUtilities.getWindowAncestor(this);
+        if (phase != Phase.SHIMMER || window == null
+                || !(event.getSource() instanceof Component source)
+                || (source != window && SwingUtilities.getWindowAncestor(source) != window)) {
+            return;
+        }
+        int id = event.getID();
+        if (id == MouseEvent.MOUSE_MOVED || id == MouseEvent.MOUSE_DRAGGED) {
+            Point at = ((MouseEvent) event).getLocationOnScreen();
+            if (pointer == null) {
+                pointer = at;
+                return;
+            }
+            if (pointer.equals(at)) {
+                return;
+            }
+        } else if (id != MouseEvent.MOUSE_PRESSED && id != MouseEvent.MOUSE_WHEEL
+                && id != KeyEvent.KEY_PRESSED) {
+            return;
+        }
+        dropSnapshot();
+    };
+
+    /** Opaque while it draws everything itself, so Swing does not repaint the page under it. */
+    @Override
+    public boolean isOpaque() {
+        if (phase == null) {
+            return false;
+        }
+        return switch (phase) {
+            case HIDDEN -> false;
+            case GREETING, DEPLOYING -> true;
+            case OPENING, CLOSING, SHIMMER -> snapshot != null;
+        };
+    }
 
     LaunchCurtain(GuiScale scale) {
         this(scale, () -> System.nanoTime() / 1_000_000L);
@@ -306,7 +362,9 @@ final class LaunchCurtain extends JComponent {
     void hideCurtain() {
         phase = Phase.HIDDEN;
         timer.stop();
+        Toolkit.getDefaultToolkit().removeAWTEventListener(goLive);
         scene = null;
+        snapshot = null;
         lastTop = -1;
         lastBottom = -1;
         lastShimmer = null;
@@ -332,17 +390,22 @@ final class LaunchCurtain extends JComponent {
     }
 
     private void start(Phase next) {
+        Toolkit.getDefaultToolkit().removeAWTEventListener(goLive);
         phase = next;
         phaseStart = clock.getAsLong();
         lastTop = -1;
         lastBottom = -1;
         lastShimmer = null;
+        if (next == Phase.OPENING || next == Phase.CLOSING) {
+            captureContent();
+        }
         setFocusable(true);
         cover();
         timer.setDelay(FRAME);
         timer.start();
         repaint();
     }
+
 
     private void cover() {
         // A sweep already handed focus back, so take it again from whoever has it now.
@@ -440,6 +503,12 @@ final class LaunchCurtain extends JComponent {
         phase = Phase.SHIMMER;
         phaseStart = clock.getAsLong();
         lastShimmer = null;
+        pointer = null;
+        // Anything that loaded while the window opened is in the sweep's picture.
+        captureContent();
+        Toolkit.getDefaultToolkit().addAWTEventListener(goLive, AWTEvent.MOUSE_EVENT_MASK
+                | AWTEvent.MOUSE_MOTION_EVENT_MASK | AWTEvent.MOUSE_WHEEL_EVENT_MASK
+                | AWTEvent.KEY_EVENT_MASK);
         // Repaint what the opening left so only the band shows.
         repaint();
         if (focusBeforeCover != null) {
@@ -635,8 +704,10 @@ final class LaunchCurtain extends JComponent {
                     paintAperture(g, width, height, apertureHalf(1 - closed, height),
                             (float) closed);
                 }
-                case SHIMMER -> paintShimmer(g, shimmerBand(progress(elapsed, SHIMMER_DURATION)),
-                        height);
+                case SHIMMER -> {
+                    paintContent(g, 0, 0, width, height);
+                    paintShimmer(g, shimmerBand(progress(elapsed, SHIMMER_DURATION)), height);
+                }
                 case DEPLOYING -> paintDeploying(g, width, height, elapsed);
                 default -> {
                 }
@@ -682,6 +753,71 @@ final class LaunchCurtain extends JComponent {
             g.setColor(LauncherTheme.ACCENT);
             g.fillRect(cursorX, layout.greetingBaseline() - cursorHeight, cursorWidth,
                     cursorHeight);
+        }
+    }
+
+    /**
+     * Draws the snapshot of the content over the given area, limited to the clip; nothing when
+     * there is none, as the curtain is then see-through and the content paints itself.
+     */
+    private void paintContent(Graphics2D g, int x, int y, int width, int height) {
+        BufferedImage image = snapshot;
+        if (image == null || width <= 0 || height <= 0) {
+            return;
+        }
+        if (snapshotWidth != getWidth() || snapshotHeight != getHeight()) {
+            // Resized mid-transition: let the live content show from here on.
+            dropSnapshot();
+            return;
+        }
+        double sx = (double) image.getWidth() / snapshotWidth;
+        double sy = (double) image.getHeight() / snapshotHeight;
+        g.drawImage(image, x, y, x + width, y + height,
+                (int) Math.round(x * sx), (int) Math.round(y * sy),
+                (int) Math.round((x + width) * sx), (int) Math.round((y + height) * sy), null);
+    }
+
+    /**
+     * Prints the content once, at the screen's resolution, so the transition draws from the
+     * image and Swing need not repaint the page under every frame.
+     */
+    private void captureContent() {
+        snapshot = null;
+        JRootPane root = getRootPane();
+        int width = getWidth();
+        int height = getHeight();
+        if (root == null || width <= 0 || height <= 0) {
+            return;
+        }
+        GraphicsConfiguration config = getGraphicsConfiguration();
+        AffineTransform device = config != null ? config.getDefaultTransform()
+                : new AffineTransform();
+        double sx = device.getScaleX();
+        double sy = device.getScaleY();
+        BufferedImage image = new BufferedImage((int) Math.ceil(width * sx),
+                (int) Math.ceil(height * sy), BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = image.createGraphics();
+        try {
+            g.scale(sx, sy);
+            g.setColor(LauncherTheme.BACKGROUND);
+            g.fillRect(0, 0, width, height);
+            JLayeredPane layered = root.getLayeredPane();
+            Point at = SwingUtilities.convertPoint(layered, 0, 0, this);
+            g.translate(at.x, at.y);
+            // Printing paints without Swing's shared back buffer, which a frame may be using.
+            layered.print(g);
+        } finally {
+            g.dispose();
+        }
+        snapshot = image;
+        snapshotWidth = width;
+        snapshotHeight = height;
+    }
+
+    private void dropSnapshot() {
+        if (snapshot != null) {
+            snapshot = null;
+            repaint();
         }
     }
 
@@ -744,6 +880,7 @@ final class LaunchCurtain extends JComponent {
         int bottom = Math.min(height, height / 2 + half);
         paintBackdrop(g, 0, 0, width, top);
         paintBackdrop(g, 0, bottom, width, height - bottom);
+        paintContent(g, 0, top, width, bottom - top);
         if (glow <= 0) {
             return;
         }
