@@ -202,6 +202,37 @@ class LauncherSwingSmokeTest {
 
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
+    void withTheIntroOffTheWindowWaitsForHomeBeforeShowing() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        CountDownLatch loading = new CountDownLatch(1);
+        LauncherServices services = new LauncherServices(temp.resolve("intro-off.json")) {
+            @Override
+            public HomeState loadHome() throws IOException {
+                try {
+                    loading.await(10, TimeUnit.SECONDS);
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                }
+                return super.loadHome();
+            }
+        };
+        services.register("Main", createSuite(temp.resolve("intro-off-copy")));
+        services.savePlayIntro(false);
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindowWithGreeting);
+            assertFalse(onEdt(frame::isVisible), "an empty window must not show while Home loads");
+            loading.countDown();
+            assertNotNull(waitForButton(frame, "manageInstallationsButton"));
+            waitFor(frame::isVisible);
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void damagedPreferredStillRendersActionableHomeAndOpensManage() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");

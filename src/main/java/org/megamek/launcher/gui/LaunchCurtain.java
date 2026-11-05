@@ -100,7 +100,8 @@ import java.util.function.Supplier;
  * opening can be skipped with a
  * click or any key; the sweep lets clicks and keys through to the content. With reduce motion on,
  * nothing animates: the greeting and sweep are skipped, openings are instant and the card is
- * still.
+ * still. With the intro turned off in Settings, the greeting, opening and sweep are skipped but
+ * launches still close onto the card.
  */
 final class LaunchCurtain extends JComponent {
     enum Phase { HIDDEN, GREETING, OPENING, SHIMMER, CLOSING, DEPLOYING }
@@ -161,6 +162,8 @@ final class LaunchCurtain extends JComponent {
     private String title = "";
     private Scene scene;
     private boolean contentReady;
+    /** Whether the greeting, opening and scan play; off, the curtain only shows launches. */
+    private boolean intro = true;
     private int lastTop = -1;
     private int lastBottom = -1;
     private Rectangle lastShimmer;
@@ -254,6 +257,11 @@ final class LaunchCurtain extends JComponent {
         return phase;
     }
 
+    /** Turns the greeting, opening and scan on or off; launches still show their card. */
+    void setIntro(boolean play) {
+        intro = play;
+    }
+
     /** The components the scan locks onto as it passes them, read each time a sweep starts. */
     void setTargets(Supplier<? extends Collection<? extends Component>> source) {
         targetSource = source == null ? List::of : source;
@@ -299,7 +307,7 @@ final class LaunchCurtain extends JComponent {
      * type the greeting and open on the content.
      */
     void greet() {
-        if (TokenMotion.isReduced()) {
+        if (TokenMotion.isReduced() || !intro) {
             return;
         }
         greeting = "";
@@ -330,6 +338,12 @@ final class LaunchCurtain extends JComponent {
 
     /** Opens on the content from the centre line, if the curtain covers it. */
     void reveal() {
+        if (!intro) {
+            if (phase != Phase.HIDDEN && phase != Phase.SHIMMER) {
+                hideCurtain();
+            }
+            return;
+        }
         if (phase == Phase.OPENING && pausedAt >= 0) {
             // Carry on from where minimising stopped the opening.
             phaseStart += clock.getAsLong() - pausedAt;

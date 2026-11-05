@@ -40,6 +40,11 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -79,7 +84,7 @@ class LauncherSettingsStoreTest {
         assertEquals(java.toString(), saved.defaultJavaExecutable());
         assertEquals(21, saved.defaultJavaFeature());
         assertEquals(saved, store.read());
-        assertTrue(json.contains("\"schemaVersion\" : 6"));
+        assertTrue(json.contains("\"schemaVersion\" : 7"));
         assertTrue(json.contains("\"showExperimental\" : false"));
         assertFalse(json.contains("checkInstalledVersionsOnOpen"));
         assertFalse(json.contains("checkNewInstallsOnOpen"));
@@ -301,7 +306,7 @@ class LauncherSettingsStoreTest {
         assertFalse(read.showExperimental());
         store.writeShowExperimental(true);
         String json = Files.readString(store.path());
-        assertTrue(json.contains("\"schemaVersion\" : 6"));
+        assertTrue(json.contains("\"schemaVersion\" : 7"));
         assertTrue(json.contains("\"showExperimental\" : true"));
         assertEquals(LauncherAppearance.DEFAULT.withTheme(LauncherAppearance.Theme.LIGHT),
                 store.read().appearance().launcherAppearance());
@@ -365,7 +370,7 @@ class LauncherSettingsStoreTest {
         assertEquals(previous, Files.readString(store.path()), "reading never rewrites");
         store.writeInstallParent(temp.toAbsolutePath().normalize());
         String json = Files.readString(store.path());
-        assertTrue(json.contains("\"schemaVersion\" : 6"), json);
+        assertTrue(json.contains("\"schemaVersion\" : 7"), json);
         assertTrue(json.contains("\"installParent\""), json);
         assertTrue(store.read().showExperimental());
     }
@@ -393,5 +398,104 @@ class LauncherSettingsStoreTest {
         Files.delete(store.path());
         assertThrows(IOException.class, () -> store.writeInstallParent(Path.of("games")));
         assertFalse(Files.exists(store.path()));
+    }
+
+    @Test
+    void playIntroDefaultsOnRoundTripsAndKeepsOtherSettings() throws Exception {
+        LauncherSettingsStore store =
+                new LauncherSettingsStore(temp.resolve("registry.json"));
+        assertTrue(store.read().playIntro());
+        store.writeShowExperimental(true);
+
+        LauncherSettingsStore.Settings saved = store.writePlayIntro(false);
+
+        assertFalse(saved.playIntro());
+        assertEquals(saved, store.read());
+        assertTrue(store.read().showExperimental());
+        assertTrue(Files.readString(store.path()).contains("\"playIntro\" : false"));
+        assertFalse(store.writeShowExperimental(false).playIntro(), "other writes keep it");
+        assertTrue(store.writePlayIntro(true).playIntro());
+    }
+
+    @Test
+    void concurrentSavesOfDifferentSettingsQueueInsteadOfRejectingEachOther() throws Exception {
+        Path registry = temp.resolve("registry.json");
+        LauncherSettingsStore introStore = new LauncherSettingsStore(registry);
+        LauncherSettingsStore experimentalStore = new LauncherSettingsStore(registry);
+        int rounds = 40;
+        CyclicBarrier start = new CyclicBarrier(2);
+        ExecutorService workers = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> intro = workers.submit(() -> {
+                start.await();
+                for (int i = 0; i < rounds; i++) introStore.writePlayIntro(i % 2 == 1);
+                return null;
+            });
+            Future<?> experimental = workers.submit(() -> {
+                start.await();
+                for (int i = 0; i < rounds; i++) experimentalStore.writeShowExperimental(i % 2 == 0);
+                return null;
+            });
+            intro.get(30, TimeUnit.SECONDS);
+            experimental.get(30, TimeUnit.SECONDS);
+        } finally {
+            workers.shutdownNow();
+        }
+
+        LauncherSettingsStore.Settings saved = introStore.read();
+        assertTrue(saved.playIntro(), "the last intro save survives");
+        assertFalse(saved.showExperimental(), "the last Experimental save survives");
+    }
+
+    @Test
+    void schemaSixReadsAsPlayingTheIntroAndIsRewrittenOnTheNextChange() throws Exception {
+        LauncherSettingsStore store =
+                new LauncherSettingsStore(temp.resolve("registry.json"));
+        String previous = """
+                {
+                  "schemaVersion" : 6,
+                  "defaultJavaExecutable" : null,
+                  "defaultJavaFeature" : null,
+                  "appearance" : { "theme" : "light" },
+                  "showExperimental" : true,
+                  "installParent" : null
+                }
+                """;
+        Files.writeString(store.path(), previous);
+
+        LauncherSettingsStore.Settings read = store.read();
+
+        assertEquals(LauncherSettingsStore.SCHEMA, read.schemaVersion());
+        assertTrue(read.playIntro());
+        assertTrue(read.showExperimental());
+        assertEquals(previous, Files.readString(store.path()), "reading never rewrites");
+        store.writePlayIntro(false);
+        String json = Files.readString(store.path());
+        assertTrue(json.contains("\"schemaVersion\" : 7"), json);
+        assertTrue(json.contains("\"playIntro\" : false"), json);
+        assertTrue(store.read().showExperimental());
+    }
+
+    @Test
+    void mistypedOrPrematurePlayIntroIsRejectedWithoutRewrite() throws Exception {
+        LauncherSettingsStore store =
+                new LauncherSettingsStore(temp.resolve("registry.json"));
+        for (String header : List.of("\"schemaVersion\" : 7, \"playIntro\" : \"no\"",
+                "\"schemaVersion\" : 7", "\"schemaVersion\" : 6, \"playIntro\" : false")) {
+            String malformed = """
+                    {
+                      %s,
+                      "defaultJavaExecutable" : null,
+                      "defaultJavaFeature" : null,
+                      "appearance" : { "theme" : "light" },
+                      "showExperimental" : false,
+                      "installParent" : null
+                    }
+                    """.formatted(header);
+            Files.writeString(store.path(), malformed);
+
+            assertThrows(IOException.class, store::read, header);
+            assertEquals(malformed, Files.readString(store.path()));
+        }
     }
 }

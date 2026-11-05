@@ -154,10 +154,16 @@ The curtain repaints only the strips that change and animates only while somethi
 a click or key skips the greeting or an opening, and the curtain takes clicks, hovers and keys
 from the page while it covers it. With reduced motion the greeting and the sweep are skipped,
 openings are instant and the card is still. It uses theme roles, so the light theme gets a light
-curtain. Only the GUI start greets; `showWindow()` alone does not.
-Settings starts with **Appearance**: a Dark/Light theme select. A change applies immediately, re-renders the current page,
+curtain. Only the GUI start greets; `showWindow()` alone does not. With **Play intro animation**
+off, the greeting, openings and sweep are all skipped: the GUI start keeps the window hidden
+until Home has loaded and then shows it on Home, and the launcher comes back from a game without
+the opening or sweep, while launching still shows the card.
+Settings starts with **Appearance**: a Dark/Light theme select and **Play intro animation** (on by
+default). A theme change applies immediately, re-renders the current page,
 and is saved off the event-dispatch thread; a failed save reports an error without reverting the
-visible appearance. High contrast is not offered until the design tokens define it.
+visible appearance. The intro option applies from the next opening and is saved off the
+event-dispatch thread in launcher settings (schema 7 and later; older schemas read as on). High
+contrast is not offered until the design tokens define it.
 Loading and error states keep the same layout; there is no global automatic-check control.
 **Releases** follows Appearance. It
 offers **Show Experimental releases** (off by default) with the warning that Experimental builds
@@ -409,7 +415,7 @@ custom `LauncherServices` registries use
 `<registry parent>/installations/<product channel>` for isolation. Destination selection performs
 no migration or filesystem write.
 
-A successful new install remembers its parent folder in launcher settings schema 6
+A successful new install remembers its parent folder in launcher settings schema 6 and later
 (`installParent`). Later suggestions place the new product/channel folder, with the usual numbered
 sibling when taken, inside that parent while it is still a real, writable directory; a missing,
 unwritable, or non-directory parent, or one reached through a link anywhere along its path, falls
