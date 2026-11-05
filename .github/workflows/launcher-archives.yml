@@ -297,6 +297,8 @@ jobs:
               if (@($executables | Where-Object { $_ -match '(^|\|)java\.exe$' }).Count -lt 1) {
                 throw 'MSI runtime is missing java.exe.'
               }
+            } elseif ($type -eq 'msi') {
+              # Already checked above to be byte-identical to the setup's chained MSI.
             } elseif ($type -eq 'pkg') {
               $expanded = Join-Path $env:RUNNER_TEMP "mm-launcher-pkg-$env:PLATFORM"
               pkgutil --expand-full $file.FullName $expanded
