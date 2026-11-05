@@ -48,24 +48,32 @@ class LaunchCurtainTest {
 
     @Test
     void statusLineAndGreetingTypeAfterTheDarkBeat() {
-        assertEquals(0, LaunchCurtain.typed(-1, 20, LaunchCurtain.TYPE_INTERVAL));
-        assertEquals(1, LaunchCurtain.typed(0, 20, LaunchCurtain.TYPE_INTERVAL));
-        assertEquals(3, LaunchCurtain.typed(2L * LaunchCurtain.TYPE_INTERVAL, 20,
-                LaunchCurtain.TYPE_INTERVAL));
-        assertEquals(20, LaunchCurtain.typed(Long.MAX_VALUE, 20, LaunchCurtain.TYPE_INTERVAL));
-        assertEquals(LaunchCurtain.GREETING_PAUSE + LaunchCurtain.GREETING_LEAD
-                + 10L * LaunchCurtain.TYPE_INTERVAL + LaunchCurtain.GREETING_HOLD,
-                LaunchCurtain.greetingDuration(5, 10), "a short status line finishes first");
-        assertEquals(LaunchCurtain.GREETING_PAUSE + 200L * LaunchCurtain.STATUS_INTERVAL
-                + LaunchCurtain.GREETING_HOLD, LaunchCurtain.greetingDuration(200, 1),
-                "a long status line holds the opening");
+        assertEquals(0, LaunchCurtain.typed(0, 1000, 20));
+        assertEquals(10, LaunchCurtain.typed(500, 1000, 20));
+        assertEquals(20, LaunchCurtain.typed(1000, 1000, 20));
+        assertEquals(20, LaunchCurtain.typed(Long.MAX_VALUE, 1000, 20));
+        assertTrue(LaunchCurtain.TEXT_START + LaunchCurtain.GREETING_DELAY
+                + LaunchCurtain.GREETING_TYPING < LaunchCurtain.GREETING_END,
+                "the greeting holds, typed, before the window opens");
+        assertEquals(0, LaunchCurtain.easeOut(-1));
+        assertEquals(1, LaunchCurtain.easeOut(2));
     }
 
     @Test
     void statusLineNamesTheLauncherVersion() {
-        assertEquals("MegaMek Launcher 0.50.12.3  //  Uplink established",
+        assertEquals("MegaMek Launcher 0.50.12.3  //  Link established",
                 LaunchCurtain.statusLine("0.50.12.3"));
-        assertEquals("MegaMek Launcher dev  //  Uplink established", LaunchCurtain.statusLine(null));
+        assertEquals("MegaMek Launcher dev  //  Link established", LaunchCurtain.statusLine(null));
+    }
+
+    @Test
+    void shimmerSweepsFromOffTheLeftToOffTheRight() {
+        LaunchCurtain curtain = curtain();
+        LaunchCurtain.Band start = curtain.shimmerBand(0);
+        LaunchCurtain.Band end = curtain.shimmerBand(1);
+        assertTrue(start.x() + start.width() + start.lean() <= 0);
+        assertTrue(end.x() >= 800);
+        assertTrue(curtain.shimmerBand(0.5).x() > start.x());
     }
 
     @Test
@@ -97,15 +105,21 @@ class LaunchCurtainTest {
             curtain.contentReady("Welcome, Commander");
             paint(curtain);
             // The dark beat has long passed, so typing starts at once.
-            long typing = LaunchCurtain.greetingDuration(
-                    LaunchCurtain.statusLine(null).length(), "Welcome, Commander".length())
-                    - LaunchCurtain.GREETING_PAUSE;
+            long typing = LaunchCurtain.GREETING_END - LaunchCurtain.TEXT_START;
             advance(typing - 1, curtain);
             assertEquals(LaunchCurtain.Phase.GREETING, curtain.phase(), "the greeting finishes first");
             advance(1, curtain);
             assertEquals(LaunchCurtain.Phase.OPENING, curtain.phase());
             paint(curtain);
             advance(5_000, curtain);
+            assertEquals(LaunchCurtain.Phase.SHIMMER, curtain.phase());
+            assertTrue(curtain.isVisible());
+            assertFalse(curtain.contains(400, 300), "the sweep lets clicks through");
+            advance(LaunchCurtain.SHIMMER_DURATION / 2, curtain);
+            paint(curtain);
+            curtain.reveal();
+            assertEquals(LaunchCurtain.Phase.SHIMMER, curtain.phase(), "a reveal leaves the sweep be");
+            advance(LaunchCurtain.SHIMMER_DURATION, curtain);
             assertEquals(LaunchCurtain.Phase.HIDDEN, curtain.phase());
             assertFalse(curtain.isVisible());
         });
@@ -144,6 +158,11 @@ class LaunchCurtainTest {
             curtain.reveal();
             assertEquals(LaunchCurtain.Phase.OPENING, curtain.phase());
             advance(5_000, curtain);
+            assertEquals(LaunchCurtain.Phase.SHIMMER, curtain.phase());
+            curtain.closeForLaunch("MekHQ");
+            assertEquals(LaunchCurtain.Phase.CLOSING, curtain.phase(), "a launch cuts the sweep short");
+            assertTrue(curtain.contains(400, 300));
+            curtain.hideCurtain();
             assertEquals(LaunchCurtain.Phase.HIDDEN, curtain.phase());
         });
     }

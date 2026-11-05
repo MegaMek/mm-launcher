@@ -53,65 +53,72 @@ import java.awt.GradientPaint;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.KeyboardFocusManager;
-import java.awt.RadialGradientPaint;
+import java.awt.LinearGradientPaint;
+import java.awt.Polygon;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.Shape;
 import java.awt.event.KeyAdapter;
 import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.awt.geom.Path2D;
-import java.awt.geom.Point2D;
 import java.awt.image.BufferedImage;
 import java.util.Locale;
-import java.util.Objects;
 import java.util.function.LongSupplier;
 
 /**
  * The launcher's scene transitions, painted on the frame's glass pane over the live content.
  * <p>
- * When the launcher opens it shows a console: a faint hex grid under scanlines, a vignette and
- * corner brackets. A status line and the greeting type themselves over it, above a rule that
- * draws out from the centre. Then the window opens from a horizontal centre line, like a screen
- * powering on, the hex grid lighting up just behind the opening edges and fading as they pass.
- * Launching an application closes the window back to that line and leaves a "Launching" card on
- * the console that waits until the application is on screen; when the launcher comes back it
- * opens from the line again, without the greeting.
+ * When the launcher opens, a status line and the greeting type themselves on the dark background
+ * with a block cursor, above a rule that draws out under them. Then the window opens from a
+ * horizontal centre line, like a screen powering on, a hex grid lighting up just behind the
+ * opening edges and fading as they pass, and once it is open a band of lit hexes sweeps across it
+ * once. Launching an application closes the window back to that line and leaves a "Launching"
+ * card that waits until the application is on screen; when the launcher comes back it opens from
+ * the line again, without the greeting.
  * <p>
- * Everything is cheap to draw: the console is drawn once into an image per window size, the
+ * Everything is cheap to draw: the hex grid is drawn once into an image per window size, the
  * content underneath is never captured, only the strips that change are repainted each frame,
  * and the timer runs only while something moves. The greeting and opening can be skipped with a
- * click or any key. With reduce motion on, nothing animates: the greeting is skipped, openings
- * are instant and the card is still.
+ * click or any key; the sweep lets clicks and keys through to the content. With reduce motion on,
+ * nothing animates: the greeting and sweep are skipped, openings are instant and the card is
+ * still.
  */
 final class LaunchCurtain extends JComponent {
-    enum Phase { HIDDEN, GREETING, OPENING, CLOSING, DEPLOYING }
+    enum Phase { HIDDEN, GREETING, OPENING, SHIMMER, CLOSING, DEPLOYING }
 
     /** The dark beat before the status line starts typing. */
-    static final int GREETING_PAUSE = 250;
-    /** How long each status line character takes to type. */
-    static final int STATUS_INTERVAL = 14;
+    static final int TEXT_START = 350;
+    /** How long the whole status line takes to type. */
+    static final int STATUS_TYPING = 450;
     /** How long after the status line starts the greeting starts typing. */
-    static final int GREETING_LEAD = 350;
-    /** How long each greeting character takes to type. */
-    static final int TYPE_INTERVAL = 40;
-    /** How long the typed greeting holds before the window opens. */
-    static final int GREETING_HOLD = 650;
+    static final int GREETING_DELAY = 550;
+    /** How long the whole greeting takes to type. */
+    static final int GREETING_TYPING = 1000;
+    /** When the typed greeting, having held, gives way to the opening. */
+    static final int GREETING_END = 2700;
     /** The longest the greeting waits for the home screen before opening anyway. */
     static final int GREETING_MAX_WAIT = 4000;
-    /** How long the rule under the greeting takes to draw out from the centre. */
-    static final int RULE_DURATION = 900;
-    static final int CURSOR_BLINK = 530;
+    /** How long after the text starts the cursor shows. */
+    private static final int CURSOR_DELAY = 500;
+    static final int CURSOR_BLINK = 333;
+    /** How long after the text starts the rule under it starts drawing out, and how long it takes. */
+    private static final int RULE_DELAY = 400;
+    private static final int RULE_DURATION = 1200;
+    /** How long the band of lit hexes takes to sweep across the opened window. */
+    static final int SHIMMER_DURATION = 900;
     /** One pass of the highlight along the "Launching" card's line. */
     static final int SCAN_PERIOD = 1600;
     /** How many steps the lit hex grid behind a moving edge fades over. */
     private static final int TRAIL_STEPS = 6;
+    /** How many steps the sweeping band's light rises and falls over. */
+    private static final int SHIMMER_STEPS = 16;
     private static final int FRAME = 1000 / 60;
     private static final int SLOW_FRAME = 1000 / 30;
 
-    /** The console drawn once for a window size and theme: its backdrop and the lit hex grid. */
-    private record Scene(int width, int height, int colours, BufferedImage backdrop,
-                         BufferedImage mesh) {
+    /** The lit hex grid, drawn once for a window size and theme. */
+    private record Scene(int width, int height, int colours, BufferedImage mesh) {
     }
 
     /** Where the greeting's lines, rule and repaint band sit for the current size. */
@@ -132,6 +139,7 @@ final class LaunchCurtain extends JComponent {
     private boolean contentReady;
     private int lastTop = -1;
     private int lastBottom = -1;
+    private Rectangle lastShimmer;
     private Component focusBeforeCover;
 
     LaunchCurtain(GuiScale scale) {
@@ -175,7 +183,13 @@ final class LaunchCurtain extends JComponent {
     /** The status line typed above the greeting, for launcher {@code version}. */
     static String statusLine(String version) {
         return "MegaMek Launcher " + (version == null || version.isBlank() ? "dev" : version)
-                + "  //  Uplink established";
+                + "  //  Link established";
+    }
+
+    /** While the band sweeps, clicks, hovers and the cursor go to the content underneath. */
+    @Override
+    public boolean contains(int x, int y) {
+        return phase != Phase.SHIMMER && super.contains(x, y);
     }
 
     @Override
@@ -226,13 +240,13 @@ final class LaunchCurtain extends JComponent {
         getAccessibleContext().setAccessibleName(text);
         // Keep whatever is left of the dark beat, then type from the start.
         long now = clock.getAsLong();
-        phaseStart = now - Math.min(now - phaseStart, GREETING_PAUSE);
+        phaseStart = now - Math.min(now - phaseStart, TEXT_START);
         repaintGreeting();
     }
 
     /** Opens on the content from the centre line, if the curtain covers it. */
     void reveal() {
-        if (phase == Phase.HIDDEN || phase == Phase.OPENING) {
+        if (phase == Phase.HIDDEN || phase == Phase.OPENING || phase == Phase.SHIMMER) {
             return;
         }
         if (TokenMotion.isReduced()) {
@@ -261,6 +275,10 @@ final class LaunchCurtain extends JComponent {
 
     /** Stops animating while the window is minimised; {@link #reveal()} carries on from there. */
     void pause() {
+        if (phase == Phase.SHIMMER) {
+            hideCurtain();
+            return;
+        }
         timer.stop();
     }
 
@@ -291,9 +309,15 @@ final class LaunchCurtain extends JComponent {
         scene = null;
         lastTop = -1;
         lastBottom = -1;
+        lastShimmer = null;
         if (isVisible()) {
             setVisible(false);
         }
+        setFocusable(true);
+        restoreFocus();
+    }
+
+    private void restoreFocus() {
         Component previous = focusBeforeCover;
         focusBeforeCover = null;
         if (previous != null && previous.isShowing()) {
@@ -312,6 +336,8 @@ final class LaunchCurtain extends JComponent {
         phaseStart = clock.getAsLong();
         lastTop = -1;
         lastBottom = -1;
+        lastShimmer = null;
+        setFocusable(true);
         cover();
         timer.setDelay(FRAME);
         timer.start();
@@ -319,9 +345,12 @@ final class LaunchCurtain extends JComponent {
     }
 
     private void cover() {
+        // A sweep already handed focus back, so take it again from whoever has it now.
+        Component owner = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
+        if (owner != null && owner != this) {
+            focusBeforeCover = owner;
+        }
         if (!isVisible()) {
-            Component owner = KeyboardFocusManager.getCurrentKeyboardFocusManager().getFocusOwner();
-            focusBeforeCover = owner != this ? owner : null;
             setVisible(true);
         }
         requestFocusInWindow();
@@ -336,8 +365,7 @@ final class LaunchCurtain extends JComponent {
         long elapsed = elapsed();
         switch (phase) {
             case GREETING -> {
-                if (contentReady ? elapsed >= greetingDuration(status.length(), greeting.length())
-                        : elapsed >= GREETING_MAX_WAIT) {
+                if (contentReady ? elapsed >= GREETING_END : elapsed >= GREETING_MAX_WAIT) {
                     start(Phase.OPENING);
                     return;
                 }
@@ -345,7 +373,7 @@ final class LaunchCurtain extends JComponent {
             }
             case OPENING -> {
                 if (elapsed >= textFadeDuration() + openDuration()) {
-                    hideCurtain();
+                    sweep();
                     return;
                 }
                 if (elapsed < textFadeDuration()) {
@@ -354,6 +382,13 @@ final class LaunchCurtain extends JComponent {
                     repaintAperture(apertureHalf(progress(elapsed - textFadeDuration(),
                             openDuration()), getHeight()));
                 }
+            }
+            case SHIMMER -> {
+                if (elapsed >= SHIMMER_DURATION) {
+                    hideCurtain();
+                    return;
+                }
+                repaintShimmer(shimmerBand(progress(elapsed, SHIMMER_DURATION)));
             }
             case CLOSING -> {
                 if (elapsed >= closeDuration()) {
@@ -378,21 +413,41 @@ final class LaunchCurtain extends JComponent {
     }
 
     /**
-     * How long a status line of {@code statusCharacters} and a greeting of {@code characters}
-     * take to type and hold; the greeting starts {@link #GREETING_LEAD} after the status line.
+     * How many of {@code length} characters typed evenly over {@code duration} ms show
+     * {@code since} ms after typing starts.
      */
-    static long greetingDuration(int statusCharacters, int characters) {
-        long typing = Math.max((long) statusCharacters * STATUS_INTERVAL,
-                GREETING_LEAD + (long) characters * TYPE_INTERVAL);
-        return GREETING_PAUSE + typing + GREETING_HOLD;
-    }
-
-    /** How many of {@code length} characters typed every {@code interval} ms show {@code since} ms in. */
-    static int typed(long since, int length, int interval) {
-        if (since < 0) {
+    static int typed(long since, long duration, int length) {
+        if (since <= 0) {
             return 0;
         }
-        return (int) Math.min(length, since / interval + 1);
+        return (int) (Math.min(1, (double) since / duration) * length);
+    }
+
+    /** Eases out: fast at first, settling at 1. */
+    static double easeOut(double x) {
+        double clamped = Math.max(0, Math.min(1, x));
+        return 1 - Math.pow(1 - clamped, 3);
+    }
+
+    /** The window has opened: a band of lit hexes sweeps across it while the content takes input. */
+    private void sweep() {
+        lastTop = -1;
+        lastBottom = -1;
+        if (TokenMotion.isReduced() || getWidth() <= 0) {
+            hideCurtain();
+            return;
+        }
+        phase = Phase.SHIMMER;
+        phaseStart = clock.getAsLong();
+        lastShimmer = null;
+        // Repaint what the opening left so only the band shows.
+        repaint();
+        if (focusBeforeCover != null) {
+            restoreFocus();
+        } else {
+            // Nothing had focus before: an unfocusable owner hands focus on to the content.
+            setFocusable(false);
+        }
     }
 
     /** Half the height of the open band at {@code progress} (0 closed, 1 open), eased. */
@@ -439,6 +494,32 @@ final class LaunchCurtain extends JComponent {
         repaint(0, layout.top(), getWidth(), layout.bottom() - layout.top());
     }
 
+    /**
+     * The sweeping band at {@code progress} (0 before the left edge, 1 past the right): its left
+     * edge along the bottom of the window, its width, and how far its top leans ahead.
+     */
+    record Band(int x, int width, int lean) {
+        Rectangle bounds(int height) {
+            return new Rectangle(x, 0, width + lean, height);
+        }
+    }
+
+    Band shimmerBand(double progress) {
+        int width = Math.max(scale.scaleForGUI(140), getWidth() / 6);
+        int lean = getHeight() / 3;
+        double p = Math.max(0, Math.min(1, progress));
+        double travel = p * p * (3 - 2 * p);
+        int x = (int) Math.round(-(width + lean) + (getWidth() + width + lean) * travel);
+        return new Band(x, width, lean);
+    }
+
+    private void repaintShimmer(Band band) {
+        Rectangle bounds = band.bounds(getHeight());
+        Rectangle area = lastShimmer == null ? bounds : bounds.union(lastShimmer);
+        repaint(area.x - 1, 0, area.width + 2, getHeight());
+        lastShimmer = bounds;
+    }
+
     /** Repaints only the rows between the band's previous and new edges, with glow and trail. */
     private void repaintAperture(int half) {
         int width = getWidth();
@@ -483,19 +564,21 @@ final class LaunchCurtain extends JComponent {
         return TokenFonts.condensed(scale.font(baseFont(), "display"), display, true);
     }
 
-    /** The greeting is the console's headline, half again the display size. */
+    /** The greeting is the screen's headline: the display face, growing with tall windows. */
     private Font greetingFont() {
-        Font display = displayFont();
-        return display.deriveFont(display.getSize2D() * 1.5f);
+        return displayFont().deriveFont(Math.max(scale.scaleForGUI(34f), getHeight() * 0.055f));
     }
 
     private Font statusFont() {
         DesignTokens.TypeStyle overline = DesignTokens.shipped().typeStyle("overline");
         Font font = scale.font(baseFont(), "overline");
-        return TokenFonts.condensed(font.deriveFont(font.getSize2D() * 1.3f), overline, true);
+        return TokenFonts.condensed(font.deriveFont(font.getSize2D() * 1.4f), overline, true);
     }
 
-    /** The status line and greeting share a left edge, centred as a block over their rule. */
+    /**
+     * The status line sits above the greeting on its left edge, the greeting centred on the
+     * window's middle, and the rule under both.
+     */
     private Layout greetingLayout() {
         Font statusFont = statusFont();
         Font greetingFont = greetingFont();
@@ -503,17 +586,20 @@ final class LaunchCurtain extends JComponent {
         FontMetrics greetingMetrics = getFontMetrics(greetingFont);
         String statusText = status.toUpperCase(Locale.ROOT);
         String greetingText = greeting.toUpperCase(Locale.ROOT);
-        int width = Math.max(statusMetrics.stringWidth(statusText),
-                greetingMetrics.stringWidth(greetingText));
+        int width = greetingMetrics.stringWidth(greetingText);
         int x = (getWidth() - width) / 2;
-        int greetingBaseline = (getHeight() - greetingMetrics.getHeight()) / 2
-                + greetingMetrics.getAscent();
-        int statusBaseline = greetingBaseline - greetingMetrics.getAscent() - scale.space("sm");
-        int ruleY = greetingBaseline + greetingMetrics.getDescent() + scale.space("sm");
+        int ascent = greetingMetrics.getAscent();
+        int greetingBaseline = getHeight() / 2 + ascent / 2;
+        int statusBaseline = greetingBaseline - ascent - scale.scaleForGUI(10);
+        int ruleY = greetingBaseline + scale.scaleForGUI(18);
         int pad = scale.space("lg");
         return new Layout(statusFont, greetingFont, statusText, greetingText, x, width,
                 statusBaseline, greetingBaseline, ruleY,
-                statusBaseline - statusMetrics.getAscent() - pad, ruleY + lineThickness() + pad);
+                statusBaseline - statusMetrics.getAscent() - pad, ruleY + ruleThickness() + pad);
+    }
+
+    private int ruleThickness() {
+        return Math.max(1, scale.scaleForGUI(1));
     }
 
     @Override
@@ -549,6 +635,8 @@ final class LaunchCurtain extends JComponent {
                     paintAperture(g, width, height, apertureHalf(1 - closed, height),
                             (float) closed);
                 }
+                case SHIMMER -> paintShimmer(g, shimmerBand(progress(elapsed, SHIMMER_DURATION)),
+                        height);
                 case DEPLOYING -> paintDeploying(g, width, height, elapsed);
                 default -> {
                 }
@@ -563,47 +651,90 @@ final class LaunchCurtain extends JComponent {
             return;
         }
         Layout layout = greetingLayout();
-        long since = elapsed - GREETING_PAUSE;
-        int statusCount = typed(since, layout.status().length(), STATUS_INTERVAL);
-        int greetingCount = typed(since - GREETING_LEAD, layout.greeting().length(), TYPE_INTERVAL);
+        long since = elapsed - TEXT_START;
+        int statusCount = typed(since, STATUS_TYPING, layout.status().length());
+        int greetingCount = typed(since - GREETING_DELAY, GREETING_TYPING,
+                layout.greeting().length());
         int x = layout.x();
 
         g.setFont(layout.statusFont());
-        FontMetrics statusMetrics = g.getFontMetrics();
         g.setColor(withAlpha(LauncherTheme.ACCENT, alpha));
         g.drawString(layout.status().substring(0, statusCount), x, layout.statusBaseline());
         g.setFont(layout.greetingFont());
-        FontMetrics greetingMetrics = g.getFontMetrics();
+        FontMetrics metrics = g.getFontMetrics();
+        String typedGreeting = layout.greeting().substring(0, greetingCount);
         g.setColor(withAlpha(LauncherTheme.TEXT, alpha));
-        g.drawString(layout.greeting().substring(0, greetingCount), x, layout.greetingBaseline());
+        g.drawString(typedGreeting, x, layout.greetingBaseline());
 
-        int thickness = lineThickness();
-        float drawn = TokenMotion.ease((float) Math.max(0, progress(since, RULE_DURATION)));
-        int ruleWidth = Math.round(layout.width() * drawn);
+        int ruleWidth = (int) Math.round(layout.width()
+                * easeOut((double) (since - RULE_DELAY) / RULE_DURATION));
         if (ruleWidth > 0) {
-            int ruleX = x + (layout.width() - ruleWidth) / 2;
             g.setColor(withAlpha(LauncherTheme.MUTED, 0.6f * alpha));
-            g.fillRect(ruleX, layout.ruleY(), ruleWidth, Math.max(1, thickness / 2));
-            int tick = scale.space("sm");
-            g.setColor(withAlpha(LauncherTheme.ACCENT, alpha));
-            g.fillRect(ruleX, layout.ruleY() - tick / 2, thickness, tick);
-            g.fillRect(ruleX + ruleWidth - thickness, layout.ruleY() - tick / 2, thickness, tick);
+            g.fillRect(x, layout.ruleY(), ruleWidth, ruleThickness());
         }
 
-        boolean typing = statusCount < layout.status().length()
-                || greetingCount < layout.greeting().length();
+        boolean typing = greetingCount < layout.greeting().length();
         boolean blinkOn = (elapsed / CURSOR_BLINK) % 2 == 0;
-        if (alpha >= 1f && statusCount > 0 && (typing || blinkOn)) {
-            boolean onGreeting = greetingCount > 0;
-            FontMetrics metrics = onGreeting ? greetingMetrics : statusMetrics;
-            String line = onGreeting ? layout.greeting().substring(0, greetingCount)
-                    : layout.status().substring(0, statusCount);
-            int baseline = onGreeting ? layout.greetingBaseline() : layout.statusBaseline();
-            int cursorX = x + metrics.stringWidth(line) + scale.space("xs");
-            int cursorWidth = Math.max(thickness, metrics.charWidth('M') / 2);
-            int cursorHeight = Math.round(metrics.getAscent() * 0.72f);
+        if (alpha >= 1f && since > CURSOR_DELAY && (typing || blinkOn)) {
+            int cursorX = x + metrics.stringWidth(typedGreeting) + scale.scaleForGUI(6);
+            int cursorWidth = Math.max(scale.scaleForGUI(10), metrics.charWidth('M') / 2);
+            int cursorHeight = metrics.getAscent() - scale.scaleForGUI(6);
             g.setColor(LauncherTheme.ACCENT);
-            g.fillRect(cursorX, baseline - cursorHeight, cursorWidth, cursorHeight);
+            g.fillRect(cursorX, layout.greetingBaseline() - cursorHeight, cursorWidth,
+                    cursorHeight);
+        }
+    }
+
+    /**
+     * Lights the hex grid inside the leaning band, brightest along its middle and fading to
+     * nothing at its edges in a few steps, with a faint wash of the accent under it.
+     */
+    private void paintShimmer(Graphics2D g, Band band, int height) {
+        Scene current = scene();
+        if (current == null) {
+            return;
+        }
+        Shape clip = g.getClip();
+        Composite composite = g.getComposite();
+        try {
+            Polygon whole = new Polygon(
+                    new int[] {band.x() + band.lean(), band.x() + band.width() + band.lean(),
+                            band.x() + band.width(), band.x()},
+                    new int[] {0, 0, height, height}, 4);
+            // The wash's gradient runs across the band, square to its leaning edges.
+            double square = (double) height * height + (double) band.lean() * band.lean();
+            float across = (float) (band.width() * (double) height / square);
+            Color accent = LauncherTheme.ACCENT;
+            g.setPaint(new LinearGradientPaint(band.x(), height,
+                    band.x() + across * height, height + across * band.lean(),
+                    new float[] {0f, 0.5f, 1f},
+                    new Color[] {withAlpha(accent, 0f), withAlpha(accent, 0.08f),
+                            withAlpha(accent, 0f)}));
+            g.fill(whole);
+            int step = Math.max(1, band.width() / SHIMMER_STEPS);
+            for (int i = 0; i < SHIMMER_STEPS; i++) {
+                double middle = (i + 0.5) / SHIMMER_STEPS;
+                float light = (float) Math.sin(Math.PI * middle);
+                int left = band.x() + i * step;
+                Polygon strip = new Polygon(
+                        new int[] {left + band.lean(), left + step + band.lean(), left + step, left},
+                        new int[] {0, 0, height, height}, 4);
+                g.setClip(clip);
+                g.clip(strip);
+                g.setComposite(AlphaComposite.SrcOver.derive(0.6f * light));
+                Rectangle area = g.getClipBounds();
+                if (area != null && !area.isEmpty()) {
+                    int from = Math.max(0, area.x);
+                    int to = Math.min(current.width(), area.x + area.width);
+                    if (to > from) {
+                        g.drawImage(current.mesh(), from, 0, to, current.height(), from, 0, to,
+                                current.height(), null);
+                    }
+                }
+            }
+        } finally {
+            g.setComposite(composite);
+            g.setClip(clip);
         }
     }
 
@@ -663,38 +794,22 @@ final class LaunchCurtain extends JComponent {
         }
     }
 
-    /** Draws the console backdrop over the given area, limited to the clip. */
+    /** Covers the given area with the background colour, limited to the clip. */
     private void paintBackdrop(Graphics2D g, int x, int y, int width, int height) {
-        if (width <= 0 || height <= 0) {
-            return;
-        }
-        Rectangle area = new Rectangle(x, y, width, height);
-        Rectangle clip = g.getClipBounds();
-        if (clip != null) {
-            area = area.intersection(clip);
-        }
-        if (area.isEmpty()) {
-            return;
-        }
-        Scene current = scene();
-        if (current == null) {
+        if (width > 0 && height > 0) {
             g.setColor(LauncherTheme.BACKGROUND);
-            g.fill(area);
-            return;
+            g.fillRect(x, y, width, height);
         }
-        g.drawImage(current.backdrop(), area.x, area.y, area.x + area.width, area.y + area.height,
-                area.x, area.y, area.x + area.width, area.y + area.height, null);
     }
 
-    /** The console for the current size and colours, drawn once and kept while the curtain shows. */
+    /** The lit hex grid for the current size and colours, drawn once and kept while the curtain shows. */
     private Scene scene() {
         int width = getWidth();
         int height = getHeight();
         if (width <= 0 || height <= 0) {
             return null;
         }
-        int colours = Objects.hash(LauncherTheme.BACKGROUND.getRGB(), LauncherTheme.TEXT.getRGB(),
-                LauncherTheme.ACCENT.getRGB());
+        int colours = LauncherTheme.ACCENT.getRGB();
         if (scene == null || scene.width() != width || scene.height() != height
                 || scene.colours() != colours) {
             scene = buildScene(width, height, colours);
@@ -703,62 +818,17 @@ final class LaunchCurtain extends JComponent {
     }
 
     private Scene buildScene(int width, int height, int colours) {
-        Path2D grid = hexGrid(width, height, scale.scaleForGUI(22));
-        Color background = LauncherTheme.BACKGROUND;
-        boolean dark = (background.getRed() * 299 + background.getGreen() * 587
-                + background.getBlue() * 114) / 1000 < 128;
-
-        BufferedImage backdrop = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g = backdrop.createGraphics();
-        try {
-            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g.setColor(background);
-            g.fillRect(0, 0, width, height);
-            g.setStroke(new BasicStroke(1f));
-            g.setColor(withAlpha(LauncherTheme.TEXT, dark ? 0.05f : 0.07f));
-            g.draw(grid);
-            g.setPaint(new RadialGradientPaint(new Point2D.Float(width / 2f, height / 2f),
-                    Math.max(width, height) * 0.75f, new float[] {0.45f, 1f},
-                    new Color[] {new Color(0, 0, 0, 0), new Color(0, 0, 0, dark ? 110 : 28)}));
-            g.fillRect(0, 0, width, height);
-            g.setColor(new Color(0, 0, 0, dark ? 40 : 10));
-            int pitch = Math.max(2, scale.scaleForGUI(3));
-            for (int y = 0; y < height; y += pitch) {
-                g.fillRect(0, y, width, 1);
-            }
-            paintCornerBrackets(g, width, height);
-        } finally {
-            g.dispose();
-        }
-
         BufferedImage mesh = new BufferedImage(width, height, BufferedImage.TYPE_INT_ARGB);
-        g = mesh.createGraphics();
+        Graphics2D g = mesh.createGraphics();
         try {
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             g.setStroke(new BasicStroke(Math.max(1f, scale.size("border") * 1.5f)));
             g.setColor(LauncherTheme.ACCENT);
-            g.draw(grid);
+            g.draw(hexGrid(width, height, scale.scaleForGUI(22)));
         } finally {
             g.dispose();
         }
-        return new Scene(width, height, colours, backdrop, mesh);
-    }
-
-    private void paintCornerBrackets(Graphics2D g, int width, int height) {
-        int inset = scale.space("xl");
-        int length = scale.scaleForGUI(28);
-        int thickness = lineThickness();
-        int right = width - inset;
-        int bottom = height - inset;
-        g.setColor(withAlpha(LauncherTheme.ACCENT, 0.7f));
-        g.fillRect(inset, inset, length, thickness);
-        g.fillRect(inset, inset, thickness, length);
-        g.fillRect(right - length, inset, length, thickness);
-        g.fillRect(right - thickness, inset, thickness, length);
-        g.fillRect(inset, bottom - thickness, length, thickness);
-        g.fillRect(inset, bottom - length, thickness, length);
-        g.fillRect(right - length, bottom - thickness, length, thickness);
-        g.fillRect(right - thickness, bottom - length, thickness, length);
+        return new Scene(width, height, colours, mesh);
     }
 
     /** Flat-topped hexes of {@code radius} tiling {@code width} by {@code height}, as outlines. */
