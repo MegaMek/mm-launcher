@@ -214,6 +214,9 @@ are offered when it cannot be read), though a saved or inherited larger value st
 memory group carries one short sizing hint under the MekHQ row. Settings edits the launcher-wide values inline: **Revert** and
 **Save launch options** are enabled only while the form differs from the saved values, unsaved edits
 survive Settings re-renders, and leaving Settings with unsaved edits asks **Save launch options?** with **Save**, **Don't save**, and **Cancel**. Save stays on Settings when a value is invalid and leaves only after the save succeeds.
+The launcher's own window always draws without Direct3D on Windows (unless `-Dsun.java2d.d3d` is set
+explicitly), because some drivers drop its partial repaints and leave the window black through the
+intro; the renderer option above only affects the games.
 **Launch options…** in an installation's More menu opens a dialog that edits overrides where each field can
 inherit the launcher-wide value. **Copy launch commands** in the same menu copies the commands used to start each application with the saved options, for troubleshooting. Values are stored
 next to the registry in `<registry>.launch-options.json`, separate from launcher settings, and an
