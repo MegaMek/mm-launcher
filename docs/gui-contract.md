@@ -17,7 +17,9 @@ and ordered main action first, then any other choices, then **Cancel** (or **Clo
 right-to-left window mirrors the row. Small helpers such as **Copy**, **View logs**, or a link sit at
 the footer's leading end. Enter presses the focused button, otherwise the main action, and Escape
 cancels. A destructive main action (remove, uninstall, reset, replace) is danger-styled, is never
-the default button, and the dialog opens with focus on Cancel. Full-page surfaces such as the
+the default button, and the dialog opens with focus on Cancel. A progress dialog keeps **Cancel** in
+its header beside the current step while the operation runs; its footer appears once there is a
+result, ending with **Close**. Full-page surfaces such as the
 Settings page and installation cards are not dialogs: their command bars stay right-aligned with
 the main action last.
 
