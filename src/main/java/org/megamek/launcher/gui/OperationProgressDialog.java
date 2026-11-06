@@ -43,15 +43,18 @@ import org.megamek.launcher.operation.OperationType;
 import org.megamek.launcher.operation.ProgressUnit;
 import org.megamek.launcher.update.ImportedCopyAdoptionService;
 
+import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
 import javax.swing.JTextArea;
+import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.WindowConstants;
@@ -60,7 +63,9 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
-import java.awt.FlowLayout;
+import java.awt.GridBagLayout;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.text.NumberFormat;
@@ -84,6 +89,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
     private static final int DETAIL_LIMIT = 90;
 
     private final GuiScale scale = GuiScale.DEFAULT;
+    private final JLabel operationName = new JLabel();
     private final JLabel phase = new JLabel("Getting ready");
     private final JLabel detail = new JLabel("Preparing the operation…");
     private final JLabel loggingWarning = new JLabel();
@@ -96,8 +102,11 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
     private final JButton cancel = control("Cancel", "operationCancelButton");
     private final JButton viewDetails =
             control("View details", "operationViewDetailsButton");
-    private final JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT,
-            scale.space("md"), 0));
+    private final List<JComponent> footerTools = new ArrayList<>();
+    private final List<JButton> footerActions = new ArrayList<>();
+    private final JPanel actions = new JPanel(new DialogFooter.FooterLayout(footerTools, footerActions,
+            scale));
+    private final JPanel headerControls = new JPanel(new GridBagLayout());
     private final List<JButton> contextualActions = new ArrayList<>();
     private final AtomicReference<OperationProgress> pending = new AtomicReference<>();
     private final Timer updateTimer;
@@ -111,13 +120,21 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
     private boolean failureShown;
     private boolean nonCancellableFromStart;
     private boolean repairProgress;
+    private String heading;
 
     OperationProgressDialog(LauncherFrame owner, String title, String logName,
                             Runnable showLogs) {
-        super(owner, title, false);
+        super(owner, LauncherTheme.DIALOG_TITLE, false);
         this.owner = owner;
         this.showLogs = showLogs;
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+
+        // The title bar names the launcher; the operation's name is this small line above the step.
+        operationName.setName("operationNameLabel");
+        operationName.setForeground(MUTED);
+        operationName.setFont(scale.font(operationName.getFont(), "label"));
+        operationName.setAlignmentX(LEFT_ALIGNMENT);
+        setHeading(title);
 
         phase.setName("operationPhaseLabel");
         phase.setForeground(ACCENT);
@@ -163,7 +180,21 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         summary.setLayout(new BoxLayout(summary, BoxLayout.Y_AXIS));
         summary.setOpaque(false);
         summary.setBorder(BorderFactory.createEmptyBorder());
-        summary.add(phase);
+        // While the operation runs, Cancel sits in the header beside the phase; the footer appears
+        // only once there is a result to close, retry, or inspect.
+        headerControls.setName("operationHeaderControls");
+        headerControls.setOpaque(false);
+        headerControls.add(cancel);
+        JPanel header = new JPanel(new BorderLayout(scale.space("lg"), 0));
+        header.setName("operationHeader");
+        header.setOpaque(false);
+        header.setAlignmentX(LEFT_ALIGNMENT);
+        header.add(phase, BorderLayout.CENTER);
+        header.add(headerControls, BorderLayout.LINE_END);
+        header.setMaximumSize(new Dimension(Integer.MAX_VALUE, header.getPreferredSize().height));
+        summary.add(operationName);
+        summary.add(Box.createVerticalStrut(scale.space("xs")));
+        summary.add(header);
         summary.add(beforeProgress);
         summary.add(progress);
         summary.add(afterProgress);
@@ -175,8 +206,10 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         viewDetails.setVisible(false);
         actions.setName("operationActions");
         actions.setBackground(BACKGROUND);
+        // View details is a helper at the footer's leading end; Close always ends the row.
+        footerTools.add(viewDetails);
         actions.add(viewDetails);
-        actions.add(cancel);
+        actions.setVisible(false);
 
         JPanel panel = new JPanel(new BorderLayout(0, scale.space("xl")));
         panel.setName("operationProgressContent");
@@ -191,21 +224,27 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         setLocationRelativeTo(owner);
 
         cancel.addActionListener(event -> requestCancellation());
+        DialogFooter.pressOnEnter(cancel);
+        DialogFooter.pressOnEnter(viewDetails);
         viewDetails.addActionListener(event -> {
             if (failure == null) {
                 this.showLogs.run();
             } else {
-                owner.showOperationFailureDetails(getTitle() + " details", failure);
+                owner.showOperationFailureDetails(heading + " details", failure);
             }
         });
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent event) {
-                if (finished) {
-                    dispose();
-                } else {
-                    requestCancellation();
-                }
+                closeRequested();
+            }
+        });
+        getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
+                .put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "operationProgress.escape");
+        getRootPane().getActionMap().put("operationProgress.escape", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent event) {
+                closeRequested();
             }
         });
         updateTimer = new Timer(UPDATE_INTERVAL_MS, event -> flush());
@@ -265,9 +304,20 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         failureSummary = message;
     }
 
-    void setTitleIfCurrent(String current, String next) {
-        if (isDisplayable() && !finished && current.equals(getTitle())) {
-            setTitle(next);
+    /** The operation's name: shown above the current step, then as the result's heading. */
+    String heading() {
+        return heading;
+    }
+
+    void setHeading(String next) {
+        heading = next;
+        operationName.setText(next);
+        getAccessibleContext().setAccessibleName(next);
+    }
+
+    void setHeadingIfCurrent(String current, String next) {
+        if (isDisplayable() && !finished && current.equals(heading)) {
+            setHeading(next);
         }
     }
 
@@ -286,8 +336,8 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         progress.setVisible(false);
         beforeProgress.setVisible(false);
         afterProgress.setVisible(false);
-        phase.setText(getTitle() == null || getTitle().isBlank()
-                ? "Operation failed" : getTitle());
+        operationName.setVisible(false);
+        phase.setText(heading == null || heading.isBlank() ? "Operation failed" : heading);
         detail.setBorder(BorderFactory.createEmptyBorder(
                 scale.space("md"), 0, 0, 0));
         String summary = failureSummary != null
@@ -308,14 +358,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
             button.setVisible(button.isEnabled());
         }
         viewDetails.setVisible(!expectedFailure && !simpleAdoptionResolution);
-        cancel.setText("Close");
-        cancel.getAccessibleContext().setAccessibleName("Close");
-        cancel.setEnabled(true);
-        cancel.setVisible(true);
-        setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-        actions.revalidate();
-        getContentPane().revalidate();
-        getContentPane().repaint();
+        showResultFooter();
     }
 
     void showCancelled() {
@@ -336,7 +379,8 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         finished = true;
         pending.set(null);
         updateTimer.stop();
-        setTitle(heading);
+        setHeading(heading);
+        operationName.setVisible(false);
         progress.setVisible(false);
         beforeProgress.setVisible(false);
         afterProgress.setVisible(false);
@@ -353,14 +397,45 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         viewDetails.getAccessibleContext().setAccessibleDescription(
                 "Open local operation logs.");
         viewDetails.setVisible(true);
+        showResultFooter();
+    }
+
+    /** Turns Cancel into Close at the end of the footer, which appears now that there is a result. */
+    private void showResultFooter() {
         cancel.setText("Close");
         cancel.getAccessibleContext().setAccessibleName("Close");
+        cancel.getAccessibleContext().setAccessibleDescription("Operation control: Close");
+        cancel.setToolTipText(null);
         cancel.setEnabled(true);
         cancel.setVisible(true);
+        if (cancel.getParent() != actions) {
+            headerControls.remove(cancel);
+            headerControls.setVisible(false);
+            footerActions.add(cancel);
+            actions.add(cancel);
+        }
+        actions.setVisible(true);
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        updateDefaultButton();
         actions.revalidate();
         getContentPane().revalidate();
         getContentPane().repaint();
+        int needed = getPreferredSize().height;
+        if (getHeight() < needed) setSize(getWidth(), needed);
+        validate();
+        DialogFooter.keepFooterVisible(this, actions);
+    }
+
+    /** Enter presses the result's first action, such as Open Installations, otherwise Close. */
+    private void updateDefaultButton() {
+        JButton main = cancel;
+        for (JButton button : footerActions) {
+            if (button != cancel && button.isVisible() && button.isEnabled()) {
+                main = button;
+                break;
+            }
+        }
+        getRootPane().setDefaultButton(main);
     }
 
     void addActionButton(JButton button) {
@@ -368,9 +443,15 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         styleButton(button);
         contextualActions.add(button);
         button.setVisible(false);
-        button.addPropertyChangeListener("enabled", event ->
-                button.setVisible(failureShown && button.isEnabled()));
-        actions.add(button, 0);
+        DialogFooter.pressOnEnter(button);
+        button.addPropertyChangeListener("enabled", event -> {
+            button.setVisible(failureShown && button.isEnabled());
+            if (failureShown) updateDefaultButton();
+        });
+        // Contextual actions such as Retry come before Close, in the order they were added.
+        footerActions.add(footerActions.contains(cancel) ? footerActions.size() - 1
+                : footerActions.size(), button);
+        actions.add(button);
         actions.revalidate();
     }
 
@@ -387,6 +468,14 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
     public void dispose() {
         if (updateTimer != null) updateTimer.stop();
         super.dispose();
+    }
+
+    private void closeRequested() {
+        if (finished) {
+            dispose();
+        } else {
+            requestCancellation();
+        }
     }
 
     private void requestCancellation() {

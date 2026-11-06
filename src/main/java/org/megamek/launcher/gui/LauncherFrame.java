@@ -72,7 +72,6 @@ import org.megamek.launcher.update.RealUpdateService;
 import org.megamek.launcher.update.UninstallService;
 import org.megamek.launcher.update.LauncherSelfUpdate;
 
-import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -92,7 +91,6 @@ import javax.swing.JPanel;
 import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.Scrollable;
-import javax.swing.KeyStroke;
 import javax.swing.JTextArea;
 import javax.swing.JTextField;
 import javax.swing.ListSelectionModel;
@@ -109,7 +107,6 @@ import java.awt.Rectangle;
 import java.awt.Toolkit;
 import java.awt.Window;
 import java.awt.datatransfer.StringSelection;
-import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
@@ -137,6 +134,8 @@ import java.util.function.Consumer;
 public final class LauncherFrame extends JFrame {
     private static final int LOG_LIMIT = 64_000;
     private static final String CHANGE_LOCATION = "Change location";
+    static final String SAVE_CHANGES = "Save";
+    static final String DONT_SAVE_CHANGES = "Don't save";
     private static final DateTimeFormatter NEWS_DATE =
             DateTimeFormatter.ofPattern("MMM d, uuuu", Locale.ENGLISH);
     static final String DISCORD_INVITE_URL = "https://discord.gg/megamek";
@@ -183,6 +182,7 @@ public final class LauncherFrame extends JFrame {
     private SwingWorker<InstallationCheck, Void> installationCheckWorker;
     private final Map<String, InstallationCheck> installationChecks = new HashMap<>();
     private final Map<String, JButton> installationMenuButtons = new HashMap<>();
+    private boolean installationMenuPending;
     private final AtomicReference<OperationContext> activeOperation = new AtomicReference<>();
     private final GuiScale guiScale = GuiScale.DEFAULT;
     private java.awt.image.BufferedImage firstLaunchArtwork;
@@ -216,6 +216,7 @@ public final class LauncherFrame extends JFrame {
     private JPanel homeNewsBody;
     private LaunchOptionsStore.Document launchOptionsDocument;
     private LaunchOptionsForm launchOptionsForm;
+    private JLabel launchOptionsMessage;
     private LaunchOptions launchOptionsDraft;
     private Throwable launchOptionsError;
     private String transientHomeMessage;
@@ -554,11 +555,14 @@ public final class LauncherFrame extends JFrame {
     private void navigateTo(Page next) {
         if (gate.isBusy()) return;
         if (page == Page.SETTINGS && next != Page.SETTINGS && launchOptionsDirty()) {
-            if (!LauncherAlertDialog.showConfirm(this, guiScale, "Discard changes?",
-                    "Your launch option changes have not been saved. Leave without saving them?",
-                    "Discard changes")) {
+            String answer = LauncherAlertDialog.show(this, "Save launch options?",
+                    "You've changed launch options but haven't saved them.", guiScale,
+                    SAVE_CHANGES, DONT_SAVE_CHANGES, LauncherAlertDialog.CANCEL);
+            if (SAVE_CHANGES.equals(answer)) {
+                saveLaunchOptionsThenNavigate(next);
                 return;
             }
+            if (!DONT_SAVE_CHANGES.equals(answer)) return;
         }
         if (page == Page.SETTINGS && next != Page.SETTINGS) {
             launchOptionsDraft = null;
@@ -1367,9 +1371,9 @@ public final class LauncherFrame extends JFrame {
                 }, error -> {
                     progress.append("\nIMPORT DID NOT COMPLETE: " + errorDetail(error) + "\n");
                     if (inspectionComplete.get()) {
-                        progress.setTitle("Could not add installation");
+                        progress.setHeading("Could not add installation");
                     } else {
-                        progress.setTitle("This folder can't be used");
+                        progress.setHeading("This folder can't be used");
                         progress.setExpectedFailureSummary(
                                 "Choose the main MegaMek, MekHQ, or MegaMekLab installation "
                                         + "folder, then try again.");
@@ -1620,11 +1624,7 @@ public final class LauncherFrame extends JFrame {
         installationMenuButtons.put(record.id(), more);
         more.getAccessibleContext().setAccessibleDescription(
                 (missing ? "Remove from launcher: " : "More actions for ") + record.name());
-        more.addActionListener(event -> run("Checking installation folder", () -> {
-            services.requireInstallationPresent(record);
-            return null;
-        }, ignored -> showInstallationMenu(record), ignored -> {},
-                () -> {}, true, false));
+        more.addActionListener(event -> openInstallationMenu(record));
         actions.add(more);
         JPanel centeredActions = new JPanel(new java.awt.GridBagLayout());
         centeredActions.setName("installationActions-" + record.id());
@@ -1632,6 +1632,50 @@ public final class LauncherFrame extends JFrame {
         centeredActions.add(actions);
         card.add(centeredActions, BorderLayout.EAST);
         return card;
+    }
+
+    /**
+     * Confirms the folder still exists, then opens the card's menu. The check is quick, so unlike
+     * {@link #run} it leaves the page's controls enabled; dimming them all reads as a page redraw.
+     */
+    private void openInstallationMenu(InstallationRecord record) {
+        if (installationMenuPending) return;
+        if (!gate.tryEnter()) {
+            LauncherAlertDialog.showMessage(this, guiScale, "Please wait",
+                    "Another operation is already running.");
+            return;
+        }
+        installationMenuPending = true;
+        new SwingWorker<Void, Void>() {
+            @Override protected Void doInBackground() throws Exception {
+                services.requireInstallationPresent(record);
+                return null;
+            }
+
+            @Override protected void done() {
+                gate.leave();
+                installationMenuPending = false;
+                Throwable problem = null;
+                try {
+                    get();
+                } catch (java.util.concurrent.ExecutionException e) {
+                    problem = e.getCause();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    problem = e;
+                }
+                if (!isDisplayable()) return;
+                if (problem == null) {
+                    showInstallationMenu(record);
+                } else if (problem instanceof UninstallService.MissingInstallationException missing) {
+                    status.setText("Installation folder not found.");
+                    removeMissingInstallation(missing.record());
+                } else {
+                    showError("Checking installation folder " + (problem instanceof InterruptedException
+                            ? "interrupted" : "failed"), problem);
+                }
+            }
+        }.execute();
     }
 
     private void showInstallationMenu(InstallationRecord record) {
@@ -2094,15 +2138,11 @@ public final class LauncherFrame extends JFrame {
         details.add(explanation);
 
         JDialog dialog = new JDialog(this, "Enable managed updates", false);
+        LauncherTheme.useLauncherTitle(dialog);
         dialog.setName("adoptionCandidateDialog");
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-        JPanel actions = new JPanel(new java.awt.FlowLayout(
-                java.awt.FlowLayout.RIGHT, guiScale.space("md"), 0));
-        actions.setBackground(FirstLaunchPanel.BACKGROUND);
-        actions.setBorder(BorderFactory.createEmptyBorder(
-                0, 0, guiScale.space("lg"), 0));
         JButton cancel = homeButton("Cancel", "cancelAdoptionButton");
-        JButton continueButton = homeButton("Continue", "continueAdoptionButton");
+        JButton continueButton = homeButton("Continue", "continueAdoptionButton", true);
         continueButton.setFont(guiScale.font(continueButton.getFont(), "label"));
         continueButton.setMnemonic(KeyEvent.VK_C);
         continueButton.getAccessibleContext().setAccessibleDescription(
@@ -2110,8 +2150,11 @@ public final class LauncherFrame extends JFrame {
         cancel.setMnemonic(KeyEvent.VK_A);
         cancel.getAccessibleContext().setAccessibleDescription(
                 "Close without contacting the release service.");
-        actions.add(cancel);
-        actions.add(continueButton);
+        DialogFooter footer = new DialogFooter(guiScale).primary(continueButton).cancel(cancel);
+        JPanel actions = footer.panel();
+        actions.setName("adoptionCandidateActions");
+        actions.setBorder(BorderFactory.createEmptyBorder(
+                0, 0, guiScale.space("lg"), 0));
         JPanel body = new JPanel(new BorderLayout(0, guiScale.space("xl")));
         body.setBackground(FirstLaunchPanel.BACKGROUND);
         body.add(details, BorderLayout.CENTER);
@@ -2139,8 +2182,7 @@ public final class LauncherFrame extends JFrame {
             dialog.dispose();
             prepareAdoption(record, suggestion, null, selected, generation);
         });
-        dialog.getRootPane().setDefaultButton(continueButton);
-        installEscapeAction(dialog, "cancelAdoption", dialog::dispose);
+        footer.install(dialog, dialog::dispose);
         dialog.setVisible(true);
     }
 
@@ -2167,7 +2209,7 @@ public final class LauncherFrame extends JFrame {
         JButton next = homeButton("Next page", "nextAdoptionReleasePageButton");
         JButton cancel = homeButton("Cancel", "cancelAdoptionReleaseButton");
         JButton continueButton = homeButton("Continue",
-                "continueSelectedAdoptionButton");
+                "continueSelectedAdoptionButton", true);
         next.setEnabled(false);
         continueButton.setEnabled(false);
         final int[] pageNumber = {0};
@@ -2191,16 +2233,16 @@ public final class LauncherFrame extends JFrame {
         heading.add(Box.createVerticalStrut(guiScale.space("md")));
         heading.add(fetch);
 
-        JPanel actions = new JPanel(new BorderLayout(guiScale.space("md"), 0));
+        // Paging belongs to the list; the footer holds only the dialog's own choices.
+        JPanel paging = new JPanel(new BorderLayout(guiScale.space("md"), 0));
+        paging.setOpaque(false);
+        paging.add(status, BorderLayout.CENTER);
+        paging.add(next, BorderLayout.EAST);
+        DialogFooter footer = new DialogFooter(guiScale).primary(continueButton).cancel(cancel);
+        JPanel actions = new JPanel(new BorderLayout(0, guiScale.space("xl")));
         actions.setOpaque(false);
-        actions.add(status, BorderLayout.CENTER);
-        JPanel buttons = new JPanel(new java.awt.FlowLayout(
-                java.awt.FlowLayout.RIGHT, guiScale.space("md"), 0));
-        buttons.setOpaque(false);
-        buttons.add(next);
-        buttons.add(cancel);
-        buttons.add(continueButton);
-        actions.add(buttons, BorderLayout.EAST);
+        actions.add(paging, BorderLayout.NORTH);
+        actions.add(footer.panel(), BorderLayout.SOUTH);
 
         JPanel body = new JPanel(new BorderLayout(guiScale.space("lg"),
                 guiScale.space("lg")));
@@ -2211,6 +2253,7 @@ public final class LauncherFrame extends JFrame {
         body.add(LauncherTheme.scrollPane(releases), BorderLayout.CENTER);
         body.add(actions, BorderLayout.SOUTH);
         JDialog dialog = new JDialog(this, "Choose official version", false);
+        LauncherTheme.useLauncherTitle(dialog);
         dialog.setName("adoptionReleaseBrowser");
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         dialog.setContentPane(body);
@@ -2271,7 +2314,9 @@ public final class LauncherFrame extends JFrame {
             prepareAdoption(record, suggestion, selected.release().tag(),
                     fixedChannel, generation);
         });
-        installEscapeAction(dialog, "cancelAdoptionRelease", dialog::dispose);
+        footer.install(dialog, dialog::dispose);
+        DialogFooter.pressOnEnter(fetch);
+        DialogFooter.pressOnEnter(next);
         dialog.setVisible(true);
     }
 
@@ -2354,7 +2399,7 @@ public final class LauncherFrame extends JFrame {
                         }
                         return;
                     }
-                    progress.setTitle("This copy remains launch-only");
+                    progress.setHeading("This copy remains launch-only");
                     if (publicationAttempted.get()) {
                         progress.setFailureSummary(
                                 "This copy could not be enabled and will remain launch-only.");
@@ -2371,32 +2416,19 @@ public final class LauncherFrame extends JFrame {
                 && state.registry().installations().contains(record);
     }
 
-    private static void installEscapeAction(JDialog dialog, String key, Runnable action) {
-        dialog.getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(
-                KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), key);
-        dialog.getRootPane().getActionMap().put(key, new AbstractAction() {
-            @Override public void actionPerformed(ActionEvent event) {
-                action.run();
-            }
-        });
-    }
 
     void showIneligibleAdoption(PreparedAdoption.Report report) {
         JPanel body = adoptionResultBody("Updates can't be enabled",
                 report.message()
                         + "<br><br>No files were changed. You can keep using this installation, "
                         + "or install a separate managed copy for updates.");
-        JPanel actions = new JPanel(new java.awt.FlowLayout(
-                java.awt.FlowLayout.RIGHT, guiScale.space("md"), 0));
-        actions.setOpaque(false);
-        JButton close = homeButton("Close", "closeAdoptionResultButton");
-        actions.add(close);
-        body.add(actions, BorderLayout.SOUTH);
+        JButton close = homeButton("Close", "closeAdoptionResultButton", true);
+        DialogFooter footer = new DialogFooter(guiScale).primary(close);
+        body.add(footer.panel(), BorderLayout.SOUTH);
         JDialog dialog = adoptionResultDialog("Updates can't be enabled", body);
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         close.addActionListener(event -> dialog.dispose());
-        installEscapeAction(dialog, "closeAdoptionResult", dialog::dispose);
-        dialog.getRootPane().setDefaultButton(close);
+        footer.install(dialog, dialog::dispose);
         dialog.setVisible(true);
     }
 
@@ -2419,27 +2451,23 @@ public final class LauncherFrame extends JFrame {
                         + withArticle(mismatch.requiredChannel()) + " release, not "
                         + withArticle(mismatch.selectedChannel()) + " release."
                         + "<br><br>No files were changed. " + guidance);
-        JPanel actions = new JPanel(new java.awt.FlowLayout(
-                java.awt.FlowLayout.RIGHT, guiScale.space("md"), 0));
-        actions.setOpaque(false);
-        JButton close = homeButton("Close", "closeAdoptionResultButton");
         if (!retryOffered) {
-            actions.add(close);
-            body.add(actions, BorderLayout.SOUTH);
+            JButton close = homeButton("Close", "closeAdoptionResultButton", true);
+            DialogFooter footer = new DialogFooter(guiScale).primary(close);
+            body.add(footer.panel(), BorderLayout.SOUTH);
             JDialog dialog = adoptionResultDialog(headingText, body);
             dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
             close.addActionListener(event -> dialog.dispose());
-            installEscapeAction(dialog, "closeAdoptionChannelMismatch", dialog::dispose);
-            dialog.getRootPane().setDefaultButton(close);
+            footer.install(dialog, dialog::dispose);
             dialog.setVisible(true);
             return;
         }
+        JButton close = homeButton("Close", "closeAdoptionResultButton");
         JButton retry = homeButton("Try " + mismatch.requiredChannel(),
-                "retrySuggestedAdoptionButton");
+                "retrySuggestedAdoptionButton", true);
         retry.setFont(guiScale.font(retry.getFont(), "label"));
-        actions.add(close);
-        actions.add(retry);
-        body.add(actions, BorderLayout.SOUTH);
+        DialogFooter footer = new DialogFooter(guiScale).primary(retry).cancel(close);
+        body.add(footer.panel(), BorderLayout.SOUTH);
         JDialog dialog = adoptionResultDialog(headingText, body);
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         close.addActionListener(event -> dialog.dispose());
@@ -2457,8 +2485,7 @@ public final class LauncherFrame extends JFrame {
             prepareAdoption(record, suggestion, null,
                     mismatch.requiredChannel(), generation);
         });
-        installEscapeAction(dialog, "closeAdoptionChannelMismatch", dialog::dispose);
-        dialog.getRootPane().setDefaultButton(retry);
+        footer.install(dialog, dialog::dispose);
         dialog.addWindowListener(new WindowAdapter() {
             @Override public void windowOpened(WindowEvent event) {
                 retry.requestFocusInWindow();
@@ -2509,6 +2536,7 @@ public final class LauncherFrame extends JFrame {
 
     private JDialog adoptionResultDialog(String title, JPanel body) {
         JDialog dialog = new JDialog(this, title, false);
+        LauncherTheme.useLauncherTitle(dialog);
         dialog.setName("adoptionResultDialog");
         dialog.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         dialog.setContentPane(body);
@@ -2535,6 +2563,7 @@ public final class LauncherFrame extends JFrame {
 
     private void renameInstallation(InstallationRecord record) {
         JDialog dialog = new JDialog(this, "Rename installation", false);
+        LauncherTheme.useLauncherTitle(dialog);
         dialog.setName("renameInstallationDialog");
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         dialog.setResizable(false);
@@ -2564,12 +2593,9 @@ public final class LauncherFrame extends JFrame {
         fields.add(hint);
         body.add(fields, BorderLayout.CENTER);
 
-        JPanel actions = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT,
-                guiScale.space("md"), 0));
-        actions.setOpaque(false);
         JButton cancel = homeButton("Cancel", "cancelRenameButton");
         cancel.addActionListener(event -> dialog.dispose());
-        JButton save = homeButton("Save name", "saveInstallationNameButton");
+        JButton save = homeButton("Save name", "saveInstallationNameButton", true);
         save.addActionListener(event -> {
             String requested = name.getText().strip();
             if (requested.isEmpty() || requested.length() > 120
@@ -2587,11 +2613,10 @@ public final class LauncherFrame extends JFrame {
             run("Renaming installation", () -> services.renameInstallation(record, requested),
                     ignored -> reload(), ignored -> {}, () -> {}, true, false);
         });
-        actions.add(cancel);
-        actions.add(save);
-        body.add(actions, BorderLayout.SOUTH);
+        DialogFooter footer = new DialogFooter(guiScale).primary(save).cancel(cancel);
+        body.add(footer.panel(), BorderLayout.SOUTH);
         dialog.setContentPane(body);
-        dialog.getRootPane().setDefaultButton(save);
+        footer.install(dialog, dialog::dispose);
         packToWidth(dialog, "dialog.md");
         dialog.setLocationRelativeTo(this);
         dialog.setVisible(true);
@@ -2608,7 +2633,7 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void removeFromLauncher(InstallationRecord record) {
-        boolean confirmed = LauncherAlertDialog.showConfirm(this, guiScale, "Remove from launcher",
+        boolean confirmed = LauncherAlertDialog.showDangerConfirm(this, guiScale, "Remove from launcher",
                 "Remove “" + record.name()
                         + "” from the launcher?\nIts files will stay in the installation folder.",
                 "Remove");
@@ -2624,7 +2649,7 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void removeMissingInstallation(InstallationRecord record) {
-        boolean confirmed = LauncherAlertDialog.showConfirm(this, guiScale,
+        boolean confirmed = LauncherAlertDialog.showDangerConfirm(this, guiScale,
                 "Installation not found",
                 "The folder for \"" + record.name() + "\" could not be found.\n\n"
                         + "Remove this installation from the launcher? No game files will be deleted.",
@@ -2642,7 +2667,7 @@ public final class LauncherFrame extends JFrame {
 
     private void resetPreferences(InstallationRecord record) {
         run("Preparing preferences reset", () -> services.planPreferencesReset(record), plan -> {
-            boolean confirmed = LauncherAlertDialog.showConfirm(this, guiScale,
+            boolean confirmed = LauncherAlertDialog.showDangerConfirm(this, guiScale,
                     "Reset preferences",
                     "Close MegaMek, MekHQ, and MegaMekLab before continuing."
                             + "\n\nThis resets the preferences for the programs in this "
@@ -2666,7 +2691,7 @@ public final class LauncherFrame extends JFrame {
         Boolean removeLogs = LauncherAlertDialog.showConfirmWithOption(this, guiScale, "Uninstall",
                 "Uninstall " + record.name() + "?\nOfficial application files will be removed. "
                         + "Saves, settings, custom files, and modified files will be kept.",
-                "Also delete log files (logs and data/logs)", true, "Uninstall");
+                "Also delete log files (logs and data/logs)", true, "Uninstall", true);
         if (removeLogs == null) return;
         boolean deleteLogs = removeLogs;
         OperationProgressDialog progress = new OperationProgressDialog(this,
@@ -2685,7 +2710,7 @@ public final class LauncherFrame extends JFrame {
                     }
                     page = Page.HOME;
                     reload();
-                }, error -> progress.setTitle("Uninstall failed"), () -> {
+                }, error -> progress.setHeading("Uninstall failed"), () -> {
                 });
     }
 
@@ -2705,7 +2730,7 @@ public final class LauncherFrame extends JFrame {
                             + (result.warning() == null ? "" : " " + result.warning());
                     page = Page.HOME;
                     reload();
-                }, error -> progress.setTitle("Uninstall recovery failed"), () -> {
+                }, error -> progress.setHeading("Uninstall recovery failed"), () -> {
                 });
     }
 
@@ -2888,6 +2913,7 @@ public final class LauncherFrame extends JFrame {
         message.setName("settingsLaunchOptionsMessage");
         message.setForeground(LauncherTheme.WARNING);
         message.setAlignmentX(Component.LEFT_ALIGNMENT);
+        launchOptionsMessage = message;
         JButton revert = homeButton("Revert", "revertLaunchOptionsButton");
         JButton save = homeButton("Save launch options", "saveGlobalLaunchOptionsButton");
         LaunchOptions current = launchOptionsDraft != null ? launchOptionsDraft : launchOptionsDocument.global();
@@ -2946,6 +2972,34 @@ public final class LauncherFrame extends JFrame {
     private boolean launchOptionsDirty() {
         return launchOptionsForm != null && launchOptionsDocument != null
                 && !launchOptionsForm.values().equals(launchOptionsDocument.global());
+    }
+
+    /** Saves the edited launch options, then leaves Settings; invalid values keep the page open. */
+    private void saveLaunchOptionsThenNavigate(Page next) {
+        LaunchOptions options;
+        try {
+            options = launchOptionsForm.collect();
+        } catch (IllegalArgumentException invalid) {
+            if (launchOptionsMessage != null) launchOptionsMessage.setText(invalid.getMessage());
+            return;
+        }
+        LaunchOptionsForm form = launchOptionsForm;
+        run("Saving launch options", () -> services.saveGlobalLaunchOptions(options), saved -> {
+            // Text fields stay editable while saving; an edit made since then keeps Settings open.
+            LaunchOptions live = launchOptionsForm == form ? form.values() : null;
+            boolean editedSince = live != null && !live.equals(saved.global());
+            launchOptionsDocument = saved;
+            launchOptionsError = null;
+            launchOptionsDraft = editedSince ? live : null;
+            launchOptionsForm = null;
+            status.setText("Saved launch options.");
+            if (page != Page.SETTINGS) return;
+            if (editedSince) {
+                renderSettingsPage();
+            } else {
+                navigateTo(next);
+            }
+        });
     }
     private JLabel mutedSettingsLabel(String text) {
         JLabel label = new JLabel(text);
@@ -3554,6 +3608,7 @@ public final class LauncherFrame extends JFrame {
                 "Choose a detected Java runtime or browse for a Java home or executable.");
 
         JDialog dialog = new JDialog(this, title, false);
+        LauncherTheme.useLauncherTitle(dialog);
         dialog.setName("javaSelectionDialog");
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         JPanel body = new JPanel(new BorderLayout(guiScale.space("lg"),
@@ -3567,12 +3622,9 @@ public final class LauncherFrame extends JFrame {
         body.add(heading, BorderLayout.NORTH);
         body.add(choices, BorderLayout.CENTER);
 
-        JPanel actions = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.RIGHT,
-                guiScale.space("md"), 0));
-        actions.setOpaque(false);
         JButton cancel = homeButton("Cancel", "cancelJavaSelectionButton");
         cancel.addActionListener(event -> dialog.dispose());
-        JButton use = homeButton("Use selected Java", "confirmJavaSelectionButton");
+        JButton use = homeButton("Use selected Java", "confirmJavaSelectionButton", true);
         use.addActionListener(event -> {
             Object choice = choices.getSelectedItem();
             dialog.dispose();
@@ -3587,11 +3639,10 @@ public final class LauncherFrame extends JFrame {
                 selection.accept(chooser.getSelectedFile().toPath());
             }
         });
-        actions.add(cancel);
-        actions.add(use);
-        body.add(actions, BorderLayout.SOUTH);
+        DialogFooter footer = new DialogFooter(guiScale).primary(use).cancel(cancel);
+        body.add(footer.panel(), BorderLayout.SOUTH);
         dialog.setContentPane(body);
-        dialog.getRootPane().setDefaultButton(use);
+        footer.install(dialog, dialog::dispose);
         packToWidth(dialog, "dialog.lg");
         dialog.setLocationRelativeTo(this);
         dialog.setVisible(true);
@@ -3766,8 +3817,8 @@ public final class LauncherFrame extends JFrame {
         String detail = errorDetail(error);
         boolean javaProblem = detail.toLowerCase(java.util.Locale.ROOT).contains("java");
         String[] choices = javaProblem
-                ? new String[]{"Cancel", "Retry", "Open Settings"}
-                : new String[]{"Cancel", CHANGE_LOCATION, "Retry"};
+                ? new String[]{"Open Settings", "Retry", "Cancel"}
+                : new String[]{"Retry", CHANGE_LOCATION, "Cancel"};
         String answer = LauncherAlertDialog.show(this,
                 javaProblem ? "Java setup required" : "Could not prepare download",
                 (javaProblem
@@ -3799,8 +3850,8 @@ public final class LauncherFrame extends JFrame {
         String detail = errorDetail(error);
         boolean javaProblem = detail.toLowerCase(java.util.Locale.ROOT).contains("java");
         String[] choices = javaProblem
-                ? new String[]{"Cancel", "Retry", "Open Settings"}
-                : new String[]{"Cancel", CHANGE_LOCATION, "Retry"};
+                ? new String[]{"Open Settings", "Retry", "Cancel"}
+                : new String[]{"Retry", CHANGE_LOCATION, "Cancel"};
         String answer = LauncherAlertDialog.show(this,
                 javaProblem ? "Java setup required" : "Could not prepare download",
                 (javaProblem
@@ -3835,7 +3886,7 @@ public final class LauncherFrame extends JFrame {
                 displayProduct(repository.key()) + " " + tag + " could not be checked."
                         + "\n\n" + errorDetail(error)
                         + "\n\nNo package was downloaded and no destination was created.",
-                guiScale, "Cancel", CHANGE_LOCATION, "Retry");
+                guiScale, "Retry", CHANGE_LOCATION, "Cancel");
         if ("Retry".equals(answer)) {
             retry.run();
         } else if (CHANGE_LOCATION.equals(answer)) {
@@ -3958,7 +4009,7 @@ public final class LauncherFrame extends JFrame {
                     reload();
                 }, error -> {
                     progress.append("\nINSTALL DID NOT COMPLETE: " + errorDetail(error) + "\n");
-                    progress.setTitle(error instanceof
+                    progress.setHeading(error instanceof
                             NormalInstallService.PublishedInstallationException
                             ? "Copy retained — setup needs repair" : "Installation failed");
                     if (error instanceof NormalInstallService.PublishedInstallationException) {
@@ -3997,10 +4048,12 @@ public final class LauncherFrame extends JFrame {
                 "Previous page", "previousReleasePageButton");
         private final JButton next = homeButton("Next page", "nextReleasePageButton");
         private final JButton install = homeButton(
-                "Install", "installReleaseButton");
+                "Install", "installReleaseButton", true);
+        private final JButton cancel = homeButton("Cancel", "cancelReleasePickerButton");
         private final JLabel pageIndicator = new JLabel("Page —");
         private final JLabel requestStatus = new JLabel(" ");
         private final JDialog dialog;
+        private final DialogFooter footer;
         private SwingWorker<?, Void> worker;
         private long generation;
         private OfficialRepository loadedRepository;
@@ -4135,17 +4188,27 @@ public final class LauncherFrame extends JFrame {
                     LauncherTheme.BORDER));
             scroll.getViewport().setBackground(FirstLaunchPanel.PANEL);
 
-            JPanel resultActions = new JPanel(new java.awt.FlowLayout(
-                    java.awt.FlowLayout.RIGHT, guiScale.space("md"), 0));
-            resultActions.setOpaque(false);
-            resultActions.add(previous);
+            // Paging belongs to the list; the footer holds only the dialog's own choices.
+            JPanel paging = new JPanel(new java.awt.FlowLayout(
+                    java.awt.FlowLayout.TRAILING, guiScale.space("md"), 0));
+            paging.setName("releasePagingActions");
+            paging.setOpaque(false);
+            paging.add(previous);
             pageIndicator.setName("releasePageIndicator");
             pageIndicator.setForeground(FirstLaunchPanel.TEXT);
             pageIndicator.setFont(guiScale.font(pageIndicator.getFont(), "label"));
             pageIndicator.getAccessibleContext().setAccessibleName("Release page");
-            resultActions.add(pageIndicator);
-            resultActions.add(next);
-            resultActions.add(install);
+            paging.add(pageIndicator);
+            paging.add(next);
+            cancel.getAccessibleContext().setAccessibleDescription(
+                    "Close without installing anything.");
+            footer = new DialogFooter(guiScale).primary(install).cancel(cancel);
+            JPanel resultActions = new JPanel(new BorderLayout(0, guiScale.space("xl")));
+            resultActions.setOpaque(false);
+            resultActions.add(paging, BorderLayout.NORTH);
+            JPanel footerPanel = footer.panel();
+            footerPanel.setName("releasePickerActions");
+            resultActions.add(footerPanel, BorderLayout.SOUTH);
             requestStatus.setName("releasePickerStatus");
             requestStatus.setForeground(FirstLaunchPanel.MUTED);
             requestStatus.setFont(guiScale.font(requestStatus.getFont(), "small"));
@@ -4168,7 +4231,8 @@ public final class LauncherFrame extends JFrame {
             body.add(bottom, BorderLayout.SOUTH);
 
             dialog = new JDialog(LauncherFrame.this,
-                    "Download an official release", false);
+                    "Install another version", false);
+            LauncherTheme.useLauncherTitle(dialog);
             dialog.setName("releasePickerDialog");
             dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
             dialog.setContentPane(body);
@@ -4190,21 +4254,13 @@ public final class LauncherFrame extends JFrame {
                             available.x + available.width - placed.width)),
                     Math.max(available.y, Math.min(placed.y,
                             available.y + available.height - placed.height)));
-            dialog.getAccessibleContext().setAccessibleName("Install another version");
             dialog.getAccessibleContext().setAccessibleDescription(
                     "Fetch official releases for one selected product and release type.");
-            dialog.getRootPane().setDefaultButton(fetch);
-            dialog.getRootPane().getInputMap(
-                    javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW).put(
-                    KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0),
-                    "closeReleasePicker");
-            dialog.getRootPane().getActionMap().put("closeReleasePicker",
-                    new AbstractAction() {
-                        @Override
-                        public void actionPerformed(ActionEvent event) {
-                            dialog.dispose();
-                        }
-                    });
+            cancel.addActionListener(event -> dialog.dispose());
+            footer.install(dialog, dialog::dispose);
+            for (JButton control : new JButton[]{fetch, previous, next}) {
+                DialogFooter.pressOnEnter(control);
+            }
             dialog.addWindowListener(new WindowAdapter() {
                 @Override
                 public void windowClosed(WindowEvent event) {
@@ -4473,8 +4529,9 @@ public final class LauncherFrame extends JFrame {
         releases.setName("previewReleaseList");
         JButton fetch = button("Fetch releases", "fetchPreviewReleasesButton");
         JButton next = button("Next page", "nextPreviewReleasePageButton");
-        JButton inspect = button(applyWorkflow ? "Update…" : "Download and preview…",
-                "runPreviewButton");
+        JButton inspect = homeButton(applyWorkflow ? "Update…" : "Download and preview…",
+                "runPreviewButton", true);
+        JButton cancel = homeButton("Cancel", "cancelPreviewReleasesButton");
         next.setEnabled(false);
         inspect.setEnabled(false);
         JLabel pageLabel = new JLabel("No network request until Fetch releases is selected.");
@@ -4486,13 +4543,17 @@ public final class LauncherFrame extends JFrame {
         JPanel bottom = new JPanel();
         bottom.add(pageLabel);
         bottom.add(next);
-        bottom.add(inspect);
         JPanel body = new JPanel(new BorderLayout(guiScale.space("md"), guiScale.space("md")));
         body.add(top, BorderLayout.NORTH);
         body.add(LauncherTheme.scrollPane(releases), BorderLayout.CENTER);
         body.add(bottom, BorderLayout.SOUTH);
-        JDialog dialog = dialog("Choose update", body, null,
+        DialogFooter footer = new DialogFooter(guiScale).primary(inspect).cancel(cancel);
+        JDialog dialog = dialog("Choose update", body, footer.panel(),
                 new Dimension(guiScale.size("dialog.lg"), guiScale.size("dialog.sm")));
+        cancel.addActionListener(event -> dialog.dispose());
+        footer.install(dialog, dialog::dispose);
+        DialogFooter.pressOnEnter(fetch);
+        DialogFooter.pressOnEnter(next);
         Consumer<Integer> load = requested -> {
             next.setEnabled(false);
             run("Fetching official releases", () -> services.releases(repository, requested),
@@ -4568,7 +4629,7 @@ public final class LauncherFrame extends JFrame {
                     showPreviewResult(result);
                 }, error -> {
                     progress.append("\nPREVIEW FAILED: " + errorDetail(error) + "\n");
-                    progress.setTitle("Update preview failed");
+                    progress.setHeading("Update preview failed");
                 }, stream::close);
     }
 
@@ -4601,7 +4662,7 @@ public final class LauncherFrame extends JFrame {
                         discardPrepared(discarded, context);
                     }
                     SwingUtilities.invokeLater(() ->
-                            progress.setTitleIfCurrent("Preparing update",
+                            progress.setHeadingIfCurrent("Preparing update",
                                     "Applying verified update"));
                     PreparedUpdate applying = prepared;
                     prepared = null; // applyPrepared now owns cleanup on every outcome
@@ -4635,7 +4696,7 @@ public final class LauncherFrame extends JFrame {
                             + "\nNo second package download was attempted. If application "
                             + "mutation began, use Check update recovery after closing every "
                             + "suite application.\n");
-                    progress.setTitle("Update failed — recovery may be required");
+                    progress.setHeading("Update failed — recovery may be required");
                     reload();
             }, stream::close);
     }
@@ -4719,7 +4780,7 @@ public final class LauncherFrame extends JFrame {
                                         + "\nIf recovery is pending, close all suite games and "
                                         + "use Recover interrupted update. Do not retry repair "
                                         + "until recovery completes.\n");
-                                progress.setTitle("Repair failed — recovery may be required");
+                                progress.setHeading("Repair failed — recovery may be required");
                                 reload();
                             }, stream::close);
                 }, error -> showError("Repair unavailable", error));
@@ -4750,7 +4811,7 @@ public final class LauncherFrame extends JFrame {
                     LauncherAlertDialog.showMessage(this, guiScale, "Recovery complete",
                             result.outcome());
                     reload();
-                }, error -> progress.setTitle("Update recovery failed"), () -> {
+                }, error -> progress.setHeading("Update recovery failed"), () -> {
                 });
     }
 
@@ -4785,8 +4846,12 @@ public final class LauncherFrame extends JFrame {
         }
         JTextArea details = textArea(text.toString());
         details.setName("updatePreviewResults");
-        JDialog dialog = dialog("Read-only update preview", LauncherTheme.scrollPane(details), null,
-                new Dimension(guiScale.size("dialog.lg"), guiScale.size("dialog.md")));
+        JButton close = homeButton("Close", "closeUpdatePreviewButton", true);
+        DialogFooter footer = new DialogFooter(guiScale).primary(close);
+        JDialog dialog = dialog("Read-only update preview", LauncherTheme.scrollPane(details),
+                footer.panel(), new Dimension(guiScale.size("dialog.lg"), guiScale.size("dialog.md")));
+        close.addActionListener(event -> dialog.dispose());
+        footer.install(dialog, dialog::dispose);
         dialog.setVisible(true);
     }
 
@@ -4831,7 +4896,7 @@ public final class LauncherFrame extends JFrame {
                                 ? "\nA published copy is retained. Do not download over it; "
                                 + "open Installations to register or repair the copy.\n"
                                 : "\nNothing was published.\n"));
-                        progress.setTitle(published
+                        progress.setHeading(published
                                 ? "Copy retained — setup needs repair" : "Installation failed");
                         repair.setEnabled(published);
                     }, stream::close);
@@ -5148,6 +5213,7 @@ public final class LauncherFrame extends JFrame {
         scroll.getViewport().setBackground(FirstLaunchPanel.PANEL);
 
         JDialog viewer = new JDialog(this, "Local operation logs", false);
+        LauncherTheme.useLauncherTitle(viewer);
         viewer.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         JPanel body = new JPanel(new BorderLayout(guiScale.space("md"),
                 guiScale.space("md")));
@@ -5162,14 +5228,14 @@ public final class LauncherFrame extends JFrame {
 
         JButton copy = homeButton("Copy sanitized log", "copyOperationLogButton");
         copy.addActionListener(event -> copySanitized(area.getText()));
-        JPanel actions = new JPanel();
-        actions.setOpaque(false);
-        actions.add(copy);
-        JButton close = homeButton("Close", "closeOperationLogButton");
+        JButton close = homeButton("Close", "closeOperationLogButton", true);
         close.addActionListener(event -> viewer.dispose());
-        actions.add(close);
+        DialogFooter footer = new DialogFooter(guiScale).tool(copy).primary(close);
+        JPanel actions = footer.panel();
+        actions.setName("operationLogActions");
         body.add(actions, BorderLayout.SOUTH);
         viewer.setContentPane(body);
+        footer.install(viewer, viewer::dispose);
         viewer.setSize(guiScale.size("dialog.lg"), guiScale.size("dialog.md"));
         viewer.setLocationRelativeTo(this);
         viewer.setVisible(true);
@@ -5229,7 +5295,7 @@ public final class LauncherFrame extends JFrame {
         Path target = selected.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".zip")
                 ? selected : selected.resolveSibling(selected.getFileName() + ".zip");
         if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)
-                && !LauncherAlertDialog.showConfirm(owner, guiScale, "Replace file?",
+                && !LauncherAlertDialog.showDangerConfirm(owner, guiScale, "Replace file?",
                 target.getFileName() + " already exists. Replace it?", "Replace")) {
             return;
         }
@@ -5262,11 +5328,20 @@ public final class LauncherFrame extends JFrame {
 
     private JDialog dialog(String title, Component center, Component south, Dimension size) {
         JDialog dialog = new JDialog(this, title, false);
+        LauncherTheme.useLauncherTitle(dialog);
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         JPanel panel = new JPanel(new BorderLayout(guiScale.space("md"), guiScale.space("md")));
         panel.setBorder(guiScale.padding("xxl", "xxl"));
-        panel.add(center instanceof JScrollPane ? center : LauncherTheme.scrollPane(center),
+        JLabel heading = new JLabel(title);
+        heading.setName("dialogHeading");
+        heading.setForeground(FirstLaunchPanel.ACCENT);
+        heading.setFont(guiScale.font(heading.getFont(), "headline"));
+        JPanel main = new JPanel(new BorderLayout(0, guiScale.space("lg")));
+        main.setOpaque(false);
+        main.add(heading, BorderLayout.NORTH);
+        main.add(center instanceof JScrollPane ? center : LauncherTheme.scrollPane(center),
                 BorderLayout.CENTER);
+        panel.add(main, BorderLayout.CENTER);
         if (south != null) panel.add(south, BorderLayout.SOUTH);
         LauncherTheme.styleContent(panel, guiScale);
         dialog.setContentPane(panel);
@@ -5318,7 +5393,12 @@ public final class LauncherFrame extends JFrame {
     }
 
     private JButton homeButton(String text, String name) {
-        JButton button = new FirstLaunchButton(text, name, false, guiScale,
+        return homeButton(text, name, false);
+    }
+
+    /** A dialog-sized button; {@code primary} styles a dialog's main action. */
+    private JButton homeButton(String text, String name, boolean primary) {
+        JButton button = new FirstLaunchButton(text, name, primary, guiScale,
                 FirstLaunchButton.Size.SMALL);
         button.getAccessibleContext().setAccessibleDescription(
                 "Activate " + text + ".");

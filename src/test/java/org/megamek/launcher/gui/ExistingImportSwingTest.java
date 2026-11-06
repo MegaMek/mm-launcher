@@ -210,7 +210,8 @@ class ExistingImportSwingTest {
             JDialog dialog = waitFor(() -> findDialog(frame, "adoptionResultDialog"));
             JLabel heading = (JLabel) find(dialog, "adoptionResultHeading");
             JLabel message = (JLabel) find(dialog, "adoptionResultMessage");
-            assertEquals("Updates can't be enabled", dialog.getTitle());
+            assertEquals("Updates can't be enabled", dialog.getAccessibleContext().getAccessibleName());
+            assertEquals(LauncherTheme.DIALOG_TITLE, dialog.getTitle(), "the heading is not repeated");
             assertEquals("Updates can't be enabled", heading.getText());
             assertEquals(FirstLaunchPanel.ACCENT, heading.getForeground());
             assertEquals(java.awt.Font.PLAIN, message.getFont().getStyle());
@@ -529,14 +530,14 @@ class ExistingImportSwingTest {
                 assertEquals("MegaMek (0.51.7)", application.getText());
                 assertEquals(org.megamek.launcher.channel.FollowChannel.CORE,
                         channel.getSelectedItem());
-                assertTrue(cancel.getX() < proceed.getX());
+                assertTrue(proceed.getX() < cancel.getX(), "the main action comes first");
                 assertTrue(dialog.getHeight() < dialog.getWidth(), "dialog remains compact");
                 assertNull(find(dialog, "chooseAdoptionReleaseButton"));
                 assertNull(find(dialog, "verifyAdoptionButton"));
                 assertEquals(0, countButtonText(dialog, "Verify copy"));
                 assertEquals(0, countButtonText(dialog, "Choose official release…"));
                 onEdt(() -> {
-                    dialog.getRootPane().getActionMap().get("cancelAdoption").actionPerformed(
+                    dialog.getRootPane().getActionMap().get(DialogFooter.ESCAPE_ACTION).actionPerformed(
                             new java.awt.event.ActionEvent(dialog, 0, "escape"));
                     return null;
                 });
@@ -699,7 +700,7 @@ class ExistingImportSwingTest {
             JLabel heading = (JLabel) find(mismatch, "adoptionResultHeading");
             JLabel message = (JLabel) find(mismatch, "adoptionResultMessage");
             JButton retry = (JButton) find(mismatch, "retrySuggestedAdoptionButton");
-            assertEquals("Use Core for this installation", mismatch.getTitle());
+            assertEquals("Use Core for this installation", mismatch.getAccessibleContext().getAccessibleName());
             assertEquals("Use Core for this installation", heading.getText());
             assertEquals(FirstLaunchPanel.ACCENT, heading.getForeground());
             assertEquals(java.awt.Font.PLAIN, message.getFont().getStyle());
@@ -1143,7 +1144,7 @@ class ExistingImportSwingTest {
     private static boolean hasShowingDialog(LauncherFrame frame, String title) {
         for (java.awt.Window window : frame.getOwnedWindows()) {
             if (window instanceof javax.swing.JDialog dialog && dialog.isShowing()
-                    && title.equals(dialog.getTitle())) return true;
+                    && title.equals(dialog.getAccessibleContext().getAccessibleName())) return true;
         }
         return false;
     }

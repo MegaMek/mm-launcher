@@ -73,6 +73,20 @@ class BugReportDialogTest {
         assertEquals(List.of("save", "form", "discord", "close"), calls);
     }
 
+    @Test
+    void enterPressesTheFocusedButtonRatherThanTheReportForm() throws Exception {
+        SwingUtilities.invokeAndWait(() -> {
+            BugReportDialog.Content content = BugReportDialog.content(GuiScale.DEFAULT,
+                    new BugReportDialog.Actions(() -> {}, () -> {}, () -> {}), () -> {});
+            for (String name : List.of("saveBugReportArchiveButton", "openBugReportFormButton",
+                    "bugReportDiscordButton", "closeBugReportButton")) {
+                AbstractButton button = (AbstractButton) find(content.panel(), name);
+                assertNotNull(button.getInputMap(javax.swing.JComponent.WHEN_FOCUSED)
+                        .get(javax.swing.KeyStroke.getKeyStroke("ENTER")), name);
+            }
+        });
+    }
+
     private static Component find(Container root, String name) {
         if (name.equals(root.getName())) return root;
         for (Component child : root.getComponents()) {

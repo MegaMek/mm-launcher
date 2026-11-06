@@ -155,10 +155,10 @@ class UpdateApplySwingTest {
             assertTrue(cancelUpdate instanceof FirstLaunchButton);
             assertTrue(confirmUpdate instanceof FirstLaunchButton);
             Container actions = find(firstConsent, "recommendedUpdateConsentActions");
-            assertTrue(actions.getComponentZOrder(cancelUpdate)
-                    < actions.getComponentZOrder(confirmUpdate));
-            assertTrue(actions.getComponent(0) instanceof javax.swing.Box.Filler,
-                    "horizontal glue must right-align the grouped actions");
+            assertTrue(confirmUpdate.getX() < cancelUpdate.getX(), "the main action comes first");
+            assertEquals(confirmUpdate.getWidth(), cancelUpdate.getWidth());
+            assertEquals(actions.getWidth() - (cancelUpdate.getX() + cancelUpdate.getWidth()),
+                    confirmUpdate.getX(), 1, "the actions are centred");
             assertEquals(confirmUpdate, firstConsent.getRootPane().getDefaultButton());
             click(firstConsent, "Cancel");
             waitUntil(() -> !firstConsent.isDisplayable());
@@ -367,14 +367,14 @@ class UpdateApplySwingTest {
                 OperationProgressDialog dialog = new OperationProgressDialog(frame,
                         "Preparing update", "applyUpdateProgressLog", () -> {});
                 dialog.setVisible(true);
-                dialog.setTitleIfCurrent("Preparing update", "Applying verified update");
-                assertEquals("Applying verified update", dialog.getTitle());
-                dialog.setTitle("Update failed — recovery may be required");
-                dialog.setTitleIfCurrent("Preparing update", "Applying verified update");
-                assertEquals("Update failed — recovery may be required", dialog.getTitle());
+                dialog.setHeadingIfCurrent("Preparing update", "Applying verified update");
+                assertEquals("Applying verified update", dialog.getAccessibleContext().getAccessibleName());
+                dialog.setHeading("Update failed — recovery may be required");
+                dialog.setHeadingIfCurrent("Preparing update", "Applying verified update");
+                assertEquals("Update failed — recovery may be required", dialog.getAccessibleContext().getAccessibleName());
                 dialog.showFailure(new IOException("simulated apply failure"));
-                dialog.setTitleIfCurrent("Preparing update", "Applying verified update");
-                assertEquals("Update failed — recovery may be required", dialog.getTitle());
+                dialog.setHeadingIfCurrent("Preparing update", "Applying verified update");
+                assertEquals("Update failed — recovery may be required", dialog.getAccessibleContext().getAccessibleName());
                 dialog.dispose();
                 return null;
             });
@@ -409,7 +409,7 @@ class UpdateApplySwingTest {
                 }
                 return null;
             }, Duration.ofSeconds(60));
-            assertEquals("Update failed — recovery may be required", failed.getTitle());
+            assertEquals("Update failed — recovery may be required", failed.getAccessibleContext().getAccessibleName());
             assertNotNull(find(failed, "operationViewDetailsButton"));
             waitForReloadedCards(frame, cardsBeforeUpdate);
             assertNull(find(frame, "recoverUpdateButton"),
