@@ -40,7 +40,6 @@ import org.megamek.launcher.registry.RegistryData;
 import org.megamek.launcher.registry.RegistryStore;
 import org.megamek.launcher.update.StrictPathSafety;
 
-import java.awt.Desktop;
 import java.awt.EventQueue;
 import java.io.IOException;
 import java.nio.file.Path;
@@ -55,7 +54,7 @@ public final class OpenLocationService {
 
     public OpenLocationService(Path registry) {
         this(registry, new RegistryStore(), new InstallationInspector(),
-                new AwtDesktopGateway());
+                new SystemDesktopGateway());
     }
 
     OpenLocationService(Path registry, RegistryStore registries,
@@ -95,16 +94,18 @@ public final class OpenLocationService {
         void open(Path directory) throws IOException;
     }
 
-    private static final class AwtDesktopGateway implements DesktopGateway {
+    private static final class SystemDesktopGateway implements DesktopGateway {
+        private final PlatformOpener opener = new PlatformOpener();
+
         @Override
         public boolean supported() {
-            return Desktop.isDesktopSupported()
-                    && Desktop.getDesktop().isSupported(Desktop.Action.OPEN);
+            // The opener reports its own failure, including the xdg-open fallback on Linux.
+            return true;
         }
 
         @Override
         public void open(Path directory) throws IOException {
-            Desktop.getDesktop().open(directory.toFile());
+            opener.open(directory);
         }
     }
 }

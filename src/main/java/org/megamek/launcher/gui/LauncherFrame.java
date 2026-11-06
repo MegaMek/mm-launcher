@@ -3292,12 +3292,7 @@ public final class LauncherFrame extends JFrame {
 
     private void openWebsite(java.net.URI address, String description) {
         run("Opening " + description, () -> {
-            java.awt.Desktop desktop = java.awt.Desktop.isDesktopSupported()
-                    ? java.awt.Desktop.getDesktop() : null;
-            if (desktop == null || !desktop.isSupported(java.awt.Desktop.Action.BROWSE)) {
-                throw new IOException("Opening web links is not supported on this system");
-            }
-            desktop.browse(address);
+            new PlatformOpener().browse(address);
             return null;
         }, ignored -> {});
     }
