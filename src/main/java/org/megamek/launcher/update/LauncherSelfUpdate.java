@@ -38,6 +38,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import org.megamek.launcher.release.GitHubRateLimitException;
 import org.megamek.launcher.release.JavaReleaseTransport;
 import org.megamek.launcher.release.ReleaseTransport;
 import org.megamek.launcher.operation.OperationContext;
@@ -229,8 +230,11 @@ public final class LauncherSelfUpdate {
 
     private byte[] latestReleaseMetadata() throws IOException, InterruptedException {
         try (var response = transport.get(LATEST, "application/vnd.github+json")) {
-            if (response.status() != 200) throw new IOException(
-                    "Official launcher release lookup returned HTTP " + response.status());
+            if (response.status() != 200) {
+                GitHubRateLimitException limited = GitHubRateLimitException.from(response);
+                if (limited != null) throw limited;
+                throw new IOException("Official launcher release lookup returned HTTP " + response.status());
+            }
             byte[] metadata = response.body().readNBytes(1024 * 1024 + 1);
             if (metadata.length > 1024 * 1024) throw new IOException("Release metadata exceeds limit");
             return metadata;

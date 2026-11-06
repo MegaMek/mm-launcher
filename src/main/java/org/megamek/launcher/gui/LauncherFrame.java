@@ -221,7 +221,7 @@ public final class LauncherFrame extends JFrame {
     private Throwable launchOptionsError;
     private String transientHomeMessage;
     private boolean launcherUpdateChecked;
-    private final LauncherSelfUpdate launcherUpdater = new LauncherSelfUpdate();
+    private final LauncherSelfUpdate launcherUpdater;
     private BugReportDialog bugReportDialog;
 
     public LauncherFrame(LauncherServices services) {
@@ -251,6 +251,7 @@ public final class LauncherFrame extends JFrame {
                           LauncherNewsFeed newsFeed) {
         super(titleFor(LauncherFrame.class.getPackage().getImplementationVersion()));
         this.services = services;
+        this.launcherUpdater = new LauncherSelfUpdate(services.releaseTransport());
         this.showExperimental = services.showExperimental();
         this.showExperimentalSave = new LatestSettingSave<>(services::saveShowExperimental);
         this.playIntro = services.playIntro();

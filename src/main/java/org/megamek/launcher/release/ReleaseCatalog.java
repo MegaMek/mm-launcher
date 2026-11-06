@@ -58,6 +58,7 @@ public final class ReleaseCatalog {
     private static final Pattern ASSET_NAME =
             Pattern.compile("[A-Za-z0-9][A-Za-z0-9._-]{0,254}\\.tar\\.gz");
     private static final URI API = URI.create("https://api.github.com");
+    private static final Pattern NEXT_LINK = Pattern.compile("<[^>]*>\\s*;\\s*rel=\"?next\"?");
     private final ReleaseTransport transport;
     private final ObjectMapper mapper = JsonMapper.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build()
@@ -74,7 +75,8 @@ public final class ReleaseCatalog {
         }
         URI uri = API.resolve("/repos/" + repository.slug() + "/releases?per_page="
                 + perPage + "&page=" + page);
-        JsonNode root = requestJson(uri);
+        String[] link = new String[1];
+        JsonNode root = requestJson(uri, link);
         if (!root.isArray()) throw new IOException("GitHub release response must be an array");
         if (root.size() > perPage) {
             throw new IOException("GitHub release response exceeds the requested page size");
@@ -82,7 +84,17 @@ public final class ReleaseCatalog {
         List<Release> releases = new ArrayList<>();
         for (JsonNode node : root) releases.add(parseRelease(repository, node, false));
         return new Page(page, perPage, List.copyOf(releases),
-                releases.size() == perPage);
+                mayHaveNextPage(link[0], releases.size(), perPage));
+    }
+
+    /**
+     * GitHub's Link header names the next page whenever one exists, so a full last page does not
+     * cost an extra request that returns nothing. A response without the header (one page only,
+     * or a source that does not page that way) falls back to treating a full page as more to come.
+     */
+    static boolean mayHaveNextPage(String link, int returned, int perPage) {
+        if (link == null || link.isBlank()) return returned == perPage;
+        return NEXT_LINK.matcher(link).find();
     }
 
     public Release exact(OfficialRepository repository, String tag)
@@ -168,10 +180,15 @@ public final class ReleaseCatalog {
     }
 
     private JsonNode requestJson(URI uri) throws IOException, InterruptedException {
+        return requestJson(uri, null);
+    }
+
+    private JsonNode requestJson(URI uri, String[] link) throws IOException, InterruptedException {
         validateApiUri(uri);
         try (ReleaseTransport.Response response =
                      transport.get(uri, "application/vnd.github+json")) {
             if (response.status() != 200) throw httpError(response);
+            if (link != null) link[0] = response.firstHeader("link");
             byte[] bytes = bounded(response.body(), MAX_METADATA);
             try {
                 JsonNode node = mapper.readTree(bytes);
@@ -263,6 +280,8 @@ public final class ReleaseCatalog {
     }
 
     private static IOException httpError(ReleaseTransport.Response response) {
+        GitHubRateLimitException limited = GitHubRateLimitException.from(response);
+        if (limited != null) return limited;
         String remaining = response.firstHeader("x-ratelimit-remaining");
         String reset = response.firstHeader("x-ratelimit-reset");
         String detail = response.status() == 403 || response.status() == 429

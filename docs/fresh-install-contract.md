@@ -28,6 +28,15 @@ interruption paths.
 API HTTP and rate-limit failures are explicit. HTTPS plus GitHub's same-source digest is useful
 integrity checking, not an independent signature.
 
+GitHub allows only 60 unauthenticated API requests per hour per network, and it counts conditional
+`304 Not Modified` responses against that allowance too. The GUI therefore shares successful JSON
+responses from `api.github.com` between all of its checks for ten minutes, in memory and in
+`<registry-name>.github-cache/` beside the registry so a relaunch reuses them. Release-list paging
+follows GitHub's `Link` header instead of requesting an empty page after a full one. Once GitHub
+refuses a request for exceeding the allowance, further API requests fail immediately with a
+message naming the local time GitHub accepts requests again, without spending more of the
+allowance. Package downloads are never cached.
+
 Imported-copy adoption reuses these exact repository, release metadata, asset-name, size,
 SHA-256, transport, and safe-extraction boundaries, but it is not a fresh install: it stages the
 package outside the registered root only for comparison and never publishes package files into
