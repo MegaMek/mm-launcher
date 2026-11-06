@@ -217,6 +217,11 @@ class MissingInstallationSwingTest {
             SwingTestSupport.startClick(frame, "installationMenuButton-" + fixture.removed.id());
             assertTrue(started.await(5, TimeUnit.SECONDS));
             SwingTestSupport.onEdt(() -> {
+                assertTrue(SwingTestSupport.find(frame, "installationMenuButton-" + fixture.retained.id(),
+                        javax.swing.JButton.class).isEnabled(), "the quick folder check leaves the page enabled");
+                return null;
+            });
+            SwingTestSupport.onEdt(() -> {
                 var render = LauncherFrame.class.getDeclaredMethod("renderInstallationsPage");
                 render.setAccessible(true);
                 render.invoke(frame);

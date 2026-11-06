@@ -182,6 +182,7 @@ public final class LauncherFrame extends JFrame {
     private SwingWorker<InstallationCheck, Void> installationCheckWorker;
     private final Map<String, InstallationCheck> installationChecks = new HashMap<>();
     private final Map<String, JButton> installationMenuButtons = new HashMap<>();
+    private boolean installationMenuPending;
     private final AtomicReference<OperationContext> activeOperation = new AtomicReference<>();
     private final GuiScale guiScale = GuiScale.DEFAULT;
     private java.awt.image.BufferedImage firstLaunchArtwork;
@@ -1623,11 +1624,7 @@ public final class LauncherFrame extends JFrame {
         installationMenuButtons.put(record.id(), more);
         more.getAccessibleContext().setAccessibleDescription(
                 (missing ? "Remove from launcher: " : "More actions for ") + record.name());
-        more.addActionListener(event -> run("Checking installation folder", () -> {
-            services.requireInstallationPresent(record);
-            return null;
-        }, ignored -> showInstallationMenu(record), ignored -> {},
-                () -> {}, true, false));
+        more.addActionListener(event -> openInstallationMenu(record));
         actions.add(more);
         JPanel centeredActions = new JPanel(new java.awt.GridBagLayout());
         centeredActions.setName("installationActions-" + record.id());
@@ -1635,6 +1632,50 @@ public final class LauncherFrame extends JFrame {
         centeredActions.add(actions);
         card.add(centeredActions, BorderLayout.EAST);
         return card;
+    }
+
+    /**
+     * Confirms the folder still exists, then opens the card's menu. The check is quick, so unlike
+     * {@link #run} it leaves the page's controls enabled; dimming them all reads as a page redraw.
+     */
+    private void openInstallationMenu(InstallationRecord record) {
+        if (installationMenuPending) return;
+        if (!gate.tryEnter()) {
+            LauncherAlertDialog.showMessage(this, guiScale, "Please wait",
+                    "Another operation is already running.");
+            return;
+        }
+        installationMenuPending = true;
+        new SwingWorker<Void, Void>() {
+            @Override protected Void doInBackground() throws Exception {
+                services.requireInstallationPresent(record);
+                return null;
+            }
+
+            @Override protected void done() {
+                gate.leave();
+                installationMenuPending = false;
+                Throwable problem = null;
+                try {
+                    get();
+                } catch (java.util.concurrent.ExecutionException e) {
+                    problem = e.getCause();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    problem = e;
+                }
+                if (!isDisplayable()) return;
+                if (problem == null) {
+                    showInstallationMenu(record);
+                } else if (problem instanceof UninstallService.MissingInstallationException missing) {
+                    status.setText("Installation folder not found.");
+                    removeMissingInstallation(missing.record());
+                } else {
+                    showError("Checking installation folder " + (problem instanceof InterruptedException
+                            ? "interrupted" : "failed"), problem);
+                }
+            }
+        }.execute();
     }
 
     private void showInstallationMenu(InstallationRecord record) {
