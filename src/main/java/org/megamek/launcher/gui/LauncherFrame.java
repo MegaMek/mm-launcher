@@ -2983,13 +2983,22 @@ public final class LauncherFrame extends JFrame {
             if (launchOptionsMessage != null) launchOptionsMessage.setText(invalid.getMessage());
             return;
         }
+        LaunchOptionsForm form = launchOptionsForm;
         run("Saving launch options", () -> services.saveGlobalLaunchOptions(options), saved -> {
+            // Text fields stay editable while saving; an edit made since then keeps Settings open.
+            LaunchOptions live = launchOptionsForm == form ? form.values() : null;
+            boolean editedSince = live != null && !live.equals(saved.global());
             launchOptionsDocument = saved;
             launchOptionsError = null;
-            launchOptionsDraft = null;
+            launchOptionsDraft = editedSince ? live : null;
             launchOptionsForm = null;
             status.setText("Saved launch options.");
-            if (page == Page.SETTINGS) navigateTo(next);
+            if (page != Page.SETTINGS) return;
+            if (editedSince) {
+                renderSettingsPage();
+            } else {
+                navigateTo(next);
+            }
         });
     }
     private JLabel mutedSettingsLabel(String text) {

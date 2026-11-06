@@ -14,7 +14,7 @@ respective XDG/fallback locations.
 
 Every dialog uses one footer: its actions are centred, equally wide (at least 88 scaled pixels),
 and ordered main action first, then any other choices, then **Cancel** (or **Close**) last; a
-right-to-left window mirrors the row. Small helpers such as **Copy**, **View logs**, or a link sit at
+right-to-left window mirrors the row, and a dialog cannot be narrowed below its footer. Small helpers such as **Copy**, **View logs**, or a link sit at
 the footer's leading end. Enter presses the focused button, otherwise the main action, and Escape
 cancels. A destructive main action (remove, uninstall, reset, replace) is danger-styled, is never
 the default button, and the dialog opens with focus on Cancel. A progress dialog keeps **Cancel** in

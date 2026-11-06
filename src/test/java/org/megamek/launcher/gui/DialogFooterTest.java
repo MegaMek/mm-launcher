@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.awt.ComponentOrientation;
+import java.awt.Dimension;
 import java.awt.GraphicsEnvironment;
 import java.awt.event.ActionEvent;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -122,6 +123,35 @@ class DialogFooterTest {
                 dialog.dispose();
             }
         });
+    }
+
+    @Test
+    @Tag("native-gui")
+    void anOpenDialogCannotBeNarrowedBelowItsFooter() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(), "dialogs require a display");
+        JDialog[] holder = new JDialog[1];
+        SwingUtilities.invokeAndWait(() -> {
+            JDialog dialog = new JDialog();
+            holder[0] = dialog;
+            DialogFooter footer = new DialogFooter(SCALE).primary(new JButton("Save launch options"))
+                    .secondary(new JButton("Don't save these changes")).cancel(new JButton("Cancel"));
+            dialog.setContentPane(footer.panel());
+            footer.install(dialog, null);
+            dialog.pack();
+            dialog.setMinimumSize(new Dimension(120, dialog.getHeight()));
+            dialog.setSize(120, dialog.getHeight());
+            dialog.setVisible(true);
+        });
+        try {
+            SwingTestSupport.awaitCondition("dialog widened to fit its footer", () -> SwingTestSupport.onEdt(() -> {
+                JDialog dialog = holder[0];
+                JPanel footer = (JPanel) dialog.getContentPane();
+                return footer.getWidth() >= footer.getPreferredSize().width
+                        && dialog.getMinimumSize().width >= dialog.getWidth();
+            }));
+        } finally {
+            SwingUtilities.invokeAndWait(holder[0]::dispose);
+        }
     }
 
     private static void escape(JDialog dialog) {

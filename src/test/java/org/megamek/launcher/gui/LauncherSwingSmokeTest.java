@@ -83,6 +83,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -931,6 +932,11 @@ class LauncherSwingSmokeTest {
             assertTrue(cancel.isVisible());
             assertTrue(details.isVisible());
             assertFalse(repairHolder.get().isVisible());
+            assertSame(cancel, dialog.getRootPane().getDefaultButton(), "Enter closes a plain result");
+            for (JButton button : new JButton[]{cancel, details, repairHolder.get()}) {
+                assertNotNull(button.getInputMap(javax.swing.JComponent.WHEN_FOCUSED)
+                        .get(javax.swing.KeyStroke.getKeyStroke("ENTER")), "Enter presses a focused button");
+            }
             JLabel logging = findLabel(dialog, "operationLoggingWarning");
             assertTrue(logging.isVisible());
             assertTrue(logging.getText().contains("original failure"));
@@ -938,6 +944,8 @@ class LauncherSwingSmokeTest {
             SwingUtilities.invokeAndWait(() -> repairHolder.get().setEnabled(true));
             assertTrue(repairHolder.get().isVisible(),
                     "a needed repair action appears only after failure");
+            assertSame(repairHolder.get(), dialog.getRootPane().getDefaultButton(),
+                    "the result's own action is its main action");
         } finally {
             context.finish(org.megamek.launcher.operation.OperationOutcome.FAILED, "done");
             dispose(frame);

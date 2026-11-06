@@ -47,9 +47,12 @@ import java.awt.Dimension;
 import java.awt.FocusTraversalPolicy;
 import java.awt.Insets;
 import java.awt.LayoutManager;
+import java.awt.Rectangle;
 import java.awt.Window;
 import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
+import java.awt.event.WindowAdapter;
+import java.awt.event.WindowEvent;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -168,6 +171,26 @@ final class DialogFooter {
         }
         FocusTraversalPolicy base = dialog.getFocusTraversalPolicy();
         if (base != null) dialog.setFocusTraversalPolicy(new InitialFocus(base));
+        dialog.addWindowListener(new WindowAdapter() {
+            @Override
+            public void windowOpened(WindowEvent event) {
+                keepFooterVisible(dialog, panel());
+            }
+        });
+    }
+
+    /**
+     * Stops {@code window} from being narrowed below {@code footer}'s full row, so no action is
+     * clipped; the screen's usable width still wins. Call once the window is laid out.
+     */
+    static void keepFooterVisible(Window window, JComponent footer) {
+        if (!footer.isShowing()) return;
+        int needed = window.getWidth() - footer.getWidth() + footer.getPreferredSize().width;
+        Rectangle available = GuiScale.usableBounds(window.getGraphicsConfiguration());
+        needed = Math.min(needed, available.width);
+        Dimension minimum = window.getMinimumSize();
+        if (minimum.width < needed) window.setMinimumSize(new Dimension(needed, minimum.height));
+        if (window.getWidth() < needed) window.setSize(needed, window.getHeight());
     }
 
     private void requireNoMain() {

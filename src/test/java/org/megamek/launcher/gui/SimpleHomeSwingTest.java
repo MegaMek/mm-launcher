@@ -1855,6 +1855,30 @@ class SimpleHomeSwingTest {
             SwingTestSupport.awaitCondition("prompt saved the edit", () ->
                     "-Dinline=5".equals(services.savedJvmArguments));
             assertNotNull(waitButton(frame, "settingsButton"));
+
+            assertNotNull(waitFor(() -> find(frame, "launchOptionsJvmArguments") == null ? frame : null),
+                    "the prompt's Save left Settings");
+            CountDownLatch leaving = new CountDownLatch(1);
+            services.launchOptionsSaveGate = leaving;
+            editLaunchOptionsThenLeave(frame, "-Dinline=6");
+            SwingTestSupport.clickText(waitDialog(frame, "Save launch options?"), "Save");
+            onEdt(() -> {
+                ((javax.swing.JTextField) find(frame, "launchOptionsJvmArguments")).setText("-Dinline=7");
+                return null;
+            });
+            leaving.countDown();
+            SwingTestSupport.awaitCondition("prompt saved before the later edit", () ->
+                    "-Dinline=6".equals(services.savedJvmArguments));
+            javax.swing.JTextField kept = waitFor(() -> {
+                javax.swing.JTextField field = find(frame, "launchOptionsJvmArguments");
+                return field != null && "-Dinline=7".equals(field.getText()) ? field : null;
+            });
+            assertNotNull(kept, "an edit made while saving keeps Settings open with that edit");
+            services.launchOptionsSaveGate = null;
+            onEdt(() -> {
+                ((JButton) find(frame, "revertLaunchOptionsButton")).doClick();
+                return null;
+            });
         } finally {
             dispose(frame);
         }

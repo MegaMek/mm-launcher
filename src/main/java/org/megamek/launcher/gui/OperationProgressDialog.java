@@ -224,6 +224,8 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         setLocationRelativeTo(owner);
 
         cancel.addActionListener(event -> requestCancellation());
+        DialogFooter.pressOnEnter(cancel);
+        DialogFooter.pressOnEnter(viewDetails);
         viewDetails.addActionListener(event -> {
             if (failure == null) {
                 this.showLogs.run();
@@ -414,11 +416,26 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         }
         actions.setVisible(true);
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        updateDefaultButton();
         actions.revalidate();
         getContentPane().revalidate();
         getContentPane().repaint();
         int needed = getPreferredSize().height;
         if (getHeight() < needed) setSize(getWidth(), needed);
+        validate();
+        DialogFooter.keepFooterVisible(this, actions);
+    }
+
+    /** Enter presses the result's first action, such as Open Installations, otherwise Close. */
+    private void updateDefaultButton() {
+        JButton main = cancel;
+        for (JButton button : footerActions) {
+            if (button != cancel && button.isVisible() && button.isEnabled()) {
+                main = button;
+                break;
+            }
+        }
+        getRootPane().setDefaultButton(main);
     }
 
     void addActionButton(JButton button) {
@@ -426,8 +443,11 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         styleButton(button);
         contextualActions.add(button);
         button.setVisible(false);
-        button.addPropertyChangeListener("enabled", event ->
-                button.setVisible(failureShown && button.isEnabled()));
+        DialogFooter.pressOnEnter(button);
+        button.addPropertyChangeListener("enabled", event -> {
+            button.setVisible(failureShown && button.isEnabled());
+            if (failureShown) updateDefaultButton();
+        });
         // Contextual actions such as Retry come before Close, in the order they were added.
         footerActions.add(footerActions.contains(cancel) ? footerActions.size() - 1
                 : footerActions.size(), button);

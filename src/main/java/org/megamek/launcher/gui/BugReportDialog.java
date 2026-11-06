@@ -219,6 +219,10 @@ final class BugReportDialog extends JDialog {
         closeButton.addActionListener(event -> close.run());
 
         DialogFooter footer = new DialogFooter(scale).tool(discord).cancel(closeButton);
+        // Open bug report form is the default button; a focused button must win Enter over it.
+        for (JButton button : new JButton[]{save, open, discord, closeButton}) {
+            DialogFooter.pressOnEnter(button);
+        }
         JPanel footerPanel = footer.panel();
         footerPanel.setName("bugReportActions");
 
