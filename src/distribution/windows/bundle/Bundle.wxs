@@ -19,11 +19,13 @@
           IconSourceFile="$(LauncherIcon)" DisableModify="button"
           HelpUrl="https://megamek.org" AboutUrl="https://megamek.org">
     <!-- Theme="none" means no stock payload group: the BA reads its theme
-         from the thm.xml/thm.wxl payloads and needs a WixStdbaInformation row. -->
+         from the thm.xml/thm.wxl payloads and needs a WixStdbaInformation row.
+         Launch goes through the always-installed Start Menu shortcut, which the
+         MSI points at the folder it actually resolved (custom picks included). -->
     <BootstrapperApplication>
       <bal:WixStandardBootstrapperApplication Theme="none"
           SuppressOptionsUI="yes" SuppressRepair="yes" ShowVersion="yes"
-          LaunchTarget="[LocalAppDataFolder]Programs\MegaMek Launcher\MegaMek Launcher.exe"/>
+          LaunchTarget="[ProgramMenuFolder]MegaMek\MegaMek Launcher.lnk"/>
       <Payload Name="thm.xml" SourceFile="theme.xml"/>
       <Payload Name="thm.wxl" SourceFile="theme.wxl"/>
       <Payload Name="side.png" SourceFile="art\side.png"/>

@@ -392,9 +392,16 @@ class WindowsInstallerUiTest {
         assertTrue(bundleSource.contains("<MsiProperty Name=\"LAUNCHER_INSTALL_FOLDER\" Value=\"[LauncherInstallFolder]\""));
         assertTrue(bundleSource.contains("Variable=\"LauncherInstallFolder\""),
                 "The setup must start from the remembered folder");
+        assertTrue(bundleSource.contains("LaunchTarget=\"[ProgramMenuFolder]MegaMek\\MegaMek Launcher.lnk\""),
+                "Launch must follow the MSI's resolved folder, not assume the default one");
+        Path wxs = RESOURCES.resolve("MegaMekLauncher.wxs");
+        assertTrue(Files.readString(wxs).contains("<Directory Id=\"LauncherMenuFolder\" Name=\"MegaMek\"/>"),
+                "The setup's Launch button targets this Start Menu folder");
         String theme = Files.readString(bundle.resolve("theme.xml"));
         assertTrue(theme.contains("<BrowseDirectoryAction VariableName=\"LauncherInstallFolder\""),
                 "Change must open the standard Windows folder dialog");
+        assertTrue(theme.contains("FontId=\"0\">#(loc.DesktopShortcutCheckbox)</Checkbox>"),
+                "The desktop checkbox keeps its caption as its accessible name");
         assertFalse(theme.contains("DirectoryList"), "The native folder dialog replaces MSI browse controls");
     }
 

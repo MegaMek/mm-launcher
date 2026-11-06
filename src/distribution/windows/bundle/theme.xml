@@ -63,8 +63,9 @@
             <Label X="312" Y="248" Width="-32" Height="18" FontId="4" DisablePrefix="yes">#(loc.InstallFolderHint)</Label>
             <Label Name="InstallVersion" X="312" Y="-112" Width="-32" Height="18" FontId="4" DisablePrefix="yes" VisibleCondition="WixStdBAShowVersion">#(loc.InstallVersion)</Label>
             <!-- Themed checkboxes ignore the font color (black text on the dark
-                 surface), so the box has no text and a label sits beside it. -->
-            <Checkbox Name="DesktopShortcutCheckbox" X="312" Y="-80" Width="16" Height="20" TabStop="yes" FontId="0" />
+                 surface), so the box is only wide enough to clip its caption and
+                 a label sits beside it. The caption stays as the accessible name. -->
+            <Checkbox Name="DesktopShortcutCheckbox" X="312" Y="-80" Width="16" Height="20" TabStop="yes" FontId="0">#(loc.DesktopShortcutCheckbox)</Checkbox>
             <Label X="336" Y="-80" Width="-32" Height="20" FontId="0" DisablePrefix="yes">#(loc.DesktopShortcutCheckbox)</Label>
             <Button Name="InstallButton" X="-32" Y="-28" Width="136" Height="38" TabStop="yes" FontId="5" HoverFontId="5" SelectedFontId="5">
                 <ButtonImage ImageFile="primary.png"/>
