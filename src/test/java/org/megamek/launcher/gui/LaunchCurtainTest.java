@@ -37,6 +37,7 @@ import org.junit.jupiter.api.Test;
 
 import javax.swing.SwingUtilities;
 import java.awt.image.BufferedImage;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -269,6 +270,39 @@ class LaunchCurtainTest {
             assertEquals(LaunchCurtain.Phase.HIDDEN, curtain.phase(), "no opening or scan on return");
             assertFalse(curtain.animating());
         });
+    }
+
+    @Test
+    void actionsWaitingForTheCurtainRunOnceTheIntroHasFinished() throws Exception {
+        List<String> ran = new java.util.concurrent.CopyOnWriteArrayList<>();
+        LaunchCurtain[] held = new LaunchCurtain[1];
+        onEdt(() -> {
+            LaunchCurtain curtain = curtain();
+            held[0] = curtain;
+            curtain.whenUncovered(() -> ran.add("hidden"));
+            assertEquals(List.of("hidden"), ran, "nothing covers the content, so it runs at once");
+
+            curtain.greet();
+            curtain.contentReady("Welcome, Commander");
+            curtain.whenUncovered(() -> ran.add("first"));
+            curtain.whenUncovered(() -> ran.add("second"));
+            advance(LaunchCurtain.GREETING_END, curtain);
+            advance(5_000, curtain);
+            assertEquals(LaunchCurtain.Phase.SHIMMER, curtain.phase());
+        });
+        onEdt(() -> {
+            assertEquals(List.of("hidden"), ran, "the greeting, opening and sweep come first");
+            advance(5_000, held[0]);
+            assertEquals(LaunchCurtain.Phase.HIDDEN, held[0].phase());
+        });
+        onEdt(() -> assertEquals(List.of("hidden", "first", "second"), ran));
+
+        onEdt(() -> {
+            held[0].closeForLaunch("MegaMek");
+            held[0].whenUncovered(() -> ran.add("disposed"));
+            held[0].removeNotify();
+        });
+        onEdt(() -> assertEquals(3, ran.size(), "a disposed frame drops what was waiting"));
     }
 
     private LaunchCurtain curtain() {

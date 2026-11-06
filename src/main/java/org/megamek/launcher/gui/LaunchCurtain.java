@@ -174,6 +174,8 @@ final class LaunchCurtain extends JComponent {
     private int snapshotHeight;
     private Point pointer;
     private Supplier<? extends Collection<? extends Component>> targetSource = List::of;
+    /** Waiting for the curtain to hide; see {@link #whenUncovered(Runnable)}. */
+    private final List<Runnable> uncovered = new ArrayList<>();
     /** Where the sweep's targets sit, and when (in sweep time) the scan locked onto each; -1 not yet. */
     private List<Rectangle> targets = List.of();
     private long[] lockedAt = new long[0];
@@ -303,6 +305,28 @@ final class LaunchCurtain extends JComponent {
     }
 
     /**
+     * Runs {@code action} once nothing covers the content, so a dialog never opens over the
+     * greeting, opening or sweep; at once when the curtain is already hidden.
+     */
+    void whenUncovered(Runnable action) {
+        if (phase == Phase.HIDDEN) {
+            action.run();
+        } else {
+            uncovered.add(action);
+        }
+    }
+
+    private void runUncovered() {
+        if (uncovered.isEmpty()) {
+            return;
+        }
+        List<Runnable> waiting = List.copyOf(uncovered);
+        uncovered.clear();
+        // After the frame that hid the curtain, and in order, so a dialog opens on a still page.
+        SwingUtilities.invokeLater(() -> waiting.forEach(Runnable::run));
+    }
+
+    /**
      * Covers the window with the background colour and waits for {@link #contentReady(String)} to
      * type the greeting and open on the content.
      */
@@ -424,6 +448,7 @@ final class LaunchCurtain extends JComponent {
         }
         setFocusable(true);
         restoreFocus();
+        runUncovered();
     }
 
     /** Stops the timer and drops the cached images and global listener, so nothing outlives the frame. */
@@ -445,6 +470,7 @@ final class LaunchCurtain extends JComponent {
     public void removeNotify() {
         // Disposing the frame mid-launch must not leave the timer ticking on it.
         release();
+        uncovered.clear();
         focusBeforeCover = null;
         super.removeNotify();
     }
