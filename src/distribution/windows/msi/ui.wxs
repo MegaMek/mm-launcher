@@ -1,0 +1,252 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
+
+  This file is part of MegaMek Launcher.
+
+  MegaMek Launcher is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License (GPL),
+  version 3 or (at your option) any later version,
+  as published by the Free Software Foundation.
+
+  MegaMek Launcher is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty
+  of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+  See the GNU General Public License for more details.
+
+  A copy of the GPL should have been included with this project;
+  if not, see <https://www.gnu.org/licenses/>.
+
+  NOTICE: The MegaMek organization is a non-profit group of volunteers
+  creating free software for the BattleTech community.
+
+  MechWarrior, BattleMech, `Mech and AeroTech are registered trademarks
+  of The Topps Company, Inc. All Rights Reserved.
+
+  Catalyst Game Labs and the Catalyst Game Labs logo are trademarks of
+  InMediaRes Productions, LLC.
+
+  MechWarrior Copyright Microsoft Corporation. MegaMek was created under
+  Microsoft's "Game Content Usage Rules"
+  <https://www.xbox.com/en-US/developers/rules> and it is not endorsed by or
+  affiliated with Microsoft.
+-->
+
+<!-- WiX v7 installer UI. No InstallDirDlg: the setup bundle offers the folder
+     choice and passes it in LAUNCHER_INSTALL_FOLDER; a direct msiexec install
+     uses the remembered folder or the per-user default. -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Fragment>
+    <Binary Id="WizardDialogArt" SourceFile="!(bindpath.Resources)wizard-dialog.bmp"/>
+    <Binary Id="WizardBannerArt" SourceFile="!(bindpath.Resources)wizard-banner.bmp"/>
+    <Property Id="LAUNCH_AFTER_INSTALL" Value="1"/>
+    <Property Id="LAUNCHER_DESKTOP_SHORTCUT" Value="1"/>
+    <!-- MegaMekLauncher.wxs owns the DesktopFolder shortcut. Its component is
+         conditional on LAUNCHER_DESKTOP_SHORTCUT; only persist the opt-out,
+         not a second shortcut. -->
+    <Property Id="LAUNCHER_DESKTOP_OPTOUT">
+      <RegistrySearch Id="PreviousDesktopOptOut" Root="HKCU"
+                      Key="Software\MegaMek\MegaMek Launcher\Installer"
+                      Name="DesktopShortcutOptOut" Type="raw"/>
+    </Property>
+    <CustomAction Id="RestoreDesktopOptOut" Property="LAUNCHER_DESKTOP_SHORTCUT"
+                  Value="{}"/>
+    <!-- Upgrades, including the launcher's silent self-update, stay in the
+         recorded folder (MegaMekLauncher.wxs reads it). Directory properties
+         stay empty until CostFinalize, so an empty INSTALLDIR here means the
+         command line did not choose a folder explicitly. -->
+    <CustomAction Id="RestoreInstallDir" Property="INSTALLDIR"
+                  Value="[LAUNCHER_PREVIOUS_INSTALLDIR]"/>
+    <!-- Built by the windowsInstallerFolderCheck Gradle task (WiX 7 DTF, C#).
+         Turns LAUNCHER_INSTALL_FOLDER into INSTALLDIR (always a dedicated
+         "MegaMek Launcher" folder) or fails setup before anything changes when
+         uninstall could not safely delete that folder. -->
+    <Binary Id="LauncherFolderCA" SourceFile="$(LauncherFolderCheck)"/>
+    <CustomAction Id="ResolveInstallFolder" BinaryRef="LauncherFolderCA"
+                  DllEntry="ResolveInstallFolder" Execute="immediate" Return="check"/>
+    <ComponentGroup Id="LauncherUiState" Directory="INSTALLDIR">
+      <Component Id="DesktopOptOutPreference" Guid="8B67C1E0-7B4B-4DC3-95D0-F19EBA63BB36"
+                 Condition="NOT LAUNCHER_DESKTOP_SHORTCUT">
+        <RegistryValue Root="HKCU" Key="Software\MegaMek\MegaMek Launcher\Installer"
+                       Name="DesktopShortcutOptOut" Type="string" Value="1" KeyPath="yes"/>
+      </Component>
+      <!-- Remove only the empty installer-owned Programs directory; never its
+           contents or the containing LocalAppDataFolder. -->
+      <Component Id="LauncherProgramsFolderCleanup" Directory="LauncherProgramsFolder"
+                 Guid="B65FBBC1-16ED-4FA8-8B83-83DAED6597B1">
+        <RegistryValue Root="HKCU" Key="Software\MegaMek\MegaMek Launcher\Installer"
+                       Name="ProgramsFolderOwned" Type="integer" Value="1" KeyPath="yes"/>
+        <RemoveFolder Id="RemoveEmptyLauncherProgramsFolder" On="uninstall"/>
+      </Component>
+    </ComponentGroup>
+    <FeatureRef Id="Launcher">
+      <ComponentGroupRef Id="LauncherUiState"/>
+    </FeatureRef>
+    <InstallExecuteSequence>
+      <Custom Action="RestoreInstallDir" After="AppSearch"
+              Condition="LAUNCHER_PREVIOUS_INSTALLDIR AND NOT INSTALLDIR AND NOT Installed"/>
+      <!-- Before RemoveExistingProducts, so a rejected folder leaves the
+           current installation untouched. -->
+      <Custom Action="ResolveInstallFolder" After="RestoreInstallDir"
+              Condition="LAUNCHER_INSTALL_FOLDER AND NOT Installed AND NOT REMOVE"/>
+      <!-- AppSearch precedes the early RemoveExistingProducts (before CostInitialize).
+           UI choice wins in interactive installs; silent upgrades read the old marker.
+           The setup bundle seeds its checkbox from the same marker and passes
+           LAUNCHER_DESKTOP_CHOSEN, so its (possibly re-checked) choice also wins. -->
+      <Custom Action="RestoreDesktopOptOut" After="AppSearch"
+              Condition="LAUNCHER_DESKTOP_OPTOUT = 1 AND UILevel &lt; 5 AND NOT Installed AND NOT LAUNCHER_DESKTOP_CHOSEN"/>
+    </InstallExecuteSequence>
+    <CustomAction Id="SetLauncherTarget" Property="WixShellExecTarget"
+                  Value="[INSTALLDIR]MegaMek Launcher.exe"/>
+    <CustomAction Id="LaunchMegaMekLauncher" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)"
+                  DllEntry="WixShellExec" Impersonate="yes" Return="ignore"/>
+    <UI Id="LauncherUI">
+      <TextStyle Id="LauncherFont" FaceName="Segoe UI" Size="9"/>
+      <Property Id="DefaultUIFont" Value="LauncherFont"/>
+      <Property Id="ErrorDialog" Value="LauncherError"/>
+      <!-- Windows Installer invokes these two dialogs outside the wizard flow. -->
+      <!-- Native error-dialog style lets Windows Installer supply the message,
+           select and position its response buttons, and use system error sounds. -->
+      <Dialog Id="LauncherError" Width="370" Height="270" Title="MegaMek Launcher Setup"
+              ErrorDialog="yes">
+        <Control Id="ErrorText" Type="Text" X="20" Y="55" Width="330" Height="130"
+                 TabSkip="no" NoPrefix="yes" Text="[ErrorText]"/>
+        <Control Id="A" Type="PushButton" X="150" Y="243" Width="70" Height="18"
+                 TabSkip="yes" Text="Abort">
+          <Publish Event="EndDialog" Value="ErrorAbort"/>
+        </Control>
+        <Control Id="C" Type="PushButton" X="150" Y="243" Width="70" Height="18"
+                 TabSkip="yes" Text="Cancel">
+          <Publish Event="EndDialog" Value="ErrorCancel"/>
+        </Control>
+        <Control Id="I" Type="PushButton" X="150" Y="243" Width="70" Height="18"
+                 TabSkip="yes" Text="Ignore">
+          <Publish Event="EndDialog" Value="ErrorIgnore"/>
+        </Control>
+        <Control Id="N" Type="PushButton" X="150" Y="243" Width="70" Height="18"
+                 TabSkip="yes" Text="No">
+          <Publish Event="EndDialog" Value="ErrorNo"/>
+        </Control>
+        <Control Id="O" Type="PushButton" X="150" Y="243" Width="70" Height="18"
+                 TabSkip="yes" Text="OK">
+          <Publish Event="EndDialog" Value="ErrorOk"/>
+        </Control>
+        <Control Id="R" Type="PushButton" X="150" Y="243" Width="70" Height="18"
+                 TabSkip="yes" Text="Retry">
+          <Publish Event="EndDialog" Value="ErrorRetry"/>
+        </Control>
+        <Control Id="Y" Type="PushButton" X="150" Y="243" Width="70" Height="18"
+                 TabSkip="yes" Text="Yes">
+          <Publish Event="EndDialog" Value="ErrorYes"/>
+        </Control>
+      </Dialog>
+      <Dialog Id="FilesInUse" Width="370" Height="270" Title="Files in Use"
+              KeepModeless="yes">
+        <Control Id="Message" Type="Text" X="20" Y="32" Width="330" Height="38"
+                 Text="Close these applications to continue installing MegaMek Launcher:"/>
+        <Control Id="Processes" Type="ListBox" X="20" Y="77" Width="330" Height="116"
+                 Property="FileInUseProcess"/>
+        <Control Id="Retry" Type="PushButton" X="134" Y="243" Width="64" Height="18"
+                 Default="yes" Text="Retry">
+          <Publish Event="EndDialog" Value="Retry"/>
+        </Control>
+        <Control Id="Ignore" Type="PushButton" X="205" Y="243" Width="64" Height="18"
+                 Text="Ignore">
+          <Publish Event="EndDialog" Value="Ignore"/>
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="276" Y="243" Width="84" Height="18"
+                 Cancel="yes" Text="Cancel setup">
+          <Publish Event="EndDialog" Value="Exit"/>
+        </Control>
+      </Dialog>
+      <Dialog Id="LauncherWelcome" Width="370" Height="270" Title="MegaMek Launcher Setup">
+        <!-- Artwork occupies only the left strip; the controls sit directly on
+             the native light dialog surface, not on a baked image panel. -->
+        <Control Id="Art" Type="Bitmap" X="0" Y="0" Width="180" Height="234"
+                 Text="WizardDialogArt"/>
+        <Control Id="Detail" Type="Text" X="190" Y="46" Width="165" Height="130"
+                 Text="Install MegaMek Launcher for this user in:&#10;&#10;[INSTALLDIR]"/>
+        <Control Id="DesktopShortcut" Type="CheckBox" X="190" Y="180" Width="165" Height="20"
+                 Property="LAUNCHER_DESKTOP_SHORTCUT" CheckBoxValue="1"
+                 Text="Create a desktop shortcut"/>
+        <Control Id="Install" Type="PushButton" X="228" Y="243" Width="66" Height="18"
+                 Default="yes" Text="Install">
+          <Publish Event="EndDialog" Value="Return"/>
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="18"
+                 Cancel="yes" Text="Cancel">
+          <Publish Event="EndDialog" Value="Exit"/>
+        </Control>
+      </Dialog>
+      <!-- A Show action before ExecuteAction MUST be modeless: a modal dialog
+           without EndDialog blocks the UI sequence and never installs files. -->
+      <Dialog Id="LauncherProgress" Width="370" Height="270" Modeless="yes"
+              Title="Installing MegaMek Launcher">
+        <Control Id="Banner" Type="Bitmap" X="0" Y="0" Width="370" Height="44"
+                 Text="WizardBannerArt"/>
+        <Control Id="Title" Type="Text" X="15" Y="56" Width="335" Height="24" TabSkip="no"
+                 Text="Installing MegaMek Launcher"/>
+        <!-- The MSI has no ActionText table. Subscribing to the Windows
+             Installer fallback messages can display raw tokens such as
+             "Files [9]" on localized systems. Keep the label static; the
+             independent progress-bar subscription still reports progress. -->
+        <Control Id="StatusText" Type="Text" X="15" Y="97" Width="335" Height="22"
+                 Text="Setting up MegaMek Launcher..."/>
+        <Control Id="ProgressBar" Type="ProgressBar" X="15" Y="126" Width="335" Height="15"
+                 ProgressBlocks="yes" Text="Progress">
+          <Subscribe Event="SetProgress" Attribute="Progress"/>
+        </Control>
+      </Dialog>
+      <Dialog Id="Exit" Width="370" Height="270" Title="MegaMek Launcher Setup Complete">
+        <Control Id="Art" Type="Bitmap" X="0" Y="0" Width="180" Height="234"
+                 Text="WizardDialogArt"/>
+        <Control Id="Title" Type="Text" X="190" Y="46" Width="165" Height="65"
+                 Text="MegaMek Launcher is installed."/>
+        <Control Id="Launch" Type="CheckBox" X="190" Y="148" Width="165" Height="20"
+                 Property="LAUNCH_AFTER_INSTALL" CheckBoxValue="1"
+                 Text="Launch MegaMek Launcher"/>
+        <Control Id="Finish" Type="PushButton" X="296" Y="243" Width="64" Height="18"
+                 Default="yes" Text="Finish">
+          <Publish Event="DoAction" Value="SetLauncherTarget" Order="1"
+                   Condition="LAUNCH_AFTER_INSTALL = 1 AND UILevel = 5 AND NOT REMOVE"/>
+          <Publish Event="DoAction" Value="LaunchMegaMekLauncher" Order="2"
+                   Condition="LAUNCH_AFTER_INSTALL = 1 AND UILevel = 5 AND NOT REMOVE"/>
+          <Publish Event="EndDialog" Value="Return" Order="3"/>
+        </Control>
+      </Dialog>
+      <Dialog Id="FatalError" Width="370" Height="270" Title="MegaMek Launcher Setup">
+        <Control Id="Message" Type="Text" X="20" Y="50" Width="330" Height="90"
+                 Text="Setup could not finish. No launcher was started."/>
+        <Control Id="Close" Type="PushButton" X="296" Y="243" Width="64" Height="18"
+                 Default="yes" Text="Close">
+          <Publish Event="EndDialog" Value="Return"/>
+        </Control>
+      </Dialog>
+      <Dialog Id="UserExit" Width="370" Height="270" Title="MegaMek Launcher Setup">
+        <Control Id="Message" Type="Text" X="20" Y="50" Width="330" Height="90"
+                 Text="Setup was cancelled. No launcher was started."/>
+        <Control Id="Close" Type="PushButton" X="296" Y="243" Width="64" Height="18"
+                 Default="yes" Text="Close">
+          <Publish Event="EndDialog" Value="Return"/>
+        </Control>
+      </Dialog>
+      <InstallUISequence>
+        <Custom Action="RestoreInstallDir" After="AppSearch"
+                Condition="LAUNCHER_PREVIOUS_INSTALLDIR AND NOT INSTALLDIR AND NOT Installed"/>
+        <Custom Action="RestoreDesktopOptOut" After="AppSearch"
+                Condition="LAUNCHER_DESKTOP_OPTOUT = 1 AND NOT Installed"/>
+        <Show Dialog="LauncherWelcome" Before="LauncherProgress" Condition="NOT Installed"/>
+        <Show Dialog="LauncherProgress" Before="ExecuteAction" Condition="NOT Installed"/>
+        <Show Dialog="Exit" OnExit="success" Condition="NOT REMOVE"/>
+        <Show Dialog="FatalError" OnExit="error"/>
+        <Show Dialog="UserExit" OnExit="cancel"/>
+      </InstallUISequence>
+      <AdminUISequence>
+        <Show Dialog="Exit" OnExit="success"/>
+        <Show Dialog="FatalError" OnExit="error"/>
+        <Show Dialog="UserExit" OnExit="cancel"/>
+      </AdminUISequence>
+    </UI>
+  </Fragment>
+</Wix>
+
