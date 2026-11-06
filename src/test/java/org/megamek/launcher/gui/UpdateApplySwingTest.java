@@ -367,14 +367,14 @@ class UpdateApplySwingTest {
                 OperationProgressDialog dialog = new OperationProgressDialog(frame,
                         "Preparing update", "applyUpdateProgressLog", () -> {});
                 dialog.setVisible(true);
-                dialog.setTitleIfCurrent("Preparing update", "Applying verified update");
-                assertEquals("Applying verified update", dialog.getTitle());
-                dialog.setTitle("Update failed — recovery may be required");
-                dialog.setTitleIfCurrent("Preparing update", "Applying verified update");
-                assertEquals("Update failed — recovery may be required", dialog.getTitle());
+                dialog.setHeadingIfCurrent("Preparing update", "Applying verified update");
+                assertEquals("Applying verified update", dialog.getAccessibleContext().getAccessibleName());
+                dialog.setHeading("Update failed — recovery may be required");
+                dialog.setHeadingIfCurrent("Preparing update", "Applying verified update");
+                assertEquals("Update failed — recovery may be required", dialog.getAccessibleContext().getAccessibleName());
                 dialog.showFailure(new IOException("simulated apply failure"));
-                dialog.setTitleIfCurrent("Preparing update", "Applying verified update");
-                assertEquals("Update failed — recovery may be required", dialog.getTitle());
+                dialog.setHeadingIfCurrent("Preparing update", "Applying verified update");
+                assertEquals("Update failed — recovery may be required", dialog.getAccessibleContext().getAccessibleName());
                 dialog.dispose();
                 return null;
             });
@@ -409,7 +409,7 @@ class UpdateApplySwingTest {
                 }
                 return null;
             }, Duration.ofSeconds(60));
-            assertEquals("Update failed — recovery may be required", failed.getTitle());
+            assertEquals("Update failed — recovery may be required", failed.getAccessibleContext().getAccessibleName());
             assertNotNull(find(failed, "operationViewDetailsButton"));
             waitForReloadedCards(frame, cardsBeforeUpdate);
             assertNull(find(frame, "recoverUpdateButton"),

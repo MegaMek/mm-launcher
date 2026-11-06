@@ -72,6 +72,7 @@ final class SubfolderDialog extends JDialog {
         setName("subfolderDialog");
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         getAccessibleContext().setAccessibleName("Choose install folder");
+        LauncherTheme.useLauncherTitle(this);
         getAccessibleContext().setAccessibleDescription(
                 "Enter one safe new folder name inside the selected parent folder.");
 

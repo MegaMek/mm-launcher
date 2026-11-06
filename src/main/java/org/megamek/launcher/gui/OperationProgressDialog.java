@@ -89,6 +89,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
     private static final int DETAIL_LIMIT = 90;
 
     private final GuiScale scale = GuiScale.DEFAULT;
+    private final JLabel operationName = new JLabel();
     private final JLabel phase = new JLabel("Getting ready");
     private final JLabel detail = new JLabel("Preparing the operation…");
     private final JLabel loggingWarning = new JLabel();
@@ -119,13 +120,21 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
     private boolean failureShown;
     private boolean nonCancellableFromStart;
     private boolean repairProgress;
+    private String heading;
 
     OperationProgressDialog(LauncherFrame owner, String title, String logName,
                             Runnable showLogs) {
-        super(owner, title, false);
+        super(owner, LauncherTheme.DIALOG_TITLE, false);
         this.owner = owner;
         this.showLogs = showLogs;
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+
+        // The title bar names the launcher; the operation's name is this small line above the step.
+        operationName.setName("operationNameLabel");
+        operationName.setForeground(MUTED);
+        operationName.setFont(scale.font(operationName.getFont(), "label"));
+        operationName.setAlignmentX(LEFT_ALIGNMENT);
+        setHeading(title);
 
         phase.setName("operationPhaseLabel");
         phase.setForeground(ACCENT);
@@ -183,6 +192,8 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         header.add(phase, BorderLayout.CENTER);
         header.add(headerControls, BorderLayout.LINE_END);
         header.setMaximumSize(new Dimension(Integer.MAX_VALUE, header.getPreferredSize().height));
+        summary.add(operationName);
+        summary.add(Box.createVerticalStrut(scale.space("xs")));
         summary.add(header);
         summary.add(beforeProgress);
         summary.add(progress);
@@ -217,7 +228,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
             if (failure == null) {
                 this.showLogs.run();
             } else {
-                owner.showOperationFailureDetails(getTitle() + " details", failure);
+                owner.showOperationFailureDetails(heading + " details", failure);
             }
         });
         addWindowListener(new WindowAdapter() {
@@ -291,9 +302,20 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         failureSummary = message;
     }
 
-    void setTitleIfCurrent(String current, String next) {
-        if (isDisplayable() && !finished && current.equals(getTitle())) {
-            setTitle(next);
+    /** The operation's name: shown above the current step, then as the result's heading. */
+    String heading() {
+        return heading;
+    }
+
+    void setHeading(String next) {
+        heading = next;
+        operationName.setText(next);
+        getAccessibleContext().setAccessibleName(next);
+    }
+
+    void setHeadingIfCurrent(String current, String next) {
+        if (isDisplayable() && !finished && current.equals(heading)) {
+            setHeading(next);
         }
     }
 
@@ -312,8 +334,8 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         progress.setVisible(false);
         beforeProgress.setVisible(false);
         afterProgress.setVisible(false);
-        phase.setText(getTitle() == null || getTitle().isBlank()
-                ? "Operation failed" : getTitle());
+        operationName.setVisible(false);
+        phase.setText(heading == null || heading.isBlank() ? "Operation failed" : heading);
         detail.setBorder(BorderFactory.createEmptyBorder(
                 scale.space("md"), 0, 0, 0));
         String summary = failureSummary != null
@@ -355,7 +377,8 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         finished = true;
         pending.set(null);
         updateTimer.stop();
-        setTitle(heading);
+        setHeading(heading);
+        operationName.setVisible(false);
         progress.setVisible(false);
         beforeProgress.setVisible(false);
         afterProgress.setVisible(false);

@@ -210,7 +210,8 @@ class ExistingImportSwingTest {
             JDialog dialog = waitFor(() -> findDialog(frame, "adoptionResultDialog"));
             JLabel heading = (JLabel) find(dialog, "adoptionResultHeading");
             JLabel message = (JLabel) find(dialog, "adoptionResultMessage");
-            assertEquals("Updates can't be enabled", dialog.getTitle());
+            assertEquals("Updates can't be enabled", dialog.getAccessibleContext().getAccessibleName());
+            assertEquals(LauncherTheme.DIALOG_TITLE, dialog.getTitle(), "the heading is not repeated");
             assertEquals("Updates can't be enabled", heading.getText());
             assertEquals(FirstLaunchPanel.ACCENT, heading.getForeground());
             assertEquals(java.awt.Font.PLAIN, message.getFont().getStyle());
@@ -699,7 +700,7 @@ class ExistingImportSwingTest {
             JLabel heading = (JLabel) find(mismatch, "adoptionResultHeading");
             JLabel message = (JLabel) find(mismatch, "adoptionResultMessage");
             JButton retry = (JButton) find(mismatch, "retrySuggestedAdoptionButton");
-            assertEquals("Use Core for this installation", mismatch.getTitle());
+            assertEquals("Use Core for this installation", mismatch.getAccessibleContext().getAccessibleName());
             assertEquals("Use Core for this installation", heading.getText());
             assertEquals(FirstLaunchPanel.ACCENT, heading.getForeground());
             assertEquals(java.awt.Font.PLAIN, message.getFont().getStyle());
@@ -1143,7 +1144,7 @@ class ExistingImportSwingTest {
     private static boolean hasShowingDialog(LauncherFrame frame, String title) {
         for (java.awt.Window window : frame.getOwnedWindows()) {
             if (window instanceof javax.swing.JDialog dialog && dialog.isShowing()
-                    && title.equals(dialog.getTitle())) return true;
+                    && title.equals(dialog.getAccessibleContext().getAccessibleName())) return true;
         }
         return false;
     }

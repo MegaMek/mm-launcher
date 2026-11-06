@@ -548,7 +548,7 @@ class LauncherSwingSmokeTest {
                 frame.setVisible(true);
                 frame.downloadDialog();
             });
-            JDialog dialog = owned(frame, "Download an official release");
+            JDialog dialog = owned(frame, "Install another version");
             JButton previous = find(dialog, "previousReleasePageButton");
             JButton next = find(dialog, "nextReleasePageButton");
             JButton fetch = find(dialog, "fetchReleasesButton");
@@ -601,7 +601,7 @@ class LauncherSwingSmokeTest {
                 frame.setVisible(true);
                 frame.downloadDialog();
             });
-            JDialog dialog = owned(frame, "Download an official release");
+            JDialog dialog = owned(frame, "Install another version");
             JComboBox<?> product = findCombo(dialog, "downloadProductCombo");
             JComboBox<?> channel = findCombo(dialog, "downloadChannelCombo");
             assertTrue(product instanceof StyledComboBox<?>);
@@ -705,7 +705,7 @@ class LauncherSwingSmokeTest {
                 frame.setVisible(true);
                 frame.downloadDialog();
             });
-            JDialog dialog = owned(frame, "Download an official release");
+            JDialog dialog = owned(frame, "Install another version");
             JButton fetch = find(dialog, "fetchReleasesButton");
             JComboBox<?> product = findCombo(dialog, "downloadProductCombo");
             SwingTestSupport.startClick(dialog, "fetchReleasesButton");
@@ -1101,7 +1101,7 @@ class LauncherSwingSmokeTest {
         JButton download = onEdt(() -> find(frame, "installAnotherVersionButton"));
         assertNotNull(download);
         SwingUtilities.invokeAndWait(download::doClick);
-        JDialog picker = owned(frame, "Download an official release");
+        JDialog picker = owned(frame, "Install another version");
         assertTrue(onEdt(picker::isVisible));
         JButton fetch = onEdt(() -> find(picker, "fetchReleasesButton"));
         assertNotNull(fetch);
@@ -1215,7 +1215,7 @@ class LauncherSwingSmokeTest {
         SwingUtilities.invokeAndWait(() -> {
             for (java.awt.Window window : frame.getOwnedWindows()) {
                 if (window instanceof JDialog dialog && dialog.isShowing()
-                        && title.equals(dialog.getTitle())) {
+                        && title.equals(dialog.getAccessibleContext().getAccessibleName())) {
                     result[0] = true;
                 }
             }
@@ -1240,7 +1240,7 @@ class LauncherSwingSmokeTest {
     private static void closeOwned(LauncherFrame frame, String title) throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             for (java.awt.Window window : frame.getOwnedWindows()) {
-                if (window instanceof JDialog dialog && title.equals(dialog.getTitle())) {
+                if (window instanceof JDialog dialog && title.equals(dialog.getAccessibleContext().getAccessibleName())) {
                     dialog.dispose();
                 }
             }

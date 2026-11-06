@@ -72,6 +72,7 @@ final class LauncherErrorDialog extends JDialog {
         setName("launcherErrorDialog");
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         getAccessibleContext().setAccessibleName(title);
+        LauncherTheme.useLauncherTitle(this);
         getAccessibleContext().setAccessibleDescription(details);
 
         Font base = UIManager.getFont("Label.font");

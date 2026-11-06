@@ -71,6 +71,7 @@ final class LauncherAlertDialog extends JDialog {
         setName("launcherAlertDialog");
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         getAccessibleContext().setAccessibleName(title);
+        LauncherTheme.useLauncherTitle(this);
         getAccessibleContext().setAccessibleDescription(message);
 
         Font base = UIManager.getFont("Label.font");

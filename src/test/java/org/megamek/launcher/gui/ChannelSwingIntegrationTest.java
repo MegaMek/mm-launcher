@@ -145,7 +145,7 @@ class ChannelSwingIntegrationTest {
                     () -> find(frame, "manageInstallationsButton").doClick());
             JButton addRelease = waitFor(() -> find(frame, "installAnotherVersionButton"));
             SwingUtilities.invokeAndWait(addRelease::doClick);
-            JDialog download = waitForDialog(frame, "Download an official release");
+            JDialog download = waitForDialog(frame, "Install another version");
             JComboBox<?> freshChannel = findCombo(download, "downloadChannelCombo");
             assertNotNull(freshChannel);
             assertEquals(FollowChannel.CORE, onEdt(freshChannel::getSelectedItem),

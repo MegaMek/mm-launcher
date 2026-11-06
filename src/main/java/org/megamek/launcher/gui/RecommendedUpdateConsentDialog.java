@@ -73,6 +73,7 @@ final class RecommendedUpdateConsentDialog extends JDialog {
         setName("recommendedUpdateConsentDialog");
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         getAccessibleContext().setAccessibleName(getTitle());
+        LauncherTheme.useLauncherTitle(this);
         getAccessibleContext().setAccessibleDescription(
                 "Confirm downloading and installing the displayed update.");
 

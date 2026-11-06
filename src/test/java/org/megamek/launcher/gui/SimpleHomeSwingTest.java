@@ -554,7 +554,7 @@ class SimpleHomeSwingTest {
             JButton exactPicker = waitButton(frame, "installAnotherVersionButton");
             assertNotNull(exactPicker);
             SwingUtilities.invokeAndWait(exactPicker::doClick);
-            JDialog picker = waitDialog(frame, "Download an official release");
+            JDialog picker = waitDialog(frame, "Install another version");
             assertEquals(0, services.releaseFetches.get(),
                     "the deferred picker waits for an explicit fetch or browse action");
             saveReviewImage("release-picker.png", picker);
@@ -2257,7 +2257,7 @@ class SimpleHomeSwingTest {
         SwingUtilities.invokeAndWait(() -> {
             for (java.awt.Window window : frame.getOwnedWindows()) {
                 if (window instanceof JDialog dialog && dialog.isShowing()
-                        && title.equals(dialog.getTitle())) {
+                        && title.equals(dialog.getAccessibleContext().getAccessibleName())) {
                     showing[0] = true;
                 }
             }
@@ -2283,7 +2283,7 @@ class SimpleHomeSwingTest {
         String product = display(repository);
         String releaseLabel =
             VersionDisplay.installLatest(product, channel.toString(), version);
-        assertEquals(releaseLabel, dialog.getTitle());
+        assertEquals(releaseLabel, dialog.getAccessibleContext().getAccessibleName());
         assertEquals(releaseLabel,
             ((JLabel) find(dialog, "normalInstallHeading")).getText());
         assertNull(find(dialog, "normalInstallVersion"));

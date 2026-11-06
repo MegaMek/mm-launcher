@@ -210,7 +210,7 @@ final class SwingTestSupport {
     static JDialog showingDialog(Window owner, String title) {
         for (Window child : owner.getOwnedWindows()) {
             if (child instanceof JDialog dialog && dialog.isShowing()
-                    && title.equals(dialog.getTitle())) return dialog;
+                    && title.equals(dialog.getAccessibleContext().getAccessibleName())) return dialog;
             JDialog nested = showingDialog(child, title);
             if (nested != null) return nested;
         }
