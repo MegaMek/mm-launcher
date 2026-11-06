@@ -43,12 +43,16 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.Rectangle;
 
-/** A design-token command button: a cream primary face or a raised secondary face. */
+/**
+ * A design-token command button: a cream primary face, a raised secondary face, or a secondary face
+ * with a danger edge and text for a destructive action.
+ */
 final class FirstLaunchButton extends JButton {
     enum Size { REGULAR, SMALL, COMPACT }
 
     private final GuiScale scale;
     private final boolean primary;
+    private final boolean danger;
     private final Size size;
 
     FirstLaunchButton(String text, String name, boolean primary, GuiScale scale) {
@@ -56,9 +60,20 @@ final class FirstLaunchButton extends JButton {
     }
 
     FirstLaunchButton(String text, String name, boolean primary, GuiScale scale, Size size) {
+        this(text, name, primary, false, scale, size);
+    }
+
+    /** A destructive action's button, for a dialog's {@link DialogFooter#danger danger} action. */
+    static FirstLaunchButton danger(String text, String name, GuiScale scale, Size size) {
+        return new FirstLaunchButton(text, name, false, true, scale, size);
+    }
+
+    private FirstLaunchButton(String text, String name, boolean primary, boolean danger, GuiScale scale,
+                              Size size) {
         super(text);
         this.scale = scale;
         this.primary = primary;
+        this.danger = danger;
         this.size = size;
         setName(name);
         getAccessibleContext().setAccessibleName(text);
@@ -83,7 +98,8 @@ final class FirstLaunchButton extends JButton {
                 Graphics2D text = (Graphics2D) graphics.create();
                 try {
                     ButtonDetail.paint(text, FirstLaunchButton.this, scale, textRectangle, value,
-                            LauncherTheme.buttonText(primary, isEnabled()));
+                            danger ? LauncherTheme.dangerButtonText(isEnabled())
+                                    : LauncherTheme.buttonText(primary, isEnabled()));
                 } finally {
                     text.dispose();
                 }
@@ -104,8 +120,14 @@ final class FirstLaunchButton extends JButton {
     protected void paintComponent(Graphics graphics) {
         Graphics2D canvas = (Graphics2D) graphics.create();
         try {
-            LauncherTheme.paintButton(canvas, getWidth(), getHeight(), scale, primary, isEnabled(),
-                    getModel().isPressed() && getModel().isArmed(), getModel().isRollover(), isFocusOwner());
+            boolean pressed = getModel().isPressed() && getModel().isArmed();
+            if (danger) {
+                LauncherTheme.paintDangerButton(canvas, getWidth(), getHeight(), scale, isEnabled(),
+                        pressed, getModel().isRollover(), isFocusOwner());
+            } else {
+                LauncherTheme.paintButton(canvas, getWidth(), getHeight(), scale, primary, isEnabled(),
+                        pressed, getModel().isRollover(), isFocusOwner());
+            }
         } finally {
             canvas.dispose();
         }

@@ -217,20 +217,16 @@ final class BugReportDialog extends JDialog {
                 FirstLaunchButton.Size.SMALL);
         closeButton.addActionListener(event -> close.run());
 
-        JPanel footer = new JPanel();
-        footer.setName("bugReportActions");
-        footer.setOpaque(false);
-        footer.setLayout(new BoxLayout(footer, BoxLayout.X_AXIS));
-        footer.add(discord);
-        footer.add(Box.createHorizontalGlue());
-        footer.add(closeButton);
+        DialogFooter footer = new DialogFooter(scale).tool(discord).cancel(closeButton);
+        JPanel footerPanel = footer.panel();
+        footerPanel.setName("bugReportActions");
 
         JPanel panel = new JPanel(new BorderLayout(0, scale.space("xl")));
         panel.setName("bugReportContent");
         panel.setBackground(FirstLaunchPanel.BACKGROUND);
         panel.setBorder(scale.padding("xxl", "xxl"));
         panel.add(fields, BorderLayout.CENTER);
-        panel.add(footer, BorderLayout.SOUTH);
+        panel.add(footerPanel, BorderLayout.SOUTH);
         return new Content(panel, save, open, closeButton, status);
     }
 

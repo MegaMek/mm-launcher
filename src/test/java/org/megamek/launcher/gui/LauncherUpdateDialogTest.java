@@ -70,7 +70,7 @@ class LauncherUpdateDialogTest {
                         body.getText().replaceAll("<[^>]*>", " ").replaceAll("\\s+", " ").trim());
                 return null;
             });
-            SwingTestSupport.click(dialog, accept ? "launcherAlertButton1" : "launcherAlertButton0");
+            SwingTestSupport.click(dialog, accept ? "launcherAlertButton0" : "launcherAlertButton1");
             assertEquals(accept, answer.get(8, TimeUnit.SECONDS));
             SwingTestSupport.awaitCondition("confirmation dismissed",
                     () -> SwingTestSupport.showingWindow(owner, LauncherAlertDialog.class) == null);

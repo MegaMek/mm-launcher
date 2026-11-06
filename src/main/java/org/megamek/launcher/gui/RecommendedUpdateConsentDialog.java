@@ -33,16 +33,13 @@
 
 package org.megamek.launcher.gui;
 
-import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
-import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.WindowConstants;
@@ -53,7 +50,6 @@ import java.awt.Font;
 import java.awt.Frame;
 import java.awt.GraphicsConfiguration;
 import java.awt.Rectangle;
-import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
@@ -61,7 +57,6 @@ import java.util.Objects;
 
 /** Styled consent for the complete captured recommended-update operation. */
 final class RecommendedUpdateConsentDialog extends JDialog {
-    private static final String CANCEL_ACTION = "cancelRecommendedUpdate";
 
     private final GuiScale scale;
     private final JButton update;
@@ -127,14 +122,9 @@ final class RecommendedUpdateConsentDialog extends JDialog {
         update.getAccessibleContext().setAccessibleDescription(
                 "Download and install the displayed update.");
 
-        JPanel actions = new JPanel();
+        DialogFooter footer = new DialogFooter(scale).primary(update).cancel(cancel);
+        JPanel actions = footer.panel();
         actions.setName("recommendedUpdateConsentActions");
-        actions.setOpaque(false);
-        actions.setLayout(new BoxLayout(actions, BoxLayout.X_AXIS));
-        actions.add(Box.createHorizontalGlue());
-        actions.add(cancel);
-        actions.add(Box.createHorizontalStrut(scale.space("md")));
-        actions.add(update);
 
         JPanel content = new JPanel(new BorderLayout(0, scale.space("xl")));
         content.setName("recommendedUpdateConsentContent");
@@ -146,15 +136,7 @@ final class RecommendedUpdateConsentDialog extends JDialog {
 
         cancel.addActionListener(event -> cancel());
         update.addActionListener(event -> approve());
-        getRootPane().setDefaultButton(update);
-        getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(
-                KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), CANCEL_ACTION);
-        getRootPane().getActionMap().put(CANCEL_ACTION, new AbstractAction() {
-            @Override
-            public void actionPerformed(ActionEvent event) {
-                cancel();
-            }
-        });
+        footer.install(this, this::cancel);
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowOpened(WindowEvent event) {

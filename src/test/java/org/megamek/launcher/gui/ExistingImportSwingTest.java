@@ -529,14 +529,14 @@ class ExistingImportSwingTest {
                 assertEquals("MegaMek (0.51.7)", application.getText());
                 assertEquals(org.megamek.launcher.channel.FollowChannel.CORE,
                         channel.getSelectedItem());
-                assertTrue(cancel.getX() < proceed.getX());
+                assertTrue(proceed.getX() < cancel.getX(), "the main action comes first");
                 assertTrue(dialog.getHeight() < dialog.getWidth(), "dialog remains compact");
                 assertNull(find(dialog, "chooseAdoptionReleaseButton"));
                 assertNull(find(dialog, "verifyAdoptionButton"));
                 assertEquals(0, countButtonText(dialog, "Verify copy"));
                 assertEquals(0, countButtonText(dialog, "Choose official release…"));
                 onEdt(() -> {
-                    dialog.getRootPane().getActionMap().get("cancelAdoption").actionPerformed(
+                    dialog.getRootPane().getActionMap().get(DialogFooter.ESCAPE_ACTION).actionPerformed(
                             new java.awt.event.ActionEvent(dialog, 0, "escape"));
                     return null;
                 });

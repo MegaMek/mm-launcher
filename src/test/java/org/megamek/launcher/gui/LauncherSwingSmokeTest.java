@@ -179,7 +179,7 @@ class LauncherSwingSmokeTest {
         SubfolderDialog escaped = onEdt(() ->
                 new SubfolderDialog(null, "MekHQ Core (0.51.0)", GuiScale.DEFAULT));
         SwingUtilities.invokeAndWait(() -> escaped.getRootPane().getActionMap()
-                .get("cancelSubfolder").actionPerformed(
+                .get(DialogFooter.ESCAPE_ACTION).actionPerformed(
                         new java.awt.event.ActionEvent(escaped, 0, "escape")));
         assertEquals(null, escaped.result());
     }
@@ -661,13 +661,15 @@ class LauncherSwingSmokeTest {
             JButton destination = find(dialog, "installReleaseButton");
             assertEquals(previous.getParent(), indicator.getParent());
             assertEquals(previous.getParent(), next.getParent());
-            assertEquals(previous.getParent(), destination.getParent());
             assertTrue(previous.getParent().getComponentZOrder(previous)
                     < previous.getParent().getComponentZOrder(indicator));
             assertTrue(previous.getParent().getComponentZOrder(indicator)
                     < previous.getParent().getComponentZOrder(next));
-            assertTrue(previous.getParent().getComponentZOrder(next)
-                    < previous.getParent().getComponentZOrder(destination));
+            JButton cancelPicker = find(dialog, "cancelReleasePickerButton");
+            assertEquals("releasePickerActions", destination.getParent().getName());
+            assertEquals(destination.getParent(), cancelPicker.getParent());
+            assertTrue(destination.getX() < cancelPicker.getX(), "Install leads the dialog footer");
+            assertEquals(destination, dialog.getRootPane().getDefaultButton());
             SwingUtilities.invokeAndWait(() -> list.setSelectedIndex(2));
             assertFalse(find(dialog, "installReleaseButton").isEnabled(),
                     "an unavailable row cannot enable destination selection");

@@ -128,6 +128,24 @@ final class LauncherTheme {
         }
     }
 
+    /** A destructive action: the secondary face with a danger edge, to go with {@link #dangerButtonText}. */
+    static void paintDangerButton(Graphics2D graphics, int width, int height, GuiScale scale,
+                                  boolean enabled, boolean pressed, boolean hovered, boolean focused) {
+        Color background = !enabled ? DISABLED_BACKGROUND
+                : pressed ? PRESSED_BACKGROUND : hovered ? ACTIVE_BACKGROUND : BUTTON_BACKGROUND;
+        graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        graphics.setPaint(background);
+        graphics.fill(shape(width, height, scale, 0));
+        paintOutline(graphics, width, height, scale, enabled ? DANGER : BORDER);
+        if (focused && enabled) {
+            paintFocus(graphics, width, height, scale);
+        }
+    }
+
+    static Color dangerButtonText(boolean enabled) {
+        return enabled ? DANGER : DISABLED_TEXT;
+    }
+
     static void paintOutline(Graphics2D graphics, int width, int height, GuiScale scale, Color border) {
         float stroke = Math.max(1f, scale.size("border"));
         graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);

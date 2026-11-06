@@ -43,15 +43,18 @@ import org.megamek.launcher.operation.OperationType;
 import org.megamek.launcher.operation.ProgressUnit;
 import org.megamek.launcher.update.ImportedCopyAdoptionService;
 
+import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
+import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JProgressBar;
 import javax.swing.JTextArea;
+import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import javax.swing.WindowConstants;
@@ -60,7 +63,8 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
-import java.awt.FlowLayout;
+import java.awt.event.ActionEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.text.NumberFormat;
@@ -96,8 +100,10 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
     private final JButton cancel = control("Cancel", "operationCancelButton");
     private final JButton viewDetails =
             control("View details", "operationViewDetailsButton");
-    private final JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT,
-            scale.space("md"), 0));
+    private final List<JComponent> footerTools = new ArrayList<>();
+    private final List<JButton> footerActions = new ArrayList<>();
+    private final JPanel actions = new JPanel(new DialogFooter.FooterLayout(footerTools, footerActions,
+            scale));
     private final List<JButton> contextualActions = new ArrayList<>();
     private final AtomicReference<OperationProgress> pending = new AtomicReference<>();
     private final Timer updateTimer;
@@ -175,6 +181,9 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         viewDetails.setVisible(false);
         actions.setName("operationActions");
         actions.setBackground(BACKGROUND);
+        // View details is a helper at the footer's leading end; Cancel/Close always ends the row.
+        footerTools.add(viewDetails);
+        footerActions.add(cancel);
         actions.add(viewDetails);
         actions.add(cancel);
 
@@ -201,11 +210,15 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowClosing(WindowEvent event) {
-                if (finished) {
-                    dispose();
-                } else {
-                    requestCancellation();
-                }
+                closeRequested();
+            }
+        });
+        getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
+                .put(KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), "operationProgress.escape");
+        getRootPane().getActionMap().put("operationProgress.escape", new AbstractAction() {
+            @Override
+            public void actionPerformed(ActionEvent event) {
+                closeRequested();
             }
         });
         updateTimer = new Timer(UPDATE_INTERVAL_MS, event -> flush());
@@ -370,7 +383,9 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         button.setVisible(false);
         button.addPropertyChangeListener("enabled", event ->
                 button.setVisible(failureShown && button.isEnabled()));
-        actions.add(button, 0);
+        // Contextual actions such as Retry come before Close, in the order they were added.
+        footerActions.add(footerActions.size() - 1, button);
+        actions.add(button);
         actions.revalidate();
     }
 
@@ -387,6 +402,14 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
     public void dispose() {
         if (updateTimer != null) updateTimer.stop();
         super.dispose();
+    }
+
+    private void closeRequested() {
+        if (finished) {
+            dispose();
+        } else {
+            requestCancellation();
+        }
     }
 
     private void requestCancellation() {

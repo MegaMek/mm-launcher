@@ -838,14 +838,14 @@ class SimpleHomeSwingTest {
             assertTrue(LauncherFrame.EXPERIMENTAL_CONFIRM_MESSAGE.contains("for testing"));
             assertTrue(LauncherFrame.EXPERIMENTAL_CONFIRM_MESSAGE.contains(
                     "may break or be incomplete"));
-            SwingTestSupport.click(cancelled, "launcherAlertButton0");
+            SwingTestSupport.clickText(cancelled, "Cancel");
             waitUntil(() -> !cancelled.isShowing());
             assertFalse(onEdt(checkbox::isSelected), "cancel leaves the box unticked");
             assertFalse(services.showExperimental, "cancel saves nothing");
 
             SwingTestSupport.startClick(frame, "showExperimentalReleasesCheckbox");
             JDialog confirmed = waitDialog(frame, LauncherFrame.EXPERIMENTAL_CONFIRM_TITLE);
-            SwingTestSupport.click(confirmed, "launcherAlertButton1");
+            SwingTestSupport.click(confirmed, "launcherAlertButton0");
             waitUntil(() -> services.showExperimental);
             assertTrue(onEdt(checkbox::isSelected));
 
@@ -1793,9 +1793,12 @@ class SimpleHomeSwingTest {
             });
 
             SwingUtilities.invokeLater(() -> ((JButton) find(frame, "homeButton")).doClick());
-            JDialog discard = waitDialog(frame, "Discard changes?");
+            JDialog discard = waitDialog(frame, "Save launch options?");
+            assertEquals("Save", SwingTestSupport.label(find(discard, "launcherAlertButton0")));
+            assertEquals("Don't save", SwingTestSupport.label(find(discard, "launcherAlertButton1")));
+            assertEquals("Cancel", SwingTestSupport.label(find(discard, "launcherAlertButton2")));
             invokeDialogEscape(discard);
-            SwingTestSupport.awaitCondition("discard prompt closed", () -> !discard.isShowing());
+            SwingTestSupport.awaitCondition("save prompt closed", () -> !discard.isShowing());
             Component unsaved = onEdt(() -> {
                 assertEquals("-Dinline=1",
                         ((javax.swing.JTextField) find(frame, "launchOptionsJvmArguments")).getText(),
@@ -1839,7 +1842,18 @@ class SimpleHomeSwingTest {
             });
             services.launchOptionsSaveGate = null;
             SwingUtilities.invokeAndWait(waitButton(frame, "homeButton")::doClick);
-            assertNoShowingDialog(frame, "Discard changes?");
+            assertNoShowingDialog(frame, "Save launch options?");
+            assertNotNull(waitButton(frame, "settingsButton"));
+
+            editLaunchOptionsThenLeave(frame, "-Dinline=4");
+            SwingTestSupport.clickText(waitDialog(frame, "Save launch options?"), "Don't save");
+            assertNotNull(waitButton(frame, "settingsButton"));
+            assertEquals("-Dinline=2", services.savedJvmArguments, "Don't save keeps the saved values");
+
+            editLaunchOptionsThenLeave(frame, "-Dinline=5");
+            SwingTestSupport.clickText(waitDialog(frame, "Save launch options?"), "Save");
+            SwingTestSupport.awaitCondition("prompt saved the edit", () ->
+                    "-Dinline=5".equals(services.savedJvmArguments));
             assertNotNull(waitButton(frame, "settingsButton"));
         } finally {
             dispose(frame);
@@ -2438,6 +2452,14 @@ class SimpleHomeSwingTest {
         Path path = Path.of(directory);
         Files.createDirectories(path);
         ImageIO.write(image, "PNG", path.resolve(name).toFile());
+    }
+
+    private static void editLaunchOptionsThenLeave(LauncherFrame frame, String jvmArguments)
+            throws Exception {
+        SwingUtilities.invokeAndWait(waitButton(frame, "settingsButton")::doClick);
+        javax.swing.JTextField field = waitFor(() -> find(frame, "launchOptionsJvmArguments"));
+        SwingUtilities.invokeAndWait(() -> field.setText(jvmArguments));
+        SwingUtilities.invokeLater(() -> ((JButton) find(frame, "homeButton")).doClick());
     }
 
     private static void invokeDialogEscape(JDialog dialog) throws Exception {

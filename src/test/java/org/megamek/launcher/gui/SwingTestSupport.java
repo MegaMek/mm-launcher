@@ -113,6 +113,13 @@ final class SwingTestSupport {
         startAction(root, text, true);
     }
 
+    static AbstractButton clickText(Container root, String text) throws Exception {
+        PendingAction action = startAction(root, text, true);
+        result(action.completion(), TIMEOUT, "click " + text, false);
+        checkActions();
+        return action.button();
+    }
+
     private static PendingAction startAction(Container root, String target, boolean byText)
             throws Exception {
         if (SwingUtilities.isEventDispatchThread()) {

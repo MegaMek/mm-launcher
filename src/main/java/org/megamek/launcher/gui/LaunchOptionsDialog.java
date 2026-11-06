@@ -46,7 +46,6 @@ import javax.swing.JScrollPane;
 import javax.swing.WindowConstants;
 import java.awt.BorderLayout;
 import java.awt.Dimension;
-import java.awt.FlowLayout;
 import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.Toolkit;
@@ -98,12 +97,10 @@ final class LaunchOptionsDialog {
         message.setName("launchOptionsMessage");
         message.setForeground(LauncherTheme.WARNING);
         south.add(message, BorderLayout.NORTH);
-        JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT, scale.space("md"), 0));
-        actions.setOpaque(false);
         JButton cancel = new FirstLaunchButton("Cancel", "cancelLaunchOptionsButton", false, scale,
                 FirstLaunchButton.Size.SMALL);
         cancel.addActionListener(event -> dialog.dispose());
-        JButton save = new FirstLaunchButton("Save", "saveLaunchOptionsButton", false, scale,
+        JButton save = new FirstLaunchButton("Save", "saveLaunchOptionsButton", true, scale,
                 FirstLaunchButton.Size.SMALL);
         save.addActionListener(event -> {
             LaunchOptions options;
@@ -116,13 +113,14 @@ final class LaunchOptionsDialog {
             dialog.dispose();
             onSave.accept(options);
         });
-        actions.add(cancel);
-        actions.add(save);
-        south.add(actions, BorderLayout.EAST);
+        DialogFooter footer = new DialogFooter(scale).primary(save).cancel(cancel);
+        JPanel actions = footer.panel();
+        actions.setName("launchOptionsActions");
+        south.add(actions, BorderLayout.CENTER);
         body.add(south, BorderLayout.SOUTH);
 
         dialog.setContentPane(body);
-        dialog.getRootPane().setDefaultButton(save);
+        footer.install(dialog, dialog::dispose);
         dialog.pack();
         Rectangle usable = (owner != null ? owner.getGraphicsConfiguration()
                 : dialog.getGraphicsConfiguration()).getBounds();

@@ -121,11 +121,11 @@ class MissingInstallationSwingTest {
                 assertEquals(1, SwingTestSupport.countButtonText(notice, "Remove from launcher"));
                 return null;
             });
-            SwingTestSupport.click(notice, "launcherAlertButton0");
+            SwingTestSupport.clickText(notice, "Cancel");
             assertEquals(2, fixture.services.readRegistry().installations().size());
             SwingTestSupport.startClick(frame, "installationMenuButton-" + fixture.removed.id());
             JDialog retryNotice = SwingTestSupport.dialog(frame, "Installation not found");
-            SwingTestSupport.click(retryNotice, "launcherAlertButton1");
+            SwingTestSupport.clickText(retryNotice, "Remove from launcher");
             SwingTestSupport.awaitCondition("registration removal and refreshed Home", () ->
                     fixture.services.readRegistry().installations().equals(List.of(fixture.retained))
                             && SwingTestSupport.find(frame, "launch-megamek-button", JButton.class) != null
@@ -191,7 +191,7 @@ class MissingInstallationSwingTest {
             SwingTestSupport.startClick(frame, launch
                     ? "launch-megamek-button" : "installationMenuButton-" + fixture.removed.id());
             JDialog notice = SwingTestSupport.dialog(frame, "Installation not found");
-            SwingTestSupport.click(notice, "launcherAlertButton1");
+            SwingTestSupport.clickText(notice, "Remove from launcher");
             SwingTestSupport.awaitCondition("deleted launch target removed", () ->
                     fixture.services.readRegistry().installations().equals(List.of(fixture.retained)));
             assertFalse(Files.exists(fixture.root));

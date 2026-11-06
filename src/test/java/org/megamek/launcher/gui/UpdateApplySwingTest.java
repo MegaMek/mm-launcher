@@ -155,10 +155,10 @@ class UpdateApplySwingTest {
             assertTrue(cancelUpdate instanceof FirstLaunchButton);
             assertTrue(confirmUpdate instanceof FirstLaunchButton);
             Container actions = find(firstConsent, "recommendedUpdateConsentActions");
-            assertTrue(actions.getComponentZOrder(cancelUpdate)
-                    < actions.getComponentZOrder(confirmUpdate));
-            assertTrue(actions.getComponent(0) instanceof javax.swing.Box.Filler,
-                    "horizontal glue must right-align the grouped actions");
+            assertTrue(confirmUpdate.getX() < cancelUpdate.getX(), "the main action comes first");
+            assertEquals(confirmUpdate.getWidth(), cancelUpdate.getWidth());
+            assertEquals(actions.getWidth() - (cancelUpdate.getX() + cancelUpdate.getWidth()),
+                    confirmUpdate.getX(), 1, "the actions are centred");
             assertEquals(confirmUpdate, firstConsent.getRootPane().getDefaultButton());
             click(firstConsent, "Cancel");
             waitUntil(() -> !firstConsent.isDisplayable());

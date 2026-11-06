@@ -10,6 +10,17 @@ a mutation and its parent is already a real directory. State/receipt files remai
 normal product/channel payload child; Linux keeps state and managed application data in their
 respective XDG/fallback locations.
 
+## Dialog buttons
+
+Every dialog uses one footer: its actions are centred, equally wide (at least 88 scaled pixels),
+and ordered main action first, then any other choices, then **Cancel** (or **Close**) last; a
+right-to-left window mirrors the row. Small helpers such as **Copy**, **View logs**, or a link sit at
+the footer's leading end. Enter presses the focused button, otherwise the main action, and Escape
+cancels. A destructive main action (remove, uninstall, reset, replace) is danger-styled, is never
+the default button, and the dialog opens with focus on Cancel. Full-page surfaces such as the
+Settings page and installation cards are not dialogs: their command bars stay right-aligned with
+the main action last.
+
 ## Managed application and settings model
 
 Managed Home is application-oriented, not legacy-default-oriented. It has no visible Main
@@ -196,7 +207,7 @@ directory for every installation. The memory choices stop at this computer's phy
 are offered when it cannot be read), though a saved or inherited larger value stays selectable, and the
 memory group carries one short sizing hint under the MekHQ row. Settings edits the launcher-wide values inline: **Revert** and
 **Save launch options** are enabled only while the form differs from the saved values, unsaved edits
-survive Settings re-renders, and leaving Settings with unsaved edits asks **Discard changes?** first.
+survive Settings re-renders, and leaving Settings with unsaved edits asks **Save launch options?** with **Save**, **Don't save**, and **Cancel**. Save stays on Settings when a value is invalid and leaves only after the save succeeds.
 **Launch options…** in an installation's More menu opens a dialog that edits overrides where each field can
 inherit the launcher-wide value. **Copy launch commands** in the same menu copies the commands used to start each application with the saved options, for troubleshooting. Values are stored
 next to the registry in `<registry>.launch-options.json`, separate from launcher settings, and an
@@ -548,8 +559,8 @@ updates that label in place and never replaces managed Home.
 An available result displays verified installed tag, followed target, status, release-notes URL,
 and full size. **Update to recommended release…** goes directly to that captured target and opens a
 styled update consent showing the application name, current version, new version, and rounded
-human-readable MB download size, and reminds the user to close MegaMek, MekHQ, and MegaMekLab. Its right-aligned actions are
-**Cancel** then **Update**, with Update as the default. This one consent authorizes the complete
+human-readable MB download size, and reminds the user to close MegaMek, MekHQ, and MegaMekLab. Its actions are
+**Update** then **Cancel**, with Update as the default. This one consent authorizes the complete
 attempt; Cancel, Escape, and window close fetch no package body. Before any package request the
 backend rechecks the record, channel sidecar, fixed source, repository, tag, asset name, size, and
 digest. Changed metadata is rejected for fresh consent; it cannot silently retarget. There is no
@@ -639,8 +650,8 @@ managed-incomplete/corrupt, and recovery-pending cards never show it.
 
 The compact first screen shows one **Program (Version)** line and a styled update-channel selector
 with Core selected by default; Experimental is the only alternative and appears only when
-**Show Experimental releases** is on. **Cancel** is fixed at
-the far left and **Continue** at the far right; Escape cancels and Enter continues. No network
+**Show Experimental releases** is on. **Continue** comes first and **Cancel** last, following
+the dialog button rule; Escape cancels and Enter continues. No network
 request occurs until Continue. Continue searches bounded GitHub release-list metadata for the
 detected official repository and automatically prepares the copy only when one safe immutable tag
 matches. Numeric dotted versions compare numerically (`0.50.7`, `0.50.07`, and `v0.50.07` are

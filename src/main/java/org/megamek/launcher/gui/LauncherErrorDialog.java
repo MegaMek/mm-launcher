@@ -131,17 +131,9 @@ final class LauncherErrorDialog extends JDialog {
                 true, scale, FirstLaunchButton.Size.SMALL);
         close.addActionListener(event -> dispose());
 
-        JPanel actions = new JPanel();
+        DialogFooter footer = new DialogFooter(scale).tool(copy).tool(logs).tool(report).primary(close);
+        JPanel actions = footer.panel();
         actions.setName("launcherErrorActions");
-        actions.setOpaque(false);
-        actions.setLayout(new BoxLayout(actions, BoxLayout.X_AXIS));
-        actions.add(copy);
-        actions.add(Box.createHorizontalStrut(scale.space("md")));
-        actions.add(logs);
-        actions.add(Box.createHorizontalGlue());
-        actions.add(report);
-        actions.add(Box.createHorizontalStrut(scale.space("md")));
-        actions.add(close);
 
         JPanel content = new JPanel(new BorderLayout(0, scale.space("xl")));
         content.setName("launcherErrorContent");
@@ -151,7 +143,7 @@ final class LauncherErrorDialog extends JDialog {
         content.add(actions, BorderLayout.SOUTH);
         setContentPane(content);
 
-        getRootPane().setDefaultButton(close);
+        footer.install(this, this::dispose);
 
         pack();
         Rectangle available = GuiScale.usableBounds(getGraphicsConfiguration());
