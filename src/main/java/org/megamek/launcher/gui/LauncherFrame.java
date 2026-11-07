@@ -221,7 +221,7 @@ public final class LauncherFrame extends JFrame {
     private Throwable launchOptionsError;
     private String transientHomeMessage;
     private boolean launcherUpdateChecked;
-    private final LauncherSelfUpdate launcherUpdater = new LauncherSelfUpdate();
+    private final LauncherSelfUpdate launcherUpdater;
     private BugReportDialog bugReportDialog;
 
     public LauncherFrame(LauncherServices services) {
@@ -251,6 +251,7 @@ public final class LauncherFrame extends JFrame {
                           LauncherNewsFeed newsFeed) {
         super(titleFor(LauncherFrame.class.getPackage().getImplementationVersion()));
         this.services = services;
+        this.launcherUpdater = new LauncherSelfUpdate(services.releaseTransport());
         this.showExperimental = services.showExperimental();
         this.showExperimentalSave = new LatestSettingSave<>(services::saveShowExperimental);
         this.playIntro = services.playIntro();
@@ -260,6 +261,7 @@ public final class LauncherFrame extends JFrame {
         this.existingImportPrompts = existingImportPrompts;
         this.normalInstallLocationPrompts = normalInstallLocationPrompts;
         setName("launcherFrame");
+        setIconImages(LauncherIcons.images());
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         setMinimumSize(guiScale.scaleForGUI(680, 470));
         setPreferredSize(guiScale.scaleForGUI(1180, 820));
@@ -3467,7 +3469,7 @@ public final class LauncherFrame extends JFrame {
         }
         run("Checking launcher release", () -> services.checkLauncherUpdate(
                 LauncherSelfUpdate.consumeReport(launcherUpdateReport(), LauncherSelfUpdate.currentVersion()),
-                launcherUpdater::check), checked -> {
+                launcherUpdater::check), checked -> curtain.whenUncovered(() -> {
             if (checked.pending()) {
                 setLauncherUpdateStatus(explicit, checked.message());
                 if (explicit) LauncherAlertDialog.showMessage(this, guiScale,
@@ -3509,7 +3511,7 @@ public final class LauncherFrame extends JFrame {
                 dispose();
                 System.exit(0);
             }, error -> progress.append("\nLauncher update failed: " + errorDetail(error) + "\n"), () -> {});
-        }, error -> {
+        }), error -> {
             if (toolsUnavailable(error)) {
                 checkLauncherRelease(explicit);
                 return;
@@ -3531,7 +3533,7 @@ public final class LauncherFrame extends JFrame {
 
     /** Copies that can't update in place link a newer release to its page instead. */
     private void checkLauncherRelease(boolean explicit) {
-        run("Checking launcher release", launcherUpdater::checkRelease, release -> {
+        run("Checking launcher release", launcherUpdater::checkRelease, release -> curtain.whenUncovered(() -> {
             if (release == null) {
                 setLauncherUpdateStatus(explicit, "Launcher is up to date.");
                 return;
@@ -3540,7 +3542,7 @@ public final class LauncherFrame extends JFrame {
             if (confirmLauncherDownload(this, guiScale, release)) {
                 openWebsite(release.page(), "launcher release page");
             }
-        }, error -> {
+        }), error -> {
             if (!explicit) {
                 setLauncherUpdateStatus(false,
                         "Launcher update: " + SanitizedErrors.text(error.getMessage()));
@@ -3573,10 +3575,19 @@ public final class LauncherFrame extends JFrame {
 
     static boolean confirmLauncherUpdate(Window owner, GuiScale scale,
                                           LauncherSelfUpdate.Candidate candidate, String notice) {
-        String message = "Version " + candidate.version() + " is available.\n\n"
+        return LauncherAlertDialog.showConfirm(owner, scale, "Update MegaMek Launcher",
+                launcherUpdatePrompt(candidate.version(), notice,
+                        LauncherSelfUpdate.asksForAdministratorPassword()), "Update now");
+    }
+
+    static String launcherUpdatePrompt(String version, String notice, boolean asksForPassword) {
+        String message = "Version " + version + " is available.\n\n"
                 + "Close any running games before updating.";
-        if (notice != null) message = notice + "\n\n" + message;
-        return LauncherAlertDialog.showConfirm(owner, scale, "Update MegaMek Launcher", message, "Update now");
+        if (asksForPassword) {
+            message += "\n\nYour system will ask for an administrator password, because the "
+                    + "launcher is installed as a system package.";
+        }
+        return notice == null ? message : notice + "\n\n" + message;
     }
 
     private void chooseDefaultJava() {

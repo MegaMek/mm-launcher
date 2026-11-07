@@ -37,13 +37,30 @@ import org.megamek.launcher.onboarding.PlatformInstallLocations;
 
 import javax.swing.SwingUtilities;
 import java.awt.GraphicsEnvironment;
+import java.awt.Toolkit;
 import java.io.PrintStream;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
 import java.io.IOException;
+import java.util.Locale;
+import java.util.Properties;
 
 public final class GuiLauncher {
+    static final String DIRECT3D = "sun.java2d.d3d";
+
     private GuiLauncher() {
+    }
+
+    /**
+     * Turns off Java2D's Direct3D pipeline on Windows unless it was set explicitly. Some drivers
+     * drop its partial repaints, which leaves the launcher window black through the intro, and
+     * the launcher gains nothing from GPU drawing. Must run before AWT initialises.
+     */
+    static void avoidDirect3D(String osName, Properties properties) {
+        if (osName.toLowerCase(Locale.ROOT).startsWith("windows")
+                && properties.getProperty(DIRECT3D) == null) {
+            properties.setProperty(DIRECT3D, "false");
+        }
     }
 
     public static int start(String[] args, PrintStream error) {
@@ -55,10 +72,15 @@ public final class GuiLauncher {
             error.println("Usage: mm-launcher gui [--registry <path>]");
             return 2;
         }
+        avoidDirect3D(System.getProperty("os.name", ""), System.getProperties());
         if (GraphicsEnvironment.isHeadless()) {
             error.println("ERROR: the graphical launcher cannot start in a headless environment");
             return 2;
         }
+        // Linux names windows after the class at the bottom of the thread that starts the AWT
+        // toolkit. Starting it here, on the main thread, keeps that name equal to the menu
+        // entry's StartupWMClass, so desktops show the launcher's own icon for its windows.
+        Toolkit.getDefaultToolkit();
         SwingUtilities.invokeLater(() -> {
             LauncherAppearance.install(LauncherAppearance.DEFAULT);
             if (selection.defaultRegistry()) {

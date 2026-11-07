@@ -192,6 +192,10 @@ abstract class WindowsInstallerMsi : DefaultTask() {
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val customActionDirectory: DirectoryProperty
 
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val upgradeRemovalScript: RegularFileProperty
+
     // Checked explicitly at execution time so missing local tools get actionable errors.
     @get:Internal
     abstract val wixBinaryDirectory: DirectoryProperty
@@ -281,6 +285,15 @@ abstract class WindowsInstallerMsi : DefaultTask() {
             environment("MM_LAUNCHER_CA_DIR", customActionDirectory.get().asFile.absolutePath)
         }
         check(generated.isFile) { "jpackage did not produce ${generated.absolutePath}." }
+        // Keep the previous launcher recoverable if an update fails (see the script).
+        execOperations.exec {
+            executable = "powershell.exe"
+            args(
+                "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                "-File", upgradeRemovalScript.get().asFile.absolutePath,
+                "-Msi", generated.absolutePath
+            )
+        }
         installer.parentFile.mkdirs()
         Files.move(generated.toPath(), installer.toPath())
     }
@@ -363,6 +376,15 @@ abstract class NativeInstaller : DefaultTask() {
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val macIconFile: RegularFileProperty
 
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val linuxIconFile: RegularFileProperty
+
+    // Holds "MegaMek Launcher.desktop", which replaces jpackage's menu entry template.
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val linuxResources: DirectoryProperty
+
     @get:Internal
     abstract val jpackageExecutable: RegularFileProperty
 
@@ -442,7 +464,11 @@ abstract class NativeInstaller : DefaultTask() {
                 }
             } else {
                 args("--linux-package-name", "megamek-launcher",
-                    "--install-dir", "/opt")
+                    "--install-dir", "/opt",
+                    // Installs the menu entry and icon (xdg-desktop-menu) and removes them on uninstall.
+                    "--linux-shortcut",
+                    "--icon", linuxIconFile.get().asFile.absolutePath,
+                    "--resource-dir", linuxResources.get().asFile.absolutePath)
             }
         }
         val generated = destination.listFiles().orEmpty().filter { it.extension == type }
@@ -1181,6 +1207,8 @@ val windowsInstallerMsi = tasks.register<WindowsInstallerMsi>("windowsInstallerM
     iconFile.set(layout.projectDirectory.file("src/distribution/windows/icon.ico"))
     wixResources.set(layout.projectDirectory.dir("src/distribution/windows/msi"))
     customActionDirectory.set(windowsInstallerFolderPicker.flatMap { it.outputDirectory })
+    upgradeRemovalScript.set(
+        layout.projectDirectory.file("src/distribution/windows/schedule-upgrade-removal.ps1"))
     outputs.cacheIf { false }
 }
 
@@ -1228,6 +1256,9 @@ if (OperatingSystem.current().isLinux || OperatingSystem.current().isMacOsX) {
             runtimeDirectory.set(nativeRuntimeDirectory)
             macIconFile.set(layout.projectDirectory.file(
                 "src/distribution/macos/MegaMekLauncher.icns"))
+            linuxIconFile.set(layout.projectDirectory.file(
+                "src/main/resources/org/megamek/launcher/gui/icons/launcher-256.png"))
+            linuxResources.set(layout.projectDirectory.dir("src/distribution/linux"))
             jpackageExecutable.set(layout.file(javaHome.map { File(it, "bin/jpackage") }))
             packageType.set(type)
             mainJarFileName.set(tasks.named<Jar>("jar").flatMap { it.archiveFileName })

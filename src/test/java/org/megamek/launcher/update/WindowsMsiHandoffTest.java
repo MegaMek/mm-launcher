@@ -51,6 +51,7 @@ class WindowsMsiHandoffTest {
 
     private void installerExit(int code) throws Exception {
         Files.writeString(installer, "@echo off\r\necho %* > \"" + arguments
+                + "\"\r\necho installer exit " + code + " > \"" + LauncherSelfUpdate.installerLog(report)
                 + "\"\r\nexit /b " + code + "\r\n");
     }
 
@@ -100,6 +101,7 @@ class WindowsMsiHandoffTest {
         assertTrue(supplied.contains("/l*v"));
         assertTrue(supplied.contains("\"" + msi + "\""), "spaced MSI argument must remain quoted");
         assertFalse(Files.exists(msi.getParent()));
+        assertFalse(Files.exists(LauncherSelfUpdate.failedInstallerLog(report)));
         assertTrue(LauncherSelfUpdate.consumeReport(report, "0.1.1", () -> {}).installed());
         assertFalse(Files.exists(report));
     }
@@ -141,18 +143,32 @@ class WindowsMsiHandoffTest {
         }
     }
 
-    @Test void nonzeroInstallerResultsAreRecordedWithoutRelaunchOrFalseSuccess() throws Exception {
+    @Test void nonzeroInstallerResultsReopenThePreviousLauncherAndKeepTheFailedLog() throws Exception {
+        Path failedLog = LauncherSelfUpdate.failedInstallerLog(report);
         for (int code : new int[]{1602, 1603}) {
             installerExit(code);
             execute();
             assertEquals(Integer.toString(code), Files.readString(report));
-            assertFalse(Files.exists(reopened));
-            assertFalse(LauncherSelfUpdate.consumeReport(report, "0.1.0",
-                    () -> fail("failed install cannot verify success")).installed());
+            awaitReopen();
+            assertEquals("installer exit " + code, Files.readString(failedLog).trim());
+            var result = LauncherSelfUpdate.consumeReport(report, "0.1.0",
+                    () -> fail("failed install cannot verify success"));
+            assertFalse(result.installed());
+            assertTrue(result.message().contains(failedLog.toString()), result.message());
             Files.createDirectories(msi.getParent());
             Files.writeString(msi, "fixture: not an actual installer");
             Files.writeString(report, "pending");
+            Files.delete(reopened);
         }
+    }
+
+    @Test void failedUpdateWithoutAnInstalledLauncherDoesNotTryToReopen() throws Exception {
+        installerExit(1603);
+        Files.delete(launcher);
+        assertEquals(0, execute(), Files.readString(LauncherSelfUpdate.helperLog(report)));
+        assertEquals("1603", Files.readString(report));
+        assertFalse(Files.exists(reopened));
+        assertFalse(Files.readString(LauncherSelfUpdate.helperLog(report)).contains("Start-Process"));
     }
 
     @Test void rebootRequiredIsSuccessfulButDoesNotForceRestart() throws Exception {
@@ -166,12 +182,13 @@ class WindowsMsiHandoffTest {
         assertTrue(result.message().contains("computer restart"));
     }
 
-    @Test void changedChecksumNeverRunsInstallerAndLeavesUsefulDiagnostics() throws Exception {
+    @Test void changedChecksumNeverRunsInstallerAndReopensThePreviousLauncher() throws Exception {
         Files.writeString(msi, "changed after verification");
         execute();
         assertTrue(Files.readString(report).startsWith("handoff failed:"));
         assertFalse(Files.exists(arguments));
-        assertFalse(Files.exists(reopened));
+        awaitReopen();
+        assertFalse(Files.exists(LauncherSelfUpdate.failedInstallerLog(report)));
         assertTrue(Files.exists(msi), "unrecognized replacement bytes must not be deleted");
         assertTrue(Files.readString(LauncherSelfUpdate.helperLog(report)).contains("Staged MSI digest changed"));
     }
