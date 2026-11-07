@@ -351,21 +351,70 @@ jobs:
               if (@($listing | Where-Object { $_ -match 'launcher-registry\.json|/MegaMek Launcher/(launcher-registry|games)' }).Count -gt 0) {
                 throw "$type package contains mutable user state."
               }
-              # jpackage's install script registers this menu entry and icon with xdg-desktop-menu.
+              # The package scripts register these entries through desktop-integration.sh.
               $desktopEntry = '/opt/megamek-launcher/lib/megamek-launcher-MegaMek_Launcher.desktop'
               if (@($listing | Where-Object { $_ -match "$([regex]::Escape($desktopEntry))$" }).Count -ne 1 -or
                   @($listing | Where-Object { $_ -match '/opt/megamek-launcher/lib/MegaMek_Launcher\.png$' }).Count -ne 1) {
                 throw "$type desktop menu entry or icon is missing."
               }
-              $extract = if ($type -eq 'deb') {
-                "dpkg-deb --fsys-tarfile `"$($file.FullName)`" | tar -xO `".$desktopEntry`""
-              } else {
-                "rpm2cpio `"$($file.FullName)`" | cpio --quiet -i --to-stdout `".$desktopEntry`""
+              $readFile = {
+                param($path)
+                $extract = if ($type -eq 'deb') {
+                  "dpkg-deb --fsys-tarfile `"$($file.FullName)`" | tar -xO `".$path`""
+                } else {
+                  "rpm2cpio `"$($file.FullName)`" | cpio --quiet -i --to-stdout `".$path`""
+                }
+                $content = (& bash -c $extract) -join "`n"
+                if ($LASTEXITCODE -ne 0 -or -not $content) { throw "$type is missing $path." }
+                $content
               }
-              $entry = (& bash -c $extract) -join "`n"
-              if ($LASTEXITCODE -ne 0 -or $entry -notmatch '(?m)^StartupWMClass=org-megamek-launcher-DesktopLauncher$' -or
+              $entry = & $readFile $desktopEntry
+              if ($entry -notmatch '(?m)^StartupWMClass=org-megamek-launcher-DesktopLauncher$' -or
                   $entry -notmatch '(?m)^Exec="?/opt/megamek-launcher/bin/MegaMek Launcher"?$') {
                 throw "$type desktop menu entry does not match the launcher window."
+              }
+              # Hidden entries give the games' windows their names and icons in docks and task bars.
+              $games = [ordered]@{ MegaMek = 'megamek-MegaMek'; MekHQ = 'mekhq-MekHQ'; MegaMekLab = 'megameklab-MegaMekLab' }
+              foreach ($game in $games.Keys) {
+                $gameIcon = "/opt/megamek-launcher/lib/desktop-entries/$game.png"
+                if (@($listing | Where-Object { $_ -match "$([regex]::Escape($gameIcon))$" }).Count -ne 1) {
+                  throw "$type is missing the $game window icon."
+                }
+                $gameEntry = & $readFile "/opt/megamek-launcher/lib/desktop-entries/megamek-launcher-$game.desktop"
+                if ($gameEntry -notmatch "(?m)^Name=$game$" -or $gameEntry -notmatch '(?m)^NoDisplay=true$' -or
+                    $gameEntry -notmatch "(?m)^StartupWMClass=$([regex]::Escape($games[$game]))$" -or
+                    $gameEntry -notmatch "(?m)^Icon=$([regex]::Escape($gameIcon))$") {
+                  throw "$type $game desktop entry does not match the game window."
+                }
+              }
+              $integration = & $readFile '/opt/megamek-launcher/lib/desktop-entries/desktop-integration.sh'
+              $integration | & sh -n
+              if ($LASTEXITCODE -ne 0 -or $integration -notmatch '(?m)^XDG_DATA_DIRS=/usr/share$') {
+                throw "$type desktop integration script is invalid."
+              }
+              # Entries must go to /usr/share/applications, never xdg-desktop-menu's environment-dependent choice.
+              $scripts = if ($type -eq 'deb') {
+                $control = Join-Path ([IO.Path]::GetTempPath()) "megamek-launcher-deb-control"
+                Remove-Item -Recurse -Force $control -ErrorAction SilentlyContinue
+                & dpkg-deb --control $file.FullName $control
+                if ($LASTEXITCODE -ne 0) { throw 'Could not extract deb control scripts.' }
+                $postinst = Get-Content -Raw (Join-Path $control 'postinst')
+                $prerm = Get-Content -Raw (Join-Path $control 'prerm')
+                if ($postinst -notmatch 'desktop-integration\.sh install' -or $prerm -notmatch 'desktop-integration\.sh uninstall') {
+                  throw 'deb scripts do not register the desktop entries.'
+                }
+                "$postinst`n$prerm"
+              } else {
+                $rpmScripts = (& rpm -qp --scripts $file.FullName) -join "`n"
+                if ($LASTEXITCODE -ne 0 -or
+                    $rpmScripts -notmatch '(?s)posttrans scriptlet.*desktop-integration\.sh install' -or
+                    $rpmScripts -notmatch '(?s)preuninstall scriptlet.*if \[ "\$1" = 0 \].*desktop-integration\.sh uninstall') {
+                  throw 'rpm scriptlets do not register the desktop entries.'
+                }
+                $rpmScripts
+              }
+              if ($scripts -match 'xdg-desktop-menu') {
+                throw "$type scripts call xdg-desktop-menu directly instead of desktop-integration.sh."
               }
             }
           }

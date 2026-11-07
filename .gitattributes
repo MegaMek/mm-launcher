@@ -32,3 +32,8 @@
 
 src/distribution/linux/mm-launcher text eol=lf
 "src/distribution/macos/MM Launcher" text eol=lf
+src/distribution/linux/postinst text eol=lf
+src/distribution/linux/prerm text eol=lf
+src/distribution/linux/*.spec text eol=lf
+src/distribution/linux/**/*.desktop text eol=lf
+src/distribution/linux/**/*.sh text eol=lf

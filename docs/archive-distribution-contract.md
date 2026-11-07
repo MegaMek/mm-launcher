@@ -26,13 +26,25 @@ account setup and live verification remain pending. Linux signing remains outsid
 
 Linux's stable package name is `megamek-launcher` under `/opt`; the macOS
 bundle identifier is `org.megamek.launcher` under `/Applications`.
-The Linux packages install an application menu entry and icon through jpackage's
-`--linux-shortcut` (registered with `xdg-desktop-menu`, removed on uninstall). The entry
-comes from `src/distribution/linux/MegaMek Launcher.desktop`; its
+The Linux packages install an application menu entry and icon. jpackage's
+`--linux-shortcut` builds the entry from `src/distribution/linux/MegaMek Launcher.desktop`; its
 `StartupWMClass=org-megamek-launcher-DesktopLauncher` matches the window class Java derives
 from the main class, so desktops group the launcher window under that entry and icon. The
 launcher starts the AWT toolkit on the main thread to keep that class stable, and sets the
-same icon (16–256 px PNGs from the Windows icon) on its window. CI checks the entry.
+same icon (16–256 px PNGs from the Windows icon) on its window. The packages also ship
+`src/distribution/linux/desktop-entries` (via `--app-content`, under
+`/opt/megamek-launcher/lib/desktop-entries`): hidden (`NoDisplay=true`) MegaMek, MekHQ and
+MegaMekLab entries whose `StartupWMClass` matches the class of the games' windows
+(`megamek-MegaMek`, `mekhq-MekHQ`, `megameklab-MegaMekLab`, from the main classes the
+launcher starts), with the games' own 256 px icons, so docks and task bars name and badge
+game windows. Their `Exec` opens the launcher. The overridden `postinst`/`prerm` and
+`megamek-launcher.spec` (jpackage 21's templates with the desktop steps replaced) run
+`desktop-integration.sh`, which registers all four entries with `xdg-desktop-menu` in
+`/usr/share/applications`: left alone, `xdg-desktop-menu` picks the first writable
+`XDG_DATA_DIRS` entry, such as Flatpak's export directory. It also removes copies earlier
+builds left there, and never fails the package transaction. The RPM registers them in
+`%posttrans` and removes them only on uninstall, so upgrades keep them. CI checks the
+entries, icons and scripts.
 Both own only application files. Registry, settings, logs and installed
 games live in independent user paths and must not be overwritten by package
 upgrades. The Windows MSI retains its per-user installation folder and
