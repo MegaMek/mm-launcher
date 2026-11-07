@@ -275,6 +275,15 @@ jobs:
               if (@(MsiValues "SELECT ``Action`` FROM ``InstallExecuteSequence`` WHERE ``Action``='LaunchMegaMekLauncher'").Count -ne 0) {
                 throw 'Silent MSI execute sequence must never launch the application.'
               }
+              # A failed update must roll back to the previous launcher instead of deleting it.
+              $view = $database.OpenView("SELECT ``Action``, ``Sequence`` FROM ``InstallExecuteSequence`` WHERE ``Action``='InstallInitialize' OR ``Action``='RemoveExistingProducts'")
+              [void]$view.Execute()
+              $sequence = @{}
+              while ($record = $view.Fetch()) { $sequence[$record.StringData(1)] = $record.IntegerData(2) }
+              [void]$view.Close()
+              if ($sequence['RemoveExistingProducts'] -ne $sequence['InstallInitialize'] + 1) {
+                throw 'MSI must remove the previous launcher inside the install transaction.'
+              }
               # The packaged JVM must include java.exe for games started by the launcher.
               if (@($executables | Where-Object { $_ -match '(^|\|)java\.exe$' }).Count -lt 1) {
                 throw 'MSI runtime is missing java.exe.'

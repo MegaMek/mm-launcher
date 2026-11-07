@@ -56,7 +56,11 @@ Welcome has a checked-by-default Create a desktop shortcut option. This uses
 jpackage's own conditional `DesktopFolder` shortcut component, not a shell
 script: unchecking it disables that component. An HKCU installer-owned opt-out
 registry component records only the unchecked choice; AppSearch restores it
-before jpackage's early `RemoveExistingProducts` during silent `/qn` upgrades.
+before `RemoveExistingProducts` during silent `/qn` upgrades. The build moves
+jpackage's `RemoveExistingProducts` from before `CostInitialize` to right after
+`InstallInitialize` (`src/distribution/windows/schedule-upgrade-removal.ps1`), so the
+previous version is removed inside the installation transaction: a failed upgrade
+rolls back to the previous launcher's files instead of leaving none. CI verifies it.
 An interactive upgrade may change that choice on Welcome. Removing the MSI
 removes only its owned shortcut and preference component, not unrelated desktop
 entries. The Start menu shortcut is independent. The interactive completion
@@ -587,8 +591,12 @@ explicitly, avoiding incompatible PowerShell 7 module search paths inherited by
 Java processes. Progress is visible without a setup wizard. Installer
 exit 0 is successful; 3010 is successful with a restart-required notice, never
 a forced restart. Failed or cancelled installations are not reported as success.
-Only a successful installation reopens the fixed installed launcher entry point,
-after the completed report has been written atomically.
+Only a successful installation reopens the fixed installed launcher entry point as
+the updated launcher, after the completed report has been written atomically. After a
+failed or cancelled installation the helper reopens that entry point when it still
+exists (Windows Installer rolled back to the previous launcher), so the failure and
+its diagnostics are shown; a non-zero installer result also copies the installer log
+to `msi-update-installer-failed.log` so a retry does not overwrite it.
 
 The helper's Windows PowerShell completion writer passes `[NullString]::Value`
 to `File.Replace`; passing `$null` binds an empty backup path and leaves the

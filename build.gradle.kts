@@ -192,6 +192,10 @@ abstract class WindowsInstallerMsi : DefaultTask() {
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val customActionDirectory: DirectoryProperty
 
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val upgradeRemovalScript: RegularFileProperty
+
     // Checked explicitly at execution time so missing local tools get actionable errors.
     @get:Internal
     abstract val wixBinaryDirectory: DirectoryProperty
@@ -281,6 +285,15 @@ abstract class WindowsInstallerMsi : DefaultTask() {
             environment("MM_LAUNCHER_CA_DIR", customActionDirectory.get().asFile.absolutePath)
         }
         check(generated.isFile) { "jpackage did not produce ${generated.absolutePath}." }
+        // Keep the previous launcher recoverable if an update fails (see the script).
+        execOperations.exec {
+            executable = "powershell.exe"
+            args(
+                "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+                "-File", upgradeRemovalScript.get().asFile.absolutePath,
+                "-Msi", generated.absolutePath
+            )
+        }
         installer.parentFile.mkdirs()
         Files.move(generated.toPath(), installer.toPath())
     }
@@ -1181,6 +1194,8 @@ val windowsInstallerMsi = tasks.register<WindowsInstallerMsi>("windowsInstallerM
     iconFile.set(layout.projectDirectory.file("src/distribution/windows/icon.ico"))
     wixResources.set(layout.projectDirectory.dir("src/distribution/windows/msi"))
     customActionDirectory.set(windowsInstallerFolderPicker.flatMap { it.outputDirectory })
+    upgradeRemovalScript.set(
+        layout.projectDirectory.file("src/distribution/windows/schedule-upgrade-removal.ps1"))
     outputs.cacheIf { false }
 }
 

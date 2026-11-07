@@ -104,7 +104,8 @@ the per-user upgrade begins with visible Windows Installer progress (`/passive`,
 no extra wizard and no forced computer restart). After successful completion,
 the helper records its result before reopening the launcher; the next launch confirms
 the installed version and quietly saves clean success in local diagnostics, without a
-success popup. Failures, restart-required notices and staged installer cleanup warnings remain
+success popup. On Windows a failed update rolls back to the previous launcher, which the
+helper reopens to show the failure. Failures, restart-required notices and staged installer cleanup warnings remain
 visible. Settings offers a manual check.
 macOS uses the matching Intel or Apple Silicon package and opens Apple's Installer,
 including its normal authorization and security checks. The helper waits for Installer to
@@ -131,7 +132,8 @@ with staged installer cleanup failure is reported as a cleanup warning, not as a
 installation failure. Pending or unrecognized results remain for review; a
 completed result is acknowledged before the release lookup, even when offline.
 Helper output and installer diagnostics are retained beside the registry
-as `msi-update-helper.log` and `msi-update-installer.log` on Windows, or
+as `msi-update-helper.log` and `msi-update-installer.log` on Windows (a failed installation's
+log is also kept as `msi-update-installer-failed.log`), or
 `launcher-update-helper.log` and `launcher-update-installer.log` on macOS/Linux; update operation logs include
 both locations. Windows PowerShell's atomic completion write uses `[NullString]::Value`,
 not `$null`, which is converted to an invalid empty backup path by its .NET method binding.

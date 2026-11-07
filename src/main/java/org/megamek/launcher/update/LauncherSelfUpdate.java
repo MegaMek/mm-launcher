@@ -716,7 +716,7 @@ public final class LauncherSelfUpdate {
             result = new ReportResult(false, "Previous launcher update did not complete (installer "
                     + "result: " + outcome.replaceAll("\\p{Cntrl}", " ") + "). "
                     + "Check the installer and retry the launcher update check. Diagnostics: "
-                    + helperLog(report) + " and " + installerLog(report));
+                    + helperLog(report) + " and " + failedOrInstallerLog(report, outcome));
         } else {
             throw new IOException("Unrecognized launcher update result. The report was retained at "
                     + report + " for inspection; do not retry until it is resolved.");
@@ -778,6 +778,17 @@ public final class LauncherSelfUpdate {
                 ? "launcher-update-installer.log" : "msi-update-installer.log");
     }
 
+    public static Path failedInstallerLog(Path report) {
+        String name = installerLog(report).getFileName().toString();
+        return report.resolveSibling(name.substring(0, name.length() - ".log".length()) + "-failed.log");
+    }
+
+    private static Path failedOrInstallerLog(Path report, String outcome) {
+        Path failed = failedInstallerLog(report);
+        return outcome.matches("[0-9]+") && Files.isRegularFile(failed, LinkOption.NOFOLLOW_LINKS)
+                ? failed : installerLog(report);
+    }
+
     static String handoffScript(Path file, String version, String sha256, Path report, long parentPid,
                                 Path launcher, Path installer) {
         Path directory = file.getParent();
@@ -813,6 +824,10 @@ public final class LauncherSelfUpdate {
                 + " { $outcome=" + literal("installed-cleanup-warning:" + version) + " }"
                 + "elseif($outcome -eq " + literal("installed-reboot-required:" + version) + ")"
                 + " { $outcome=" + literal("installed-reboot-required-cleanup-warning:" + version) + " } };"
+                // The next update attempt overwrites the installer log; keep the failed one to share.
+                + "if($outcome -match '^[0-9]+$') { try { if([IO.File]::Exists($installerLog))"
+                + " { [IO.File]::Copy($installerLog," + literal(failedInstallerLog(report).toString()) + ",$true) } }"
+                + " catch { Write-Error $_ -ErrorAction Continue } };"
                 + "$tmp=[IO.Path]::Combine([IO.Path]::GetDirectoryName($report),"
                 + "[IO.Path]::GetRandomFileName());"
                 + "try { $bytes=[Text.Encoding]::UTF8.GetBytes($outcome);"
@@ -826,7 +841,12 @@ public final class LauncherSelfUpdate {
                 + " -or $outcome -eq " + literal("installed-reboot-required:" + version)
                 + " -or $outcome -eq " + literal("installed-cleanup-warning:" + version)
                 + " -or $outcome -eq " + literal("installed-reboot-required-cleanup-warning:" + version) + ")"
-                + " { Start-Process -FilePath " + literal(launcher.toString()) + " }";
+                + " { Start-Process -FilePath " + literal(launcher.toString()) + " }"
+                // Windows Installer rolls a failed update back to the previous launcher; reopen it
+                // so the player sees the failure and where its diagnostics are.
+                + " elseif([IO.File]::Exists(" + literal(launcher.toString()) + "))"
+                + " { try { Start-Process -FilePath " + literal(launcher.toString()) + " }"
+                + " catch { Write-Error $_ -ErrorAction Continue } }";
     }
 
     /** The helper waits for this JVM to exit; exit status is retained for the next launch. */
