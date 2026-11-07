@@ -380,7 +380,8 @@ abstract class NativeInstaller : DefaultTask() {
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val linuxIconFile: RegularFileProperty
 
-    // Holds "MegaMek Launcher.desktop", which replaces jpackage's menu entry template.
+    // Holds "MegaMek Launcher.desktop" (replaces jpackage's menu entry template), the
+    // postinst/prerm and spec overrides, and desktop-entries/ (installed under lib/).
     @get:InputDirectory
     @get:PathSensitive(PathSensitivity.RELATIVE)
     abstract val linuxResources: DirectoryProperty
@@ -463,12 +464,15 @@ abstract class NativeInstaller : DefaultTask() {
                         "--mac-signing-keychain", signingKeychain)
                 }
             } else {
+                val linuxDir = linuxResources.get().asFile
                 args("--linux-package-name", "megamek-launcher",
                     "--install-dir", "/opt",
-                    // Installs the menu entry and icon (xdg-desktop-menu) and removes them on uninstall.
+                    // Builds the launcher's menu entry; the overridden package scripts register it
+                    // and the hidden game entries through desktop-entries/desktop-integration.sh.
                     "--linux-shortcut",
                     "--icon", linuxIconFile.get().asFile.absolutePath,
-                    "--resource-dir", linuxResources.get().asFile.absolutePath)
+                    "--resource-dir", linuxDir.absolutePath,
+                    "--app-content", File(linuxDir, "desktop-entries").absolutePath)
             }
         }
         val generated = destination.listFiles().orEmpty().filter { it.extension == type }

@@ -1,0 +1,25 @@
+#!/bin/sh
+# prerm script for APPLICATION_PACKAGE
+#
+# Replaces jpackage's template so menu entries are removed by
+# /opt/megamek-launcher/lib/desktop-entries/desktop-integration.sh.
+# see: dh_installdeb(1)
+
+set -e
+
+case "$1" in
+    remove|deconfigure)
+        sh /opt/megamek-launcher/lib/desktop-entries/desktop-integration.sh uninstall
+    ;;
+
+    # The new version's postinst registers the entries again.
+    upgrade|failed-upgrade)
+    ;;
+
+    *)
+        echo "prerm called with unknown argument \`$1'" >&2
+        exit 1
+    ;;
+esac
+
+exit 0

@@ -115,7 +115,8 @@ be present. PolicyKit supplies the administrator prompt, which the update confir
 about; `apt-get` or `dnf` performs the
 upgrade using a verified private copy. Linux requires a desktop authorization agent.
 The `.deb` and `.rpm` packages add a MegaMek Launcher entry and icon to the desktop's
-application menu.
+application menu (in `/usr/share/applications`), and give MegaMek, MekHQ and MegaMekLab
+windows their names and icons in the dock or task bar.
 Portable copies and unsupported package-manager setups remain manual. Released portable copies,
 and package installs missing PolicyKit or their package manager, still check for a newer official
 release on startup and from Settings; when one exists they offer to open its release page instead of

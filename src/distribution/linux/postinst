@@ -1,0 +1,24 @@
+#!/bin/sh
+# postinst script for APPLICATION_PACKAGE
+#
+# Replaces jpackage's template so menu entries are registered by
+# /opt/megamek-launcher/lib/desktop-entries/desktop-integration.sh.
+# see: dh_installdeb(1)
+
+set -e
+
+case "$1" in
+    configure)
+        sh /opt/megamek-launcher/lib/desktop-entries/desktop-integration.sh install
+    ;;
+
+    abort-upgrade|abort-remove|abort-deconfigure)
+    ;;
+
+    *)
+        echo "postinst called with unknown argument \`$1'" >&2
+        exit 1
+    ;;
+esac
+
+exit 0
