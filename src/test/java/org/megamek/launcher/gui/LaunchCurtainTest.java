@@ -305,6 +305,40 @@ class LaunchCurtainTest {
         onEdt(() -> assertEquals(3, ran.size(), "a disposed frame drops what was waiting"));
     }
 
+    @Test
+    void actionsHiddenButNotYetRunAreDroppedWhenTheFrameIsDisposed() throws Exception {
+        List<String> ran = new java.util.concurrent.CopyOnWriteArrayList<>();
+        onEdt(() -> {
+            LaunchCurtain curtain = curtain();
+            curtain.greet();
+            curtain.whenUncovered(() -> ran.add("late"));
+            curtain.hideCurtain();
+            assertEquals(List.of(), ran, "the actions wait for the frame after the hide");
+            curtain.removeNotify();
+        });
+        onEdt(() -> assertEquals(List.of(), ran, "disposal before the dispatch drops them"));
+    }
+
+    @Test
+    void actionsWaitAgainWhenTheCurtainCoversBeforeTheyRun() throws Exception {
+        List<String> ran = new java.util.concurrent.CopyOnWriteArrayList<>();
+        LaunchCurtain[] held = new LaunchCurtain[1];
+        onEdt(() -> {
+            LaunchCurtain curtain = curtain();
+            held[0] = curtain;
+            curtain.greet();
+            curtain.whenUncovered(() -> ran.add("first"));
+            curtain.hideCurtain();
+            curtain.greet();
+            curtain.whenUncovered(() -> ran.add("second"));
+        });
+        onEdt(() -> {
+            assertEquals(List.of(), ran, "nothing opens over the new cover");
+            held[0].hideCurtain();
+        });
+        onEdt(() -> assertEquals(List.of("first", "second"), ran, "both run, in order"));
+    }
+
     private LaunchCurtain curtain() {
         LaunchCurtain curtain = new LaunchCurtain(GuiScale.DEFAULT, now::get);
         curtain.setSize(800, 600);

@@ -103,13 +103,30 @@ public final class CachingReleaseTransport implements ReleaseTransport {
 
     @Override
     public Response get(URI uri, String accept) throws IOException, InterruptedException {
+        return get(uri, accept, true);
+    }
+
+    /**
+     * Skips reading the cache but still refreshes it and honours a rate-limit refusal, so release
+     * revalidation sees current GitHub metadata without bypassing the cooldown.
+     */
+    @Override
+    public ReleaseTransport fresh() {
+        return (uri, accept) -> get(uri, accept, false);
+    }
+
+    private Response get(URI uri, String accept, boolean reuse)
+            throws IOException, InterruptedException {
         if (!isApi(uri)) return delegate.get(uri, accept);
-        throwIfLimited();
-        if (!CACHED_ACCEPT.equals(accept)) return checked(delegate.get(uri, accept));
+        if (!CACHED_ACCEPT.equals(accept)) {
+            throwIfLimited();
+            return checked(delegate.get(uri, accept));
+        }
         String key = key(uri, accept);
         // One fetch per URL at a time, so checks that start together share one request.
         synchronized (locks.computeIfAbsent(key, ignored -> new Object())) {
-            Entry cached = fresh(key, uri, accept);
+            // A response cached before a refusal is still served during the cooldown.
+            Entry cached = reuse ? fresh(key, uri, accept) : null;
             if (cached != null) return cached.response();
             throwIfLimited();
             Response response = checked(delegate.get(uri, accept));

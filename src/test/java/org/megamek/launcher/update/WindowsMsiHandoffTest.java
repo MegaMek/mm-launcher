@@ -51,7 +51,7 @@ class WindowsMsiHandoffTest {
 
     private void installerExit(int code) throws Exception {
         Files.writeString(installer, "@echo off\r\necho %* > \"" + arguments
-                + "\"\r\necho installer exit " + code + "> \"" + LauncherSelfUpdate.installerLog(report)
+                + "\"\r\necho installer exit " + code + " > \"" + LauncherSelfUpdate.installerLog(report)
                 + "\"\r\nexit /b " + code + "\r\n");
     }
 

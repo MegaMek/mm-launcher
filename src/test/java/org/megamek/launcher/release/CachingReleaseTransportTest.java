@@ -157,6 +157,34 @@ class CachingReleaseTransportTest {
     }
 
     @Test
+    void freshResponsesAreStillServedDuringARateLimit() throws Exception {
+        MutableClock clock = new MutableClock();
+        FakeTransport network = new FakeTransport();
+        CachingReleaseTransport cache = new CachingReleaseTransport(network, null, clock);
+        assertEquals("[1]", body(cache.get(LIST, JSON)));
+        network.status = 429;
+        URI other = URI.create("https://api.github.com/repos/MegaMek/mm-launcher/releases/latest");
+        assertThrows(GitHubRateLimitException.class, () -> cache.get(other, JSON));
+
+        assertEquals("[1]", body(cache.get(LIST, JSON)), "the cached copy needs no request");
+        assertThrows(GitHubRateLimitException.class, () -> cache.get(other, JSON));
+        assertThrows(GitHubRateLimitException.class, () -> cache.get(other, "application/octet-stream"));
+        assertThrows(GitHubRateLimitException.class, () -> cache.fresh().get(LIST, JSON));
+        assertEquals(2, network.requests.size());
+    }
+
+    @Test
+    void theFreshViewAsksGitHubAndRefreshesTheSharedCopy() throws Exception {
+        FakeTransport network = new FakeTransport();
+        CachingReleaseTransport cache = new CachingReleaseTransport(network, null, new MutableClock());
+        assertEquals("[1]", body(cache.get(LIST, JSON)));
+        assertEquals("[2]", body(cache.fresh().get(LIST, JSON)));
+        assertEquals("[2]", body(cache.get(LIST, JSON)), "later checks reuse the newer copy");
+        assertEquals(2, network.requests.size());
+        assertEquals("[3]", body(cache.fresh().get(ASSET, "application/octet-stream")));
+    }
+
+    @Test
     void rateLimitMessagesNameTheLocalResetTime() throws Exception {
         Instant reset = Instant.parse("2026-11-06T19:33:37Z");
         String message = new GitHubRateLimitException(reset, ZoneOffset.UTC).getMessage();

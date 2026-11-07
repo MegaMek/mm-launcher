@@ -176,6 +176,8 @@ final class LaunchCurtain extends JComponent {
     private Supplier<? extends Collection<? extends Component>> targetSource = List::of;
     /** Waiting for the curtain to hide; see {@link #whenUncovered(Runnable)}. */
     private final List<Runnable> uncovered = new ArrayList<>();
+    /** Whether {@link #uncovered} is already scheduled to run after the curtain hid. */
+    private boolean dispatchPending;
     /** Where the sweep's targets sit, and when (in sweep time) the scan locked onto each; -1 not yet. */
     private List<Rectangle> targets = List.of();
     private long[] lockedAt = new long[0];
@@ -309,7 +311,7 @@ final class LaunchCurtain extends JComponent {
      * greeting, opening or sweep; at once when the curtain is already hidden.
      */
     void whenUncovered(Runnable action) {
-        if (phase == Phase.HIDDEN) {
+        if (phase == Phase.HIDDEN && !dispatchPending) {
             action.run();
         } else {
             uncovered.add(action);
@@ -317,13 +319,18 @@ final class LaunchCurtain extends JComponent {
     }
 
     private void runUncovered() {
-        if (uncovered.isEmpty()) {
+        if (uncovered.isEmpty() || dispatchPending) {
             return;
         }
-        List<Runnable> waiting = List.copyOf(uncovered);
-        uncovered.clear();
+        dispatchPending = true;
         // After the frame that hid the curtain, and in order, so a dialog opens on a still page.
-        SwingUtilities.invokeLater(() -> waiting.forEach(Runnable::run));
+        // The actions stay queued until then: disposal drops them and a new cover keeps them.
+        SwingUtilities.invokeLater(() -> {
+            dispatchPending = false;
+            while (phase == Phase.HIDDEN && !uncovered.isEmpty()) {
+                uncovered.removeFirst().run();
+            }
+        });
     }
 
     /**
