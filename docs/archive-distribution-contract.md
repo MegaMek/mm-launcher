@@ -26,6 +26,13 @@ account setup and live verification remain pending. Linux signing remains outsid
 
 Linux's stable package name is `megamek-launcher` under `/opt`; the macOS
 bundle identifier is `org.megamek.launcher` under `/Applications`.
+The Linux packages install an application menu entry and icon through jpackage's
+`--linux-shortcut` (registered with `xdg-desktop-menu`, removed on uninstall). The entry
+comes from `src/distribution/linux/MegaMek Launcher.desktop`; its
+`StartupWMClass=org-megamek-launcher-DesktopLauncher` matches the window class Java derives
+from the main class, so desktops group the launcher window under that entry and icon. The
+launcher starts the AWT toolkit on the main thread to keep that class stable, and sets the
+same icon (16–256 px PNGs from the Windows icon) on its window. CI checks the entry.
 Both own only application files. Registry, settings, logs and installed
 games live in independent user paths and must not be overwritten by package
 upgrades. The Windows MSI retains its per-user installation folder and
@@ -668,7 +675,9 @@ Debian uses the numeric launcher version without a revision suffix; RPM uses rel
 Package name, version/release and architecture must match both the running installation
 and the downloaded package. Missing, mismatched or ambiguous ownership fails explicitly.
 PolicyKit (`pkexec`, with a desktop authorization agent) authorizes a bounded installer
-script. It copies the download into a private root-owned directory, checks its SHA-256,
+script. Package updates always need administrator rights, because the system package
+database is shared; the update confirmation says the system will ask for an administrator
+password. The script copies the download into a private root-owned directory, checks its SHA-256,
 then uses `apt-get -y install` or `dnf -y upgrade`. It never enables downgrades,
 disables trust checks, or feeds a mutable user-owned package directly to a privileged
 package manager. Other Linux package-manager setups remain manual; they can use the

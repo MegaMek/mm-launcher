@@ -261,6 +261,7 @@ public final class LauncherFrame extends JFrame {
         this.existingImportPrompts = existingImportPrompts;
         this.normalInstallLocationPrompts = normalInstallLocationPrompts;
         setName("launcherFrame");
+        setIconImages(LauncherIcons.images());
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         setMinimumSize(guiScale.scaleForGUI(680, 470));
         setPreferredSize(guiScale.scaleForGUI(1180, 820));
@@ -3574,10 +3575,19 @@ public final class LauncherFrame extends JFrame {
 
     static boolean confirmLauncherUpdate(Window owner, GuiScale scale,
                                           LauncherSelfUpdate.Candidate candidate, String notice) {
-        String message = "Version " + candidate.version() + " is available.\n\n"
+        return LauncherAlertDialog.showConfirm(owner, scale, "Update MegaMek Launcher",
+                launcherUpdatePrompt(candidate.version(), notice,
+                        LauncherSelfUpdate.asksForAdministratorPassword()), "Update now");
+    }
+
+    static String launcherUpdatePrompt(String version, String notice, boolean asksForPassword) {
+        String message = "Version " + version + " is available.\n\n"
                 + "Close any running games before updating.";
-        if (notice != null) message = notice + "\n\n" + message;
-        return LauncherAlertDialog.showConfirm(owner, scale, "Update MegaMek Launcher", message, "Update now");
+        if (asksForPassword) {
+            message += "\n\nYour system will ask for an administrator password, because the "
+                    + "launcher is installed as a system package.";
+        }
+        return notice == null ? message : notice + "\n\n" + message;
     }
 
     private void chooseDefaultJava() {

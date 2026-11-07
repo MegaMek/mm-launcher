@@ -376,6 +376,15 @@ abstract class NativeInstaller : DefaultTask() {
     @get:PathSensitive(PathSensitivity.NONE)
     abstract val macIconFile: RegularFileProperty
 
+    @get:InputFile
+    @get:PathSensitive(PathSensitivity.NONE)
+    abstract val linuxIconFile: RegularFileProperty
+
+    // Holds "MegaMek Launcher.desktop", which replaces jpackage's menu entry template.
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val linuxResources: DirectoryProperty
+
     @get:Internal
     abstract val jpackageExecutable: RegularFileProperty
 
@@ -455,7 +464,11 @@ abstract class NativeInstaller : DefaultTask() {
                 }
             } else {
                 args("--linux-package-name", "megamek-launcher",
-                    "--install-dir", "/opt")
+                    "--install-dir", "/opt",
+                    // Installs the menu entry and icon (xdg-desktop-menu) and removes them on uninstall.
+                    "--linux-shortcut",
+                    "--icon", linuxIconFile.get().asFile.absolutePath,
+                    "--resource-dir", linuxResources.get().asFile.absolutePath)
             }
         }
         val generated = destination.listFiles().orEmpty().filter { it.extension == type }
@@ -1243,6 +1256,9 @@ if (OperatingSystem.current().isLinux || OperatingSystem.current().isMacOsX) {
             runtimeDirectory.set(nativeRuntimeDirectory)
             macIconFile.set(layout.projectDirectory.file(
                 "src/distribution/macos/MegaMekLauncher.icns"))
+            linuxIconFile.set(layout.projectDirectory.file(
+                "src/main/resources/org/megamek/launcher/gui/icons/launcher-256.png"))
+            linuxResources.set(layout.projectDirectory.dir("src/distribution/linux"))
             jpackageExecutable.set(layout.file(javaHome.map { File(it, "bin/jpackage") }))
             packageType.set(type)
             mainJarFileName.set(tasks.named<Jar>("jar").flatMap { it.archiveFileName })

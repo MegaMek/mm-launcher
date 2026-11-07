@@ -37,6 +37,7 @@ import org.megamek.launcher.onboarding.PlatformInstallLocations;
 
 import javax.swing.SwingUtilities;
 import java.awt.GraphicsEnvironment;
+import java.awt.Toolkit;
 import java.io.PrintStream;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -76,6 +77,10 @@ public final class GuiLauncher {
             error.println("ERROR: the graphical launcher cannot start in a headless environment");
             return 2;
         }
+        // Linux names windows after the class at the bottom of the thread that starts the AWT
+        // toolkit. Starting it here, on the main thread, keeps that name equal to the menu
+        // entry's StartupWMClass, so desktops show the launcher's own icon for its windows.
+        Toolkit.getDefaultToolkit();
         SwingUtilities.invokeLater(() -> {
             LauncherAppearance.install(LauncherAppearance.DEFAULT);
             if (selection.defaultRegistry()) {

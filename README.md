@@ -111,8 +111,11 @@ macOS uses the matching Intel or Apple Silicon package and opens Apple's Install
 including its normal authorization and security checks. The helper waits for Installer to
 close and confirms the package receipt and app version before reopening.
 Linux selects `.deb` or `.rpm` from the installed package, not whichever tool happens to
-be present. PolicyKit supplies the administrator prompt; `apt-get` or `dnf` performs the
+be present. PolicyKit supplies the administrator prompt, which the update confirmation warns
+about; `apt-get` or `dnf` performs the
 upgrade using a verified private copy. Linux requires a desktop authorization agent.
+The `.deb` and `.rpm` packages add a MegaMek Launcher entry and icon to the desktop's
+application menu.
 Portable copies and unsupported package-manager setups remain manual. Released portable copies,
 and package installs missing PolicyKit or their package manager, still check for a newer official
 release on startup and from Settings; when one exists they offer to open its release page instead of

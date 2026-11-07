@@ -99,6 +99,11 @@ public final class LauncherSelfUpdate {
         return windowsAvailable() || NativeLauncherUpdate.available();
     }
 
+    /** Linux package updates need an administrator password, which players should expect. */
+    public static boolean asksForAdministratorPassword() {
+        return NativeLauncherUpdate.asksForAdministratorPassword();
+    }
+
     /**
      * Released builds outside a native installer (portable or generic archives) cannot apply
      * an update, but can still tell the player that one exists. Development builds have no

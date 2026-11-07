@@ -351,6 +351,22 @@ jobs:
               if (@($listing | Where-Object { $_ -match 'launcher-registry\.json|/MegaMek Launcher/(launcher-registry|games)' }).Count -gt 0) {
                 throw "$type package contains mutable user state."
               }
+              # jpackage's install script registers this menu entry and icon with xdg-desktop-menu.
+              $desktopEntry = '/opt/megamek-launcher/lib/megamek-launcher-MegaMek_Launcher.desktop'
+              if (@($listing | Where-Object { $_ -match "$([regex]::Escape($desktopEntry))$" }).Count -ne 1 -or
+                  @($listing | Where-Object { $_ -match '/opt/megamek-launcher/lib/MegaMek_Launcher\.png$' }).Count -ne 1) {
+                throw "$type desktop menu entry or icon is missing."
+              }
+              $extract = if ($type -eq 'deb') {
+                "dpkg-deb --fsys-tarfile `"$($file.FullName)`" | tar -xO `".$desktopEntry`""
+              } else {
+                "rpm2cpio `"$($file.FullName)`" | cpio --quiet -i --to-stdout `".$desktopEntry`""
+              }
+              $entry = (& bash -c $extract) -join "`n"
+              if ($LASTEXITCODE -ne 0 -or $entry -notmatch '(?m)^StartupWMClass=org-megamek-launcher-DesktopLauncher$' -or
+                  $entry -notmatch '(?m)^Exec="?/opt/megamek-launcher/bin/MegaMek Launcher"?$') {
+                throw "$type desktop menu entry does not match the launcher window."
+              }
             }
           }
 
