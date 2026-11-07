@@ -8,11 +8,9 @@
 set -e
 
 case "$1" in
-    configure)
+    # Abort cases restore entries that prerm removed before the transaction rolled back.
+    configure|abort-upgrade|abort-remove|abort-deconfigure)
         sh /opt/megamek-launcher/lib/desktop-entries/desktop-integration.sh install
-    ;;
-
-    abort-upgrade|abort-remove|abort-deconfigure)
     ;;
 
     *)
