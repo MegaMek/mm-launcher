@@ -35,7 +35,6 @@ package org.megamek.launcher.gui;
 
 import org.megamek.launcher.onboarding.NormalInstallService;
 
-import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -45,7 +44,6 @@ import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
-import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.WindowConstants;
@@ -57,7 +55,6 @@ import java.awt.Font;
 import java.awt.Frame;
 import java.awt.GraphicsConfiguration;
 import java.awt.Rectangle;
-import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
@@ -76,7 +73,6 @@ final class NormalInstallConfirmationDialog extends JDialog {
     static final Color MUTED = FirstLaunchPanel.MUTED;
     static final Color ACCENT = LauncherTheme.ACCENT;
 
-    private static final String CANCEL_ACTION = "cancelNormalInstallConfirmation";
     private final GuiScale scale;
     private final JButton changeLocation;
     private final JButton install;
@@ -97,6 +93,7 @@ final class NormalInstallConfirmationDialog extends JDialog {
         setName("normalInstallConfirmationDialog");
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         getAccessibleContext().setAccessibleName(getTitle());
+        LauncherTheme.useLauncherTitle(this);
         getAccessibleContext().setAccessibleDescription(
                 "Review the validated version, included programs, download size, and "
                         + "destination before installing.");
@@ -114,14 +111,9 @@ final class NormalInstallConfirmationDialog extends JDialog {
 
         JPanel summary = summary(plan, product, programs);
 
-        JPanel actions = new JPanel();
+        DialogFooter footer = new DialogFooter(scale).primary(install).cancel(cancel);
+        JPanel actions = footer.panel();
         actions.setName("normalInstallConfirmationActions");
-        actions.setOpaque(false);
-        actions.setLayout(new BoxLayout(actions, BoxLayout.X_AXIS));
-        actions.add(Box.createHorizontalGlue());
-        actions.add(cancel);
-        actions.add(Box.createHorizontalStrut(scale.space("md")));
-        actions.add(install);
 
         JPanel content = new JPanel(new BorderLayout(0, scale.space("xl")));
         content.setName("normalInstallConfirmationContent");
@@ -134,15 +126,7 @@ final class NormalInstallConfirmationDialog extends JDialog {
         changeLocation.addActionListener(event -> attemptTransition(changeAction));
         install.addActionListener(event -> attemptTransition(installAction));
         cancel.addActionListener(event -> cancel());
-        getRootPane().setDefaultButton(install);
-        getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(
-                KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), CANCEL_ACTION);
-        getRootPane().getActionMap().put(CANCEL_ACTION, new AbstractAction() {
-            @Override
-            public void actionPerformed(ActionEvent event) {
-                cancel();
-            }
-        });
+        footer.install(this, this::cancel);
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowOpened(WindowEvent event) {

@@ -33,7 +33,6 @@
 
 package org.megamek.launcher.gui;
 
-import javax.swing.AbstractAction;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
@@ -42,7 +41,6 @@ import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.KeyStroke;
 import javax.swing.UIManager;
 import javax.swing.WindowConstants;
 import java.awt.BorderLayout;
@@ -51,36 +49,29 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Rectangle;
 import java.awt.Window;
-import java.awt.event.ActionEvent;
-import java.awt.event.KeyEvent;
 import java.util.Objects;
 
 /**
  * Themed replacement for raw {@link javax.swing.JOptionPane} confirm/message/option dialogs, so
  * these surfaces match the design-token background / accent heading / {@link FirstLaunchButton} styling
- * used everywhere else in the launcher. Buttons are laid out left to right with the least
- * committal action (typically "Cancel") on the left and the recommended action rightmost,
- * styled primary, and bound as the default button — the same ordering convention already used
- * by {@link SubfolderDialog} and {@link NormalInstallConfirmationDialog}.
+ * used everywhere else in the launcher. Its buttons follow the launcher's {@link DialogFooter} rule:
+ * centred and equally wide, the main action first (styled primary and the default button, or styled
+ * danger and never the default), any other choices next, and Cancel last. Escape dismisses it.
  */
 final class LauncherAlertDialog extends JDialog {
-    private static final String DISMISS_ACTION = "dismissLauncherAlert";
+    static final String CANCEL = "Cancel";
 
     private final GuiScale scale;
     private String result;
 
     private LauncherAlertDialog(Window owner, String title, String message, GuiScale scale,
-                                String... buttons) {
-        this(owner, title, message, scale, null, buttons);
-    }
-
-    private LauncherAlertDialog(Window owner, String title, String message, GuiScale scale,
-                                JComponent option, String... buttons) {
+                                JComponent option, boolean danger, String... buttons) {
         super(owner, title, ModalityType.APPLICATION_MODAL);
         this.scale = scale;
         setName("launcherAlertDialog");
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         getAccessibleContext().setAccessibleName(title);
+        LauncherTheme.useLauncherTitle(this);
         getAccessibleContext().setAccessibleDescription(message);
 
         Font base = UIManager.getFont("Label.font");
@@ -109,25 +100,28 @@ final class LauncherAlertDialog extends JDialog {
             fields.add(option);
         }
 
-        JPanel actions = new JPanel();
-        actions.setName("launcherAlertActions");
-        actions.setOpaque(false);
-        actions.setLayout(new BoxLayout(actions, BoxLayout.X_AXIS));
-        actions.add(Box.createHorizontalGlue());
-        JButton defaultButton = null;
+        DialogFooter footer = new DialogFooter(scale);
         for (int i = 0; i < buttons.length; i++) {
-            boolean primary = i == buttons.length - 1;
             String label = buttons[i];
-            JButton button = new FirstLaunchButton(label, "launcherAlertButton" + i, primary,
-                    scale, FirstLaunchButton.Size.SMALL);
+            boolean main = i == 0;
+            String name = "launcherAlertButton" + i;
+            JButton button = main && danger
+                    ? FirstLaunchButton.danger(label, name, scale, FirstLaunchButton.Size.SMALL)
+                    : new FirstLaunchButton(label, name, main, scale, FirstLaunchButton.Size.SMALL);
             button.addActionListener(event -> {
                 result = label;
                 dispose();
             });
-            if (i > 0) actions.add(Box.createHorizontalStrut(scale.space("md")));
-            actions.add(button);
-            if (primary) defaultButton = button;
+            if (main) {
+                if (danger) footer.danger(button); else footer.primary(button);
+            } else if (i == buttons.length - 1 && CANCEL.equals(label)) {
+                footer.cancel(button);
+            } else {
+                footer.secondary(button);
+            }
         }
+        JPanel actions = footer.panel();
+        actions.setName("launcherAlertActions");
 
         JPanel content = new JPanel(new BorderLayout(0, scale.space("xl")));
         content.setName("launcherAlertContent");
@@ -137,15 +131,9 @@ final class LauncherAlertDialog extends JDialog {
         content.add(actions, BorderLayout.SOUTH);
         setContentPane(content);
 
-        if (defaultButton != null) getRootPane().setDefaultButton(defaultButton);
-        getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(
-                KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), DISMISS_ACTION);
-        getRootPane().getActionMap().put(DISMISS_ACTION, new AbstractAction() {
-            @Override
-            public void actionPerformed(ActionEvent event) {
-                result = null;
-                dispose();
-            }
+        footer.install(this, () -> {
+            result = null;
+            dispose();
         });
 
         pack();
@@ -163,12 +151,24 @@ final class LauncherAlertDialog extends JDialog {
     }
 
     /**
-     * Shows a two-button confirmation ("Cancel" plus {@code confirmText}, the latter styled
-     * primary and rightmost) and returns whether the user chose {@code confirmText}.
+     * Shows a two-button confirmation ({@code confirmText} as the primary main action, then
+     * Cancel) and returns whether the user chose {@code confirmText}.
      */
     static boolean showConfirm(Window owner, GuiScale scale, String title, String message,
                                 String confirmText) {
-        return confirmText.equals(show(owner, title, message, scale, "Cancel", confirmText));
+        return confirmText.equals(show(owner, title, message, scale, confirmText, CANCEL));
+    }
+
+    /**
+     * Like {@link #showConfirm} for a destructive action: {@code confirmText} is styled danger,
+     * focus starts on Cancel, and Enter never chooses the destructive action unless it has focus.
+     */
+    static boolean showDangerConfirm(Window owner, GuiScale scale, String title, String message,
+                                     String confirmText) {
+        LauncherAlertDialog dialog = new LauncherAlertDialog(owner, title, message, scale, null,
+                true, confirmText, CANCEL);
+        dialog.setVisible(true);
+        return confirmText.equals(dialog.result);
     }
 
     /**
@@ -178,30 +178,39 @@ final class LauncherAlertDialog extends JDialog {
     static Boolean showConfirmWithOption(Window owner, GuiScale scale, String title,
                                          String message, String optionText,
                                          boolean optionSelected, String confirmText) {
+        return showConfirmWithOption(owner, scale, title, message, optionText, optionSelected,
+                confirmText, false);
+    }
+
+    /** {@link #showConfirmWithOption} whose confirmation is optionally a destructive action. */
+    static Boolean showConfirmWithOption(Window owner, GuiScale scale, String title,
+                                         String message, String optionText,
+                                         boolean optionSelected, String confirmText,
+                                         boolean danger) {
         JCheckBox option = new MapCheckBox(optionText, optionSelected, scale);
         option.setName("launcherAlertOption");
         option.setForeground(FirstLaunchPanel.TEXT);
         LauncherAlertDialog dialog = new LauncherAlertDialog(owner, title, message, scale,
-                option, "Cancel", confirmText);
+                option, danger, confirmText, CANCEL);
         dialog.setVisible(true);
         return confirmText.equals(dialog.result) ? option.isSelected() : null;
     }
 
     /**
-     * Shows a dialog with the given buttons, ordered left to right exactly as supplied (the
-     * last entry is styled primary, rightmost, and bound as the default button). Returns the
-     * label of the button chosen, or {@code null} if the dialog was dismissed without choosing
-     * one (Escape key or window close).
+     * Shows a dialog with the given buttons in the order supplied: the first is the primary main
+     * action and the default button, and a last {@value #CANCEL} entry is the cancel action.
+     * Returns the label of the button chosen, or {@code null} if the dialog was dismissed without
+     * choosing one (Escape key or window close).
      */
     static String show(Window owner, String title, String message, GuiScale scale,
                        String... buttons) {
         Objects.requireNonNull(buttons, "buttons");
         if (buttons.length == 0) throw new IllegalArgumentException("At least one button is required");
-        LauncherAlertDialog dialog = new LauncherAlertDialog(owner, title, message, scale, buttons);
+        LauncherAlertDialog dialog = new LauncherAlertDialog(owner, title, message, scale, null,
+                false, buttons);
         dialog.setVisible(true);
         return dialog.result;
     }
-
     private static JLabel wrappedLabel(String text, String name, Font font, java.awt.Color color,
                                        int widthPixels) {
         JLabel label = new JLabel("<html><body style='width:" + widthPixels + "px'>"

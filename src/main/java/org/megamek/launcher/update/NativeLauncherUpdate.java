@@ -115,6 +115,12 @@ final class NativeLauncherUpdate {
 
     static boolean available() { return system() != null; }
 
+    /** PolicyKit asks for an administrator password before the package manager replaces the package. */
+    static boolean asksForAdministratorPassword() {
+        NativeLauncherUpdate updater = system();
+        return updater != null && updater.platform == Platform.LINUX;
+    }
+
     String suffix(String runningVersion) throws IOException, InterruptedException {
         if (kind == null) verifyInstalledVersion(runningVersion);
         return kind.suffix;

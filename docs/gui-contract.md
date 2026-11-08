@@ -10,6 +10,23 @@ a mutation and its parent is already a real directory. State/receipt files remai
 normal product/channel payload child; Linux keeps state and managed application data in their
 respective XDG/fallback locations.
 
+## Dialog buttons
+
+Every dialog uses one footer: its actions are centred, equally wide (at least 88 scaled pixels),
+and ordered main action first, then any other choices, then **Cancel** (or **Close**) last; a
+right-to-left window mirrors the row, and a dialog cannot be narrowed below its footer. Small helpers such as **Copy**, **View logs**, or a link sit at
+the footer's leading end. Enter presses the focused button, otherwise the main action, and Escape
+cancels. A destructive main action (remove, uninstall, reset, replace) is danger-styled, is never
+the default button, and the dialog opens with focus on Cancel. A progress dialog keeps **Cancel** in
+its header beside the current step while the operation runs; its footer appears once there is a
+result, ending with **Close**. Full-page surfaces such as the
+Settings page and installation cards are not dialogs: their command bars stay right-aligned with
+the main action last.
+
+Every dialog's title bar reads **MegaMek Launcher**. Its specific title appears once, as the heading
+inside the dialog, and is also the dialog's accessible name. A progress dialog shows the operation's
+name as a small line above the current step.
+
 ## Managed application and settings model
 
 Managed Home is application-oriented, not legacy-default-oriented. It has no visible Main
@@ -154,10 +171,16 @@ The curtain repaints only the strips that change and animates only while somethi
 a click or key skips the greeting or an opening, and the curtain takes clicks, hovers and keys
 from the page while it covers it. With reduced motion the greeting and the sweep are skipped,
 openings are instant and the card is still. It uses theme roles, so the light theme gets a light
-curtain. Only the GUI start greets; `showWindow()` alone does not.
-Settings starts with **Appearance**: a Dark/Light theme select. A change applies immediately, re-renders the current page,
+curtain. Only the GUI start greets; `showWindow()` alone does not. With **Play intro animation**
+off, the greeting, openings and sweep are all skipped: the GUI start keeps the window hidden
+until Home has loaded and then shows it on Home, and the launcher comes back from a game without
+the opening or sweep, while launching still shows the card.
+Settings starts with **Appearance**: a Dark/Light theme select and **Play intro animation** (on by
+default). A theme change applies immediately, re-renders the current page,
 and is saved off the event-dispatch thread; a failed save reports an error without reverting the
-visible appearance. High contrast is not offered until the design tokens define it.
+visible appearance. The intro option applies from the next opening and is saved off the
+event-dispatch thread in launcher settings (schema 7 and later; older schemas read as on). High
+contrast is not offered until the design tokens define it.
 Loading and error states keep the same layout; there is no global automatic-check control.
 **Releases** follows Appearance. It
 offers **Show Experimental releases** (off by default) with the warning that Experimental builds
@@ -190,16 +213,20 @@ directory for every installation. The memory choices stop at this computer's phy
 are offered when it cannot be read), though a saved or inherited larger value stays selectable, and the
 memory group carries one short sizing hint under the MekHQ row. Settings edits the launcher-wide values inline: **Revert** and
 **Save launch options** are enabled only while the form differs from the saved values, unsaved edits
-survive Settings re-renders, and leaving Settings with unsaved edits asks **Discard changes?** first.
+survive Settings re-renders, and leaving Settings with unsaved edits asks **Save launch options?** with **Save**, **Don't save**, and **Cancel**. Save stays on Settings when a value is invalid and leaves only after the save succeeds.
+The launcher's own window always draws without Direct3D on Windows (unless `-Dsun.java2d.d3d` is set
+explicitly), because some drivers drop its partial repaints and leave the window black through the
+intro; the renderer option above only affects the games.
 **Launch options…** in an installation's More menu opens a dialog that edits overrides where each field can
 inherit the launcher-wide value. **Copy launch commands** in the same menu copies the commands used to start each application with the saved options, for troubleshooting. Values are stored
 next to the registry in `<registry>.launch-options.json`, separate from launcher settings, and an
 unreadable file is reported and never overwritten. Imported installations adopt their existing
 `-Xmx` from the application's `.l4j.ini` as an override. Java arguments must be options starting
 with `-`; class path, module, `-jar`, `-Xmx`, argument-file, and informational flags are rejected.
-Every application starts with generational ZGC (`-XX:+UseZGC`, plus `-XX:+ZGenerational` on Java 21
-and 22 only, since it is the default and deprecated from Java 23). Choosing a collector (`-XX:±Use…GC`)
-in the Java arguments replaces this default, and an explicit `-XX:±ZGenerational` is kept as written.
+The launcher adds no garbage collector option, so applications use the Java runtime's default
+collector (G1). Generational ZGC lagged the user interface noticeably on the bundled Temurin
+21.0.13. A player can still choose a collector (for example `-XX:+UseZGC -XX:+ZGenerational`) in the
+Java arguments.
 The user directory is passed as `-Dmegamek.userDir`, which MegaMek 0.51.01 and later treat as
 a launcher-managed override of the User Directory preference.
 
@@ -209,7 +236,8 @@ Clean, confirmed update completion is diagnostic-only: no success popup, confirm
 preamble, or extra detail in a release-lookup error.
 The same cancellable download/verification dialog hands off to the native installer after consent:
 Windows Installer, Apple's Installer, or PolicyKit and the installed Linux package manager.
-The launcher closes before installation and reopens only after verified installation success.
+The launcher closes before installation and reopens after verified installation success; on
+Windows it also reopens after a failed installation, which rolls back to the previous launcher.
 Failures, required computer restarts, staged installer cleanup/reopen warnings and unresolved pending
 updates retain their existing presentation. Diagnostic-write failures are surfaced explicitly.
 
@@ -408,7 +436,7 @@ custom `LauncherServices` registries use
 `<registry parent>/installations/<product channel>` for isolation. Destination selection performs
 no migration or filesystem write.
 
-A successful new install remembers its parent folder in launcher settings schema 6
+A successful new install remembers its parent folder in launcher settings schema 6 and later
 (`installParent`). Later suggestions place the new product/channel folder, with the usual numbered
 sibling when taken, inside that parent while it is still a real, writable directory; a missing,
 unwritable, or non-directory parent, or one reached through a link anywhere along its path, falls
@@ -541,8 +569,8 @@ updates that label in place and never replaces managed Home.
 An available result displays verified installed tag, followed target, status, release-notes URL,
 and full size. **Update to recommended release…** goes directly to that captured target and opens a
 styled update consent showing the application name, current version, new version, and rounded
-human-readable MB download size, and reminds the user to close MegaMek, MekHQ, and MegaMekLab. Its right-aligned actions are
-**Cancel** then **Update**, with Update as the default. This one consent authorizes the complete
+human-readable MB download size, and reminds the user to close MegaMek, MekHQ, and MegaMekLab. Its actions are
+**Update** then **Cancel**, with Update as the default. This one consent authorizes the complete
 attempt; Cancel, Escape, and window close fetch no package body. Before any package request the
 backend rechecks the record, channel sidecar, fixed source, repository, tag, asset name, size, and
 digest. Changed metadata is rejected for fresh consent; it cannot silently retarget. There is no
@@ -632,8 +660,8 @@ managed-incomplete/corrupt, and recovery-pending cards never show it.
 
 The compact first screen shows one **Program (Version)** line and a styled update-channel selector
 with Core selected by default; Experimental is the only alternative and appears only when
-**Show Experimental releases** is on. **Cancel** is fixed at
-the far left and **Continue** at the far right; Escape cancels and Enter continues. No network
+**Show Experimental releases** is on. **Continue** comes first and **Cancel** last, following
+the dialog button rule; Escape cancels and Enter continues. No network
 request occurs until Continue. Continue searches bounded GitHub release-list metadata for the
 detected official repository and automatically prepares the copy only when one safe immutable tag
 matches. Numeric dotted versions compare numerically (`0.50.7`, `0.50.07`, and `v0.50.07` are

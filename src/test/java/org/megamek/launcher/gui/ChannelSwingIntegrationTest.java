@@ -145,7 +145,7 @@ class ChannelSwingIntegrationTest {
                     () -> find(frame, "manageInstallationsButton").doClick());
             JButton addRelease = waitFor(() -> find(frame, "installAnotherVersionButton"));
             SwingUtilities.invokeAndWait(addRelease::doClick);
-            JDialog download = waitForDialog(frame, "Download an official release");
+            JDialog download = waitForDialog(frame, "Install another version");
             JComboBox<?> freshChannel = findCombo(download, "downloadChannelCombo");
             assertNotNull(freshChannel);
             assertEquals(FollowChannel.CORE, onEdt(freshChannel::getSelectedItem),
@@ -372,7 +372,7 @@ class ChannelSwingIntegrationTest {
 
             SwingTestSupport.click(frame, "installCoreButton");
             JDialog failure = SwingTestSupport.dialog(frame, "Could not prepare download");
-            SwingTestSupport.click(failure, "launcherAlertButton0");
+            SwingTestSupport.clickText(failure, "Cancel");
             assertEquals("MEGAMEK Core", services.plannedInstall,
                     "Install Core plans a new Core copy of the same product");
         } finally {

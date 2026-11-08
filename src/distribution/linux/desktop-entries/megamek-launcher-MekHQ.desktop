@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=MekHQ
+Comment=Run a BattleTech campaign and fight its battles in MegaMek
+Exec="/opt/megamek-launcher/bin/MegaMek Launcher"
+Icon=/opt/megamek-launcher/lib/desktop-entries/MekHQ.png
+Terminal=false
+NoDisplay=true
+Categories=Game;StrategyGame;
+Keywords=MegaMek;MekHQ;MegaMekLab;BattleTech;
+StartupWMClass=mekhq-MekHQ

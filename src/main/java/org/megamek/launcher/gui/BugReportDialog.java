@@ -90,6 +90,7 @@ final class BugReportDialog extends JDialog {
         setName("bugReportDialog");
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         getAccessibleContext().setAccessibleName(TITLE);
+        LauncherTheme.useLauncherTitle(this);
         content = content(scale, actions, this::dispose);
         setContentPane(content.panel());
         getRootPane().setDefaultButton(content.openIssueForm());
@@ -217,20 +218,20 @@ final class BugReportDialog extends JDialog {
                 FirstLaunchButton.Size.SMALL);
         closeButton.addActionListener(event -> close.run());
 
-        JPanel footer = new JPanel();
-        footer.setName("bugReportActions");
-        footer.setOpaque(false);
-        footer.setLayout(new BoxLayout(footer, BoxLayout.X_AXIS));
-        footer.add(discord);
-        footer.add(Box.createHorizontalGlue());
-        footer.add(closeButton);
+        DialogFooter footer = new DialogFooter(scale).tool(discord).cancel(closeButton);
+        // Open bug report form is the default button; a focused button must win Enter over it.
+        for (JButton button : new JButton[]{save, open, discord, closeButton}) {
+            DialogFooter.pressOnEnter(button);
+        }
+        JPanel footerPanel = footer.panel();
+        footerPanel.setName("bugReportActions");
 
         JPanel panel = new JPanel(new BorderLayout(0, scale.space("xl")));
         panel.setName("bugReportContent");
         panel.setBackground(FirstLaunchPanel.BACKGROUND);
         panel.setBorder(scale.padding("xxl", "xxl"));
         panel.add(fields, BorderLayout.CENTER);
-        panel.add(footer, BorderLayout.SOUTH);
+        panel.add(footerPanel, BorderLayout.SOUTH);
         return new Content(panel, save, open, closeButton, status);
     }
 

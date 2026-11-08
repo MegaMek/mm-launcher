@@ -47,8 +47,9 @@
     <MediaTemplate EmbedCab="yes"/>
 
     <!-- Same upgrade policy as the former jpackage MSI: any other version is
-         removed, older (upgrade) or newer (downgrade), and the old product is
-         removed completely before costing the new one. -->
+         removed, older (upgrade) or newer (downgrade). Removal runs inside the
+         install transaction, so a failed upgrade rolls back to the previous
+         launcher instead of leaving none. -->
     <Upgrade Id="$(LauncherUpgradeCode)">
       <UpgradeVersion Property="LAUNCHER_OLDER_FOUND" Maximum="$(LauncherVersion)"
                       IncludeMaximum="no" MigrateFeatures="yes"/>
@@ -56,7 +57,7 @@
                       IncludeMinimum="no" MigrateFeatures="yes"/>
     </Upgrade>
     <InstallExecuteSequence>
-      <RemoveExistingProducts Before="CostInitialize"/>
+      <RemoveExistingProducts After="InstallInitialize"/>
     </InstallExecuteSequence>
 
     <Icon Id="LauncherIcon" SourceFile="$(LauncherIcon)"/>

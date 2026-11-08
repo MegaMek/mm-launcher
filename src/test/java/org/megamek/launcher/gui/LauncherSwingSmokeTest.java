@@ -83,6 +83,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -179,7 +180,7 @@ class LauncherSwingSmokeTest {
         SubfolderDialog escaped = onEdt(() ->
                 new SubfolderDialog(null, "MekHQ Core (0.51.0)", GuiScale.DEFAULT));
         SwingUtilities.invokeAndWait(() -> escaped.getRootPane().getActionMap()
-                .get("cancelSubfolder").actionPerformed(
+                .get(DialogFooter.ESCAPE_ACTION).actionPerformed(
                         new java.awt.event.ActionEvent(escaped, 0, "escape")));
         assertEquals(null, escaped.result());
     }
@@ -195,6 +196,37 @@ class LauncherSwingSmokeTest {
             SwingUtilities.invokeAndWait(frame::showWindow);
             assertNotNull(waitForButton(frame, "retryRegistryButton"));
             assertEquals("{broken", java.nio.file.Files.readString(registry));
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
+    void withTheIntroOffTheWindowWaitsForHomeBeforeShowing() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        CountDownLatch loading = new CountDownLatch(1);
+        LauncherServices services = new LauncherServices(temp.resolve("intro-off.json")) {
+            @Override
+            public HomeState loadHome() throws IOException {
+                try {
+                    loading.await(10, TimeUnit.SECONDS);
+                } catch (InterruptedException error) {
+                    Thread.currentThread().interrupt();
+                }
+                return super.loadHome();
+            }
+        };
+        services.register("Main", createSuite(temp.resolve("intro-off-copy")));
+        services.savePlayIntro(false);
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindowWithGreeting);
+            assertFalse(onEdt(frame::isVisible), "an empty window must not show while Home loads");
+            loading.countDown();
+            assertNotNull(waitForButton(frame, "manageInstallationsButton"));
+            waitFor(frame::isVisible);
         } finally {
             dispose(frame);
         }
@@ -517,7 +549,7 @@ class LauncherSwingSmokeTest {
                 frame.setVisible(true);
                 frame.downloadDialog();
             });
-            JDialog dialog = owned(frame, "Download an official release");
+            JDialog dialog = owned(frame, "Install another version");
             JButton previous = find(dialog, "previousReleasePageButton");
             JButton next = find(dialog, "nextReleasePageButton");
             JButton fetch = find(dialog, "fetchReleasesButton");
@@ -570,7 +602,7 @@ class LauncherSwingSmokeTest {
                 frame.setVisible(true);
                 frame.downloadDialog();
             });
-            JDialog dialog = owned(frame, "Download an official release");
+            JDialog dialog = owned(frame, "Install another version");
             JComboBox<?> product = findCombo(dialog, "downloadProductCombo");
             JComboBox<?> channel = findCombo(dialog, "downloadChannelCombo");
             assertTrue(product instanceof StyledComboBox<?>);
@@ -630,13 +662,15 @@ class LauncherSwingSmokeTest {
             JButton destination = find(dialog, "installReleaseButton");
             assertEquals(previous.getParent(), indicator.getParent());
             assertEquals(previous.getParent(), next.getParent());
-            assertEquals(previous.getParent(), destination.getParent());
             assertTrue(previous.getParent().getComponentZOrder(previous)
                     < previous.getParent().getComponentZOrder(indicator));
             assertTrue(previous.getParent().getComponentZOrder(indicator)
                     < previous.getParent().getComponentZOrder(next));
-            assertTrue(previous.getParent().getComponentZOrder(next)
-                    < previous.getParent().getComponentZOrder(destination));
+            JButton cancelPicker = find(dialog, "cancelReleasePickerButton");
+            assertEquals("releasePickerActions", destination.getParent().getName());
+            assertEquals(destination.getParent(), cancelPicker.getParent());
+            assertTrue(destination.getX() < cancelPicker.getX(), "Install leads the dialog footer");
+            assertEquals(destination, dialog.getRootPane().getDefaultButton());
             SwingUtilities.invokeAndWait(() -> list.setSelectedIndex(2));
             assertFalse(find(dialog, "installReleaseButton").isEnabled(),
                     "an unavailable row cannot enable destination selection");
@@ -672,7 +706,7 @@ class LauncherSwingSmokeTest {
                 frame.setVisible(true);
                 frame.downloadDialog();
             });
-            JDialog dialog = owned(frame, "Download an official release");
+            JDialog dialog = owned(frame, "Install another version");
             JButton fetch = find(dialog, "fetchReleasesButton");
             JComboBox<?> product = findCombo(dialog, "downloadProductCombo");
             SwingTestSupport.startClick(dialog, "fetchReleasesButton");
@@ -898,6 +932,11 @@ class LauncherSwingSmokeTest {
             assertTrue(cancel.isVisible());
             assertTrue(details.isVisible());
             assertFalse(repairHolder.get().isVisible());
+            assertSame(cancel, dialog.getRootPane().getDefaultButton(), "Enter closes a plain result");
+            for (JButton button : new JButton[]{cancel, details, repairHolder.get()}) {
+                assertNotNull(button.getInputMap(javax.swing.JComponent.WHEN_FOCUSED)
+                        .get(javax.swing.KeyStroke.getKeyStroke("ENTER")), "Enter presses a focused button");
+            }
             JLabel logging = findLabel(dialog, "operationLoggingWarning");
             assertTrue(logging.isVisible());
             assertTrue(logging.getText().contains("original failure"));
@@ -905,6 +944,8 @@ class LauncherSwingSmokeTest {
             SwingUtilities.invokeAndWait(() -> repairHolder.get().setEnabled(true));
             assertTrue(repairHolder.get().isVisible(),
                     "a needed repair action appears only after failure");
+            assertSame(repairHolder.get(), dialog.getRootPane().getDefaultButton(),
+                    "the result's own action is its main action");
         } finally {
             context.finish(org.megamek.launcher.operation.OperationOutcome.FAILED, "done");
             dispose(frame);
@@ -1068,7 +1109,7 @@ class LauncherSwingSmokeTest {
         JButton download = onEdt(() -> find(frame, "installAnotherVersionButton"));
         assertNotNull(download);
         SwingUtilities.invokeAndWait(download::doClick);
-        JDialog picker = owned(frame, "Download an official release");
+        JDialog picker = owned(frame, "Install another version");
         assertTrue(onEdt(picker::isVisible));
         JButton fetch = onEdt(() -> find(picker, "fetchReleasesButton"));
         assertNotNull(fetch);
@@ -1182,7 +1223,7 @@ class LauncherSwingSmokeTest {
         SwingUtilities.invokeAndWait(() -> {
             for (java.awt.Window window : frame.getOwnedWindows()) {
                 if (window instanceof JDialog dialog && dialog.isShowing()
-                        && title.equals(dialog.getTitle())) {
+                        && title.equals(dialog.getAccessibleContext().getAccessibleName())) {
                     result[0] = true;
                 }
             }
@@ -1207,7 +1248,7 @@ class LauncherSwingSmokeTest {
     private static void closeOwned(LauncherFrame frame, String title) throws Exception {
         SwingUtilities.invokeAndWait(() -> {
             for (java.awt.Window window : frame.getOwnedWindows()) {
-                if (window instanceof JDialog dialog && title.equals(dialog.getTitle())) {
+                if (window instanceof JDialog dialog && title.equals(dialog.getAccessibleContext().getAccessibleName())) {
                     dialog.dispose();
                 }
             }

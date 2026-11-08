@@ -42,6 +42,14 @@ import java.util.Map;
 public interface ReleaseTransport {
     Response get(URI uri, String accept) throws IOException, InterruptedException;
 
+    /**
+     * A view that always asks the source instead of reusing shared metadata, for the final checks
+     * that must see a withdrawn or replaced release before anything is downloaded or applied.
+     */
+    default ReleaseTransport fresh() {
+        return this;
+    }
+
     record Response(int status, Map<String, List<String>> headers, InputStream body)
             implements AutoCloseable {
         public Response {

@@ -33,17 +33,14 @@
 
 package org.megamek.launcher.gui;
 
-import javax.swing.AbstractAction;
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
-import javax.swing.JComponent;
 import javax.swing.JDialog;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JTextField;
-import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.WindowConstants;
@@ -54,7 +51,6 @@ import java.awt.Dimension;
 import java.awt.Font;
 import java.awt.Rectangle;
 import java.awt.Window;
-import java.awt.event.ActionEvent;
 import java.awt.event.KeyEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
@@ -64,7 +60,6 @@ import java.nio.file.Path;
  * Styled, in-place validated editor for the one new subfolder created below a chosen parent.
  */
 final class SubfolderDialog extends JDialog {
-    private static final String CANCEL_ACTION = "cancelSubfolder";
     private final GuiScale scale;
     private final JTextField folderName;
     private final JLabel error = new JLabel(" ");
@@ -77,6 +72,7 @@ final class SubfolderDialog extends JDialog {
         setName("subfolderDialog");
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         getAccessibleContext().setAccessibleName("Choose install folder");
+        LauncherTheme.useLauncherTitle(this);
         getAccessibleContext().setAccessibleDescription(
                 "Enter one safe new folder name inside the selected parent folder.");
 
@@ -138,13 +134,9 @@ final class SubfolderDialog extends JDialog {
         fields.add(Box.createVerticalStrut(scale.space("xs")));
         fields.add(error);
 
-        JPanel actions = new JPanel();
-        actions.setOpaque(false);
-        actions.setLayout(new BoxLayout(actions, BoxLayout.X_AXIS));
-        actions.add(Box.createHorizontalGlue());
-        actions.add(cancel);
-        actions.add(Box.createHorizontalStrut(scale.space("md")));
-        actions.add(continueButton);
+        DialogFooter footer = new DialogFooter(scale).primary(continueButton).cancel(cancel);
+        JPanel actions = footer.panel();
+        actions.setName("subfolderActions");
 
         JPanel content = new JPanel(new BorderLayout(0, scale.space("xl")));
         content.setName("subfolderDialogContent");
@@ -154,15 +146,7 @@ final class SubfolderDialog extends JDialog {
         content.add(actions, BorderLayout.SOUTH);
         setContentPane(content);
 
-        getRootPane().setDefaultButton(continueButton);
-        getRootPane().getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW).put(
-                KeyStroke.getKeyStroke(KeyEvent.VK_ESCAPE, 0), CANCEL_ACTION);
-        getRootPane().getActionMap().put(CANCEL_ACTION, new AbstractAction() {
-            @Override
-            public void actionPerformed(ActionEvent event) {
-                cancel();
-            }
-        });
+        footer.install(this, this::cancel);
         addWindowListener(new WindowAdapter() {
             @Override
             public void windowOpened(WindowEvent event) {

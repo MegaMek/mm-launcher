@@ -96,7 +96,7 @@ class UninstallSwingTest {
             var menu = SwingTestSupport.installationMenu(frame, record.id());
             SwingTestSupport.startClickText(menu, "Uninstall…");
             var confirmation = SwingTestSupport.dialog(frame, "Uninstall");
-            SwingTestSupport.click(confirmation, "launcherAlertButton0");
+            SwingTestSupport.clickText(confirmation, "Cancel");
             assertEquals(0, calls.get());
             assertTrue(Files.exists(root.resolve("MegaMek.jar")));
             assertEquals(2, services.readRegistry().installations().size());
@@ -115,7 +115,7 @@ class UninstallSwingTest {
                 deleteLogs.doClick();
                 return null;
             });
-            SwingTestSupport.click(confirmation, "launcherAlertButton1");
+            SwingTestSupport.click(confirmation, "launcherAlertButton0");
             SwingTestSupport.awaitCondition("uninstall and refreshed Home", () ->
                     services.readRegistry().installations().equals(List.of(retained))
                             && SwingTestSupport.find(frame, "launch-megamek-button") != null

@@ -195,7 +195,8 @@ true. There is no configurable global or new-install default. The normal quote b
 repository/product set/channel/source version and registry/default snapshot without carrying a
 check preference or Settings revision. Settings schemas 3 and 4 hold no channel data; they read
 with **Show Experimental releases** off and are rewritten as the current schema on the next
-change; schemas 3 to 5 also read with no remembered install folder. Older
+change; schemas 3 to 5 also read with no remembered install folder, and schemas 3 to 6 read
+with the intro animation on. Older
 Settings schemas are rejected rather than migrated. Absent/corrupt/unknown channels remain Unknown
 or Unavailable and launch-only with no inference or assignment path. The CLI fresh installer
 requires `--channel core` or `--channel experimental` and initializes its check-on-open value to

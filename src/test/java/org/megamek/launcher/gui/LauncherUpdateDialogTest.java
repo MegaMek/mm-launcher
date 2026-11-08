@@ -62,6 +62,7 @@ class LauncherUpdateDialogTest {
             assertEquals(0, SwingTestSupport.countButtonText(dialog, "Yes"));
             SwingTestSupport.onEdt(() -> {
                 assertEquals(FirstLaunchPanel.BACKGROUND, dialog.getContentPane().getBackground());
+                assertEquals(LauncherTheme.DIALOG_TITLE, dialog.getTitle());
                 JLabel body = SwingTestSupport.find(dialog, "launcherAlertMessage", JLabel.class);
                 String expected = "Version 0.1.1 is available.\n\nClose any running games before updating.";
                 if (notice != null) expected = notice + "\n\n" + expected;
@@ -70,7 +71,7 @@ class LauncherUpdateDialogTest {
                         body.getText().replaceAll("<[^>]*>", " ").replaceAll("\\s+", " ").trim());
                 return null;
             });
-            SwingTestSupport.click(dialog, accept ? "launcherAlertButton1" : "launcherAlertButton0");
+            SwingTestSupport.click(dialog, accept ? "launcherAlertButton0" : "launcherAlertButton1");
             assertEquals(accept, answer.get(8, TimeUnit.SECONDS));
             SwingTestSupport.awaitCondition("confirmation dismissed",
                     () -> SwingTestSupport.showingWindow(owner, LauncherAlertDialog.class) == null);

@@ -64,6 +64,7 @@ import org.megamek.launcher.operation.OperationType;
 import org.megamek.launcher.registry.InstallationRecord;
 import org.megamek.launcher.registry.RegistryData;
 import org.megamek.launcher.registry.RegistryStore;
+import org.megamek.launcher.release.CachingReleaseTransport;
 import org.megamek.launcher.release.FreshInstaller;
 import org.megamek.launcher.release.JavaReleaseTransport;
 import org.megamek.launcher.release.OfficialRepository;
@@ -116,13 +117,18 @@ public class LauncherServices {
 
     public LauncherServices(Path registry) {
         this(registry, new RegistryStore(), new InstallationInspector(),
-                new JavaReleaseTransport(), new JavaRuntime(), new ApplicationLauncher());
+                githubTransport(registry), new JavaRuntime(), new ApplicationLauncher());
     }
 
     public LauncherServices(Path registry, PlatformInstallLocations installLocations) {
         this(registry, new RegistryStore(), new InstallationInspector(),
-                new JavaReleaseTransport(), new JavaRuntime(), new ApplicationLauncher(),
+                githubTransport(registry), new JavaRuntime(), new ApplicationLauncher(),
                 new RootCoordinator(), installLocations);
+    }
+
+    private static ReleaseTransport githubTransport(Path registry) {
+        return new CachingReleaseTransport(new JavaReleaseTransport(),
+                CachingReleaseTransport.directoryFor(registry));
     }
 
     public LauncherServices(Path registry, RegistryStore store, InstallationInspector inspector,
@@ -167,6 +173,11 @@ public class LauncherServices {
 
     public Path registry() {
         return registry;
+    }
+
+    /** The shared release transport, so every lookup reuses the same GitHub metadata. */
+    public ReleaseTransport releaseTransport() {
+        return transport;
     }
 
     public QuickInstallSnapshot quickInstallSnapshot(boolean showExperimental)
@@ -356,6 +367,20 @@ public class LauncherServices {
     void saveShowExperimental(boolean showExperimental) throws IOException {
         ensureRegistryParent();
         settings.writeShowExperimental(showExperimental);
+    }
+
+    /** Whether the launcher plays its intro; unreadable settings keep it on. */
+    boolean playIntro() {
+        try {
+            return settings.read().playIntro();
+        } catch (IOException | RuntimeException error) {
+            return true;
+        }
+    }
+
+    void savePlayIntro(boolean playIntro) throws IOException {
+        ensureRegistryParent();
+        settings.writePlayIntro(playIntro);
     }
 
     public SettingsView settingsView() throws IOException, InterruptedException {

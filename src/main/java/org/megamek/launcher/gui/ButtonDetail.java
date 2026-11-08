@@ -44,6 +44,9 @@ import java.awt.Graphics2D;
 import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.RenderingHints;
+import java.awt.Shape;
+import java.awt.font.GlyphVector;
+import java.awt.geom.PathIterator;
 import java.awt.geom.Rectangle2D;
 
 /**
@@ -145,12 +148,44 @@ final class ButtonDetail {
             graphics.setFont(badgeFont);
             // Center the drawn glyphs, not the font's line box: the line box's leading and
             // descent otherwise push short text like "1 update" toward the bottom border.
-            Rectangle2D ink = badgeFont.createGlyphVector(graphics.getFontRenderContext(), badge)
-                    .getVisualBounds();
+            // Horizontally, split the difference between the ink's box and its mass: text like
+            // "1 update" is light on the left, so box-centering alone reads as shifted right.
+            GlyphVector glyphs = badgeFont.createGlyphVector(
+                    graphics.getFontRenderContext(), badge);
+            Rectangle2D ink = glyphs.getVisualBounds();
+            double inkCenter = (ink.getCenterX() + inkMassX(glyphs.getOutline(), ink)) / 2;
             graphics.drawString(badge,
-                    (float) (badgeX + (badgeWidth - ink.getWidth()) / 2 - ink.getX()),
+                    (float) (badgeX + badgeWidth / 2.0 - inkCenter),
                     (float) (badgeY + (badgeHeight - ink.getHeight()) / 2 - ink.getY()));
         }
+    }
+
+    /** The horizontal centroid of the filled glyph outlines, or the box center if they have none. */
+    static double inkMassX(Shape outline, Rectangle2D ink) {
+        double area = 0;
+        double moment = 0;
+        double[] point = new double[6];
+        double startX = 0, startY = 0, lastX = 0, lastY = 0;
+        for (PathIterator path = outline.getPathIterator(null, 0.1); !path.isDone(); path.next()) {
+            int type = path.currentSegment(point);
+            double x = point[0], y = point[1];
+            if (type == PathIterator.SEG_MOVETO) {
+                startX = lastX = x;
+                startY = lastY = y;
+                continue;
+            }
+            if (type == PathIterator.SEG_CLOSE) {
+                x = startX;
+                y = startY;
+            }
+            // Shoelace terms: holes wind the other way and subtract themselves.
+            double cross = lastX * y - x * lastY;
+            area += cross;
+            moment += (lastX + x) * cross;
+            lastX = x;
+            lastY = y;
+        }
+        return Math.abs(area) < 1e-9 ? ink.getCenterX() : moment / (3 * area);
     }
 
     private static Color muted(Color color) {

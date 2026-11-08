@@ -187,10 +187,13 @@ class NormalInstallServiceTest {
         assertTrue(launcher.command(latest, "megamek", java).contains("-Xmx4096m"));
         for (String product : List.of("megamek", "mekhq", "lab")) {
             List<String> defaults = launcher.command(latest, product, java);
-            assertTrue(defaults.contains("-XX:+UseZGC") && defaults.contains("-XX:+ZGenerational"), product);
+            assertTrue(defaults.stream().noneMatch(argument -> argument.matches("-XX:[+-]Use\\w*GC")
+                    || argument.contains("ZGenerational")), "Java picks the collector: " + product);
         }
-        assertFalse(launcher.command(latest, "megamek", java, new LaunchOptions(null, null, null,
-                null, "-XX:+UseG1GC", null)).contains("-XX:+UseZGC"), "a chosen collector replaces ZGC");
+        List<String> zgc = launcher.command(latest, "megamek", java, new LaunchOptions(null, null, null,
+                null, "-XX:+UseZGC -XX:+ZGenerational", null));
+        assertTrue(zgc.contains("-XX:+UseZGC") && zgc.contains("-XX:+ZGenerational"),
+                "a collector chosen in the Java arguments is passed through");
         Path userDir = fixture.destination.getParent().resolve("shared-user-data").toAbsolutePath();
         List<String> tuned = launcher.command(latest, "megamek", java, new LaunchOptions(2048, null, null,
                 LaunchOptions.Renderer.OPENGL, "-Dsun.java2d.uiScale=1.5", userDir.toString()));

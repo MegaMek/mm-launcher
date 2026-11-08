@@ -310,8 +310,8 @@ class WindowsInstallerUiTest {
         assertEquals("$(LauncherVersion)", newer.getAttribute("Minimum"));
         assertEquals("no", newer.getAttribute("IncludeMinimum"));
         Element remove = (Element) doc.getElementsByTagNameNS(WIX, "RemoveExistingProducts").item(0);
-        assertEquals("CostInitialize", remove.getAttribute("Before"),
-                "The old product must be gone before the new one is costed");
+        assertEquals("InstallInitialize", remove.getAttribute("After"),
+                "A failed upgrade must roll back to the previous launcher, not delete it");
 
         Element menu = find(doc, "Directory", "LauncherMenuFolder");
         assertEquals("MegaMek", menu.getAttribute("Name"));

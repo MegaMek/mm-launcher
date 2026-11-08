@@ -35,6 +35,7 @@ package org.megamek.launcher.gui;
 
 import org.megamek.launcher.design.DesignTokens;
 
+import javax.accessibility.AccessibleContext;
 import javax.swing.BorderFactory;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
@@ -47,6 +48,7 @@ import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
+import java.awt.Dialog;
 import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
@@ -95,6 +97,20 @@ final class LauncherTheme {
     private LauncherTheme() {
     }
 
+    /** What every launcher dialog shows in its window title bar. */
+    static final String DIALOG_TITLE = "MegaMek Launcher";
+
+    /**
+     * Puts {@link #DIALOG_TITLE} in {@code dialog}'s title bar, so its specific title appears only once,
+     * as the heading inside it. The specific title stays the dialog's accessible name.
+     */
+    static void useLauncherTitle(Dialog dialog) {
+        AccessibleContext context = dialog.getAccessibleContext();
+        // An unset accessible name falls back to the title; pin it before the title changes.
+        context.setAccessibleName(context.getAccessibleName());
+        dialog.setTitle(DIALOG_TITLE);
+    }
+
     private static int tokenSize(String key) {
         Float size = DesignTokens.shipped().size().get(key);
         if (size == null) throw new IllegalStateException("Missing design token size " + key);
@@ -126,6 +142,24 @@ final class LauncherTheme {
         if (focused && enabled) {
             paintFocus(graphics, width, height, scale);
         }
+    }
+
+    /** A destructive action: the secondary face with a danger edge, to go with {@link #dangerButtonText}. */
+    static void paintDangerButton(Graphics2D graphics, int width, int height, GuiScale scale,
+                                  boolean enabled, boolean pressed, boolean hovered, boolean focused) {
+        Color background = !enabled ? DISABLED_BACKGROUND
+                : pressed ? PRESSED_BACKGROUND : hovered ? ACTIVE_BACKGROUND : BUTTON_BACKGROUND;
+        graphics.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        graphics.setPaint(background);
+        graphics.fill(shape(width, height, scale, 0));
+        paintOutline(graphics, width, height, scale, enabled ? DANGER : BORDER);
+        if (focused && enabled) {
+            paintFocus(graphics, width, height, scale);
+        }
+    }
+
+    static Color dangerButtonText(boolean enabled) {
+        return enabled ? DANGER : DISABLED_TEXT;
     }
 
     static void paintOutline(Graphics2D graphics, int width, int height, GuiScale scale, Color border) {

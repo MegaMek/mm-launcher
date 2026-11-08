@@ -75,6 +75,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OperationCancellationTest {
@@ -251,6 +252,31 @@ class OperationCancellationTest {
                 new org.megamek.launcher.registry.RegistryStore().read(registry)
                         .defaultInstallationId());
         assertFalse(Thread.currentThread().isInterrupted());
+    }
+
+    @Test
+    void finalChecksThroughTheSharedCacheSeeChangedOrWithdrawnReleases() throws Exception {
+        byte[] archive = packageArchive();
+        String changed = metadata(archive).replace(sha(archive), sha(new byte[] {1}));
+        CachingReleaseTransport cache = new CachingReleaseTransport(new QueueTransport(
+                response(metadata(archive)), binary(archive), response(changed)), null);
+        VerifiedPackageFetcher fetcher = new VerifiedPackageFetcher(cache);
+        try (VerifiedPackageFetcher.Workspace workspace = fetcher.fetch(OfficialRepository.MEGAMEK,
+                "v2", temp, ".drift-", quiet())) {
+            IOException drift = assertThrows(IOException.class, () -> fetcher.revalidateAndExtract(
+                    OfficialRepository.MEGAMEK, "v2", workspace, null, quiet()));
+            assertTrue(drift.getMessage().contains("metadata changed"), drift.getMessage());
+        }
+
+        CachingReleaseTransport discovered = new CachingReleaseTransport(new QueueTransport(
+                response(metadata(archive)),
+                () -> new ReleaseTransport.Response(404, Map.of(),
+                        new ByteArrayInputStream(new byte[0]))), null);
+        URI exact = ReleaseCatalog.exactMetadataUri(OfficialRepository.MEGAMEK, "v2");
+        discovered.get(exact, "application/vnd.github+json").close();
+        assertThrows(IOException.class, () -> new VerifiedPackageFetcher(discovered).fetch(
+                OfficialRepository.MEGAMEK, "v2", temp, ".withdrawn-", quiet()),
+                "a release withdrawn after discovery is not downloaded from the cached copy");
     }
 
     private static byte[] packageArchive() throws Exception {

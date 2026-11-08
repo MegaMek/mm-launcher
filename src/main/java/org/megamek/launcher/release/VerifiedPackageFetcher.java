@@ -76,7 +76,9 @@ public final class VerifiedPackageFetcher {
 
     VerifiedPackageFetcher(ReleaseTransport transport, SafeTarExtractor extractor) {
         this.transport = transport;
-        this.catalog = new ReleaseCatalog(transport);
+        // The exact-release reads here are the last check before a transfer or Apply, so they
+        // must see a release that was withdrawn or replaced moments ago.
+        this.catalog = new ReleaseCatalog(transport.fresh());
         this.extractor = extractor;
     }
 

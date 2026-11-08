@@ -89,7 +89,7 @@
            current installation untouched. -->
       <Custom Action="ResolveInstallFolder" After="RestoreInstallDir"
               Condition="LAUNCHER_INSTALL_FOLDER AND NOT Installed AND NOT REMOVE"/>
-      <!-- AppSearch precedes the early RemoveExistingProducts (before CostInitialize).
+      <!-- AppSearch precedes RemoveExistingProducts (after InstallInitialize).
            UI choice wins in interactive installs; silent upgrades read the old marker.
            The setup bundle seeds its checkbox from the same marker and passes
            LAUNCHER_DESKTOP_CHOSEN, so its (possibly re-checked) choice also wins. -->

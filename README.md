@@ -107,14 +107,19 @@ name, company and version resource, then exits before the per-user upgrade begin
 setup's themed progress window (`/passive`, no prompts and no forced computer restart). After successful completion,
 the helper records its result before reopening the launcher; the next launch confirms
 the installed version and quietly saves clean success in local diagnostics, without a
-success popup. Failures, restart-required notices and staged installer cleanup warnings remain
+success popup. On Windows a failed update rolls back to the previous launcher, which the
+helper reopens to show the failure. Failures, restart-required notices and staged installer cleanup warnings remain
 visible. Settings offers a manual check.
 macOS uses the matching Intel or Apple Silicon package and opens Apple's Installer,
 including its normal authorization and security checks. The helper waits for Installer to
 close and confirms the package receipt and app version before reopening.
 Linux selects `.deb` or `.rpm` from the installed package, not whichever tool happens to
-be present. PolicyKit supplies the administrator prompt; `apt-get` or `dnf` performs the
+be present. PolicyKit supplies the administrator prompt, which the update confirmation warns
+about; `apt-get` or `dnf` performs the
 upgrade using a verified private copy. Linux requires a desktop authorization agent.
+The `.deb` and `.rpm` packages add a MegaMek Launcher entry and icon to the desktop's
+application menu (in `/usr/share/applications`), and give MegaMek, MekHQ and MegaMekLab
+windows their names and icons in the dock or task bar.
 Portable copies and unsupported package-manager setups remain manual. Released portable copies,
 and package installs missing PolicyKit or their package manager, still check for a newer official
 release on startup and from Settings; when one exists they offer to open its release page instead of
@@ -134,7 +139,8 @@ with staged installer cleanup failure is reported as a cleanup warning, not as a
 installation failure. Pending or unrecognized results remain for review; a
 completed result is acknowledged before the release lookup, even when offline.
 Helper output and installer diagnostics are retained beside the registry
-as `msi-update-helper.log` and `msi-update-installer.log` on Windows, or
+as `msi-update-helper.log` and `msi-update-installer.log` on Windows (a failed installation's
+log is also kept as `msi-update-installer-failed.log`), or
 `launcher-update-helper.log` and `launcher-update-installer.log` on macOS/Linux; update operation logs include
 both locations. Windows PowerShell's atomic completion write uses `[NullString]::Value`,
 not `$null`, which is converted to an invalid empty backup path by its .NET method binding.
