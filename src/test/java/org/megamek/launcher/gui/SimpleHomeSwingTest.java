@@ -1094,6 +1094,45 @@ class SimpleHomeSwingTest {
 
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
+    void launchOptionsDialogCopiesTheCommandsForTheUnsavedForm() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
+        FakeServices services = new FakeServices(temp.resolve("copy-commands.json"));
+        services.installed = true;
+        services.main = services.first;
+        services.saveInstallationLaunchOptions(services.first,
+                new LaunchOptions(3000, null, null, null, null, null));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            clickShowingButton(frame, "manageInstallationsButton");
+            JPopupMenu menu = SwingTestSupport.installationMenu(frame, services.first.id());
+            assertNull(onEdt(() -> find(menu, "copyLaunchCommands-" + services.first.id())),
+                    "copying launch commands lives in the Launch options dialog");
+            invokeMenuSelection(onEdt(() -> find(menu, "launchOptions-" + services.first.id())));
+            JDialog dialog = SwingTestSupport.await("launch options dialog", () ->
+                    java.util.Arrays.stream(frame.getOwnedWindows())
+                            .filter(window -> window instanceof JDialog && window.isShowing()
+                                    && "launchOptionsDialog".equals(window.getName()))
+                            .map(JDialog.class::cast).findFirst().orElse(null));
+            SwingUtilities.invokeAndWait(() -> {
+                ((JButton) find(dialog, "restoreLaunchOptionsDefaultsButton")).doClick();
+                ((JButton) find(dialog, "copyLaunchCommandsButton")).doClick();
+            });
+            JLabel message = onEdt(() -> find(dialog, "launchOptionsMessage"));
+            waitUntil(() -> message.getText().startsWith("Copied launch commands"));
+            assertEquals(LaunchOptions.INHERIT, services.previewedOverrides,
+                    "the copy uses the form as shown, not the saved options");
+            assertEquals(3000, services.launchOptions().installation(services.first.id()).megamekHeapMb(),
+                    "copying never saves");
+            assertTrue(dialog.isShowing(), "the dialog stays open after copying");
+            SwingUtilities.invokeAndWait(dialog::dispose);
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void adoptedCopyRepairSkipsTheFileCheck() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         FakeServices services = new FakeServices(temp.resolve("adopted-repair-menu.json"));
@@ -1971,6 +2010,7 @@ class SimpleHomeSwingTest {
         /** When set, the launched game keeps running until the test counts it down. */
         private volatile CountDownLatch launchExit;
         private volatile InstallationRecord previewedRecord;
+        private volatile LaunchOptions previewedOverrides;
         private volatile String previewedProduct;
         private volatile InstallationRecord launchedRecord;
         private volatile String launchedProduct;
@@ -2285,6 +2325,12 @@ class SimpleHomeSwingTest {
             previewedRecord = record;
             previewedProduct = product;
             return List.of("fixture-java", product);
+        }
+
+        @Override
+        public List<String> preview(InstallationRecord record, String product, LaunchOptions overrides) {
+            previewedOverrides = overrides;
+            return preview(record, product);
         }
 
         @Override

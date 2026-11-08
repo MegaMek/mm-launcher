@@ -60,7 +60,7 @@ final class LaunchOptionsDialog {
 
     LaunchOptionsDialog(JFrame owner, GuiScale scale, String title, String heading, String explanation,
                         LaunchOptions inherited, LaunchOptions current, String inheritLabel,
-                        Consumer<LaunchOptions> onSave) {
+                        Consumer<LaunchOptions> onSave, Consumer<LaunchOptions> onCopyCommands) {
         Objects.requireNonNull(scale, "scale");
         dialog = new JDialog(owner, title, false);
         LauncherTheme.useLauncherTitle(dialog);
@@ -104,13 +104,8 @@ final class LaunchOptionsDialog {
         JButton save = new FirstLaunchButton("Save", "saveLaunchOptionsButton", true, scale,
                 FirstLaunchButton.Size.SMALL);
         save.addActionListener(event -> {
-            LaunchOptions options;
-            try {
-                options = form.collect();
-            } catch (IllegalArgumentException invalid) {
-                message.setText(invalid.getMessage());
-                return;
-            }
+            LaunchOptions options = collect();
+            if (options == null) return;
             dialog.dispose();
             onSave.accept(options);
         });
@@ -119,7 +114,19 @@ final class LaunchOptionsDialog {
         restore.getAccessibleContext().setAccessibleDescription(
                 "Set every option to follow the launcher default. Save to keep the change.");
         restore.addActionListener(event -> form.restoreDefaults());
-        DialogFooter footer = new DialogFooter(scale).tool(restore).primary(save).cancel(cancel);
+        DialogFooter footer = new DialogFooter(scale).tool(restore);
+        if (onCopyCommands != null) {
+            JButton copy = new FirstLaunchButton("Copy launch commands", "copyLaunchCommandsButton",
+                    false, scale, FirstLaunchButton.Size.SMALL);
+            copy.getAccessibleContext().setAccessibleDescription(
+                    "Copy the commands that start each application with the options shown, for troubleshooting");
+            copy.addActionListener(event -> {
+                LaunchOptions options = collect();
+                if (options != null) onCopyCommands.accept(options);
+            });
+            footer.tool(copy);
+        }
+        footer.primary(save).cancel(cancel);
         JPanel actions = footer.panel();
         actions.setName("launchOptionsActions");
         south.add(actions, BorderLayout.CENTER);
@@ -137,6 +144,22 @@ final class LaunchOptionsDialog {
                 Math.min(Math.max(scale.size("dialog.sm"), dialog.getHeight()), maxHeight));
         dialog.setMinimumSize(new Dimension(scale.size("dialog.md"), scale.size("dialog.sm")));
         dialog.setLocationRelativeTo(owner);
+    }
+
+    private LaunchOptions collect() {
+        try {
+            return form.collect();
+        } catch (IllegalArgumentException invalid) {
+            message.setForeground(LauncherTheme.WARNING);
+            message.setText(invalid.getMessage());
+            return null;
+        }
+    }
+
+    /** Shows a confirmation under the form until the next edit. */
+    void note(String text) {
+        message.setForeground(FirstLaunchPanel.MUTED);
+        message.setText(text);
     }
 
     JDialog dialog() {

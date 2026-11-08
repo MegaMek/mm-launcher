@@ -232,7 +232,7 @@ explicitly), because some drivers drop its partial repaints and leave the window
 intro; the renderer option above only affects the games.
 **Launch options…** in an installation's More menu opens a dialog that edits overrides where each field can
 inherit the launcher-wide value; **Restore defaults** sets every field back to inheriting, which
-takes effect when saved. **Copy launch commands** in the same menu copies the commands used to start each application with the saved options, for troubleshooting. Values are stored
+takes effect when saved. **Copy launch commands** in the same dialog copies the commands used to start each application with the options as currently shown (including unsaved edits, which it does not save), for troubleshooting. Values are stored
 next to the registry in `<registry>.launch-options.json`, separate from launcher settings, and an
 unreadable file is reported and never overwritten. Imported installations adopt their existing
 `-Xmx` from the application's `.l4j.ini` as an override. Java arguments must be options starting

@@ -730,10 +730,18 @@ public class LauncherServices {
 
     public List<String> preview(InstallationRecord record, String product)
             throws IOException, InterruptedException {
+        return preview(record, product, null);
+    }
+
+    /** The launch command with {@code overrides} in place of the saved ones, or the saved ones when null. */
+    public List<String> preview(InstallationRecord record, String product, LaunchOptions overrides)
+            throws IOException, InterruptedException {
         InstallationRecord current = requireCurrentLaunchRecord(record);
         JavaRuntime.CurrentJava java = configuredGameJava(current);
-        return applicationLauncher.command(current, product, java,
-                launchOptions.read().effective(current.id()));
+        LaunchOptionsStore.Document document = launchOptions.read();
+        LaunchOptions effective = overrides == null ? document.effective(current.id())
+                : overrides.over(document.global().over(LaunchOptions.builtIn()));
+        return applicationLauncher.command(current, product, java, effective);
     }
 
     public int launch(InstallationRecord record, String product)

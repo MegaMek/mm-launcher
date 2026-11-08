@@ -1858,12 +1858,6 @@ public final class LauncherFrame extends JFrame {
                 "Set memory, rendering, and other launch options for " + record.name());
         launchOptions.addActionListener(event -> openInstallationLaunchOptions(record));
         menu.add(launchOptions);
-        JMenuItem copyCommands = installationMenuItem("Copy launch commands");
-        copyCommands.setName("copyLaunchCommands-" + record.id());
-        copyCommands.getAccessibleContext().setAccessibleDescription(
-                "Copy the commands used to start each application in " + record.name() + ", for troubleshooting");
-        copyCommands.addActionListener(event -> copyLaunchCommands(record));
-        menu.add(copyCommands);
         JMenuItem repair = installationMenuItem("Repair…");
         repair.setName("repairInstallation-" + record.id());
         repair.getAccessibleContext().setAccessibleDescription(
@@ -3139,7 +3133,8 @@ public final class LauncherFrame extends JFrame {
     private void openInstallationLaunchOptions(InstallationRecord record) {
         run("Reading launch options", services::launchOptions, document -> {
             LaunchOptions inherited = document.global().over(LaunchOptions.builtIn());
-            new LaunchOptionsDialog(this, guiScale, "Launch options",
+            LaunchOptionsDialog[] dialog = new LaunchOptionsDialog[1];
+            dialog[0] = new LaunchOptionsDialog(this, guiScale, "Launch options",
                     "Launch options for " + installationDisplayName(record),
                     "Override the launcher-wide options for this installation only.",
                     inherited, document.installation(record.id()), "Use launcher default",
@@ -3147,16 +3142,20 @@ public final class LauncherFrame extends JFrame {
                             () -> services.saveInstallationLaunchOptions(record, options), saved -> {
                                 launchOptionsDocument = saved;
                                 status.setText("Saved launch options for " + installationDisplayName(record) + ".");
-                            })).show();
+                            }),
+                    options -> copyLaunchCommands(record, options, dialog[0]));
+            dialog[0].show();
         });
     }
 
-    private void copyLaunchCommands(InstallationRecord record) {
+    /** Copies the commands that would start each application with the dialog's unsaved {@code overrides}. */
+    private void copyLaunchCommands(InstallationRecord record, LaunchOptions overrides,
+                                    LaunchOptionsDialog dialog) {
         List<Product> products = record.products() == null ? List.of() : record.products();
         run("Preparing launch commands", () -> {
             StringBuilder commands = new StringBuilder();
             for (Product product : products) {
-                List<String> command = services.preview(record, product.key());
+                List<String> command = services.preview(record, product.key(), overrides);
                 commands.append(displayProduct(product.key())).append(':').append(System.lineSeparator());
                 commands.append(String.join(" ", command.stream().map(LauncherFrame::quoteArgument).toList()))
                         .append(System.lineSeparator()).append(System.lineSeparator());
@@ -3165,6 +3164,7 @@ public final class LauncherFrame extends JFrame {
         }, text -> {
             Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(text), null);
             status.setText("Copied launch commands.");
+            dialog.note("Copied launch commands to the clipboard.");
         });
     }
 
