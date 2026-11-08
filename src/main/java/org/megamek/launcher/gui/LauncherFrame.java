@@ -4770,7 +4770,11 @@ public final class LauncherFrame extends JFrame {
             if (download) downloadRepair(record, check.source());
             return download;
         }
-        if (check != null) lines.add("All game files are intact.");
+        if (check != null) {
+            lines.add("All game files are intact.");
+        } else if (result.checkError() != null) {
+            lines.add("The game files could not be checked: " + result.checkError());
+        }
         status.setText("Repair complete");
         LauncherAlertDialog.showMessage(this, guiScale, "Repair complete",
                 String.join("\n\n", lines));

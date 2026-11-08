@@ -100,7 +100,10 @@ game files without downloading anything), and says that saves stay. An unchecked
 **Also reset settings to defaults (a backup is kept)** option adds the settings reset below.
 The offline step deletes only the regenerable caches shared with uninstall, then, for a copy the
 launcher did not install, re-inspects the folder and refreshes the recorded build and products
-when they changed. A stale selection is rejected. The result dialog lists what was done.
+when they changed. A stale selection is rejected. Cancelling is only honoured before the first
+change; once caches are cleared the repair runs to the end so the result dialog can list what was
+done. If the file check itself fails, that dialog still reports the completed steps (including any
+settings backup) and says the game files could not be checked.
 
 The optional settings reset keeps its program scope, and the result identifies the retained
 backup location; a reset failure is reported without undoing the rest. The root coordinator blocks tracked
