@@ -1855,6 +1855,79 @@ class RealUpdateServiceTest {
         }
     }
 
+    @Test
+    void offlineFileCheckFindsDamageWithoutDownloadingAndSkipsRegenerableCaches()
+            throws Exception {
+        Map<String, byte[]> files = packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime"),
+                "data/mekfiles/units.cache", bytes("shipped cache")));
+        Fixture fixture = install("offline-check", "v1", files);
+        RealUpdateService service = service(new PackageTransport(), point -> {});
+        RealUpdateService.Snapshot snapshot = service.snapshot(fixture.registry, fixture.id);
+        assertTrue(snapshot.current().officialManifest().files().stream()
+                .anyMatch(entry -> entry.path().equals("data/mekfiles/units.cache")));
+        assertEquals(0, InstallationRepairService.checkFiles(snapshot).damaged());
+
+        Files.writeString(fixture.root.resolve("lib/runtime.txt"), "edited");
+        Files.delete(fixture.root.resolve("data/default.txt"));
+        Files.writeString(fixture.root.resolve("data/mekfiles/units.cache"), "rebuilt by MegaMek");
+        InstallationRepairService.FileCheck check = InstallationRepairService.checkFiles(snapshot);
+        assertEquals(List.of("data/default.txt"), check.missing());
+        assertEquals(List.of("lib/runtime.txt"), check.modified());
+        Files.delete(fixture.root.resolve("data/mekfiles/units.cache"));
+        assertEquals(2, InstallationRepairService.checkFiles(snapshot).damaged(),
+                "a cleared cache is not damage");
+        assertEquals("edited", Files.readString(fixture.root.resolve("lib/runtime.txt")));
+    }
+
+    @Test
+    void tidyClearsCachesButKeepsTheRecordOfALauncherInstalledCopy() throws Exception {
+        Map<String, byte[]> files = packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime"),
+                "data/mekfiles/units.cache", bytes("cache")));
+        Fixture fixture = install("tidy-owned", "v1", files);
+        RegistryStore store = new RegistryStore();
+        InstallationRecord before = store.resolve(store.read(fixture.registry), fixture.id);
+        Files.write(fixture.root.resolve("MegaMek.jar"), jar(2, 0));
+        InstallationRepairService.Tidy tidy = repairService(fixture.registry, "tidy-owned")
+                .tidy(before);
+        assertEquals(List.of("data/mekfiles/units.cache"), tidy.clearedCaches());
+        assertFalse(Files.exists(fixture.root.resolve("data/mekfiles/units.cache")));
+        assertFalse(tidy.rescanned(), "the receipt, not the folder, records an owned build");
+        assertEquals(before, tidy.record());
+        assertEquals(before, store.resolve(store.read(fixture.registry), fixture.id));
+    }
+
+    @Test
+    void tidyRescansAnImportedCopyAndRejectsAStaleSelection() throws Exception {
+        Path area = Files.createDirectory(temp.resolve("tidy-imported"));
+        Path registry = area.resolve("registry.json");
+        Path root = area.resolve("installed");
+        materialize(root, packageFiles(1, Map.of("lib/runtime.txt", bytes("runtime"))));
+        RegistryStore store = new RegistryStore();
+        InstallationRecord before = store.register(registry, "Imported", root, null);
+        Files.write(root.resolve("MegaMek.jar"), jar(2, 0));
+        InstallationRepairService repair = repairService(registry, "tidy-imported");
+
+        InstallationRepairService.Tidy tidy = repair.tidy(before);
+        assertTrue(tidy.clearedCaches().isEmpty());
+        assertTrue(tidy.rescanned());
+        assertEquals(before.observedBuild(), tidy.previousBuild());
+        assertEquals(new InstallationInspector().inspect(root).observedBuild(),
+                tidy.record().observedBuild());
+        assertEquals(tidy.record(), store.resolve(store.read(registry), before.id()));
+        assertEquals(before.name(), tidy.record().name());
+
+        IOException stale = assertThrows(IOException.class, () -> repair.tidy(before));
+        assertTrue(stale.getMessage().contains("changed"));
+        assertFalse(repair.tidy(tidy.record()).rescanned());
+    }
+
+    private InstallationRepairService repairService(Path registry, String name) {
+        return new InstallationRepairService(registry, new RegistryStore(),
+                new InstallationInspector(), new RootCoordinator(temp.resolve(name + "-locks")));
+    }
+
     private Fixture install(String name, String tag, Map<String, byte[]> files) throws Exception {
         return install(name, tag, files, FollowChannel.CORE);
     }

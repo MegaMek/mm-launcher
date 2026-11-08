@@ -43,6 +43,7 @@ public enum OperationType {
     RECOVERY("Update recovery"),
     UNINSTALL("Uninstall"),
     UNINSTALL_RECOVERY("Uninstall recovery"),
+    REPAIR("Repair"),
     GUI_ERROR("Launcher error");
 
     private final String displayName;

@@ -152,6 +152,12 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         userDirectory.refresh();
     }
 
+    /** Sets every option to follow the inherited layer; nothing is saved until collected. */
+    void restoreDefaults() {
+        for (Row row : rows) row.restoreDefault.run();
+        onChange.run();
+    }
+
     /** This layer's values as entered, without validation. */
     LaunchOptions values() {
         return new LaunchOptions(
@@ -273,6 +279,11 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         }
 
         Row row = new Row(inherit, editor);
+        row.restoreDefault = () -> {
+            inherit.setSelected(true);
+            resetToInherited.run();
+            row.refresh();
+        };
         inherit.addActionListener(event -> {
             if (inherit.isSelected()) resetToInherited.run();
             row.refresh();
@@ -395,6 +406,7 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         final JCheckBox inherit;
         JComponent editor;
         List<? extends Component> extraEditors = List.of();
+        Runnable restoreDefault = () -> {};
 
         Row(JCheckBox inherit, JComponent editor) {
             this.inherit = inherit;

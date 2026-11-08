@@ -93,7 +93,7 @@ public final class UninstallService {
     public static final int JOURNAL_SCHEMA = 1;
     public static final String CONFIRMATION = "UNINSTALL-OFFICIAL-FILES";
     /** Runtime caches the applications rebuild from package data on the next start. */
-    static final List<String> REGENERABLE_CACHES = List.of("data/mekfiles/units.cache");
+    public static final List<String> REGENERABLE_CACHES = List.of("data/mekfiles/units.cache");
     /** Folders where the applications write their own logs; removed only on explicit request. */
     public static final List<String> LOG_FOLDERS = List.of("logs", "data/logs");
     private static final int MAX_LOG_FILES = 10_000;
