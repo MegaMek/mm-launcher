@@ -80,11 +80,13 @@ final class HomeLaunchSplitButton extends JPanel {
     private static final String CLOSE_POPUP_ACTION = "closeAlternateInstallations";
     /** The popup rows' horizontal padding, a design-token space name. */
     private static final String ROW_SIDE = "xl";
+    private static final String DEFAULT_TAG = "DEFAULT";
 
     private final GuiScale scale;
     private final SegmentButton primaryButton;
     private final SegmentButton optionsButton;
     private final JPopupMenu popupMenu;
+    private final JMenuItem defaultItem;
     private final List<JMenuItem> optionItems;
     private final List<Option> alternatives;
     private final boolean hasOptions;
@@ -105,6 +107,17 @@ final class HomeLaunchSplitButton extends JPanel {
 
     HomeLaunchSplitButton(GuiScale scale, String productKey, String productName,
                           String preferredVersion, String preferredChannel,
+                          Runnable primaryAction, List<Option> alternatives) {
+        this(scale, productKey, productName, preferredVersion, preferredChannel, null,
+                primaryAction, alternatives);
+    }
+
+    /**
+     * @param defaultLabel the popup row naming the copy the primary segment launches; {@code null}
+     *                     builds one from the product, channel, and version
+     */
+    HomeLaunchSplitButton(GuiScale scale, String productKey, String productName,
+                          String preferredVersion, String preferredChannel, String defaultLabel,
                           Runnable primaryAction, List<Option> alternatives) {
         this.scale = scale;
         List<Option> capturedOptions = List.copyOf(alternatives);
@@ -139,13 +152,13 @@ final class HomeLaunchSplitButton extends JPanel {
         optionsButton = new SegmentButton("", "launch-" + productKey + "-options-button", true);
         optionsButton.setIcon(new DownArrowIcon(scale));
         optionsButton.setHorizontalAlignment(SwingConstants.CENTER);
-        optionsButton.setToolTipText("Launch " + productName
-                + " from another registered installation.");
+        optionsButton.setToolTipText("Choose which installed copy of " + productName
+                + " to launch.");
         optionsButton.getAccessibleContext().setAccessibleName(
-                "Other " + productName + " installations");
+                productName + " installations");
         optionsButton.getAccessibleContext().setAccessibleDescription(
-                "Open registered alternatives for " + productName
-                        + ". This does not change the preferred installation.");
+                "Choose which registered copy of " + productName
+                        + " to launch. This does not change the default installation.");
         optionsButton.addActionListener(event -> openPopup());
 
         popupMenu = new JPopupMenu();
@@ -153,10 +166,26 @@ final class HomeLaunchSplitButton extends JPanel {
         // A native window keeps the community links and other home content from painting over the open list
         popupMenu.setLightWeightPopupEnabled(false);
         popupMenu.getAccessibleContext().setAccessibleName(
-                "Other " + productName + " installations");
+                productName + " installations");
         popupMenu.getAccessibleContext().setAccessibleDescription(
-                "Launch a captured registered copy without changing the preference.");
-        if (hasOptions) popupMenu.add(popupHeader());
+                "Launch the default copy or another registered copy without changing the default.");
+        // The default copy leads the list, so it never reads as a menu holding just one choice
+        defaultItem = new AlternativeItem(defaultLabel == null || defaultLabel.isBlank()
+                ? defaultRowLabel(productName, preferredChannel, preferredVersion)
+                : defaultLabel, true);
+        defaultItem.setName("launch-" + productKey + "-default-item");
+        defaultItem.getAccessibleContext().setAccessibleName(
+                defaultItem.getText() + " · Default");
+        defaultItem.getAccessibleContext().setAccessibleDescription(
+                "The default copy, also launched by the main button.");
+        defaultItem.addActionListener(event -> {
+            closePopup();
+            if (!disposed && primaryButton.isEnabled()) primaryAction.run();
+        });
+        if (hasOptions) {
+            popupMenu.add(popupHeader());
+            popupMenu.add(defaultItem);
+        }
         optionItems = capturedOptions.stream().map(option -> {
             JMenuItem item = menuItem(option.label());
             item.addActionListener(event -> invokeOption(option));
@@ -197,7 +226,7 @@ final class HomeLaunchSplitButton extends JPanel {
 
     /** A short caps frame over the rows; the rows themselves are values and stay sentence case. */
     private JLabel popupHeader() {
-        JLabel header = new JLabel("Other installations");
+        JLabel header = new JLabel("Installations");
         header.setName("launch-popup-header");
         header.setFont(scale.font(header.getFont(), "caption"));
         header.setForeground(LauncherTheme.MUTED);
@@ -206,8 +235,13 @@ final class HomeLaunchSplitButton extends JPanel {
         return header;
     }
 
+    private static String defaultRowLabel(String productName, String channel, String version) {
+        String detail = VersionDisplay.channelVersion(channel, version);
+        return detail.isEmpty() ? productName : productName + " · " + detail;
+    }
+
     private JMenuItem menuItem(String label) {
-        JMenuItem item = new AlternativeItem(label);
+        JMenuItem item = new AlternativeItem(label, false);
         item.getAccessibleContext().setAccessibleName(label);
         item.getAccessibleContext().setAccessibleDescription(
                 label + ". Launch this registered copy without changing the preference.");
@@ -250,8 +284,9 @@ final class HomeLaunchSplitButton extends JPanel {
         int width = Math.max(natural.width, getWidth());
         popupMenu.setPreferredSize(new Dimension(width, natural.height));
         popupMenu.show(this, getWidth() - width, popupY(natural.height));
-        JMenuItem selected = optionItems.stream().filter(JMenuItem::isEnabled)
-                .findFirst().orElse(null);
+        JMenuItem selected = java.util.stream.Stream.concat(
+                        java.util.stream.Stream.of(defaultItem), optionItems.stream())
+                .filter(JMenuItem::isEnabled).findFirst().orElse(null);
         MenuSelectionManager.defaultManager().setSelectedPath(selected == null
                 ? new MenuElement[]{popupMenu}
                 : new MenuElement[]{popupMenu, selected});
@@ -318,9 +353,14 @@ final class HomeLaunchSplitButton extends JPanel {
         return popupMenu;
     }
 
-    /** The alternative rows, in order, without the popup's header. */
+    /** The alternative rows, in order, without the popup's header or the default row. */
     List<JMenuItem> menuItems() {
         return optionItems;
+    }
+
+    /** The popup's first row: the default copy the primary segment launches. */
+    JMenuItem defaultItem() {
+        return defaultItem;
     }
 
     boolean hasOptions() {
@@ -330,10 +370,12 @@ final class HomeLaunchSplitButton extends JPanel {
     void setPrimaryAvailable(boolean available) {
         primaryAvailable = available;
         primaryButton.setEnabled(isEnabled() && available);
+        updateOptionAvailability();
     }
 
     private void updateOptionAvailability() {
         boolean enabled = isEnabled() && optionsButton.isEnabled();
+        defaultItem.setEnabled(enabled && primaryAvailable);
         for (int index = 0; index < optionItems.size(); index++) {
             optionItems.get(index).setEnabled(enabled && alternatives.get(index).available());
         }
@@ -369,22 +411,42 @@ final class HomeLaunchSplitButton extends JPanel {
         try {
             canvas.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
                     RenderingHints.VALUE_ANTIALIAS_ON);
-            boolean pressed = primaryButton.getModel().isPressed()
-                    && primaryButton.getModel().isArmed()
-                    || hasOptions && optionsButton.getModel().isPressed()
+            boolean primaryPressed = primaryButton.getModel().isPressed()
+                    && primaryButton.getModel().isArmed();
+            boolean optionsPressed = hasOptions && optionsButton.getModel().isPressed()
                     && optionsButton.getModel().isArmed();
-            boolean hover = primaryButton.getModel().isRollover()
-                    || hasOptions && optionsButton.getModel().isRollover();
+            boolean primaryHover = primaryButton.isEnabled() && primaryButton.getModel().isRollover();
+            boolean optionsHover = hasOptions && optionsButton.isEnabled()
+                    && optionsButton.getModel().isRollover();
             boolean enabled = isEnabled() && (primaryButton.isEnabled()
                     || hasOptions && optionsButton.isEnabled());
-            LauncherTheme.paintButton(canvas, getWidth(), getHeight(), scale, true, enabled, pressed, hover,
-                    primaryButton.isFocusOwner() || hasOptions && optionsButton.isFocusOwner());
-            if (hasOptions) {
+            boolean focused = primaryButton.isFocusOwner() || hasOptions && optionsButton.isFocusOwner();
+            if (!hasOptions) {
+                LauncherTheme.paintButton(canvas, getWidth(), getHeight(), scale, true, enabled,
+                        primaryPressed, primaryHover, focused);
+            } else {
+                // Only the segment under the pointer lights up, so the arrow reads as its own button
+                LauncherTheme.paintButton(canvas, getWidth(), getHeight(), scale, true, enabled,
+                        false, false, false);
                 int separator = optionsButton.getX();
+                if (primaryPressed || primaryHover || optionsPressed || optionsHover) {
+                    boolean primarySegment = primaryPressed || primaryHover && !optionsPressed;
+                    Graphics2D segment = (Graphics2D) canvas.create();
+                    try {
+                        segment.clipRect(primarySegment ? 0 : separator, 0,
+                                primarySegment ? separator : getWidth() - separator, getHeight());
+                        LauncherTheme.paintButton(segment, getWidth(), getHeight(), scale, true,
+                                enabled, primarySegment ? primaryPressed : optionsPressed, true, false);
+                    } finally {
+                        segment.dispose();
+                    }
+                }
+                if (focused && enabled) LauncherTheme.paintFocus(canvas, getWidth(), getHeight(), scale);
                 Color divider = LauncherTheme.buttonText(true, enabled);
-                canvas.setColor(new Color(divider.getRed(), divider.getGreen(), divider.getBlue(), 64));
-                canvas.drawLine(separator, scale.space("md"),
-                        separator, getHeight() - scale.space("md"));
+                canvas.setColor(new Color(divider.getRed(), divider.getGreen(), divider.getBlue(), 140));
+                canvas.setStroke(new java.awt.BasicStroke(Math.max(1f, scale.size("border"))));
+                canvas.drawLine(separator, scale.space("sm"),
+                        separator, getHeight() - scale.space("sm"));
             }
         } finally {
             canvas.dispose();
@@ -412,9 +474,11 @@ final class HomeLaunchSplitButton extends JPanel {
     private final class AlternativeItem extends JMenuItem {
         private final String title;
         private final String detail;
+        private final boolean preferred;
 
-        private AlternativeItem(String label) {
+        private AlternativeItem(String label, boolean preferred) {
             super(label);
+            this.preferred = preferred;
             int split = label.indexOf(" · ");
             title = split < 0 ? label : label.substring(0, split);
             detail = split < 0 ? null : label.substring(split + 3);
@@ -427,11 +491,15 @@ final class HomeLaunchSplitButton extends JPanel {
             return scale.font(getFont(), "small");
         }
 
+        private int tagWidth(FontMetrics metrics) {
+            return preferred ? scale.space("lg") + metrics.stringWidth(DEFAULT_TAG) : 0;
+        }
+
         @Override
         public Dimension getPreferredSize() {
             Insets insets = getInsets();
             FontMetrics titleMetrics = getFontMetrics(getFont());
-            int width = titleMetrics.stringWidth(title);
+            int width = titleMetrics.stringWidth(title) + tagWidth(getFontMetrics(detailFont()));
             int height = titleMetrics.getHeight();
             if (detail != null) {
                 FontMetrics detailMetrics = getFontMetrics(detailFont());
@@ -464,6 +532,14 @@ final class HomeLaunchSplitButton extends JPanel {
                 canvas.setColor(enabled ? LauncherTheme.TEXT : LauncherTheme.DISABLED_TEXT);
                 int y = insets.top + titleMetrics.getAscent();
                 canvas.drawString(title, insets.left, y);
+                if (preferred) {
+                    Font font = detailFont();
+                    FontMetrics tagMetrics = canvas.getFontMetrics(font);
+                    canvas.setFont(font);
+                    canvas.setColor(enabled ? LauncherTheme.ACCENT : LauncherTheme.DISABLED_TEXT);
+                    canvas.drawString(DEFAULT_TAG, getWidth() - insets.right
+                            - tagMetrics.stringWidth(DEFAULT_TAG), y);
+                }
                 if (detail != null) {
                     Font font = detailFont();
                     FontMetrics detailMetrics = canvas.getFontMetrics(font);

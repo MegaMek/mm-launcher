@@ -1057,6 +1057,7 @@ public final class LauncherFrame extends JFrame {
             String channel = homeChannelLabel(record);
             HomeLaunchSplitButton launch = new HomeLaunchSplitButton(guiScale, productKey,
                     displayProduct(productKey), record.observedBuild(), channel,
+                    homeAlternativeLabel(record, productKey),
                     () -> launchDirectly(record, productKey),
                     homeLaunchAlternatives(record, productKey));
             LauncherServices.InstallationStatus local = installationLocalStatus(record);

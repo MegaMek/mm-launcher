@@ -36,6 +36,10 @@ preferred `InstallationRecord`, displays **Program Channel (Version)**, and uses
 static reinspection, Java, coordinator, and launch validation without a GUI preview or confirmation.
 Alternate rows are deterministic,
 launch-only exact-record actions and never mutate a preference or fall back at click time.
+The alternates list opens with the default copy, tagged **Default** and launching exactly what the
+primary segment launches, so the list always shows at least two copies. Hover and press highlight
+only the segment under the pointer, and a visible divider separates the arrow from the launch
+segment.
 Missing preferred folders show **Not found** on the launch button's detail line (accessible name
 **Program (Version) · Not found**) instead of a recovery banner. Their primary launch segment is disabled, but usable alternate installations remain
 available; known blocked alternatives are disabled. Genuine recovery/unavailable messages remain
