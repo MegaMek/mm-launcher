@@ -639,7 +639,7 @@ plugins {
 }
 
 group = "org.megamek.launcher"
-version = "0.14.35"
+version = "0.14.36"
 
 repositories {
     mavenCentral()
