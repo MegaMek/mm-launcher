@@ -48,8 +48,10 @@ import org.megamek.launcher.launch.LaunchOptionsStore;
 import org.megamek.launcher.onboarding.Inspection;
 import org.megamek.launcher.onboarding.NormalInstallService;
 import org.megamek.launcher.onboarding.Product;
+import org.megamek.launcher.operation.OperationCancelledException;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationPhase;
+import org.megamek.launcher.operation.OperationType;
 import org.megamek.launcher.operation.ProgressUnit;
 import org.megamek.launcher.registry.InstallationRecord;
 import org.megamek.launcher.registry.RegistryData;
@@ -1136,6 +1138,76 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    void repairCanOnlyBeCancelledBeforeItChangesAnything() throws Exception {
+        FakeServices services = new FakeServices(temp.resolve("repair-cancel-before.json"));
+        OperationContext cancelled = new OperationContext(OperationType.REPAIR);
+        assertTrue(cancelled.requestCancellation().accepted());
+        assertThrows(OperationCancelledException.class,
+                () -> services.quickRepair(services.first, true, cancelled));
+        assertEquals(0, services.tidies.get());
+        assertEquals(0, services.resetCalls.get());
+
+        services.repairManaged = true;
+        services.cancelDuringCheck = true;
+        OperationContext context = new OperationContext(OperationType.REPAIR);
+        LauncherServices.QuickRepairResult result =
+                services.quickRepair(services.first, true, context);
+        assertFalse(services.checkCancellation.accepted(),
+                "a cancel during the file check must not drop the completed steps");
+        assertNotNull(result.settingsReset());
+        assertNotNull(result.check());
+        assertNull(result.checkError());
+    }
+
+    @Test
+    void failedFileCheckKeepsTheCompletedRepairSteps() throws Exception {
+        FakeServices services = new FakeServices(temp.resolve("repair-check-failure.json"));
+        services.repairManaged = true;
+        services.checkFailure = new IOException("cannot read MekHQ.jar");
+        LauncherServices.QuickRepairResult result = services.quickRepair(services.first, true,
+                new OperationContext(OperationType.REPAIR));
+        assertEquals(1, services.tidies.get());
+        assertNotNull(result.settingsReset());
+        assertNull(result.check());
+        assertTrue(result.checkError().contains("cannot read MekHQ.jar"), result.checkError());
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
+    void repairReportsTheSettingsBackupWhenTheFileCheckFails() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
+        FakeServices services = new FakeServices(temp.resolve("repair-check-failure-gui.json"));
+        services.installed = true;
+        services.main = services.first;
+        services.repairManaged = true;
+        services.checkFailure = new IOException("cannot read MekHQ.jar");
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            clickShowingButton(frame, "manageInstallationsButton");
+            JPopupMenu menu = SwingTestSupport.installationMenu(frame, services.first.id());
+            JMenuItem repair = onEdt(() -> find(menu, "repairInstallation-" + services.first.id()));
+            invokeMenuSelection(repair);
+            JDialog consent = waitDialog(frame, "Repair");
+            SwingUtilities.invokeAndWait(() -> {
+                JCheckBox option = find(consent, "launcherAlertOption");
+                option.setSelected(true);
+            });
+            click(consent, "Repair");
+            JDialog result = waitDialog(frame, "Repair complete");
+            String body = ((JLabel) find(result, "launcherAlertMessage"))
+                    .getAccessibleContext().getAccessibleName();
+            assertTrue(body.contains("Settings were reset"), body);
+            assertTrue(body.contains(services.resetBackup.toString()), body);
+            assertTrue(body.contains("The game files could not be checked: cannot read MekHQ.jar"),
+                    body);
+            click(result, "OK");
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
     @org.junit.jupiter.api.Tag("native-gui")
     void adoptedCopyRepairSkipsTheFileCheck() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
@@ -1989,6 +2061,9 @@ class SimpleHomeSwingTest {
         private final AtomicInteger repairs = new AtomicInteger();
         private final AtomicInteger tidies = new AtomicInteger();
         private volatile List<String> missingFiles = List.of();
+        private volatile IOException checkFailure;
+        private volatile boolean cancelDuringCheck;
+        private volatile OperationContext.CancellationRequest checkCancellation;
         private final Path resetBackup;
         private final List<QuickInstallOption.Key> plannedChoices =
                 new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -2131,7 +2206,10 @@ class SimpleHomeSwingTest {
         }
 
         @Override public RepairCheck checkInstallationFiles(InstallationRecord record,
-                                                            OperationContext context) {
+                                                            OperationContext context)
+                throws IOException {
+            if (cancelDuringCheck) checkCancellation = context.requestCancellation();
+            if (checkFailure != null) throw checkFailure;
             if (!fileCheckEligible(record)) return null;
             return new RepairCheck(repairSource(record),
                     new InstallationRepairService.FileCheck(missingFiles, List.of()));

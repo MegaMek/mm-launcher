@@ -494,26 +494,33 @@ public class LauncherServices {
     /**
      * @param settingsReset the settings backup when settings were reset, otherwise {@code null}
      * @param settingsError why settings could not be reset, otherwise {@code null}
-     * @param check         the file check, or {@code null} when the copy cannot be checked
+     * @param check         the file check, or {@code null} when the copy was not checked
+     * @param checkError    why the game files could not be checked, otherwise {@code null}
      */
     public record QuickRepairResult(InstallationRepairService.Tidy tidy,
                                     PreferencesResetService.Result settingsReset,
-                                    String settingsError, RepairCheck check) {
+                                    String settingsError, RepairCheck check, String checkError) {
     }
 
     /**
      * The offline Repair: clear caches and rescan, optionally reset settings, then check the
      * game files. Downloading replacements is a separate, consented step.
+     *
+     * <p>Cancellation is only honoured before the first change. After that the repair runs to
+     * the end, and a failed file check is reported alongside the completed steps, so the player
+     * always learns what changed and where any settings backup went.</p>
      */
     public QuickRepairResult quickRepair(InstallationRecord record, boolean resetSettings,
                                     OperationContext context)
             throws IOException, InterruptedException {
+        context.checkpoint();
+        context.enterFinalization("Repair has started changing the installation; "
+                + "it will finish and report what changed.");
         context.phase(OperationPhase.METADATA, "Clearing caches and checking the installation folder");
         InstallationRepairService.Tidy tidy = tidyInstallation(record);
         PreferencesResetService.Result settings = null;
         String settingsError = null;
         if (resetSettings) {
-            context.checkpoint();
             context.phase(OperationPhase.METADATA, "Resetting settings");
             try {
                 settings = resetPreferences(planPreferencesReset(tidy.record()));
@@ -521,10 +528,15 @@ public class LauncherServices {
                 settingsError = detail(error);
             }
         }
-        context.checkpoint();
         context.phase(OperationPhase.PLAN, "Checking game files");
-        RepairCheck check = checkInstallationFiles(tidy.record(), context);
-        return new QuickRepairResult(tidy, settings, settingsError, check);
+        RepairCheck check = null;
+        String checkError = null;
+        try {
+            check = checkInstallationFiles(tidy.record(), context);
+        } catch (IOException | RuntimeException error) {
+            checkError = detail(error);
+        }
+        return new QuickRepairResult(tidy, settings, settingsError, check, checkError);
     }
 
     public HomeState loadHome() throws IOException {
