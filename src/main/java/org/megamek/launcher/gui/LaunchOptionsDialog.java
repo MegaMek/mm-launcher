@@ -114,7 +114,12 @@ final class LaunchOptionsDialog {
             dialog.dispose();
             onSave.accept(options);
         });
-        DialogFooter footer = new DialogFooter(scale).primary(save).cancel(cancel);
+        JButton restore = new FirstLaunchButton("Restore defaults", "restoreLaunchOptionsDefaultsButton",
+                false, scale, FirstLaunchButton.Size.SMALL);
+        restore.getAccessibleContext().setAccessibleDescription(
+                "Set every option to follow the launcher default. Save to keep the change.");
+        restore.addActionListener(event -> form.restoreDefaults());
+        DialogFooter footer = new DialogFooter(scale).tool(restore).primary(save).cancel(cancel);
         JPanel actions = footer.panel();
         actions.setName("launchOptionsActions");
         south.add(actions, BorderLayout.CENTER);

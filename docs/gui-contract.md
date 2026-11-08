@@ -92,10 +92,18 @@ application files. A folder deleted after rendering also routes an affected laun
 to this dialog, including when containing directories were deleted or moved.
 Unavailable filesystems, access errors, and unsafe paths are not treated as
 deleted folders. There is no standalone GUI Preview action. Update is primary only when known available.
-**Reset preferences…** appears in the More menu for ordinary registered copies, including
-imports. The confirmation explains the program scope, asks users to close the suite, and says
-that saves, campaigns, and custom files stay. It omits the file list and backup path; the
-success dialog identifies the retained backup location. The root coordinator blocks tracked
+**Repair…** appears in the More menu for every registered copy, including imports, and replaces
+the former Reset preferences and Repair installation items. It is disabled while the copy is
+missing or has pending update recovery. Its confirmation asks users to close the suite, says it
+clears the unit cache and re-reads the folder (and, for a launcher-installed copy, checks the
+game files without downloading anything), and says that saves stay. An unchecked
+**Also reset settings to defaults (a backup is kept)** option adds the settings reset below.
+The offline step deletes only the regenerable caches shared with uninstall, then, for a copy the
+launcher did not install, re-inspects the folder and refreshes the recorded build and products
+when they changed. A stale selection is rejected. The result dialog lists what was done.
+
+The optional settings reset keeps its program scope, and the result identifies the retained
+backup location; a reset failure is reported without undoing the rest. The root coordinator blocks tracked
 running games and pending updates. Users must close externally started suite apps as well.
 Official receipt source determines package scope;
 without a receipt, an unambiguous inspected product inventory is required. MekHQ resets MM,
@@ -105,8 +113,9 @@ files (including saves and custom files) alone and never touches OS-global Java 
 No matching files means no reset and no backup created. On a partial move failure, already
 moved files are rolled back where safe; errors identify the backup for manual recovery.
 
-**Repair installation…** appears in More only for a healthy exact-release managed copy without
-pending recovery; imported and adopted copies cannot use it. The pre-download consent identifies
+When the offline check finds missing or changed game files on a healthy exact-release managed
+copy (imported and adopted copies skip the check), a separate **Restore game files** dialog lists
+them and offers **Download and restore**; nothing is downloaded without that consent. It identifies
 the download size if known, asks users to close all suite apps, and explains in plain language
 that missing or changed game files will be replaced, saves and settings stay, and users should
 back up changed game files they want to keep. It does not display the installation name, folder,
@@ -222,7 +231,8 @@ The launcher's own window always draws without Direct3D on Windows (unless `-Dsu
 explicitly), because some drivers drop its partial repaints and leave the window black through the
 intro; the renderer option above only affects the games.
 **Launch options…** in an installation's More menu opens a dialog that edits overrides where each field can
-inherit the launcher-wide value. **Copy launch commands** in the same menu copies the commands used to start each application with the saved options, for troubleshooting. Values are stored
+inherit the launcher-wide value; **Restore defaults** sets every field back to inheriting, which
+takes effect when saved. **Copy launch commands** in the same menu copies the commands used to start each application with the saved options, for troubleshooting. Values are stored
 next to the registry in `<registry>.launch-options.json`, separate from launcher settings, and an
 unreadable file is reported and never overwritten. Imported installations adopt their existing
 `-Xmx` from the application's `.l4j.ini` as an override. Java arguments must be options starting

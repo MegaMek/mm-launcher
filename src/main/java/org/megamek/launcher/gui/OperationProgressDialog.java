@@ -708,6 +708,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
             case RECOVERY -> "recovery";
             case UNINSTALL -> "uninstall";
             case UNINSTALL_RECOVERY -> "uninstall recovery";
+            case REPAIR -> "repair";
             case GUI_ERROR -> "operation";
         };
         return "Finishing " + operation + " — do not close the launcher.";

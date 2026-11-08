@@ -65,6 +65,7 @@ import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
 import org.megamek.launcher.update.OwnershipPolicy;
 import org.megamek.launcher.update.ImportedCopyAdoptionService;
+import org.megamek.launcher.update.InstallationRepairService;
 import org.megamek.launcher.update.PreparedAdoption;
 import org.megamek.launcher.update.PreparedUpdate;
 import org.megamek.launcher.update.UpdatePreviewService;
@@ -120,6 +121,7 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.text.NumberFormat;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.HashSet;
 import java.util.HashMap;
@@ -1862,10 +1864,14 @@ public final class LauncherFrame extends JFrame {
                 "Copy the commands used to start each application in " + record.name() + ", for troubleshooting");
         copyCommands.addActionListener(event -> copyLaunchCommands(record));
         menu.add(copyCommands);
-        JMenuItem resetPreferences = installationMenuItem("Reset preferences…");
-        resetPreferences.setName("resetPreferences-" + record.id());
-        resetPreferences.addActionListener(event -> resetPreferences(record));
-        menu.add(resetPreferences);
+        JMenuItem repair = installationMenuItem("Repair…");
+        repair.setName("repairInstallation-" + record.id());
+        repair.getAccessibleContext().setAccessibleDescription(
+                "Clear caches, check the game files, and optionally reset settings for "
+                        + record.name());
+        repair.setEnabled(local == null || !local.pendingUpdate() && !local.missing());
+        repair.addActionListener(event -> repairInstallation(record));
+        menu.add(repair);
         JMenuItem remove = installationMenuItem("Remove from launcher…");
         remove.addActionListener(event -> removeFromLauncher(record));
         menu.add(remove);
@@ -1881,14 +1887,6 @@ public final class LauncherFrame extends JFrame {
         }
         if (updateManaged) {
             menu.add(installationMenuSeparator());
-            if (local != null && local.error() == null && !local.pendingUpdate()
-                    && local.adoption() == ImportedCopyAdoptionService.Availability.MANAGED
-                    && !local.adopted()) {
-                JMenuItem repair = installationMenuItem("Repair installation…");
-                repair.setName("repairInstallation-" + record.id());
-                repair.addActionListener(event -> repairInstallation(record));
-                menu.add(repair);
-            }
             JMenuItem uninstall = installationMenuItem("Uninstall…");
             uninstall.addActionListener(event -> uninstall(record));
             menu.add(uninstall);
@@ -2666,28 +2664,6 @@ public final class LauncherFrame extends JFrame {
                     page = Page.HOME;
                     reload();
                 });
-    }
-
-    private void resetPreferences(InstallationRecord record) {
-        run("Preparing preferences reset", () -> services.planPreferencesReset(record), plan -> {
-            boolean confirmed = LauncherAlertDialog.showDangerConfirm(this, guiScale,
-                    "Reset preferences",
-                    "Close MegaMek, MekHQ, and MegaMekLab before continuing."
-                            + "\n\nThis resets the preferences for the programs in this "
-                            + "installation. Your saves, campaigns, and custom files will stay."
-                            + "\n\nA backup of your current preferences will be kept in case "
-                            + "you want to restore them. Its location will be shown after "
-                            + "the reset.",
-                    "Reset preferences");
-            if (!confirmed) return;
-            run("Resetting preferences", () -> services.resetPreferences(plan), result -> {
-                String message = result.moved().isEmpty()
-                        ? "No known preferences files were found; nothing was reset."
-                        : "Your previous preferences were backed up here:\n" + result.backup();
-                status.setText(message);
-                LauncherAlertDialog.showMessage(this, guiScale, "Preferences reset", message);
-            });
-        });
     }
 
     private void uninstall(InstallationRecord record) {
@@ -4732,70 +4708,131 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void repairInstallation(InstallationRecord record) {
-        // Capture local provenance off the EDT. No download or mutation precedes consent.
-        run("Checking repair eligibility", () -> services.repairSource(record),
-                source -> {
-                    if (!isDisplayable()) return;
-                    String size = source.current().assetSize() > 0
-                            ? BinarySizeFormat.mebibytes(source.current().assetSize())
-                            : "unknown";
-                    boolean confirmed = LauncherAlertDialog.showConfirm(this, guiScale,
-                            "Repair installation",
-                            "Download size: " + size
-                                    + "\n\nClose all MegaMek, MekHQ, and MegaMekLab windows "
-                                    + "before continuing."
-                                    + "\n\nRepair will replace missing or changed game files. "
-                                    + "Your saves and settings will stay."
-                                    + "\n\nIf you changed game files you want to keep, back "
-                                    + "them up first.",
-                            "Repair");
-                    if (!confirmed) return;
-                    OperationProgressDialog progress = new OperationProgressDialog(this,
-                            "Repairing installation", "repairProgressLog",
-                            this::showOperationLogs);
-                    progress.useRepairProgress();
-                    progress.startNonCancellable(
-                            "Please keep the launcher open until repair finishes.");
-                    progress.setVisible(true);
-                    PrintStream stream = new PrintStream(new LogOutput(progress.logArea()), true,
-                            StandardCharsets.UTF_8);
-                    runOperation("Repairing " + record.name(), OperationType.UPDATE_APPLY,
-                            List.of(source.root()), progress,
-                            context -> {
-                                // The backend owns the root gate, live-child check, transaction
-                                // journal, and recovery. Never call it with a stale consent.
-                                context.checkpoint();
-                                return services.repair(source, stream, context);
-                            }, result -> {
-                                progress.append("\nRestored " + result.missingRestored()
-                                        + " missing and " + result.modifiedRestored()
-                                        + " modified official files.\n");
-                                if (!result.extraLibJars().isEmpty()) {
-                                    progress.append("WARNING: extra unowned lib JARs remain: "
-                                            + String.join(", ", result.extraLibJars())
-                                            + ". They may affect the game.\n");
-                                }
-                                progress.append(result.warning() + "\n");
-                                progress.showRepairComplete(
-                                        result.missingRestored() + result.modifiedRestored() == 0
-                                                ? "Repair complete. No missing or changed "
-                                                        + "installation files were found."
-                                                : "Repair complete. Your installation is ready "
-                                                        + "to use.",
-                                        result.extraLibJars().isEmpty() ? null
-                                                : "Some added files may still affect the game. "
-                                                        + "View logs for details.");
-                                page = Page.INSTALLATIONS;
-                                reload();
-                            }, error -> {
-                                progress.append("\nREPAIR FAILED: " + errorDetail(error)
-                                        + "\nIf recovery is pending, close all suite games and "
-                                        + "use Recover interrupted update. Do not retry repair "
-                                        + "until recovery completes.\n");
-                                progress.setHeading("Repair failed — recovery may be required");
-                                reload();
-                            }, stream::close);
-                }, error -> showError("Repair unavailable", error));
+        run("Preparing repair", () -> services.fileCheckEligible(record), checkFiles -> {
+            if (!isDisplayable()) return;
+            Boolean resetSettings = LauncherAlertDialog.showConfirmWithOption(this, guiScale,
+                    "Repair",
+                    "Close MegaMek, MekHQ, and MegaMekLab before continuing."
+                            + "\n\nRepair clears the unit cache, which MegaMek rebuilds the "
+                            + "next time it starts, and re-reads the installation folder."
+                            + (checkFiles
+                            ? "\n\nIt also checks the game files. Nothing is downloaded unless "
+                                    + "files are missing or changed, and only after you agree."
+                            : "")
+                            + "\n\nYour saves, campaigns, and custom files will stay.",
+                    "Also reset settings to defaults (a backup is kept)", false, "Repair");
+            if (resetSettings == null) return;
+            OperationProgressDialog progress = new OperationProgressDialog(this,
+                    "Repairing installation", "repairProgressLog", this::showOperationLogs);
+            progress.setVisible(true);
+            runOperation("Repairing " + record.name(), OperationType.REPAIR,
+                    List.of(Path.of(record.canonicalRoot())), progress,
+                    context -> services.quickRepair(record, resetSettings, context), result -> {
+                        progress.dispose();
+                        // A reload holds the operation gate, so prompt first; a download reloads
+                        // when it finishes.
+                        if (!showRepairResult(record, result)) reload();
+                    }, error -> progress.setHeading("Repair failed"), () -> {
+                    });
+        }, error -> showError("Repair unavailable", error));
+    }
+
+    /** Reports the offline repair and returns whether a download repair was started. */
+    private boolean showRepairResult(InstallationRecord record,
+                                     LauncherServices.QuickRepairResult result) {
+        if (!isDisplayable()) return false;
+        List<String> lines = new ArrayList<>();
+        InstallationRepairService.Tidy tidy = result.tidy();
+        lines.add(tidy.clearedCaches().isEmpty() ? "There was no unit cache to clear."
+                : "Cleared the unit cache. MegaMek rebuilds it the next time it starts.");
+        if (tidy.rescanned()) {
+            lines.add("Updated the recorded version from " + tidy.previousBuild() + " to "
+                    + tidy.record().observedBuild() + ".");
+        }
+        if (result.settingsReset() != null) {
+            lines.add(result.settingsReset().moved().isEmpty()
+                    ? "No settings files were found, so there was nothing to reset."
+                    : "Settings were reset. Your previous settings were backed up here:\n"
+                            + result.settingsReset().backup());
+        } else if (result.settingsError() != null) {
+            lines.add("Settings were not reset: " + result.settingsError());
+        }
+        LauncherServices.RepairCheck check = result.check();
+        if (check != null && check.files().damaged() > 0) {
+            InstallationRepairService.FileCheck files = check.files();
+            long assetSize = check.source().current().assetSize();
+            String size = assetSize > 0 ? BinarySizeFormat.mebibytes(assetSize) : "an unknown size";
+            lines.add(describeDamage(files) + "\n\nDownload the release (" + size
+                    + ") to restore them? If you changed game files you want to keep, back them "
+                    + "up first.");
+            boolean download = LauncherAlertDialog.showConfirm(this, guiScale, "Restore game files",
+                    String.join("\n\n", lines), "Download and restore");
+            if (download) downloadRepair(record, check.source());
+            return download;
+        }
+        if (check != null) lines.add("All game files are intact.");
+        status.setText("Repair complete");
+        LauncherAlertDialog.showMessage(this, guiScale, "Repair complete",
+                String.join("\n\n", lines));
+        return false;
+    }
+
+    private static String describeDamage(InstallationRepairService.FileCheck files) {
+        List<String> parts = new ArrayList<>();
+        if (!files.missing().isEmpty()) {
+            parts.add(files.missing().size() + (files.missing().size() == 1
+                    ? " game file is missing" : " game files are missing"));
+        }
+        if (!files.modified().isEmpty()) {
+            parts.add(files.modified().size() + (files.modified().size() == 1
+                    ? " game file was changed" : " game files were changed"));
+        }
+        return String.join(" and ", parts) + ".";
+    }
+
+    private void downloadRepair(InstallationRecord record, RealUpdateService.Snapshot source) {
+        OperationProgressDialog progress = new OperationProgressDialog(this,
+                "Repairing installation", "repairProgressLog", this::showOperationLogs);
+        progress.useRepairProgress();
+        progress.startNonCancellable("Please keep the launcher open until repair finishes.");
+        progress.setVisible(true);
+        PrintStream stream = new PrintStream(new LogOutput(progress.logArea()), true,
+                StandardCharsets.UTF_8);
+        runOperation("Repairing " + record.name(), OperationType.UPDATE_APPLY,
+                List.of(source.root()), progress,
+                context -> {
+                    // The backend owns the root gate, live-child check, transaction
+                    // journal, and recovery. Never call it with a stale consent.
+                    context.checkpoint();
+                    return services.repair(source, stream, context);
+                }, result -> {
+                    progress.append("\nRestored " + result.missingRestored()
+                            + " missing and " + result.modifiedRestored()
+                            + " modified official files.\n");
+                    if (!result.extraLibJars().isEmpty()) {
+                        progress.append("WARNING: extra unowned lib JARs remain: "
+                                + String.join(", ", result.extraLibJars())
+                                + ". They may affect the game.\n");
+                    }
+                    progress.append(result.warning() + "\n");
+                    progress.showRepairComplete(
+                            result.missingRestored() + result.modifiedRestored() == 0
+                                    ? "Repair complete. No missing or changed "
+                                            + "installation files were found."
+                                    : "Repair complete. Your installation is ready to use.",
+                            result.extraLibJars().isEmpty() ? null
+                                    : "Some added files may still affect the game. "
+                                            + "View logs for details.");
+                    page = Page.INSTALLATIONS;
+                    reload();
+                }, error -> {
+                    progress.append("\nREPAIR FAILED: " + errorDetail(error)
+                            + "\nIf recovery is pending, close all suite games and "
+                            + "use Recover interrupted update. Do not retry repair "
+                            + "until recovery completes.\n");
+                    progress.setHeading("Repair failed — recovery may be required");
+                    reload();
+                }, stream::close);
     }
 
     private void recoverUpdate(InstallationRecord record) {

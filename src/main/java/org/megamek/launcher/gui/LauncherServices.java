@@ -74,6 +74,7 @@ import org.megamek.launcher.update.UpdatePreviewService;
 import org.megamek.launcher.update.OwnershipReceipt;
 import org.megamek.launcher.update.CurrentUpdateState;
 import org.megamek.launcher.update.ImportedCopyAdoptionService;
+import org.megamek.launcher.update.InstallationRepairService;
 import org.megamek.launcher.update.PreparedAdoption;
 import org.megamek.launcher.update.PreparedUpdate;
 import org.megamek.launcher.update.PreparedUpdateService;
@@ -456,6 +457,74 @@ public class LauncherServices {
             throws IOException {
         return new PreferencesResetService(registry, store, inspector, updateCoordinator)
                 .reset(plan);
+    }
+
+    /** Clears regenerable caches and rescans a copy the launcher does not own. Offline. */
+    public InstallationRepairService.Tidy tidyInstallation(InstallationRecord record)
+            throws IOException {
+        requireNoPendingUninstall(record);
+        return new InstallationRepairService(registry, store, inspector, updateCoordinator)
+                .tidy(record);
+    }
+
+    /**
+     * The offline file check of a launcher-installed copy, or {@code null} when the copy has
+     * no exact-release provenance to check against.
+     */
+    public RepairCheck checkInstallationFiles(InstallationRecord record, OperationContext context)
+            throws IOException, InterruptedException {
+        if (!fileCheckEligible(record)) return null;
+        RealUpdateService.Snapshot source = repairSource(record);
+        return new RepairCheck(source, InstallationRepairService.checkFiles(source, context));
+    }
+
+    /** Whether Repair can check this copy's files against the release it was installed from. */
+    public boolean fileCheckEligible(InstallationRecord record) throws IOException {
+        org.megamek.launcher.update.ReceiptStore receipts =
+                new org.megamek.launcher.update.ReceiptStore();
+        return Files.exists(receipts.receiptPath(registry, record.id()), LinkOption.NOFOLLOW_LINKS)
+                && !Files.exists(receipts.metadataDirectory(registry)
+                        .resolve(record.id() + ".adoption.json"), LinkOption.NOFOLLOW_LINKS);
+    }
+
+    public record RepairCheck(RealUpdateService.Snapshot source,
+                              InstallationRepairService.FileCheck files) {
+    }
+
+    /**
+     * @param settingsReset the settings backup when settings were reset, otherwise {@code null}
+     * @param settingsError why settings could not be reset, otherwise {@code null}
+     * @param check         the file check, or {@code null} when the copy cannot be checked
+     */
+    public record QuickRepairResult(InstallationRepairService.Tidy tidy,
+                                    PreferencesResetService.Result settingsReset,
+                                    String settingsError, RepairCheck check) {
+    }
+
+    /**
+     * The offline Repair: clear caches and rescan, optionally reset settings, then check the
+     * game files. Downloading replacements is a separate, consented step.
+     */
+    public QuickRepairResult quickRepair(InstallationRecord record, boolean resetSettings,
+                                    OperationContext context)
+            throws IOException, InterruptedException {
+        context.phase(OperationPhase.METADATA, "Clearing caches and checking the installation folder");
+        InstallationRepairService.Tidy tidy = tidyInstallation(record);
+        PreferencesResetService.Result settings = null;
+        String settingsError = null;
+        if (resetSettings) {
+            context.checkpoint();
+            context.phase(OperationPhase.METADATA, "Resetting settings");
+            try {
+                settings = resetPreferences(planPreferencesReset(tidy.record()));
+            } catch (IOException | RuntimeException error) {
+                settingsError = detail(error);
+            }
+        }
+        context.checkpoint();
+        context.phase(OperationPhase.PLAN, "Checking game files");
+        RepairCheck check = checkInstallationFiles(tidy.record(), context);
+        return new QuickRepairResult(tidy, settings, settingsError, check);
     }
 
     public HomeState loadHome() throws IOException {

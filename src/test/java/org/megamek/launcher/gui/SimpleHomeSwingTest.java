@@ -60,6 +60,7 @@ import org.megamek.launcher.release.ReleaseTransport;
 import org.megamek.launcher.update.UpdatePreviewService;
 import org.megamek.launcher.update.ImportedCopyAdoptionService;
 import org.megamek.launcher.update.CurrentUpdateState;
+import org.megamek.launcher.update.InstallationRepairService;
 import org.megamek.launcher.update.RealUpdateService;
 
 import javax.imageio.ImageIO;
@@ -993,49 +994,58 @@ class SimpleHomeSwingTest {
 
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
-    void moreMenuPreferencesResetHonorsCancelAndReportsBackupOnConfirmation()
+    void repairOffersSettingsResetAndReportsWhatItDid()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
                 "actual Swing controls require a display");
         FakeServices services = new FakeServices(temp.resolve("reset-menu.json"));
         services.installed = true;
         services.main = services.first;
+        services.repairManaged = true;
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             clickShowingButton(frame, "manageInstallationsButton");
             for (boolean confirm : List.of(false, true)) {
                 JPopupMenu popup = SwingTestSupport.installationMenu(frame, services.first.id());
-                JMenuItem reset = onEdt(() -> find(
-                        popup, "resetPreferences-" + services.first.id()));
-                invokeMenuSelection(reset);
-                JDialog dialog = waitDialog(frame, "Reset preferences");
+                assertNull(find(popup, "resetPreferences-" + services.first.id()));
+                JMenuItem repair = onEdt(() -> find(
+                        popup, "repairInstallation-" + services.first.id()));
+                assertEquals("Repair…", repair.getText());
+                invokeMenuSelection(repair);
+                JDialog dialog = waitDialog(frame, "Repair");
                 JLabel consent = find(dialog, "launcherAlertMessage");
                 String text = consent.getAccessibleContext().getAccessibleName();
                 assertTrue(text.contains("Close MegaMek, MekHQ, and MegaMekLab"));
-                assertTrue(text.contains("preferences for the programs in this installation"));
+                assertTrue(text.contains("clears the unit cache"));
+                assertTrue(text.contains("checks the game files"));
+                assertTrue(text.contains("Nothing is downloaded unless"));
                 assertTrue(text.contains("Your saves, campaigns, and custom files will stay"));
-                assertTrue(text.contains("A backup of your current preferences will be kept"));
-                assertTrue(text.contains("Its location will be shown after the reset"));
-                assertFalse(text.contains(services.resetBackup.toString()));
-                assertFalse(text.contains("mmconf/"));
                 assertFalse(text.contains(services.first.name()));
-                click(dialog, confirm ? "Reset preferences" : "Cancel");
+                JCheckBox option = find(dialog, "launcherAlertOption");
+                assertFalse(option.isSelected(), "settings stay unless the player asks");
+                assertTrue(option.getText().contains("reset settings"));
+                if (confirm) SwingUtilities.invokeAndWait(option::doClick);
+                click(dialog, confirm ? "Repair" : "Cancel");
                 if (confirm) {
                     waitUntil(() -> services.resetCalls.get() == 1);
-                    JDialog result = waitDialog(frame, "Preferences reset");
-                    JLabel body = find(result, "launcherAlertMessage");
-                    assertEquals("Your previous preferences were backed up here:\n"
-                            + services.resetBackup,
-                            body.getAccessibleContext().getAccessibleName());
+                    JDialog result = waitDialog(frame, "Repair complete");
+                    String body = ((JLabel) find(result, "launcherAlertMessage"))
+                            .getAccessibleContext().getAccessibleName();
+                    assertTrue(body.contains("Cleared the unit cache"));
+                    assertTrue(body.contains("backed up here:\n" + services.resetBackup));
+                    assertTrue(body.contains("All game files are intact."));
                     click(result, "OK");
                 } else {
+                    assertEquals(0, services.tidies.get());
                     assertEquals(0, services.resetCalls.get());
                     clickShowingButton(frame, "homeButton");
                     clickShowingButton(frame, "manageInstallationsButton");
                 }
             }
-            assertEquals(2, services.resetPlans.get());
+            assertEquals(1, services.tidies.get());
+            assertEquals(1, services.resetPlans.get());
+            assertEquals(0, services.repairs.get(), "intact files need no download");
         } finally {
             dispose(frame);
         }
@@ -1043,7 +1053,7 @@ class SimpleHomeSwingTest {
 
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
-    void repairMenuRequiresHealthyManagedCopyAndNoPendingRecovery() throws Exception {
+    void repairMenuIsOfferedForEveryCopyButWaitsForPendingRecovery() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         FakeServices services = new FakeServices(temp.resolve("repair-menu.json"));
         services.installed = true;
@@ -1054,8 +1064,14 @@ class SimpleHomeSwingTest {
             SwingUtilities.invokeAndWait(frame::showWindow);
             clickShowingButton(frame, "manageInstallationsButton");
             JPopupMenu menu = SwingTestSupport.installationMenu(frame, services.first.id());
-            assertNotNull(find(menu, "repairInstallation-" + services.first.id()));
-            assertNull(find(menu, "repairInstallation-" + services.second.id()));
+            JMenuItem managed = find(menu, "repairInstallation-" + services.first.id());
+            assertNotNull(managed);
+            assertTrue(managed.isEnabled());
+            SwingUtilities.invokeAndWait(() ->
+                    javax.swing.MenuSelectionManager.defaultManager().clearSelectedPath());
+            JPopupMenu otherMenu = SwingTestSupport.installationMenu(frame, services.second.id());
+            assertNotNull(find(otherMenu, "repairInstallation-" + services.second.id()),
+                    "copies the launcher did not install can still be repaired offline");
             SwingUtilities.invokeAndWait(() ->
                     javax.swing.MenuSelectionManager.defaultManager().clearSelectedPath());
             dispose(frame);
@@ -1065,7 +1081,8 @@ class SimpleHomeSwingTest {
                 SwingUtilities.invokeAndWait(pendingFrame::showWindow);
                 clickShowingButton(pendingFrame, "manageInstallationsButton");
                 JPopupMenu pendingMenu = SwingTestSupport.installationMenu(pendingFrame, services.first.id());
-                assertNull(find(pendingMenu, "repairInstallation-" + services.first.id()));
+                JMenuItem pending = find(pendingMenu, "repairInstallation-" + services.first.id());
+                assertFalse(pending.isEnabled());
             } finally {
                 dispose(pendingFrame);
             }
@@ -1077,7 +1094,7 @@ class SimpleHomeSwingTest {
 
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
-    void adoptedManagedCopyHasNoRepairMenuAction() throws Exception {
+    void adoptedCopyRepairSkipsTheFileCheck() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         FakeServices services = new FakeServices(temp.resolve("adopted-repair-menu.json"));
         services.installed = true;
@@ -1089,8 +1106,23 @@ class SimpleHomeSwingTest {
             SwingUtilities.invokeAndWait(frame::showWindow);
             clickShowingButton(frame, "manageInstallationsButton");
             JPopupMenu menu = SwingTestSupport.installationMenu(frame, services.first.id());
-            assertNull(find(menu, "repairInstallation-" + services.first.id()));
-            assertNotNull(find(menu, "installationMenuSeparator"));
+            JMenuItem repair = onEdt(() -> find(menu, "repairInstallation-" + services.first.id()));
+            invokeMenuSelection(repair);
+            JDialog consent = waitDialog(frame, "Repair");
+            String text = ((JLabel) find(consent, "launcherAlertMessage"))
+                    .getAccessibleContext().getAccessibleName();
+            assertFalse(text.contains("checks the game files"));
+            click(consent, "Repair");
+            JDialog result = waitDialog(frame, "Repair complete");
+            String body = ((JLabel) find(result, "launcherAlertMessage"))
+                    .getAccessibleContext().getAccessibleName();
+            assertTrue(body.contains("Cleared the unit cache"));
+            assertFalse(body.contains("game files"));
+            assertFalse(body.contains("Settings"));
+            click(result, "OK");
+            assertEquals(1, services.tidies.get());
+            assertEquals(0, services.resetCalls.get());
+            assertEquals(0, services.repairs.get());
         } finally {
             dispose(frame);
         }
@@ -1098,41 +1130,35 @@ class SimpleHomeSwingTest {
 
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
-    void repairRequiresConsentBeforeCallingFacade() throws Exception {
+    void damagedFilesNeedSeparateConsentBeforeDownloading() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         FakeServices services = new FakeServices(temp.resolve("repair-consent.json"));
         services.installed = true;
         services.main = services.first;
         services.repairManaged = true;
+        services.missingFiles = List.of("MekHQ.jar");
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
             clickShowingButton(frame, "manageInstallationsButton");
-            JPopupMenu repairMenu = SwingTestSupport.installationMenu(frame, services.first.id());
-            JMenuItem repair = onEdt(() -> find(repairMenu, "repairInstallation-" + services.first.id()));
-            invokeMenuSelection(repair);
-            JDialog consent = waitDialog(frame, "Repair installation");
-            JLabel message = find(consent, "launcherAlertMessage");
-            String text = message.getAccessibleContext().getAccessibleName();
-            assertTrue(text.contains("Download size: "));
-            assertTrue(text.contains("Close all MegaMek, MekHQ, and MegaMekLab windows"));
-            assertTrue(text.contains("Your saves and settings will stay"));
-            assertTrue(text.contains("back them up first"));
-            assertFalse(text.contains("won't keep a backup"));
-            assertFalse(text.contains("Installation:"));
-            assertFalse(text.contains("Folder:"));
-            assertFalse(text.contains("v1.2.3"));
-            assertFalse(text.contains("official managed"));
-            assertFalse(text.contains("rollback"));
-            assertFalse(text.contains("unowned"));
-            assertEquals(0, services.repairs.get());
-            click(consent, "Cancel");
-            assertEquals(0, services.repairs.get());
-            JPopupMenu retryMenu = SwingTestSupport.installationMenu(frame, services.first.id());
-            JMenuItem retry = onEdt(() -> find(retryMenu, "repairInstallation-" + services.first.id()));
-            invokeMenuSelection(retry);
-            JDialog approved = waitDialog(frame, "Repair installation");
-            click(approved, "Repair");
+            for (boolean download : List.of(false, true)) {
+                JPopupMenu repairMenu = SwingTestSupport.installationMenu(frame, services.first.id());
+                JMenuItem repair = onEdt(() -> find(repairMenu, "repairInstallation-" + services.first.id()));
+                invokeMenuSelection(repair);
+                click(waitDialog(frame, "Repair"), "Repair");
+                JDialog restore = waitDialog(frame, "Restore game files");
+                String text = ((JLabel) find(restore, "launcherAlertMessage"))
+                        .getAccessibleContext().getAccessibleName();
+                assertTrue(text.contains("Cleared the unit cache"));
+                assertTrue(text.contains("1 game file is missing."));
+                assertTrue(text.contains("Download the release ("
+                        + BinarySizeFormat.mebibytes(services.asset.size()) + ")"));
+                assertTrue(text.contains("back them up first"));
+                assertFalse(text.contains("v1.2.3"));
+                assertFalse(text.contains("MekHQ.jar"));
+                assertEquals(0, services.repairs.get());
+                click(restore, download ? "Download and restore" : "Cancel");
+            }
             waitUntil(() -> services.repairs.get() == 1);
             JDialog completed = waitDialog(frame, "Repair complete");
             JLabel summary = find(completed, "operationProgressDetail");
@@ -1156,6 +1182,7 @@ class SimpleHomeSwingTest {
         services.installed = true;
         services.main = services.first;
         services.repairManaged = true;
+        services.missingFiles = List.of("MekHQ.jar");
         services.repairFailure = new IOException("fixture repair failed");
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
@@ -1164,7 +1191,8 @@ class SimpleHomeSwingTest {
             JPopupMenu repairMenu = SwingTestSupport.installationMenu(frame, services.first.id());
             JMenuItem repair = onEdt(() -> find(repairMenu, "repairInstallation-" + services.first.id()));
             invokeMenuSelection(repair);
-            click(waitDialog(frame, "Repair installation"), "Repair");
+            click(waitDialog(frame, "Repair"), "Repair");
+            click(waitDialog(frame, "Restore game files"), "Download and restore");
             JDialog failed = waitDialog(frame, "Repair failed — recovery may be required");
             JTextArea log = ((OperationProgressDialog) failed).logArea();
             assertTrue(log.getText().contains("fixture repair failed"));
@@ -1916,6 +1944,8 @@ class SimpleHomeSwingTest {
         private final AtomicInteger resetPlans = new AtomicInteger();
         private final AtomicInteger resetCalls = new AtomicInteger();
         private final AtomicInteger repairs = new AtomicInteger();
+        private final AtomicInteger tidies = new AtomicInteger();
+        private volatile List<String> missingFiles = List.of();
         private final Path resetBackup;
         private final List<QuickInstallOption.Key> plannedChoices =
                 new java.util.concurrent.CopyOnWriteArrayList<>();
@@ -2043,6 +2073,24 @@ class SimpleHomeSwingTest {
                 RealUpdateService.Snapshot consented, java.io.PrintStream progress,
                 OperationContext context) throws IOException {
             return repair(consented, progress);
+        }
+
+        @Override public boolean fileCheckEligible(InstallationRecord record) {
+            return repairManaged && !repairAdopted && record.id().equals(first.id());
+        }
+
+        @Override public InstallationRepairService.Tidy tidyInstallation(
+                InstallationRecord record) {
+            tidies.incrementAndGet();
+            return new InstallationRepairService.Tidy(record,
+                    List.of("data/mekfiles/units.cache"), null);
+        }
+
+        @Override public RepairCheck checkInstallationFiles(InstallationRecord record,
+                                                            OperationContext context) {
+            if (!fileCheckEligible(record)) return null;
+            return new RepairCheck(repairSource(record),
+                    new InstallationRepairService.FileCheck(missingFiles, List.of()));
         }
 
         @Override public PreferencesResetService.Result resetPreferences(
