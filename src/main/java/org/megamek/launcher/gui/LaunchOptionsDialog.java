@@ -76,14 +76,26 @@ final class LaunchOptionsDialog {
         JLabel headingLabel = new JLabel(heading);
         headingLabel.setForeground(FirstLaunchPanel.ACCENT);
         headingLabel.setFont(scale.font(headingLabel.getFont(), "headline"));
-        top.add(headingLabel);
+        // Resetting edits the fields and still needs Save, so it sits with the form rather than the footer.
+        JButton restore = new LauncherLink("Reset all to launcher defaults",
+                "restoreLaunchOptionsDefaultsButton", scale);
+        restore.getAccessibleContext().setAccessibleDescription(
+                "Set every option to follow the launcher default. Save to keep the change.");
+        JPanel headingRow = new JPanel(new BorderLayout(scale.space("lg"), 0));
+        headingRow.setOpaque(false);
+        headingRow.setAlignmentX(JPanel.LEFT_ALIGNMENT);
+        headingRow.add(headingLabel, BorderLayout.CENTER);
+        headingRow.add(restore, BorderLayout.EAST);
+        top.add(headingRow);
         top.add(Box.createVerticalStrut(scale.space("xs")));
         JLabel explanationLabel = new JLabel(explanation);
         explanationLabel.setForeground(FirstLaunchPanel.MUTED);
+        explanationLabel.setAlignmentX(JLabel.LEFT_ALIGNMENT);
         top.add(explanationLabel);
         body.add(top, BorderLayout.NORTH);
 
         form = new LaunchOptionsForm(scale, inherited, current, inheritLabel, () -> message.setText(" "));
+        restore.addActionListener(event -> form.restoreDefaults());
         form.setBorder(BorderFactory.createEmptyBorder(scale.space("md"), 0, 0, 0));
         JScrollPane scroll = LauncherTheme.scrollPane(form, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
                 JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
@@ -109,15 +121,9 @@ final class LaunchOptionsDialog {
             dialog.dispose();
             onSave.accept(options);
         });
-        JButton restore = new FirstLaunchButton("Restore defaults", "restoreLaunchOptionsDefaultsButton",
-                false, scale, FirstLaunchButton.Size.SMALL);
-        restore.getAccessibleContext().setAccessibleDescription(
-                "Set every option to follow the launcher default. Save to keep the change.");
-        restore.addActionListener(event -> form.restoreDefaults());
-        DialogFooter footer = new DialogFooter(scale).tool(restore);
+        DialogFooter footer = new DialogFooter(scale);
         if (onCopyCommands != null) {
-            JButton copy = new FirstLaunchButton("Copy launch commands", "copyLaunchCommandsButton",
-                    false, scale, FirstLaunchButton.Size.SMALL);
+            JButton copy = new LauncherLink("Copy launch commands", "copyLaunchCommandsButton", scale);
             copy.getAccessibleContext().setAccessibleDescription(
                     "Copy the commands that start each application with the options shown, for troubleshooting");
             copy.addActionListener(event -> {
@@ -134,6 +140,14 @@ final class LaunchOptionsDialog {
 
         dialog.setContentPane(body);
         footer.install(dialog, dialog::dispose);
+        // Start on the first option rather than the reset link above the form.
+        dialog.addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override
+            public void windowOpened(java.awt.event.WindowEvent event) {
+                java.awt.Component first = dialog.getFocusTraversalPolicy().getComponentAfter(dialog, restore);
+                if (first != null) first.requestFocusInWindow();
+            }
+        });
         dialog.pack();
         Rectangle usable = (owner != null ? owner.getGraphicsConfiguration()
                 : dialog.getGraphicsConfiguration()).getBounds();

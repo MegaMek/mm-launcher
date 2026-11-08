@@ -1114,8 +1114,12 @@ class SimpleHomeSwingTest {
                             .filter(window -> window instanceof JDialog && window.isShowing()
                                     && "launchOptionsDialog".equals(window.getName()))
                             .map(JDialog.class::cast).findFirst().orElse(null));
+            JButton reset = onEdt(() -> find(dialog, "restoreLaunchOptionsDefaultsButton"));
+            waitUntil(() -> dialog.getFocusOwner() != null);
+            assertTrue(SwingUtilities.isDescendingFrom(dialog.getFocusOwner(),
+                    find(dialog, "launchOptionsForm")), "focus starts on the first option, not the reset link");
             SwingUtilities.invokeAndWait(() -> {
-                ((JButton) find(dialog, "restoreLaunchOptionsDefaultsButton")).doClick();
+                reset.doClick();
                 ((JButton) find(dialog, "copyLaunchCommandsButton")).doClick();
             });
             JLabel message = onEdt(() -> find(dialog, "launchOptionsMessage"));

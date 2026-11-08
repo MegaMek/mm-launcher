@@ -231,8 +231,8 @@ The launcher's own window always draws without Direct3D on Windows (unless `-Dsu
 explicitly), because some drivers drop its partial repaints and leave the window black through the
 intro; the renderer option above only affects the games.
 **Launch options…** in an installation's More menu opens a dialog that edits overrides where each field can
-inherit the launcher-wide value; **Restore defaults** sets every field back to inheriting, which
-takes effect when saved. **Copy launch commands** in the same dialog copies the commands used to start each application with the options as currently shown (including unsaved edits, which it does not save), for troubleshooting. Values are stored
+inherit the launcher-wide value; **Reset all to launcher defaults** (a link beside the heading) sets every field back to inheriting, which
+takes effect when saved. A **Copy launch commands** link in the dialog footer copies the commands used to start each application with the options as currently shown (including unsaved edits, which it does not save), for troubleshooting. Values are stored
 next to the registry in `<registry>.launch-options.json`, separate from launcher settings, and an
 unreadable file is reported and never overwritten. Imported installations adopt their existing
 `-Xmx` from the application's `.l4j.ini` as an override. Java arguments must be options starting
