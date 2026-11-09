@@ -251,6 +251,35 @@ public final class RegistryStore {
         });
     }
 
+    /**
+     * Makes one installation preferred for every application it contains in a single atomic
+     * write, with the same stale-record revalidation and legacy-default independence as
+     * {@link #selectPreferred}. Preferences for applications the copy lacks are untouched.
+     */
+    public void selectPreferredForAll(Path registry, InstallationRecord expected)
+            throws IOException {
+        if (expected == null) throw new IOException("selected installation is required");
+        mutate(registry.toAbsolutePath().normalize(), current -> {
+            InstallationRecord registered = find(current, expected.id());
+            if (!registered.equals(expected)) {
+                throw failure("selected installation changed before it could become preferred");
+            }
+            Map<String, String> preferences =
+                    new LinkedHashMap<>(current.preferredInstallationIds());
+            boolean any = false;
+            for (Product product : registered.products() == null
+                    ? List.<Product>of() : registered.products()) {
+                if (PREFERRED_PRODUCTS.contains(product.key())) {
+                    preferences.put(product.key(), registered.id());
+                    any = true;
+                }
+            }
+            if (!any) throw failure("selected installation contains no launchable application");
+            return new RegistryData(SCHEMA, current.defaultInstallationId(), preferences,
+                    current.installations());
+        });
+    }
+
     public void remove(Path registry, InstallationRecord expected) throws IOException {
         if (expected == null) throw new IOException("selected installation is required");
         mutate(registry.toAbsolutePath().normalize(), current -> {
