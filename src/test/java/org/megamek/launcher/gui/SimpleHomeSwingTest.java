@@ -792,16 +792,30 @@ class SimpleHomeSwingTest {
             assertEquals(renamed.toString(), location.getText(),
                     "the full location previews the renamed folder");
 
+            JButton change = find(quote, "changeNormalLocationButton");
+            CountDownLatch gate = new CountDownLatch(1);
+            services.retargetGate = gate;
             services.retargetFailure = new IOException("install parent is not writable");
             SwingUtilities.invokeAndWait(install::doClick);
+            waitUntil(() -> services.retargetedDestinations.size() == 1);
+            onEdt(() -> {
+                assertFalse(install.isEnabled(), "the quote stays locked while rechecking");
+                assertFalse(change.isEnabled());
+                assertFalse(name.isEditable());
+                return null;
+            });
+            gate.countDown();
+            services.retargetGate = null;
+            waitUntil(install::isEnabled);
             assertTrue(quote.isDisplayable(), "a failed recheck keeps the quote open");
             assertFalse(problem.getText().isBlank());
-            assertTrue(install.isEnabled(), "the player can retry after a failed recheck");
+            assertTrue(name.isEditable(), "the player can retry after a failed recheck");
             assertEquals(0, services.installs.get());
 
             services.retargetFailure = null;
             SwingUtilities.invokeAndWait(install::doClick);
             waitUntil(() -> services.installs.get() == 1);
+            assertFalse(services.retargetedOnEdt, "the recheck runs off the event thread");
             assertEquals(List.of(renamed, renamed), services.retargetedDestinations);
             assertEquals(List.of(renamed), services.installedDestinations);
             assertEquals(1, services.plans.get(),
@@ -2176,6 +2190,8 @@ class SimpleHomeSwingTest {
         private final List<Path> installedDestinations =
                 new java.util.concurrent.CopyOnWriteArrayList<>();
         private volatile IOException retargetFailure;
+        private volatile CountDownLatch retargetGate;
+        private volatile boolean retargetedOnEdt;
         private NormalInstallService.TargetKind capturedTargetKind =
                 NormalInstallService.TargetKind.CAPTURED_CURRENT;
         private volatile Path unplannableDestination;
@@ -2441,7 +2457,17 @@ class SimpleHomeSwingTest {
         public NormalInstallService.Plan retargetNormalInstall(NormalInstallService.Plan plan,
                                                                Path target)
                 throws IOException {
+            if (SwingUtilities.isEventDispatchThread()) retargetedOnEdt = true;
             retargetedDestinations.add(target);
+            CountDownLatch gate = retargetGate;
+            if (gate != null) {
+                try {
+                    gate.await();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IOException("retarget interrupted", interrupted);
+                }
+            }
             if (retargetFailure != null) throw retargetFailure;
             return new NormalInstallService.Plan(plan.registry(), plan.registrySnapshot(),
                     target, plan.missingParents(), plan.channel(), plan.repository(),
@@ -2461,8 +2487,8 @@ class SimpleHomeSwingTest {
             if (started != null) started.countDown();
             if (releaseGate != null) releaseGate.await();
             if (installFailure != null) throw installFailure;
-            installs.incrementAndGet();
             installedDestinations.add(plan.destination());
+            installs.incrementAndGet();
             installed = true;
             installedChannel = plan.channel();
             installedRecord = new InstallationRecord(

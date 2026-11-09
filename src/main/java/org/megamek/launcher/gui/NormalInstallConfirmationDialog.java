@@ -262,8 +262,11 @@ final class NormalInstallConfirmationDialog extends JDialog {
 
     /** Shows why the chosen folder cannot be used and lets the player edit it again. */
     void showFolderProblem(String problem) {
+        if (!isDisplayable()) return;
         folderProblem.setText(problem == null || problem.isBlank() ? " " : problem);
         folderProblem.setToolTipText(problem);
+        transitionInProgress = false;
+        setActionsEnabled(true);
         folderName.requestFocusInWindow();
     }
 

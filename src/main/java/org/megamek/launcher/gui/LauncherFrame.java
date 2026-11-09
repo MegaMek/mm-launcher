@@ -3945,18 +3945,40 @@ public final class LauncherFrame extends JFrame {
                 }, source -> {
                     Path chosen = source.chosenDestination();
                     if (chosen == null) return false;
-                    NormalInstallService.Plan confirmed = plan;
-                    if (!chosen.equals(plan.destination())) {
-                        try {
-                            confirmed = services.retargetNormalInstall(plan, chosen);
-                        } catch (IOException | RuntimeException error) {
-                            source.showFolderProblem(errorDetail(error));
-                            return false;
-                        }
+                    if (chosen.equals(plan.destination())) {
+                        continuing[0] = true;
+                        source.dispose();
+                        runNormalInstall(plan);
+                        return true;
                     }
-                    continuing[0] = true;
-                    source.dispose();
-                    runNormalInstall(confirmed);
+                    // The recheck reads the registry and the destination, which may be slow
+                    // network or removable storage; the quote stays locked until it finishes.
+                    new SwingWorker<NormalInstallService.Plan, Void>() {
+                        @Override
+                        protected NormalInstallService.Plan doInBackground() throws Exception {
+                            return services.retargetNormalInstall(plan, chosen);
+                        }
+
+                        @Override
+                        protected void done() {
+                            if (!source.isDisplayable()) return;
+                            NormalInstallService.Plan confirmed;
+                            try {
+                                confirmed = get();
+                            } catch (InterruptedException interrupted) {
+                                Thread.currentThread().interrupt();
+                                source.showFolderProblem("Checking the install folder was "
+                                        + "interrupted; try again.");
+                                return;
+                            } catch (java.util.concurrent.ExecutionException failure) {
+                                source.showFolderProblem(errorDetail(failure.getCause()));
+                                return;
+                            }
+                            continuing[0] = true;
+                            source.dispose();
+                            runNormalInstall(confirmed);
+                        }
+                    }.execute();
                     return true;
                 });
         dialog.addWindowListener(new WindowAdapter() {
