@@ -290,6 +290,27 @@ public final class NormalInstallService {
     }
 
     /**
+     * Moves a reviewed plan to another new folder, such as one the player renamed on the quote.
+     * Only the local destination checks run again; the release quote is kept as reviewed, and
+     * {@link #install} still rechecks it against fresh official metadata before downloading.
+     */
+    public Plan retarget(Plan plan, Path requestedDestination) throws IOException {
+        if (plan == null) throw new IOException("a reviewed normal-install plan is required");
+        if (!plan.registry().equals(registry)) {
+            throw new IOException("normal install plan belongs to another launcher registry");
+        }
+        if (requestedDestination == null) {
+            throw new IOException("normal install destination is required");
+        }
+        Path destination = requestedDestination.toAbsolutePath().normalize();
+        RegistrySnapshot snapshot = snapshot();
+        List<Path> missingParents = validateProposedDestination(destination, snapshot.data());
+        return new Plan(registry, snapshot, destination, missingParents, plan.channel(),
+                plan.repository(), plan.version(), plan.requiredProducts(), plan.release(),
+                plan.asset(), plan.source(), plan.targetKind());
+    }
+
+    /**
      * Rechecks the complete quote before binary transfer, creates only consented parent
      * directories, publishes atomically, and then configures channel/Main selection.
      */

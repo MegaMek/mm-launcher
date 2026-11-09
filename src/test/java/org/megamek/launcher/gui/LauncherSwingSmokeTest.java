@@ -57,7 +57,6 @@ import javax.swing.JPanel;
 import javax.swing.JProgressBar;
 import javax.swing.SwingUtilities;
 import javax.swing.JTextArea;
-import javax.swing.JTextField;
 import java.awt.Component;
 import java.awt.Color;
 import java.awt.Container;
@@ -131,6 +130,16 @@ class LauncherSwingSmokeTest {
     }
 
     @Test
+    void publishedDatesUseThePlayersCalendarDay() {
+        java.time.Instant lateUtc = java.time.Instant.parse("2026-11-03T05:12:00Z");
+        assertEquals("Nov 3, 2026", VersionDisplay.publishedDate(lateUtc,
+                java.time.ZoneOffset.UTC, java.util.Locale.US));
+        assertEquals("Nov 2, 2026", VersionDisplay.publishedDate(lateUtc,
+                java.time.ZoneId.of("America/Los_Angeles"), java.util.Locale.US),
+                "a Tuesday-morning UTC build is still Monday on the US west coast");
+    }
+
+    @Test
     void safeSubfolderRejectsEscapesReservedNamesAndInvalidInput() {
         assertEquals(Path.of("v0.51.0"), LauncherFrame.safeSubfolder("v0.51.0"));
         for (String unsafe : List.of("", ".", "..", "a/b", "a\\b", "C:", "NUL", "COM1.txt",
@@ -139,50 +148,6 @@ class LauncherSwingSmokeTest {
                     () -> LauncherFrame.safeSubfolder(unsafe), unsafe);
             assertFalse(error.getMessage().isBlank(), "UI error detail for " + unsafe);
         }
-    }
-
-    @Test
-    @org.junit.jupiter.api.Tag("native-gui")
-    void styledSubfolderDialogValidatesInlineAndSupportsContinueCancelAndEscape()
-            throws Exception {
-        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
-                "actual Swing controls require a display");
-        SubfolderDialog valid = onEdt(() ->
-                new SubfolderDialog(null, "MekHQ Core (0.51.0)", GuiScale.DEFAULT));
-        try {
-            JTextField field = component(valid, "subfolderNameField");
-            assertEquals(LauncherTheme.INPUT_BACKGROUND, field.getBackground());
-            var border = assertInstanceOf(javax.swing.border.CompoundBorder.class, field.getBorder());
-            assertEquals(LauncherTheme.BORDER,
-                    assertInstanceOf(javax.swing.border.LineBorder.class, border.getOutsideBorder()).getLineColor());
-            JButton continueButton = find(valid, "continueSubfolderButton");
-            SwingUtilities.invokeAndWait(() -> {
-                field.setText("../escape");
-                continueButton.doClick();
-            });
-            assertTrue(valid.isDisplayable(), "invalid input stays in the same dialog");
-            assertFalse(findLabel(valid, "subfolderValidationError").getText().isBlank());
-            SwingUtilities.invokeAndWait(() -> {
-                field.setText("MekHQ Core (0.51.0)");
-                continueButton.doClick();
-            });
-            assertEquals(Path.of("MekHQ Core (0.51.0)"), valid.result());
-        } finally {
-            SwingUtilities.invokeAndWait(valid::dispose);
-        }
-
-        SubfolderDialog cancelled = onEdt(() ->
-                new SubfolderDialog(null, "MekHQ Core (0.51.0)", GuiScale.DEFAULT));
-        SwingUtilities.invokeAndWait(
-                () -> find(cancelled, "cancelSubfolderButton").doClick());
-        assertEquals(null, cancelled.result());
-
-        SubfolderDialog escaped = onEdt(() ->
-                new SubfolderDialog(null, "MekHQ Core (0.51.0)", GuiScale.DEFAULT));
-        SwingUtilities.invokeAndWait(() -> escaped.getRootPane().getActionMap()
-                .get(DialogFooter.ESCAPE_ACTION).actionPerformed(
-                        new java.awt.event.ActionEvent(escaped, 0, "escape")));
-        assertEquals(null, escaped.result());
     }
 
     @Test

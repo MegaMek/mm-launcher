@@ -238,7 +238,19 @@ public final class ReleaseCatalog {
             assets.add(asset);
         }
         return new Release(tag, title, draft, prerelease, notesUri, List.copyOf(assets),
-                optionalId(node));
+                optionalId(node), optionalInstant(node, "published_at"));
+    }
+
+    /** A missing or malformed timestamp only hides the date; it never rejects the release. */
+    private static java.util.Optional<java.time.Instant> optionalInstant(JsonNode node,
+                                                                        String field) {
+        JsonNode value = node.get(field);
+        if (value == null || !value.isTextual()) return java.util.Optional.empty();
+        try {
+            return java.util.Optional.of(java.time.Instant.parse(value.textValue()));
+        } catch (java.time.format.DateTimeParseException malformed) {
+            return java.util.Optional.empty();
+        }
     }
 
     static void validateInitialAssetUri(OfficialRepository repository, String tag, Asset asset)
@@ -354,7 +366,7 @@ public final class ReleaseCatalog {
         List<Asset> assets = new ArrayList<>(release.assets());
         assets.set(index, replacement);
         return new Release(release.tag(), release.title(), release.draft(), release.prerelease(),
-                release.notesUrl(), List.copyOf(assets), release.id());
+                release.notesUrl(), List.copyOf(assets), release.id(), release.published());
     }
 
     public record Asset(String name, long size,
@@ -383,8 +395,22 @@ public final class ReleaseCatalog {
         }
     }
     public record Assessment(boolean eligible, Asset asset, String reason) {}
+    /**
+     * {@code published} is display-only: GitHub's publish time when present and well formed.
+     * It never takes part in quote or identity checks.
+     */
     public record Release(String tag, String title, boolean draft, boolean prerelease,
-                          URI notesUrl, List<Asset> assets, java.util.OptionalLong id) {
+                          URI notesUrl, List<Asset> assets, java.util.OptionalLong id,
+                          java.util.Optional<java.time.Instant> published) {
+        public Release {
+            published = published == null ? java.util.Optional.empty() : published;
+        }
+
+        public Release(String tag, String title, boolean draft, boolean prerelease,
+                       URI notesUrl, List<Asset> assets, java.util.OptionalLong id) {
+            this(tag, title, draft, prerelease, notesUrl, assets, id, java.util.Optional.empty());
+        }
+
         public Release(String tag, String title, boolean draft, boolean prerelease,
                        URI notesUrl, List<Asset> assets) {
             this(tag, title, draft, prerelease, notesUrl, assets, java.util.OptionalLong.empty());

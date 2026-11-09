@@ -3912,10 +3912,12 @@ public final class LauncherFrame extends JFrame {
                 this, plan, product, programs, guiScale, source -> {
                     final Path changed;
                     try {
+                        String typed = source.chosenDestination() == null
+                                ? NormalInstallService.defaultFolderName(
+                                        plan.repository(), plan.channel())
+                                : source.folderName();
                         changed = normalInstallLocationPrompts.choose(source,
-                                plan.destination().getParent(),
-                                NormalInstallService.defaultFolderName(
-                                        plan.repository(), plan.channel()));
+                                plan.destination().getParent(), typed);
                     } catch (IOException error) {
                         showError("Preparing install location failed", error);
                         return false;
@@ -3941,9 +3943,42 @@ public final class LauncherFrame extends JFrame {
                     }
                     return true;
                 }, source -> {
-                    continuing[0] = true;
-                    source.dispose();
-                    runNormalInstall(plan);
+                    Path chosen = source.chosenDestination();
+                    if (chosen == null) return false;
+                    if (chosen.equals(plan.destination())) {
+                        continuing[0] = true;
+                        source.dispose();
+                        runNormalInstall(plan);
+                        return true;
+                    }
+                    // The recheck reads the registry and the destination, which may be slow
+                    // network or removable storage; the quote stays locked until it finishes.
+                    new SwingWorker<NormalInstallService.Plan, Void>() {
+                        @Override
+                        protected NormalInstallService.Plan doInBackground() throws Exception {
+                            return services.retargetNormalInstall(plan, chosen);
+                        }
+
+                        @Override
+                        protected void done() {
+                            if (!source.isDisplayable()) return;
+                            NormalInstallService.Plan confirmed;
+                            try {
+                                confirmed = get();
+                            } catch (InterruptedException interrupted) {
+                                Thread.currentThread().interrupt();
+                                source.showFolderProblem("Checking the install folder was "
+                                        + "interrupted; try again.");
+                                return;
+                            } catch (java.util.concurrent.ExecutionException failure) {
+                                source.showFolderProblem(errorDetail(failure.getCause()));
+                                return;
+                            }
+                            continuing[0] = true;
+                            source.dispose();
+                            runNormalInstall(confirmed);
+                        }
+                    }.execute();
                     return true;
                 });
         dialog.addWindowListener(new WindowAdapter() {
@@ -5499,8 +5534,8 @@ public final class LauncherFrame extends JFrame {
                 || value.equals("..") || value.contains("/") || value.contains("\\")
                 || value.contains(":") || value.endsWith(".") || value.endsWith(" ")
                 || windowsReserved) {
-            throw new IllegalArgumentException("Enter one safe relative subfolder name (no "
-                    + "drive, separators, '.', '..', trailing dot/space, or reserved device name).");
+            throw new IllegalArgumentException("Use a plain name: no slashes, drive, '..', "
+                    + "reserved name, or trailing dot/space.");
         }
         return path;
     }
@@ -5521,8 +5556,9 @@ public final class LauncherFrame extends JFrame {
     @FunctionalInterface
     interface NormalInstallLocationPrompts {
         /**
-         * Asks for a new install folder, starting in {@code suggestedParent} and proposing
-         * {@code folderName}; returns {@code null} when cancelled.
+         * Asks for the parent of a new install folder, starting in {@code suggestedParent}, and
+         * returns the folder named {@code folderName} inside it (numbered when that name is
+         * taken); returns {@code null} when cancelled. The quote lets the player rename it.
          */
         Path choose(Component parent, Path suggestedParent, String folderName)
                 throws IOException;
@@ -5535,12 +5571,8 @@ public final class LauncherFrame extends JFrame {
                 throws IOException {
             JFileChooser chooser = installParentChooser(suggestedParent);
             if (chooser.showOpenDialog(parent) != JFileChooser.APPROVE_OPTION) return null;
-            String proposedName = NormalInstallService.availableFolder(
-                    chooser.getSelectedFile().toPath(), folderName)
-                    .getFileName().toString();
-            Path folder = SubfolderDialog.show(parent, proposedName, GuiScale.DEFAULT);
-            if (folder == null) return null;
-            return chooser.getSelectedFile().toPath().resolve(folder);
+            return NormalInstallService.availableFolder(
+                    chooser.getSelectedFile().toPath(), folderName);
         }
     }
 
@@ -5634,11 +5666,15 @@ public final class LauncherFrame extends JFrame {
 
         @Override
         public String toString() {
+            String dated = release.published()
+                    .map(published -> label + " — " + VersionDisplay.publishedDate(published,
+                            java.time.ZoneId.systemDefault(), java.util.Locale.getDefault()))
+                    .orElse(label);
             if (!assessment.eligible()) {
-                return label + " — Unavailable";
+                return dated + " — Unavailable";
             }
             ReleaseCatalog.Asset asset = assessment.asset();
-            return label + " — "
+            return dated + " — "
                     + NormalInstallConfirmationDialog.formatBinaryBytes(asset.size());
         }
     }

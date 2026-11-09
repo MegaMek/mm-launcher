@@ -66,4 +66,13 @@ final class VersionDisplay {
     static String launch(String program, String channel, String version) {
         return "Launch " + programChannelVersion(program, channel, version);
     }
+
+    /** A release's publish day in the player's own calendar and locale, e.g. "Nov 3, 2026". */
+    static String publishedDate(java.time.Instant published, java.time.ZoneId zone,
+                                java.util.Locale locale) {
+        return java.time.format.DateTimeFormatter
+                .ofLocalizedDate(java.time.format.FormatStyle.MEDIUM)
+                .withLocale(locale)
+                .format(published.atZone(zone));
+    }
 }
