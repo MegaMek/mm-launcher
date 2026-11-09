@@ -296,6 +296,50 @@ class NormalInstallServiceTest {
     }
 
     @Test
+    void retargetMovesTheReviewedQuoteToARenamedFolderWithoutNewMetadataRequests()
+            throws Exception {
+        Fixture fixture = fixture("1.02.03.2");
+        NormalInstallService.Plan plan = fixture.launcherServices.prepareNormalInstall(
+                FollowChannel.EXPERIMENTAL, fixture.destination);
+        assertEquals(java.util.Optional.of(java.time.Instant.parse("2026-11-03T05:12:00Z")),
+                plan.release().published(), "the GitHub publish time reaches the quote");
+        int apiBefore = fixture.transport.apiRequests;
+        Path renamed = fixture.destination.resolveSibling("MekHQ-E");
+
+        NormalInstallService.Plan moved =
+                fixture.launcherServices.retargetNormalInstall(plan, renamed);
+
+        assertEquals(apiBefore, fixture.transport.apiRequests,
+                "renaming the folder rechecks only local state");
+        assertEquals(renamed.toAbsolutePath().normalize(), moved.destination());
+        assertEquals(plan.release(), moved.release());
+        assertEquals(plan.asset(), moved.asset());
+        assertEquals(plan.source(), moved.source());
+        assertEquals(plan.targetKind(), moved.targetKind());
+        assertFalse(Files.exists(renamed, LinkOption.NOFOLLOW_LINKS));
+
+        NormalInstallService.Result result = fixture.launcherServices.installNormal(moved,
+                quiet(), OperationContext.none(OperationType.FRESH_INSTALL));
+        assertEquals(renamed.toAbsolutePath().normalize(), result.destination());
+        assertTrue(Files.isDirectory(renamed));
+        assertFalse(Files.exists(fixture.destination, LinkOption.NOFOLLOW_LINKS));
+    }
+
+    @Test
+    void retargetRejectsAnExistingOrRegisteredFolder() throws Exception {
+        Fixture fixture = fixture("1.02.03.1");
+        NormalInstallService.Plan plan =
+                fixture.launcherServices.prepareNormalInstall(fixture.destination);
+        Path taken = Files.createDirectories(fixture.destination.resolveSibling("Taken"));
+        assertThrows(IOException.class,
+                () -> fixture.launcherServices.retargetNormalInstall(plan, taken));
+        assertThrows(IOException.class,
+                () -> fixture.launcherServices.retargetNormalInstall(plan, fixture.registry));
+        assertThrows(IOException.class,
+                () -> fixture.launcherServices.retargetNormalInstall(plan, null));
+    }
+
+    @Test
     void availableFolderSkipsAnyExistingSiblingIncludingFilesLeftBehind() throws Exception {
         Path parent = Files.createDirectory(temp.resolve("parent"));
         assertEquals(parent.resolve("MegaMek Core"),
@@ -1248,7 +1292,7 @@ class NormalInstallServiceTest {
                     repository.slug(), requested, urlName);
             return """
                     {"id":%d,"tag_name":"%s","name":"Milestone %s","draft":false,
-                    "prerelease":false,
+                    "prerelease":false,"published_at":"2026-11-03T05:12:00Z",
                     "html_url":"https://github.com/%s/releases/tag/v%s",
                     "assets":%s}
                     """.formatted(SuiteTestData.releaseId(repository, requested),

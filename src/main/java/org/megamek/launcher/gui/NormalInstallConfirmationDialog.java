@@ -47,6 +47,8 @@ import javax.swing.JTextField;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 import javax.swing.WindowConstants;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
 import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
@@ -58,6 +60,9 @@ import java.awt.Rectangle;
 import java.awt.event.KeyEvent;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
 import java.util.List;
 
 /**
@@ -79,6 +84,11 @@ final class NormalInstallConfirmationDialog extends JDialog {
     private final JButton cancel;
     private final TransitionAction changeAction;
     private final TransitionAction installAction;
+    private final Path parentFolder;
+    private final JTextField folderName = new JTextField(34);
+    private final JLabel folderProblem = new JLabel(" ");
+    private JTextField destination;
+    private boolean folderUsable = true;
     private boolean transitionInProgress;
 
     NormalInstallConfirmationDialog(Frame owner, NormalInstallService.Plan plan,
@@ -89,6 +99,7 @@ final class NormalInstallConfirmationDialog extends JDialog {
         this.scale = java.util.Objects.requireNonNull(scale, "scale");
         this.changeAction = java.util.Objects.requireNonNull(changeAction, "changeAction");
         this.installAction = java.util.Objects.requireNonNull(installAction, "installAction");
+        this.parentFolder = plan.destination().getParent();
 
         setName("normalInstallConfirmationDialog");
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
@@ -100,7 +111,8 @@ final class NormalInstallConfirmationDialog extends JDialog {
 
         changeLocation = styledButton("Change location", "changeNormalLocationButton", false);
         changeLocation.getAccessibleContext().setAccessibleDescription(
-                "Choose a parent folder and a new subfolder, then review a fresh plan.");
+                "Choose a different parent folder for the install folder, then review a fresh "
+                        + "plan.");
         install = styledButton("Install", "confirmNormalInstallButton", true);
         install.setMnemonic(KeyEvent.VK_I);
         install.getAccessibleContext().setAccessibleDescription(
@@ -159,7 +171,7 @@ final class NormalInstallConfirmationDialog extends JDialog {
                 scale.font(base, "label"), MUTED);
 
         String destinationText = plan.destination().toString();
-        JTextField destination = new JTextField(destinationText, 34);
+        destination = new JTextField(destinationText, 34);
         destination.setName("normalInstallDestination");
         destination.setEditable(false);
         // Long paths scroll; keep the folder being created visible.
@@ -182,6 +194,35 @@ final class NormalInstallConfirmationDialog extends JDialog {
         destinationRow.add(destination, BorderLayout.CENTER);
         destinationRow.add(changeLocation, BorderLayout.EAST);
 
+        JLabel folderNameLabel = label("Folder name", "normalInstallFolderNameLabel",
+                scale.font(base, "label"), MUTED);
+        folderNameLabel.setLabelFor(folderName);
+        Path createdFolder = plan.destination().getFileName();
+        folderName.setName("normalInstallFolderName");
+        folderName.setText(createdFolder == null ? "" : createdFolder.toString());
+        folderName.setFont(scale.font(base, "body"));
+        folderName.setBackground(FIELD_BACKGROUND);
+        folderName.setForeground(TEXT);
+        folderName.setCaretColor(TEXT);
+        folderName.setSelectionColor(LauncherTheme.SELECTION_BACKGROUND);
+        folderName.setSelectedTextColor(LauncherTheme.TEXT);
+        folderName.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(LauncherTheme.BORDER),
+                scale.padding("sm", "md")));
+        folderName.getAccessibleContext().setAccessibleName("Folder name");
+        folderName.getAccessibleContext().setAccessibleDescription(
+                "Name of the new folder the install is created in. It must not be a path.");
+        folderName.getDocument().addDocumentListener(new DocumentListener() {
+            @Override public void insertUpdate(DocumentEvent event) { folderNameChanged(); }
+            @Override public void removeUpdate(DocumentEvent event) { folderNameChanged(); }
+            @Override public void changedUpdate(DocumentEvent event) { folderNameChanged(); }
+        });
+
+        folderProblem.setName("normalInstallFolderNameProblem");
+        folderProblem.setFont(scale.font(base, "small"));
+        folderProblem.setForeground(LauncherTheme.DANGER);
+        folderProblem.getAccessibleContext().setAccessibleName("Folder name problem");
+
         summary.add(heading);
         summary.add(Box.createVerticalStrut(scale.space("lg")));
         summary.add(includes);
@@ -191,8 +232,62 @@ final class NormalInstallConfirmationDialog extends JDialog {
         summary.add(destinationLabel);
         summary.add(Box.createVerticalStrut(scale.space("xs")));
         summary.add(destinationRow);
+        summary.add(Box.createVerticalStrut(scale.space("lg")));
+        summary.add(folderNameLabel);
+        summary.add(Box.createVerticalStrut(scale.space("xs")));
+        folderName.setMaximumSize(new Dimension(Integer.MAX_VALUE,
+                folderName.getPreferredSize().height));
+        summary.add(folderName);
+        summary.add(Box.createVerticalStrut(scale.space("xs")));
+        folderProblem.setMaximumSize(new Dimension(Integer.MAX_VALUE,
+                folderProblem.getPreferredSize().height));
+        summary.add(folderProblem);
         alignLeft(summary);
         return summary;
+    }
+
+    /** The folder name as typed, without surrounding whitespace. */
+    String folderName() {
+        return folderName.getText().strip();
+    }
+
+    /** The full install folder for the typed name, or {@code null} while the name is unsafe. */
+    Path chosenDestination() {
+        try {
+            return parentFolder.resolve(LauncherFrame.safeSubfolder(folderName()));
+        } catch (IllegalArgumentException invalid) {
+            return null;
+        }
+    }
+
+    /** Shows why the chosen folder cannot be used and lets the player edit it again. */
+    void showFolderProblem(String problem) {
+        folderProblem.setText(problem == null || problem.isBlank() ? " " : problem);
+        folderProblem.setToolTipText(problem);
+        folderName.requestFocusInWindow();
+    }
+
+    private void folderNameChanged() {
+        String problem = null;
+        Path chosen = null;
+        try {
+            chosen = parentFolder.resolve(LauncherFrame.safeSubfolder(folderName()));
+            if (Files.exists(chosen, LinkOption.NOFOLLOW_LINKS)) {
+                problem = "A folder with this name already exists here; choose another name.";
+            }
+        } catch (IllegalArgumentException invalid) {
+            problem = invalid.getMessage();
+        }
+        if (chosen != null) {
+            String text = chosen.toString();
+            destination.setText(text);
+            destination.setToolTipText(text);
+            destination.setCaretPosition(text.length());
+        }
+        folderProblem.setText(problem == null ? " " : problem);
+        folderProblem.setToolTipText(problem);
+        folderUsable = problem == null;
+        if (!transitionInProgress) install.setEnabled(folderUsable);
     }
 
     private static String releaseLabel(NormalInstallService.Plan plan, String product) {
@@ -249,8 +344,9 @@ final class NormalInstallConfirmationDialog extends JDialog {
 
     private void setActionsEnabled(boolean enabled) {
         changeLocation.setEnabled(enabled);
-        install.setEnabled(enabled);
+        install.setEnabled(enabled && folderUsable);
         cancel.setEnabled(enabled);
+        folderName.setEditable(enabled);
     }
 
     private void resizeAndClamp(Dimension requested, boolean centerOnOwner) {

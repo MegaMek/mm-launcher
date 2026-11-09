@@ -753,6 +753,106 @@ class SimpleHomeSwingTest {
     }
 
     @Test
+    @org.junit.jupiter.api.Tag("native-gui")
+    void quoteFolderNameIsValidatedInlineAndInstallsIntoTheRenamedFolder() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        FakeServices services = new FakeServices(temp.resolve("rename-folder.json"));
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services,
+                (parent, suggested, name) -> {
+                    throw new AssertionError("renaming the folder needs no folder picker");
+                }));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            JButton primary = waitButton(frame, "downloadAndInstallButton");
+            waitUntil(primary::isEnabled);
+            SwingUtilities.invokeAndWait(primary::doClick);
+            JDialog quote = waitDialog(frame, "Install latest MekHQ Core (1.2.3)");
+            javax.swing.text.JTextComponent name = find(quote, "normalInstallFolderName");
+            javax.swing.text.JTextComponent location = find(quote, "normalInstallDestination");
+            JLabel problem = find(quote, "normalInstallFolderNameProblem");
+            JButton install = find(quote, "confirmNormalInstallButton");
+            assertTrue(name.isEditable());
+            assertEquals(services.destination.getFileName().toString(), name.getText());
+            assertTrue(install.isEnabled());
+
+            SwingUtilities.invokeAndWait(() -> name.setText("../escape"));
+            assertFalse(install.isEnabled(), "an unsafe name cannot be installed");
+            assertFalse(problem.getText().isBlank());
+
+            Files.createDirectories(services.destination.resolveSibling("Existing"));
+            SwingUtilities.invokeAndWait(() -> name.setText("Existing"));
+            assertFalse(install.isEnabled(), "an existing folder cannot be installed into");
+            assertFalse(problem.getText().isBlank());
+
+            Path renamed = services.destination.resolveSibling("MekHQ-E");
+            SwingUtilities.invokeAndWait(() -> name.setText(" MekHQ-E "));
+            assertTrue(install.isEnabled());
+            assertTrue(problem.getText().isBlank());
+            assertEquals(renamed.toString(), location.getText(),
+                    "the full location previews the renamed folder");
+
+            services.retargetFailure = new IOException("install parent is not writable");
+            SwingUtilities.invokeAndWait(install::doClick);
+            assertTrue(quote.isDisplayable(), "a failed recheck keeps the quote open");
+            assertFalse(problem.getText().isBlank());
+            assertTrue(install.isEnabled(), "the player can retry after a failed recheck");
+            assertEquals(0, services.installs.get());
+
+            services.retargetFailure = null;
+            SwingUtilities.invokeAndWait(install::doClick);
+            waitUntil(() -> services.installs.get() == 1);
+            assertEquals(List.of(renamed, renamed), services.retargetedDestinations);
+            assertEquals(List.of(renamed), services.installedDestinations);
+            assertEquals(1, services.plans.get(),
+                    "renaming the folder does not refetch release metadata");
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
+    void changeLocationKeepsTheTypedFolderNameAndAnUnchangedNameSkipsTheRecheck()
+            throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        FakeServices services = new FakeServices(temp.resolve("keep-folder-name.json"));
+        Path changed = temp.resolve("other-parent").resolve("MekHQ-E")
+                .toAbsolutePath().normalize();
+        AtomicReference<String> suggestedName = new AtomicReference<>();
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, (parent, suggested, name) -> {
+            suggestedName.set(name);
+            return changed;
+        }));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            JButton primary = waitButton(frame, "downloadAndInstallButton");
+            waitUntil(primary::isEnabled);
+            SwingUtilities.invokeAndWait(primary::doClick);
+            JDialog firstQuote = waitDialog(frame, "Install latest MekHQ Core (1.2.3)");
+            javax.swing.text.JTextComponent name = find(firstQuote, "normalInstallFolderName");
+            SwingUtilities.invokeAndWait(() -> name.setText("MekHQ-E"));
+            JButton change = find(firstQuote, "changeNormalLocationButton");
+            SwingUtilities.invokeAndWait(change::doClick);
+            waitUntil(() -> !firstQuote.isDisplayable());
+            assertEquals("MekHQ-E", suggestedName.get());
+
+            JDialog changedQuote = waitDialog(frame, "Install latest MekHQ Core (1.2.3)");
+            assertEquals("MekHQ-E", ((javax.swing.text.JTextComponent)
+                    find(changedQuote, "normalInstallFolderName")).getText());
+            JButton install = find(changedQuote, "confirmNormalInstallButton");
+            SwingUtilities.invokeAndWait(install::doClick);
+            waitUntil(() -> services.installs.get() == 1);
+            assertEquals(List.of(), services.retargetedDestinations,
+                    "the planned folder installs as reviewed");
+            assertEquals(List.of(changed), services.installedDestinations);
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
     void humanDownloadSizesUseStableBinaryUnitsWithoutOverflow() {
         assertEquals("0 bytes", NormalInstallConfirmationDialog.formatBinaryBytes(0));
         assertEquals("1 byte", NormalInstallConfirmationDialog.formatBinaryBytes(1));
@@ -2071,6 +2171,11 @@ class SimpleHomeSwingTest {
                 new java.util.concurrent.CopyOnWriteArrayList<>();
         private final List<String> plannedSources =
                 new java.util.concurrent.CopyOnWriteArrayList<>();
+        private final List<Path> retargetedDestinations =
+                new java.util.concurrent.CopyOnWriteArrayList<>();
+        private final List<Path> installedDestinations =
+                new java.util.concurrent.CopyOnWriteArrayList<>();
+        private volatile IOException retargetFailure;
         private NormalInstallService.TargetKind capturedTargetKind =
                 NormalInstallService.TargetKind.CAPTURED_CURRENT;
         private volatile Path unplannableDestination;
@@ -2333,6 +2438,18 @@ class SimpleHomeSwingTest {
         }
 
         @Override
+        public NormalInstallService.Plan retargetNormalInstall(NormalInstallService.Plan plan,
+                                                               Path target)
+                throws IOException {
+            retargetedDestinations.add(target);
+            if (retargetFailure != null) throw retargetFailure;
+            return new NormalInstallService.Plan(plan.registry(), plan.registrySnapshot(),
+                    target, plan.missingParents(), plan.channel(), plan.repository(),
+                    plan.version(), plan.requiredProducts(), plan.release(), plan.asset(),
+                    plan.source(), plan.targetKind());
+        }
+
+        @Override
         public NormalInstallService.Result installNormal(NormalInstallService.Plan plan,
                                                          PrintStream progress,
                                                          OperationContext context)
@@ -2345,6 +2462,7 @@ class SimpleHomeSwingTest {
             if (releaseGate != null) releaseGate.await();
             if (installFailure != null) throw installFailure;
             installs.incrementAndGet();
+            installedDestinations.add(plan.destination());
             installed = true;
             installedChannel = plan.channel();
             installedRecord = new InstallationRecord(

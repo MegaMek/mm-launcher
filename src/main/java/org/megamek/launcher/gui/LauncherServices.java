@@ -342,6 +342,13 @@ public class LauncherServices {
         return result;
     }
 
+    /** Points a reviewed install plan at another new folder; local checks only. */
+    public NormalInstallService.Plan retargetNormalInstall(NormalInstallService.Plan plan,
+                                                           Path destination)
+            throws IOException {
+        return normalInstalls.retarget(plan, destination);
+    }
+
     /** The saved appearance; unreadable settings fall back to the default look. */
     LauncherAppearance appearance() {
         try {
