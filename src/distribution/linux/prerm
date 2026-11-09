@@ -10,6 +10,7 @@ set -e
 case "$1" in
     remove|deconfigure)
         sh /opt/megamek-launcher/lib/desktop-entries/desktop-integration.sh uninstall
+        sh /opt/megamek-launcher/lib/polkit-1/policy-integration.sh uninstall
     ;;
 
     # The new version's postinst registers the entries again.

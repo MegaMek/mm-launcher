@@ -3560,10 +3560,6 @@ public final class LauncherFrame extends JFrame {
     static String launcherUpdatePrompt(String version, String notice, boolean asksForPassword) {
         String message = "Version " + version + " is available.\n\n"
                 + "Close any running games before updating.";
-        if (asksForPassword) {
-            message += "\n\nYour system will ask for an administrator password, because the "
-                    + "launcher is installed as a system package.";
-        }
         return notice == null ? message : notice + "\n\n" + message;
     }
 

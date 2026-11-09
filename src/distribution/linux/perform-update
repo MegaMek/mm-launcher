@@ -1,0 +1,157 @@
+#!/bin/bash
+# Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
+#
+# This file is part of MegaMek Launcher.
+#
+# MegaMek Launcher is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License (GPL),
+# version 3 or (at your option) any later version,
+# as published by the Free Software Foundation.
+#
+# MegaMek Launcher is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty
+# of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+# See the GNU General Public License for more details.
+#
+# A copy of the GPL should have been included with this project;
+# if not, see <https://www.gnu.org/licenses/>.
+#
+# NOTICE: The MegaMek organization is a non-profit group of volunteers
+# creating free software for the BattleTech community.
+#
+# MechWarrior, BattleMech, `Mech and AeroTech are registered trademarks
+# of The Topps Company, Inc. All Rights Reserved.
+#
+# Catalyst Game Labs and the Catalyst Game Labs logo are trademarks of
+# InMediaRes Productions, LLC.
+#
+# MechWarrior Copyright Microsoft Corporation. MegaMek was created under
+# Microsoft's "Game Content Usage Rules"
+# <https://www.xbox.com/en-US/developers/rules> and it is not endorsed by or
+# affiliated with Microsoft.
+
+# IMPORTANT: This file needs to have the execution bit set for pkexec to run
+# it.
+#
+# IMPORTANT: Do not set the setuid flag.
+
+# FIXME: Sanitise script arguments to prevent exploits.
+
+# Add support for partial functions. QOL.
+curry() {
+    PARTIAL_FUNCTION=$1; shift
+    OG_FUNCTION=$1; shift
+    PARTIAL_PARAMS=$*
+    CMD=$"function $PARTIAL_FUNCTION() {
+        SECOND_PARAMS=\$*;
+        $OG_FUNCTION $PARTIAL_PARAMS \$SECOND_PARAMS;
+    }"
+    eval $CMD
+}
+
+# TODO: Use build.gradle.kts to drive this flag.
+DEBUG=false
+
+# Associative array to lookup error messages using error codes. Most error 
+# codes pass through the error from the underlying required command.
+#
+# TODO: Consider completing this lookup table for all error codes.
+declare -A ERROR_CODE_MSG
+ERROR_CODE_MSG[6]="Expected non-empty string for package filename"
+ERROR_CODE_MSG[7]="Expected non-empty string for expected package sha"
+
+# Log wrappers. QOL.
+#
+# Text passed through to the logger has hyphens swapped for en dashes because
+# the hypens can be parsed as flags for the logger.
+LOG_TAG=org.megamek.launcher.perform-update
+curry log logger -t $LOG_TAG
+ldebug() { $DEBUG && log -p debug ${*//-/–}; }
+linfo() { log -p info ${*//-/–}; }
+lnote() { log -p notice ${*//-/–}; }
+lwarn() { log -s -p warning ${*//-/–}; }
+lerr() {
+    CODE=$1; shift
+    log -s -p err ERROR $CODE: ${*//-/–};
+}
+lcrit() { log -s -p crit ${*//-/–}; }
+lalert() { log -s -p alert ${*//-/–}; }
+lemerg() { log -s -p emerg ${*//-/–}; }
+
+# Evaluate a command. If error, log and exit with code.
+require() {
+    CODE=$1; shift
+    ERR=$($* 2>&1 > /dev/null)
+    [ $? -ne 0 ] && {
+        # use error message map if err is empty
+        [ -n $ERR ] && ERR=${ERROR_CODE_MSG[$CODE]}
+        lerr $CODE $ERR
+        exit $CODE
+    }
+}
+
+linfo Started self-update
+
+PLATFORM=$1
+DOWNLOADED_PKG_PATH=$2
+EXPECTED_CHECKSUM=$3
+require 6 "eval [ -n \"$DOWNLOADED_PKG_PATH\" ]"
+require 7 "eval [ -n \"$EXPECTED_CHECKSUM\" ]"
+
+# Configure this script for debian or rpm platforms.
+# Exit if platform argument is unknown.
+case $PLATFORM in
+linux-x64.deb)
+    PKG_MANAGER_CMD="apt-get -y -q install"
+    ldebug Platform Type: deb
+    ;;
+linux-x64.rpm)
+    PKG_MANAGER_CMD="dnf upgrade -y -q"
+    ldebug Platform Type: rpm
+    ;;
+*)
+    lerr 1 "Unsupported package type \"$PLATFORM\""
+    exit 1
+    ;;
+esac
+
+umask 077
+WORK_DIR=$(mktemp -d /var/tmp/mm-launcher-update.XXXXXX)
+PKG_NAME=$(basename "$DOWNLOADED_PKG_PATH")
+VERIFIED_PATH="$WORK_DIR/$PKG_NAME"
+
+ldebug Work Directory: $WORK_DIR
+ldebug Verified Package: $VERIFIED_PATH
+
+# Clean up temporary files on exit.
+cleanup() {
+    require 2 rm -f "$VERIFIED_PATH"
+    require 3 rmdir "$WORK_DIR"
+}
+trap cleanup EXIT
+
+touch $DOWNLOADED_PKG_PATH
+
+require 4 cp "$DOWNLOADED_PKG_PATH" "$VERIFIED_PATH"
+
+ACTUAL=$(sha256sum "$VERIFIED_PATH")
+if [ $? -ne 0 ]; then
+    lerr 8 $(sha256sum "$VERIFIED_PATH" 2>&1)
+    exit 8
+fi
+ACTUAL=${ACTUAL%% *}
+
+ldebug Expected Checksum: "$EXPECTED_CHECKSUM"
+ldebug Actual Checksum: "$ACTUAL"
+
+if [ $ACTUAL != $EXPECTED_CHECKSUM ]; then
+    lerr 5 "Staged package digest changed. EXPECTED: \"$EXPECTED_CHECKSUM\". GOT: \"${ACTUAL%% *}\"."
+    exit 5
+fi
+
+ldebug Running install command: $PKG_MANAGER_CMD $VERIFIED_PATH
+require 9 $PKG_MANAGER_CMD "$VERIFIED_PATH"
+
+linfo Finished self-update
+
+exit 0

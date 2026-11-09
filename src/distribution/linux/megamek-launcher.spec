@@ -81,11 +81,13 @@ sed -i -e 's/.*/%dir "&"/' %{package_filelist}
 # Runs after the whole transaction, so the entries survive an upgrade even when the
 # previous package's scriptlets removed them.
 sh /opt/megamek-launcher/lib/desktop-entries/desktop-integration.sh install
+sh /opt/megamek-launcher/lib/polkit-1/policy-integration.sh install
 
 %preun
 # Only on removal: during an upgrade the new package keeps the entries.
 if [ "$1" = 0 ]; then
   sh /opt/megamek-launcher/lib/desktop-entries/desktop-integration.sh uninstall
+  sh /opt/megamek-launcher/lib/polkit-1/policy-integration.sh uninstall
 fi
 
 %clean

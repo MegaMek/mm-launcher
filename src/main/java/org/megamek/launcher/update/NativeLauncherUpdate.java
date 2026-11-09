@@ -56,6 +56,7 @@ final class NativeLauncherUpdate {
     private static final String PACKAGE = "megamek-launcher";
     private static final String MAC_ID = "org.megamek.launcher";
     private static final String LINUX_LAUNCHER = "/opt/megamek-launcher/bin/MegaMek Launcher";
+    private static final String LINUX_UPDATE_SCRIPT = "/opt/megamek-launcher/lib/perform-update";
     private static final String MAC_LAUNCHER =
             "/Applications/MegaMek Launcher.app/Contents/MacOS/MegaMek Launcher";
     private static final String DEB_FORMAT = "${Status}\\t${Version}\\t${Architecture}\\n";
@@ -307,29 +308,17 @@ final class NativeLauncherUpdate {
                     verify,
                     "/usr/bin/open -n " + quote(bundle), false);
         }
-        String root = rootInstallScript(kind, manager);
         String verify = kind == Kind.DEB
                 ? "/usr/bin/dpkg-query --show --showformat='${Status}\\t${Version}\\t${Architecture}\\n' "
                     + PACKAGE
                 : "/usr/bin/rpm -q --queryformat=" + quote(RPM_FORMAT) + " " + PACKAGE;
-        return new Commands("/usr/bin/sha256sum",
-                "/usr/bin/pkexec /bin/sh -c " + quote(root) + " mm-launcher-installer \"$pkg\" \"$expected\"",
-                "test -x " + quote(launcher) + " && test ! -L " + quote(launcher) + " && " + verify,
-                "test -x " + quote(launcher) + " || exit 1\n" + quote(launcher) + " >&2 &\n", true);
-    }
-
-    static String rootInstallScript(Kind kind, String manager) {
-        String install = quote(manager) + (kind == Kind.DEB ? " -y install \"$safe\""
-                : " -y upgrade \"$safe\"");
-        // Only a root-owned copy whose hash matches the release is passed to the package manager.
-        return "set -eu; umask 077; pkg=$1; expected=$2; "
-                + "work=$(/usr/bin/mktemp -d /var/tmp/mm-launcher-update.XXXXXX); "
-                + "safe=\"$work/$(/usr/bin/basename \"$pkg\")\"; "
-                + "trap '/usr/bin/rm -f \"$safe\"; /usr/bin/rmdir \"$work\"' EXIT; "
-                + "/usr/bin/cp \"$pkg\" \"$safe\"; "
-                + "actual=$(/usr/bin/sha256sum \"$safe\"); actual=${actual%% *}; "
-                + "[ \"$actual\" = \"$expected\" ] || { echo 'Staged package digest changed' >&2; exit 1; }; "
-                + install;
+        return new Commands(
+            "/usr/bin/sha256sum",
+            "/usr/bin/pkexec " + quote(LINUX_UPDATE_SCRIPT) + " " + quote(kind.suffix) + " \"$pkg\" \"$expected\"",
+            "test -x " + quote(launcher) + " && test ! -L " + quote(launcher) + " && " + verify,
+            "test -x " + quote(launcher) + " || exit 1\n" + quote(launcher) + " >&2 &\n",
+            true
+        );
     }
 
     static String quote(String value) { return "'" + value.replace("'", "'\"'\"'") + "'"; }

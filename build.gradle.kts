@@ -472,7 +472,10 @@ abstract class NativeInstaller : DefaultTask() {
                     "--linux-shortcut",
                     "--icon", linuxIconFile.get().asFile.absolutePath,
                     "--resource-dir", linuxDir.absolutePath,
-                    "--app-content", File(linuxDir, "desktop-entries").absolutePath)
+                    "--app-content", File(linuxDir, "desktop-entries").absolutePath,
+                    "--app-content", File(linuxDir, "polkit-1").absolutePath,
+                    "--app-content", File(linuxDir, "perform-update").absolutePath,
+                )
             }
         }
         val generated = destination.listFiles().orEmpty().filter { it.extension == type }
