@@ -4740,7 +4740,6 @@ public final class LauncherFrame extends JFrame {
             ChannelUpdateChecker.Result recommended) {
         OperationProgressDialog progress = new OperationProgressDialog(this,
                 "Preparing update", "applyUpdateProgressLog", this::showOperationLogs);
-        String updatedFrom = record.observedBuild();
         progress.append("Downloading and verifying the exact consented package once for "
                 + tag + "...\n");
         progress.setVisible(true);
@@ -4767,10 +4766,8 @@ public final class LauncherFrame extends JFrame {
                                     "Applying verified update"));
                     PreparedUpdate applying = prepared;
                     prepared = null; // applyPrepared now owns cleanup on every outcome
-                    var applied = services.applyPrepared(
+                    return services.applyPrepared(
                             applying, RealUpdateService.CONFIRM, stream, context);
-                    services.rememberPreviousBuild(record, updatedFrom, tag, stream);
-                    return applied;
                 } catch (Exception failure) {
                     if (prepared != null) {
                         try {

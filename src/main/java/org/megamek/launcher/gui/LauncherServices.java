@@ -925,19 +925,6 @@ public class LauncherServices {
     }
 
     /**
-     * Remembers that an update took the installation from {@code previous} to {@code tag}, where
-     * What's new starts; failing to remember only makes What's new show less.
-     */
-    public void rememberPreviousBuild(InstallationRecord record, String previous, String tag, PrintStream log) {
-        if (previous == null || tag == null) return;
-        try {
-            new org.megamek.launcher.update.PreviousBuildStore().write(registry, record.id(), previous, tag);
-        } catch (IOException | RuntimeException failure) {
-            log.println("What's new will not remember the version before this update: " + failure.getMessage());
-        }
-    }
-
-    /**
      * Which channel each release belongs to, from the suite records; without them skipped
      * releases cannot be told apart, so only the target's own notes are shown.
      */

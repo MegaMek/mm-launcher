@@ -203,9 +203,6 @@ class UpdateApplySwingTest {
                     fixture.services.currentHome().defaultInstallationId());
             assertNotNull(waitFor(() -> find(frame, "installationCards")),
                     "clean success returns to the current Installations page");
-            assertEquals(List.of(fixture.first.observedBuild() + " -> v2.00.00.1"),
-                    fixture.services.whatsNewRequests,
-                    "the version before the update is where What's new starts");
             assertNull(showingDialog(frame, WhatsNewDialog.TITLE),
                     "What's new only opens when the player asks for it");
         } finally {
@@ -716,7 +713,6 @@ class UpdateApplySwingTest {
         private volatile String appliedDigest;
         private volatile String appliedConfirmation;
         private volatile boolean applyOnEdt;
-        private final List<String> whatsNewRequests = new java.util.concurrent.CopyOnWriteArrayList<>();
 
         private FakeServices(Path registry, RegistryStore store, PreparedTransport network,
                              InstallationRecord first, InstallationRecord second,
@@ -750,12 +746,6 @@ class UpdateApplySwingTest {
             this.secondCurrent = secondCurrent;
             this.unavailableInspection = unavailableInspection;
             this.preferred = first;
-        }
-
-        @Override
-        public void rememberPreviousBuild(InstallationRecord record, String previous, String tag,
-                                          java.io.PrintStream log) {
-            whatsNewRequests.add(previous + " -> " + tag);
         }
 
         @Override
