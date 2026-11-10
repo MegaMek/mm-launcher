@@ -909,16 +909,32 @@ public class LauncherServices {
     }
 
     /**
-     * What changed in every suite application between {@code since} (null when unknown) and
-     * {@code version}, from the published release notes.
+     * What changed in each application, from the version its installation ran before its last
+     * update through the launcher (or, when unknown, its version's own notes) to the version it runs.
      */
-    public ReleaseNotes.WhatsNew whatsNew(String since, String version) throws InterruptedException {
-        return ReleaseNotes.load(new ReleaseCatalog(transport), suiteChannels(), since, version);
+    public ReleaseNotes.WhatsNew whatsNew(Map<OfficialRepository, InstallationRecord> installations)
+            throws InterruptedException {
+        Map<OfficialRepository, String> since = new java.util.EnumMap<>(OfficialRepository.class);
+        Map<OfficialRepository, String> versions = new java.util.EnumMap<>(OfficialRepository.class);
+        org.megamek.launcher.update.PreviousBuildStore previous = new org.megamek.launcher.update.PreviousBuildStore();
+        installations.forEach((repository, record) -> {
+            versions.put(repository, record.observedBuild());
+            since.put(repository, previous.read(registry, record));
+        });
+        return ReleaseNotes.load(new ReleaseCatalog(transport), suiteChannels(), since, versions);
     }
 
-    /** As above, with each application at its own preferred version, as Home shows them. */
-    public ReleaseNotes.WhatsNew whatsNew(Map<OfficialRepository, String> versions) throws InterruptedException {
-        return ReleaseNotes.load(new ReleaseCatalog(transport), suiteChannels(), null, versions);
+    /**
+     * Remembers that an update took the installation from {@code previous} to {@code tag}, where
+     * What's new starts; failing to remember only makes What's new show less.
+     */
+    public void rememberPreviousBuild(InstallationRecord record, String previous, String tag, PrintStream log) {
+        if (previous == null || tag == null) return;
+        try {
+            new org.megamek.launcher.update.PreviousBuildStore().write(registry, record.id(), previous, tag);
+        } catch (IOException | RuntimeException failure) {
+            log.println("What's new will not remember the version before this update: " + failure.getMessage());
+        }
     }
 
     /**

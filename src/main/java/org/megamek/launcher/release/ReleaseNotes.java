@@ -123,21 +123,34 @@ public final class ReleaseNotes {
     public static WhatsNew load(ReleaseCatalog catalog, Channels channels, String since, String version)
             throws InterruptedException {
         Map<OfficialRepository, String> versions = new LinkedHashMap<>();
-        for (OfficialRepository repository : OfficialRepository.values()) versions.put(repository, version);
-        return load(catalog, channels, since, versions);
+        Map<OfficialRepository, String> sinces = new LinkedHashMap<>();
+        for (OfficialRepository repository : OfficialRepository.values()) {
+            versions.put(repository, version);
+            sinces.put(repository, since);
+        }
+        return load(catalog, channels, sinces, versions);
     }
 
-    /** As above, with each application at its own version; applications without one are left out. */
-    public static WhatsNew load(ReleaseCatalog catalog, Channels channels, String since,
+    /**
+     * As above, with each application at its own version, going from its own {@code since}
+     * (missing or null when unknown, which shows only its version's own release notes);
+     * applications without a version are left out.
+     */
+    public static WhatsNew load(ReleaseCatalog catalog, Channels channels, Map<OfficialRepository, String> since,
                                 Map<OfficialRepository, String> versions) throws InterruptedException {
         List<Application> applications = new ArrayList<>();
+        Set<String> starts = new HashSet<>();
         for (OfficialRepository repository : OfficialRepository.values()) {
             String version = versions.get(repository);
-            if (version != null) applications.add(application(catalog, channels, repository, since, version));
+            if (version == null) continue;
+            String from = since.get(repository);
+            starts.add(combines(from, version) ? from : null);
+            applications.add(application(catalog, channels, repository, from, version));
         }
         Set<String> distinct = new HashSet<>(versions.values());
         distinct.remove(null);
-        return new WhatsNew(distinct.size() == 1 ? distinct.iterator().next() : null, since, applications);
+        return new WhatsNew(distinct.size() == 1 ? distinct.iterator().next() : null,
+                starts.size() == 1 ? starts.iterator().next() : null, applications);
     }
 
     static Application application(ReleaseCatalog catalog, Channels channels, OfficialRepository repository,

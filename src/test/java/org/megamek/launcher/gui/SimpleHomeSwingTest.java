@@ -2231,15 +2231,11 @@ class SimpleHomeSwingTest {
         private Map<String, InstallationRecord> preferredApplications = Map.of();
 
         @Override
-        public org.megamek.launcher.release.ReleaseNotes.WhatsNew whatsNew(String since, String version) {
-            whatsNewRequests.add(since + " -> " + version);
-            return new org.megamek.launcher.release.ReleaseNotes.WhatsNew(version, since, List.of());
-        }
-
-        @Override
         public org.megamek.launcher.release.ReleaseNotes.WhatsNew whatsNew(
-                Map<org.megamek.launcher.release.OfficialRepository, String> versions) {
-            whatsNewRequests.add("home " + new java.util.TreeMap<>(versions));
+                Map<org.megamek.launcher.release.OfficialRepository, InstallationRecord> installations) {
+            Map<org.megamek.launcher.release.OfficialRepository, String> versions = new java.util.TreeMap<>();
+            installations.forEach((repository, record) -> versions.put(repository, record.observedBuild()));
+            whatsNewRequests.add("home " + versions);
             return new org.megamek.launcher.release.ReleaseNotes.WhatsNew(null, null, List.of());
         }
         private volatile CountDownLatch launchOptionsSaveGate;

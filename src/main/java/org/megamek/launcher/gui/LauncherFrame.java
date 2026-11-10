@@ -540,7 +540,7 @@ public final class LauncherFrame extends JFrame {
         archive.getAccessibleContext().setAccessibleDescription(
                 "Open the MegaMek blog archive in your browser");
         archive.addActionListener(event -> openWebsite(LauncherNewsFeed.ARCHIVE, "news archive"));
-        if (homeWhatsNewVersions().isEmpty()) {
+        if (homeWhatsNewInstallations().isEmpty()) {
             news.add(archive);
         } else {
             JButton whatsNew = new LauncherLink("What's new", "whatsNewButton", guiScale);
@@ -4084,9 +4084,6 @@ public final class LauncherFrame extends JFrame {
         String release = VersionDisplay.programChannelVersion(
                 product, plan.channel().toString(), plan.version());
         String operationDescription = "Installing " + release;
-        // The very first install is welcomed by the launcher itself; later ones say what's new.
-        // An exact version picked from "Install another version" is not news.
-        boolean showWhatsNew = !state.registry().installations().isEmpty() && plan.currentChannelTarget();
         OperationProgressDialog progress = new OperationProgressDialog(this,
                 operationDescription, "normalInstallProgressLog", this::showOperationLogs);
         progress.append("Installing the confirmed official " + product + " "
@@ -4110,7 +4107,6 @@ public final class LauncherFrame extends JFrame {
                                     + "Nothing was launched.\n");
                     page = Page.HOME;
                     reload();
-                    if (showWhatsNew) showWhatsNew(null, plan.version());
                 }, error -> {
                     progress.append("\nINSTALL DID NOT COMPLETE: " + errorDetail(error) + "\n");
                     progress.setHeading(error instanceof
@@ -4771,8 +4767,10 @@ public final class LauncherFrame extends JFrame {
                                     "Applying verified update"));
                     PreparedUpdate applying = prepared;
                     prepared = null; // applyPrepared now owns cleanup on every outcome
-                    return services.applyPrepared(
+                    var applied = services.applyPrepared(
                             applying, RealUpdateService.CONFIRM, stream, context);
+                    services.rememberPreviousBuild(record, updatedFrom, tag, stream);
+                    return applied;
                 } catch (Exception failure) {
                     if (prepared != null) {
                         try {
@@ -4796,7 +4794,6 @@ public final class LauncherFrame extends JFrame {
                 }
                 page = Page.INSTALLATIONS;
                 reload();
-                if (result.cleanupWarning() == null) showWhatsNew(updatedFrom, tag);
             }, failure -> {
                     progress.append("\nUPDATE ATTEMPT FAILED: " + errorDetail(failure)
                             + "\nNo second package download was attempted. If application "
@@ -5440,44 +5437,36 @@ public final class LauncherFrame extends JFrame {
     }
 
     /**
-     * Shows what changed in the suite going from {@code since} (null when unknown) to
-     * {@code version}, replacing any open What's new dialog.
+     * Opens What's new for the versions Home's applications run, each its own preferred version,
+     * starting where each installation was before its last update.
      */
-    void showWhatsNew(String since, String version) {
-        if (version == null) return;
-        if (whatsNewDialog != null && whatsNewDialog.isDisplayable()) whatsNewDialog.dispose();
-        whatsNewDialog = WhatsNewDialog.show(this, guiScale, since, version,
-                () -> services.whatsNew(since, version),
-                link -> openWebsite(link, "the release notes"));
-    }
-
-    /** Opens What's new for the versions Home's applications run, each its own preferred version. */
     void showHomeWhatsNew() {
-        Map<OfficialRepository, String> versions = homeWhatsNewVersions();
-        if (versions.isEmpty()) return;
-        java.util.Set<String> distinct = new java.util.HashSet<>(versions.values());
+        Map<OfficialRepository, InstallationRecord> installations = homeWhatsNewInstallations();
+        if (installations.isEmpty()) return;
+        java.util.Set<String> distinct = new java.util.HashSet<>();
+        for (InstallationRecord record : installations.values()) distinct.add(record.observedBuild());
         String version = distinct.size() == 1 ? distinct.iterator().next() : null;
         if (whatsNewDialog != null && whatsNewDialog.isDisplayable()) whatsNewDialog.dispose();
         whatsNewDialog = WhatsNewDialog.show(this, guiScale, null, version,
-                () -> services.whatsNew(versions),
+                () -> services.whatsNew(installations),
                 link -> openWebsite(link, "the release notes"));
     }
 
     /**
-     * The version each application on Home runs: its preferred installation's, or else the first
-     * installation's that has one, so an application is still described when nothing is preferred.
+     * The installation each application on Home runs: its preferred one, or else the first one
+     * with a version, so an application is still described when nothing is preferred.
      */
-    private Map<OfficialRepository, String> homeWhatsNewVersions() {
+    private Map<OfficialRepository, InstallationRecord> homeWhatsNewInstallations() {
         Map<String, InstallationRecord> preferred = state.preferredApplications();
-        String fallback = state.registry().installations().stream().map(InstallationRecord::observedBuild)
-                .filter(java.util.Objects::nonNull).findFirst().orElse(null);
-        Map<OfficialRepository, String> versions = new java.util.EnumMap<>(OfficialRepository.class);
+        InstallationRecord fallback = state.registry().installations().stream()
+                .filter(record -> record.observedBuild() != null).findFirst().orElse(null);
+        Map<OfficialRepository, InstallationRecord> installations = new java.util.EnumMap<>(OfficialRepository.class);
         for (OfficialRepository repository : OfficialRepository.values()) {
             InstallationRecord record = preferred == null ? null : preferred.get(repository.key());
-            String version = record != null && record.observedBuild() != null ? record.observedBuild() : fallback;
-            if (version != null) versions.put(repository, version);
+            InstallationRecord chosen = record != null && record.observedBuild() != null ? record : fallback;
+            if (chosen != null) installations.put(repository, chosen);
         }
-        return versions;
+        return installations;
     }
 
     /** Opens the bug report helper, or brings the open one to the front. */

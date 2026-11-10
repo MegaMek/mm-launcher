@@ -32,7 +32,6 @@
  */
 package org.megamek.launcher.gui;
 
-import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JDialog;
@@ -146,6 +145,12 @@ final class WhatsNewDialog extends JDialog {
     }
 
     void showNotes(ReleaseNotes.WhatsNew whatsNew) {
+        // Where the change starts may only be known once the notes are loaded.
+        if (whatsNew.since() != null && !content.subtitle().isVisible()) {
+            content.subtitle().setText("Everything that changed since " + plain(whatsNew.since()) + ".");
+            content.subtitle().setVisible(true);
+            content.panel().revalidate();
+        }
         showNotesText(html(scale, whatsNew));
     }
 
@@ -172,6 +177,7 @@ final class WhatsNewDialog extends JDialog {
         subtitle.setForeground(FirstLaunchPanel.MUTED);
         subtitle.setFont(scale.font(base, "body"));
         subtitle.setAlignmentX(Component.LEFT_ALIGNMENT);
+        subtitle.setBorder(javax.swing.BorderFactory.createEmptyBorder(scale.space("xs"), 0, 0, 0));
         subtitle.setVisible(!sinceText.isEmpty());
 
         JEditorPane notes = new JEditorPane("text/html", "");
@@ -201,10 +207,7 @@ final class WhatsNewDialog extends JDialog {
         top.setOpaque(false);
         top.setLayout(new BoxLayout(top, BoxLayout.Y_AXIS));
         top.add(heading);
-        if (subtitle.isVisible()) {
-            top.add(Box.createVerticalStrut(scale.space("xs")));
-            top.add(subtitle);
-        }
+        top.add(subtitle);
 
         JButton closeButton = new FirstLaunchButton("Close", "closeWhatsNewButton", true, scale,
                 FirstLaunchButton.Size.SMALL);

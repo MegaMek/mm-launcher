@@ -230,7 +230,7 @@ class ReleaseNotesTest {
         FakeTransport transport = new FakeTransport().release("v0.51.01.5", false, body(item("Five", "a", 5)))
                 .release("v0.50.07.1", false, body(item("Old", "a", 1)));
 
-        ReleaseNotes.WhatsNew whatsNew = ReleaseNotes.load(new ReleaseCatalog(transport), CHANNELS, null,
+        ReleaseNotes.WhatsNew whatsNew = ReleaseNotes.load(new ReleaseCatalog(transport), CHANNELS, Map.of(),
                 Map.of(OfficialRepository.MEGAMEK, "0.51.01.5", OfficialRepository.MEKHQ, "0.50.07.1"));
 
         assertNull(whatsNew.version(), "the applications run different versions");
@@ -238,6 +238,33 @@ class ReleaseNotesTest {
                 whatsNew.applications().stream().map(ReleaseNotes.Application::repository).toList());
         assertEquals(List.of("v0.51.01.5"), whatsNew.applications().getFirst().tags());
         assertEquals("0.50.07.1", whatsNew.applications().get(1).version());
+    }
+
+    @Test
+    void startsEachApplicationWhereItsInstallationWas() throws Exception {
+        FakeTransport transport = new FakeTransport().release("v0.51.01.5", false, body(item("Five", "a", 5)))
+                .release("v0.51.01.4", false, body(item("Four", "a", 4)))
+                .release("v0.51.01.3", false, body(item("Three", "a", 3)));
+        ReleaseCatalog catalog = new ReleaseCatalog(transport);
+
+        ReleaseNotes.WhatsNew updated = ReleaseNotes.load(catalog, CHANNELS,
+                Map.of(OfficialRepository.MEGAMEK, "0.51.01.3"), Map.of(OfficialRepository.MEGAMEK, "0.51.01.5"));
+        assertEquals("0.51.01.3", updated.since());
+        assertEquals(List.of("v0.51.01.5", "v0.51.01.4"), updated.applications().getFirst().tags());
+
+        Map<OfficialRepository, String> since = new java.util.HashMap<>();
+        since.put(OfficialRepository.MEGAMEK, "0.51.01.3");
+        since.put(OfficialRepository.MEKHQ, null);
+        ReleaseNotes.WhatsNew mixed = ReleaseNotes.load(catalog, CHANNELS, since,
+                Map.of(OfficialRepository.MEGAMEK, "0.51.01.5", OfficialRepository.MEKHQ, "0.51.01.5"));
+        assertNull(mixed.since(), "the applications start at different versions");
+        assertEquals(List.of("v0.51.01.5", "v0.51.01.4"), mixed.applications().getFirst().tags());
+
+        ReleaseNotes.WhatsNew unknown = ReleaseNotes.load(catalog, CHANNELS, Map.of(),
+                Map.of(OfficialRepository.MEGAMEK, "0.51.01.5"));
+        assertNull(unknown.since());
+        assertEquals(List.of("v0.51.01.5"), unknown.applications().getFirst().tags(),
+                "without a previous installed version only the release's own notes are shown");
     }
 
     private static VersionIdentity v(String value) {
