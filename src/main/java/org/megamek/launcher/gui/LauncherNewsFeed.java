@@ -106,7 +106,7 @@ final class LauncherNewsFeed {
             List<Article> articles = new ArrayList<>();
             for (int i = 0; i < entries.getLength(); i++) {
                 Element entry = (Element) entries.item(i);
-                String title = childText(entry, "title");
+                String title = titleText(entry);
                 String published = childText(entry, "published");
                 URI link = articleLink(entry);
                 if (title == null || title.isBlank() || published == null || link == null) {
@@ -129,13 +129,70 @@ final class LauncherNewsFeed {
     }
 
     private static String childText(Element parent, String name) {
+        Element child = child(parent, name);
+        return child == null ? null : child.getTextContent();
+    }
+
+    private static Element child(Element parent, String name) {
         for (Node node = parent.getFirstChild(); node != null; node = node.getNextSibling()) {
             if (node instanceof Element element && ATOM.equals(element.getNamespaceURI())
                     && name.equals(element.getLocalName())) {
-                return element.getTextContent();
+                return element;
             }
         }
         return null;
+    }
+
+    private static String titleText(Element entry) {
+        Element title = child(entry, "title");
+        if (title == null) return null;
+        String text = title.getTextContent();
+        return "html".equals(title.getAttribute("type")) ? decodeEntities(text) : text;
+    }
+
+    // The site's jekyll-feed writes titles as "title | smartify | strip_html | normalize_whitespace | xml_escape":
+    // tags are already gone, but the entities smartify produces, such as &amp;, are still escaped HTML text.
+    static String decodeEntities(String html) {
+        StringBuilder result = new StringBuilder(html.length());
+        int i = 0;
+        while (i < html.length()) {
+            char c = html.charAt(i);
+            int end = c == '&' ? html.indexOf(';', i) : -1;
+            String decoded = end > i && end - i <= 10 ? entity(html.substring(i + 1, end)) : null;
+            if (decoded == null) {
+                result.append(c);
+                i++;
+            } else {
+                result.append(decoded);
+                i = end + 1;
+            }
+        }
+        return result.toString();
+    }
+
+    private static String entity(String name) {
+        switch (name) {
+            case "amp": return "&";
+            case "lt": return "<";
+            case "gt": return ">";
+            case "quot": return "\"";
+            case "apos": return "'";
+            case "nbsp": return " ";
+            default: break;
+        }
+        try {
+            int codePoint;
+            if (name.startsWith("#x") || name.startsWith("#X")) {
+                codePoint = Integer.parseInt(name.substring(2), 16);
+            } else if (name.startsWith("#")) {
+                codePoint = Integer.parseInt(name.substring(1));
+            } else {
+                return null;
+            }
+            return Character.isValidCodePoint(codePoint) ? Character.toString(codePoint) : null;
+        } catch (NumberFormatException error) {
+            return null;
+        }
     }
 
     private static URI articleLink(Element entry) throws IOException {
