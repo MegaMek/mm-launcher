@@ -152,13 +152,17 @@ final class LauncherNewsFeed {
 
     // Atom "html" text is HTML markup carried as XML text, so it still holds tags and entities.
     static String htmlToText(String html) {
-        String text = html.replaceAll("<[^>]*>", "");
-        StringBuilder result = new StringBuilder(text.length());
+        StringBuilder result = new StringBuilder(html.length());
         int i = 0;
-        while (i < text.length()) {
-            char c = text.charAt(i);
-            int end = c == '&' ? text.indexOf(';', i) : -1;
-            String decoded = end > i && end - i <= 10 ? entity(text.substring(i + 1, end)) : null;
+        while (i < html.length()) {
+            char c = html.charAt(i);
+            int tagEnd = c == '<' ? tagEnd(html, i) : -1;
+            if (tagEnd > i) {
+                i = tagEnd + 1;
+                continue;
+            }
+            int end = c == '&' ? html.indexOf(';', i) : -1;
+            String decoded = end > i && end - i <= 10 ? entity(html.substring(i + 1, end)) : null;
             if (decoded == null) {
                 result.append(c);
                 i++;
@@ -168,6 +172,26 @@ final class LauncherNewsFeed {
             }
         }
         return result.toString();
+    }
+
+    // The index of the '>' closing the tag that starts at start, or -1 when the '<' there is plain text. A '>'
+    // inside a quoted attribute value does not close the tag.
+    private static int tagEnd(String html, int start) {
+        if (start + 1 >= html.length()) return -1;
+        char next = html.charAt(start + 1);
+        if (!Character.isLetter(next) && next != '/' && next != '!' && next != '?') return -1;
+        char quote = 0;
+        for (int i = start + 1; i < html.length(); i++) {
+            char c = html.charAt(i);
+            if (quote != 0) {
+                if (c == quote) quote = 0;
+            } else if (c == '"' || c == '\'') {
+                quote = c;
+            } else if (c == '>') {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private static String entity(String name) {

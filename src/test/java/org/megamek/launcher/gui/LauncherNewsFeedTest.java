@@ -95,6 +95,21 @@ class LauncherNewsFeedTest {
     }
 
     @Test
+    void literalAngleBracketsAreKept() {
+        assertEquals("Rules for BV < 5000 and PV > 100",
+                LauncherNewsFeed.htmlToText("Rules for BV < 5000 and PV > 100"));
+        assertEquals("Ends with <", LauncherNewsFeed.htmlToText("Ends with <"));
+        assertEquals("Unclosed <em class=\"x", LauncherNewsFeed.htmlToText("Unclosed <em class=\"x"));
+    }
+
+    @Test
+    void quotedAttributesDoNotEndTags() {
+        assertEquals("New rules", LauncherNewsFeed.htmlToText("New <em title=\"BV > 5000\">rules</em>"));
+        assertEquals("New rules", LauncherNewsFeed.htmlToText("New <em title='a > b'>rules</em>"));
+        assertEquals("Hidden", LauncherNewsFeed.htmlToText("<!-- note -->Hidden"));
+    }
+
+    @Test
     void rejectsFailedAndOversizedResponses() {
         LauncherNewsFeed unavailable = new LauncherNewsFeed((uri, accept) ->
                 new ReleaseTransport.Response(503, Map.of(), new ByteArrayInputStream(new byte[0])));
