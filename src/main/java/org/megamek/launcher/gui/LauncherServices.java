@@ -69,6 +69,7 @@ import org.megamek.launcher.release.FreshInstaller;
 import org.megamek.launcher.release.JavaReleaseTransport;
 import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
+import org.megamek.launcher.release.ReleaseNotes;
 import org.megamek.launcher.release.ReleaseTransport;
 import org.megamek.launcher.update.UpdatePreviewService;
 import org.megamek.launcher.update.OwnershipReceipt;
@@ -905,6 +906,14 @@ public class LauncherServices {
     public ReleaseCatalog.Page releases(OfficialRepository repository, int page)
             throws IOException, InterruptedException {
         return new ReleaseCatalog(transport).list(repository, page, 10);
+    }
+
+    /**
+     * What changed in every suite application between {@code since} (null when unknown) and
+     * {@code version}, from the published release notes.
+     */
+    public ReleaseNotes.WhatsNew whatsNew(String since, String version) throws InterruptedException {
+        return ReleaseNotes.load(new ReleaseCatalog(transport), since, version);
     }
 
     /**

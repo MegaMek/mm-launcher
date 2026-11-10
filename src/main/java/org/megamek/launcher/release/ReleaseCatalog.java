@@ -120,6 +120,42 @@ public final class ReleaseCatalog {
     }
 
     /**
+     * Lists the release notes on one page of the repository's releases, newest first. Notes are
+     * display-only: they never take part in choosing, verifying or installing a release.
+     */
+    public List<Notes> notes(OfficialRepository repository, int page, int perPage)
+            throws IOException, InterruptedException {
+        if (page < 1 || page > 1000 || perPage < 1 || perPage > MAX_PAGE_SIZE) {
+            throw new IOException("page must be 1-1000 and per-page must be 1-" + MAX_PAGE_SIZE);
+        }
+        JsonNode root = requestJson(API.resolve("/repos/" + repository.slug()
+                + "/releases?per_page=" + perPage + "&page=" + page));
+        if (!root.isArray()) throw new IOException("GitHub release response must be an array");
+        List<Notes> notes = new ArrayList<>();
+        for (JsonNode node : root) notes.add(parseNotes(node));
+        return List.copyOf(notes);
+    }
+
+    /** The release notes of one exact tag; see {@link #notes(OfficialRepository, int, int)}. */
+    public Notes notes(OfficialRepository repository, String tag)
+            throws IOException, InterruptedException {
+        Notes notes = parseNotes(requestJson(exactMetadataUri(repository, tag)));
+        if (!tag.equals(notes.tag())) {
+            throw new IOException("GitHub returned a different tag than requested");
+        }
+        return notes;
+    }
+
+    private static Notes parseNotes(JsonNode node) throws IOException {
+        if (!node.isObject()) throw new IOException("release entry must be an object");
+        String tag = requiredText(node, "tag_name");
+        requireTag(tag);
+        JsonNode body = node.get("body");
+        return new Notes(tag, requiredBoolean(node, "draft"), requiredBoolean(node, "prerelease"),
+                body != null && body.isTextual() ? body.textValue() : "");
+    }
+
+    /**
      * Returns the one fixed official API location used to revalidate an exact historical choice.
      * This is metadata identity only; package URLs remain separately constrained and verified.
      */
@@ -417,4 +453,6 @@ public final class ReleaseCatalog {
         }
     }
     public record Page(int page, int perPage, List<Release> releases, boolean mayHaveNextPage) {}
+    /** A release's Markdown notes as published on GitHub; {@code body} is empty when it has none. */
+    public record Notes(String tag, boolean draft, boolean prerelease, String body) {}
 }

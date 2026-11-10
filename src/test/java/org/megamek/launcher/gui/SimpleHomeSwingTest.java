@@ -1069,6 +1069,36 @@ class SimpleHomeSwingTest {
 
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
+    void whatsNewOnHomeShowsTheInstalledVersion() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        FakeServices services = new FakeServices(temp.resolve("whats-new.json"));
+        services.installed = true;
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            JButton whatsNew = waitButton(frame, "whatsNewButton");
+            onEdt(() -> {
+                java.awt.Container navigation = (java.awt.Container) find(frame, "managedHomeNavigation");
+                assertEquals(List.of("manageInstallationsButton", "whatsNewButton", "settingsButton"),
+                        java.util.Arrays.stream(navigation.getComponents()).map(Component::getName).toList());
+                assertTrue(whatsNew.isEnabled());
+                return null;
+            });
+            SwingUtilities.invokeAndWait(whatsNew::doClick);
+            JDialog dialog = waitDialog(frame, WhatsNewDialog.TITLE);
+            SwingTestSupport.awaitCondition("What's new loaded", () -> !services.whatsNewRequests.isEmpty());
+            assertEquals(1, services.whatsNewRequests.size());
+            assertTrue(services.whatsNewRequests.getFirst().startsWith("null -> "),
+                    "Home describes the installed version on its own");
+            SwingUtilities.invokeAndWait(dialog::dispose);
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void installationCardsDoNotSilentlyChangePreferencesAndBlockersStayActionable()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
@@ -2173,6 +2203,13 @@ class SimpleHomeSwingTest {
         private final AtomicInteger installs = new AtomicInteger();
         private final AtomicInteger releaseFetches = new AtomicInteger();
         private final AtomicInteger catalogRequests = new AtomicInteger();
+        private final List<String> whatsNewRequests = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+        @Override
+        public org.megamek.launcher.release.ReleaseNotes.WhatsNew whatsNew(String since, String version) {
+            whatsNewRequests.add(since + " -> " + version);
+            return new org.megamek.launcher.release.ReleaseNotes.WhatsNew(version, since, List.of());
+        }
         private volatile CountDownLatch launchOptionsSaveGate;
         private final AtomicInteger selections = new AtomicInteger();
         private final AtomicInteger launchAttempts = new AtomicInteger();

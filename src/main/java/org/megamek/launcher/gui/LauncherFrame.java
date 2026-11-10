@@ -226,6 +226,7 @@ public final class LauncherFrame extends JFrame {
     private boolean launcherUpdateChecked;
     private final LauncherSelfUpdate launcherUpdater;
     private BugReportDialog bugReportDialog;
+    private WhatsNewDialog whatsNewDialog;
 
     public LauncherFrame(LauncherServices services) {
         this(services, new SwingExistingImportPrompts(),
@@ -468,12 +469,20 @@ public final class LauncherFrame extends JFrame {
         JButton settings = homeButton("Settings", "settingsButton");
         settings.setMnemonic(java.awt.event.KeyEvent.VK_S);
         settings.addActionListener(event -> navigateTo(Page.SETTINGS));
+        String installedVersion = homeWhatsNewVersion();
+        JButton whatsNew = homeButton("What's new", "whatsNewButton");
+        whatsNew.setMnemonic(java.awt.event.KeyEvent.VK_W);
+        whatsNew.getAccessibleContext().setAccessibleDescription(
+                "Shows the release notes of the installed version");
+        whatsNew.setEnabled(installedVersion != null);
+        whatsNew.addActionListener(event -> showWhatsNew(null, installedVersion));
         JPanel navigation = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.CENTER,
                 guiScale.space("md"), 0));
         navigation.setName("managedHomeNavigation");
         navigation.setOpaque(false);
         navigation.setAlignmentX(Component.CENTER_ALIGNMENT);
         navigation.add(manage);
+        navigation.add(whatsNew);
         navigation.add(settings);
         JPanel navigationRow = homeNavigationRow(navigation);
         navigationRow.setName("managedHomeNavigationRow");
@@ -4064,6 +4073,8 @@ public final class LauncherFrame extends JFrame {
         String release = VersionDisplay.programChannelVersion(
                 product, plan.channel().toString(), plan.version());
         String operationDescription = "Installing " + release;
+        // The very first install is welcomed by the launcher itself; later ones say what's new.
+        boolean showWhatsNew = !state.registry().installations().isEmpty();
         OperationProgressDialog progress = new OperationProgressDialog(this,
                 operationDescription, "normalInstallProgressLog", this::showOperationLogs);
         progress.append("Installing the confirmed official " + product + " "
@@ -4087,6 +4098,7 @@ public final class LauncherFrame extends JFrame {
                                     + "Nothing was launched.\n");
                     page = Page.HOME;
                     reload();
+                    if (showWhatsNew) showWhatsNew(null, plan.version());
                 }, error -> {
                     progress.append("\nINSTALL DID NOT COMPLETE: " + errorDetail(error) + "\n");
                     progress.setHeading(error instanceof
@@ -4720,6 +4732,7 @@ public final class LauncherFrame extends JFrame {
             ChannelUpdateChecker.Result recommended) {
         OperationProgressDialog progress = new OperationProgressDialog(this,
                 "Preparing update", "applyUpdateProgressLog", this::showOperationLogs);
+        String updatedFrom = record.observedBuild();
         progress.append("Downloading and verifying the exact consented package once for "
                 + tag + "...\n");
         progress.setVisible(true);
@@ -4771,6 +4784,7 @@ public final class LauncherFrame extends JFrame {
                 }
                 page = Page.INSTALLATIONS;
                 reload();
+                if (result.cleanupWarning() == null) showWhatsNew(updatedFrom, tag);
             }, failure -> {
                     progress.append("\nUPDATE ATTEMPT FAILED: " + errorDetail(failure)
                             + "\nNo second package download was attempted. If application "
@@ -5411,6 +5425,29 @@ public final class LauncherFrame extends JFrame {
     private static void copySanitized(String text) {
         Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
                 new StringSelection(SanitizedErrors.document(text)), null);
+    }
+
+    /**
+     * Shows what changed in the suite going from {@code since} (null when unknown) to
+     * {@code version}, replacing any open What's new dialog.
+     */
+    void showWhatsNew(String since, String version) {
+        if (version == null) return;
+        if (whatsNewDialog != null && whatsNewDialog.isDisplayable()) whatsNewDialog.dispose();
+        whatsNewDialog = WhatsNewDialog.show(this, guiScale, since, version,
+                () -> services.whatsNew(since, version),
+                link -> openWebsite(link, "the release notes"));
+    }
+
+    /** The version What's new on Home describes: the one the preferred applications run. */
+    private String homeWhatsNewVersion() {
+        Map<String, InstallationRecord> preferred = state.preferredApplications();
+        for (String key : List.of("mekhq", "megamek", "lab")) {
+            InstallationRecord record = preferred == null ? null : preferred.get(key);
+            if (record != null && record.observedBuild() != null) return record.observedBuild();
+        }
+        return state.registry().installations().stream().map(InstallationRecord::observedBuild)
+                .filter(java.util.Objects::nonNull).findFirst().orElse(null);
     }
 
     /** Opens the bug report helper, or brings the open one to the front. */
