@@ -69,7 +69,11 @@ action changes only the registry label, not the installation folder or applicati
 must be unique. Imported records show
 **Imported copy · Launch only** and omit a channel rather than inferring one.
 Top-level actions are **Install another version** and **Import existing installation**. Exact actions include **Use as preferred for …**, Check/Retry, Update, update recovery,
-**Open location**, and **Remove from launcher…** when applicable. Managed/adopted cards also place
+**Open location**, and **Remove from launcher…** when applicable. A copy with more than one
+application offers **Use as preferred for all applications** first (one atomic write that leaves
+applications the copy lacks untouched) and keeps the per-application choices in a
+**Use as preferred for** submenu; a single-application copy keeps one direct
+**Use as preferred for …** action. Managed/adopted cards also place
 **Uninstall…** at the destructive bottom; imported cards do not. A pending uninstall exposes only
 **Recover uninstall** instead of a new remove/uninstall action while its folder exists.
 The uninstall confirmation offers a ticked-by-default **Also delete log files (logs and
