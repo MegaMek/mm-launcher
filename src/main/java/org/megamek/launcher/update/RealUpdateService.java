@@ -609,9 +609,9 @@ public final class RealUpdateService {
                 }
                 InstallationRecord refreshed = registries.refreshAfterUpdate(registryPath,
                         journal.expectedRecord(), installed.observedBuild(), installed.products());
+                clearStaleCaches(root, journal.nextState().officialManifest());
                 writeJournal(journalFile, withPhase(journal, "COMMITTED"));
                 cleanupCommitted(namespace, transaction, pendingFile, journal);
-                clearStaleCaches(root, journal.nextState().officialManifest());
                 return new RecoveryResult("completed verified post-mutation commit", refreshed);
             }
             if (!currentState.equals(journal.previousState())
@@ -717,9 +717,11 @@ public final class RealUpdateService {
         InstallationRecord refreshed = registries.refreshAfterUpdate(snapshot.registry(),
                 snapshot.record(), installed.observedBuild(), installed.products());
         failureHook.hit("AFTER_REGISTRY_COMMIT");
+        // Before COMMITTED, so an interrupted cleanup cannot skip it: until then recovery
+        // replays this commit, and with it the cache invalidation.
+        if (!repair) clearStaleCaches(snapshot.root(), target.manifest());
         writeJournal(journalFile, withPhase(journal, "COMMITTED"));
         cleanupCommitted(namespace, transaction, pendingFile, journal);
-        if (!repair) clearStaleCaches(snapshot.root(), target.manifest());
         long skipped = decisions.stream().filter(item -> item.action() == Action.SKIP).count();
         return new ApplyResult(refreshed, next, decisions, skipped,
                 next.overrides().size() + next.caseOverrides().size());

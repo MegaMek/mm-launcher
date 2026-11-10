@@ -1492,6 +1492,9 @@ class RealUpdateServiceTest {
                     "lib/runtime.txt", bytes("runtime-2"),
                     "docs/change.txt", bytes("new"))));
             RegistryStore store = new RegistryStore();
+            Path cache = fixture.root.resolve("data/mekfiles/units.cache");
+            Files.createDirectories(cache.getParent());
+            Files.writeString(cache, "built by v1");
             Path java = fakeJava("recovery-jdk-" + failurePoint.toLowerCase(Locale.ROOT));
             InstallationRecord before = store.resolve(store.read(fixture.registry), fixture.id);
             RealUpdateService failing = service(transport("v2", archive), point -> {
@@ -1511,9 +1514,11 @@ class RealUpdateServiceTest {
                 assertTrue(first.outcome().contains("rolled back"));
                 assertEquals("old", Files.readString(fixture.root.resolve("docs/change.txt")));
                 assertEquals("v1", recovery.snapshot(fixture.registry, fixture.id).current().tag());
+                assertEquals("built by v1", Files.readString(cache));
             } else {
                 assertTrue(first.outcome().contains("completed"));
                 assertEquals("new", Files.readString(fixture.root.resolve("docs/change.txt")));
+                assertFalse(Files.exists(cache), "a recovered commit clears the stale cache");
                 assertEquals("v2", recovery.snapshot(fixture.registry, fixture.id).current().tag());
                 assertEquals("2.0.0", new RegistryStore().resolve(
                         new RegistryStore().read(fixture.registry), fixture.id).observedBuild());
@@ -1533,6 +1538,9 @@ class RealUpdateServiceTest {
         byte[] archive = archive("MegaMek-v2", packageFiles(2, Map.of(
                 "lib/runtime.txt", bytes("runtime-2"),
                 "docs/change.txt", bytes("new"))));
+        Path cache = fixture.root.resolve("data/mekfiles/units.cache");
+        Files.createDirectories(cache.getParent());
+        Files.writeString(cache, "built by v1");
         RealUpdateService interrupted = service(transport("v2", archive), point -> {
             if (point.equals("AFTER_PENDING_DELETE")) {
                 throw new IOException("simulated cleanup interruption");
@@ -1551,6 +1559,7 @@ class RealUpdateServiceTest {
         }
         assertFalse(Files.exists(namespace.resolve("pending.json")));
         assertEquals("new", Files.readString(fixture.root.resolve("docs/change.txt")));
+        assertFalse(Files.exists(cache), "the stale cache is cleared before commit cleanup");
         assertEquals("v2", interrupted.snapshot(fixture.registry, fixture.id).current().tag());
         assertEquals("2.0.0", new RegistryStore().resolve(
                 new RegistryStore().read(fixture.registry), fixture.id).observedBuild());
