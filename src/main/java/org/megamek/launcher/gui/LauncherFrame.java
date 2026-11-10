@@ -86,6 +86,7 @@ import javax.swing.JFileChooser;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JList;
+import javax.swing.JMenu;
 import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
@@ -1818,19 +1819,7 @@ public final class LauncherFrame extends JFrame {
         menu.setName("installationMenu-" + record.id());
         menu.setBackground(LauncherTheme.POPUP_BACKGROUND);
         menu.setBorder(BorderFactory.createLineBorder(LauncherTheme.BORDER));
-        for (Product product : record.products()) {
-            JMenuItem preferred = installationMenuItem(
-                    "Use as preferred for " + displayProduct(product.key()));
-            preferred.setEnabled(!record.id().equals(
-                    state.registry().preferredInstallationIds().get(product.key())));
-            preferred.addActionListener(event -> run(
-                    "Changing " + displayProduct(product.key()) + " preference",
-                    () -> {
-                        services.selectPreferred(product.key(), record);
-                        return null;
-                    }, ignored -> reload()));
-            menu.add(preferred);
-        }
+        addPreferenceActions(menu, record);
         menu.add(installationMenuSeparator());
         if (local != null && local.pendingUninstall()) {
             JMenuItem recover = installationMenuItem("Recover uninstall");
@@ -1888,6 +1877,49 @@ public final class LauncherFrame extends JFrame {
         return menu;
     }
 
+    /**
+     * A copy with several applications offers one "for all applications" action first, the common
+     * case when switching between suite copies, with the per-application choices in a submenu. A
+     * single-application copy keeps its one direct action.
+     */
+    private void addPreferenceActions(JPopupMenu menu, InstallationRecord record) {
+        Map<String, String> preferred = state.registry().preferredInstallationIds();
+        List<JMenuItem> perApplication = new ArrayList<>();
+        for (Product product : record.products()) {
+            String label = displayProduct(product.key());
+            JMenuItem item = installationMenuItem(
+                    record.products().size() > 1 ? label : "Use as preferred for " + label);
+            item.setName("preferFor-" + product.key() + "-" + record.id());
+            item.setEnabled(!record.id().equals(preferred.get(product.key())));
+            item.addActionListener(event -> run(
+                    "Changing " + label + " preference",
+                    () -> {
+                        services.selectPreferred(product.key(), record);
+                        return null;
+                    }, ignored -> reload()));
+            perApplication.add(item);
+        }
+        if (perApplication.size() <= 1) {
+            perApplication.forEach(menu::add);
+            return;
+        }
+        boolean anyChangeable = perApplication.stream().anyMatch(JMenuItem::isEnabled);
+        JMenuItem all = installationMenuItem("Use as preferred for all applications");
+        all.setName("preferForAll-" + record.id());
+        all.setEnabled(anyChangeable);
+        all.addActionListener(event -> run("Changing application preferences",
+                () -> {
+                    services.selectPreferredForAll(record);
+                    return null;
+                }, ignored -> reload()));
+        menu.add(all);
+        JMenu submenu = installationSubmenu("Use as preferred for");
+        submenu.setName("preferForSubmenu-" + record.id());
+        submenu.setEnabled(anyChangeable);
+        perApplication.forEach(submenu::add);
+        menu.add(submenu);
+    }
+
     private JMenuItem installationMenuItem(String text) {
         JMenuItem item = new JMenuItem(text);
         item.setUI(new javax.swing.plaf.basic.BasicMenuItemUI() {
@@ -1902,6 +1934,31 @@ public final class LauncherFrame extends JFrame {
                 disabledForeground = FirstLaunchPanel.MUTED;
             }
         });
+        return styleInstallationMenuItem(item, text);
+    }
+
+    /** Like {@link #installationMenuItem} but opens a submenu, so it keeps the arrow icon. */
+    private JMenu installationSubmenu(String text) {
+        JMenu submenu = new JMenu(text);
+        submenu.setUI(new javax.swing.plaf.basic.BasicMenuUI() {
+            @Override
+            protected void installDefaults() {
+                super.installDefaults();
+                checkIcon = null;
+                defaultTextIconGap = 0;
+                selectionBackground = LauncherTheme.SELECTION_BACKGROUND;
+                selectionForeground = LauncherTheme.TEXT;
+                disabledForeground = FirstLaunchPanel.MUTED;
+            }
+        });
+        styleInstallationMenuItem(submenu, text);
+        JPopupMenu popup = submenu.getPopupMenu();
+        popup.setBackground(LauncherTheme.POPUP_BACKGROUND);
+        popup.setBorder(BorderFactory.createLineBorder(LauncherTheme.BORDER));
+        return submenu;
+    }
+
+    private <T extends JMenuItem> T styleInstallationMenuItem(T item, String text) {
         item.setOpaque(true);
         item.setBackground(LauncherTheme.POPUP_BACKGROUND);
         item.setForeground(LauncherTheme.TEXT);

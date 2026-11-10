@@ -331,6 +331,8 @@ class LauncherServicesTest {
         assertThrows(UninstallService.MissingInstallationException.class,
                 () -> services.selectPreferred("megamek", deleted));
         assertThrows(UninstallService.MissingInstallationException.class,
+                () -> services.selectPreferredForAll(deleted));
+        assertThrows(UninstallService.MissingInstallationException.class,
                 () -> services.planPreferencesReset(deleted));
         assertThrows(UninstallService.MissingInstallationException.class,
                 () -> services.adoptionSuggestion(deleted));

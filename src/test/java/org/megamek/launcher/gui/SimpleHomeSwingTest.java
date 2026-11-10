@@ -601,13 +601,19 @@ class SimpleHomeSwingTest {
             assertNull(find(frame, "checkOnOpenCheckbox-" + services.second.id()),
                     "managed-incomplete cards must not expose automatic checks");
             JPopupMenu cardMenu = SwingTestSupport.installationMenu(frame, services.first.id());
-            List<String> preferenceActions = java.util.Arrays.stream(cardMenu.getComponents())
+            List<String> topLevelPreferences = java.util.Arrays.stream(cardMenu.getComponents())
                     .filter(JMenuItem.class::isInstance).map(JMenuItem.class::cast)
                     .map(JMenuItem::getText)
-                    .filter(text -> text.startsWith("Use as preferred for ")).toList();
-            assertEquals(List.of("Use as preferred for MegaMek",
-                    "Use as preferred for MekHQ",
-                    "Use as preferred for MegaMekLab"), preferenceActions);
+                    .filter(text -> text.startsWith("Use as preferred for")).toList();
+            assertEquals(List.of("Use as preferred for all applications",
+                    "Use as preferred for"), topLevelPreferences,
+                    "a suite copy offers one all-applications action and a per-application submenu");
+            javax.swing.JMenu perApplication = find(cardMenu,
+                    "preferForSubmenu-" + services.first.id());
+            assertNotNull(perApplication);
+            assertEquals(List.of("MegaMek", "MekHQ", "MegaMekLab"),
+                    java.util.Arrays.stream(perApplication.getMenuComponents())
+                            .map(JMenuItem.class::cast).map(JMenuItem::getText).toList());
             SwingUtilities.invokeAndWait(() ->
                     javax.swing.MenuSelectionManager.defaultManager().clearSelectedPath());
             assertNull(find(frame, "updateAllButton"), "there is no bulk update action");

@@ -360,7 +360,8 @@ Home has no visible global “Main” block, per-copy update buttons, or a secon
 for update status. Its single **Installations** button gains a known count badge such as
 **2 updates** (announced as **Installations (2 updates)**) when checked installations have updates; unknown and launch-only
 copies never create a false count. Update, retry, recovery, channel, location, removal, and explicit
-**Use as preferred for …** actions live on map-style installation cards. A managed card shows its
+**Use as preferred for …** actions live on map-style installation cards (a suite copy offers
+**Use as preferred for all applications** plus a per-application submenu). A managed card shows its
 read-only **Channel: Core/Experimental** identity and directly shows
 **Check for updates when the launcher opens**. This per-card checkbox is the sole automatic-check
 setting and saves immediately without changing the fixed channel. An imported card says

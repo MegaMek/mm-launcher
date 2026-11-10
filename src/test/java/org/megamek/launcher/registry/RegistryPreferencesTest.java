@@ -209,6 +209,36 @@ class RegistryPreferencesTest {
     }
 
     @Test
+    void preferredForAllSetsEveryContainedApplicationAtomically() throws Exception {
+        InstallationRecord first = record(temp.resolve("first"), "First",
+                product("megamek"), product("mekhq"), product("lab"));
+        InstallationRecord second = record(temp.resolve("second"), "Second",
+                product("megamek"), product("lab"));
+        RegistryData original = new RegistryData(RegistryStore.SCHEMA, first.id(),
+                Map.of("megamek", first.id(), "mekhq", first.id(), "lab", first.id()),
+                List.of(first, second));
+        Path registry = write(original);
+        RegistryStore store = new RegistryStore();
+
+        store.selectPreferredForAll(registry, second);
+
+        RegistryData changed = store.read(registry);
+        assertEquals(Map.of("megamek", second.id(), "mekhq", first.id(), "lab", second.id()),
+                changed.preferredInstallationIds(),
+                "applications the copy lacks keep their preference");
+        assertEquals(first.id(), changed.defaultInstallationId(),
+                "legacy default/CLI compatibility is independent");
+        assertEquals(original.installations(), changed.installations());
+
+        byte[] before = Files.readAllBytes(registry);
+        InstallationRecord stale = new InstallationRecord(first.id(), "Stale",
+                first.canonicalRoot(), first.observedBuild(), first.products(),
+                first.pin(), first.updateEligible(), first.registeredAt());
+        assertThrows(IOException.class, () -> store.selectPreferredForAll(registry, stale));
+        assertArrayEquals(before, Files.readAllBytes(registry));
+    }
+
+    @Test
     void laterRegistrationFillsOnlyStillUnsetApplications() throws Exception {
         Path registry = temp.resolve("registry.json");
         Path firstRoot = suite(temp.resolve("first-suite"), false);

@@ -743,6 +743,11 @@ public class LauncherServices {
         store.selectPreferred(registry, productKey, record);
     }
 
+    public void selectPreferredForAll(InstallationRecord record) throws IOException {
+        UninstallService.requirePresent(record);
+        store.selectPreferredForAll(registry, record);
+    }
+
     public List<Path> javaCandidates() {
         return javaRuntime.candidates();
     }
