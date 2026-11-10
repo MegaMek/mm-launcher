@@ -910,7 +910,8 @@ public class LauncherServices {
 
     /**
      * What changed in each application, from the version its installation ran before its last
-     * update through the launcher (or, when unknown, its version's own notes) to the version it runs.
+     * update through the launcher (or, when unknown, its version's own notes) to the version it runs,
+     * followed by the launcher's own changes since the launcher version that ran before this one.
      */
     public ReleaseNotes.WhatsNew whatsNew(Map<OfficialRepository, InstallationRecord> installations)
             throws InterruptedException {
@@ -921,7 +922,38 @@ public class LauncherServices {
             versions.put(repository, record.observedBuild());
             since.put(repository, previous.read(registry, record));
         });
-        return ReleaseNotes.load(new ReleaseCatalog(transport), suiteChannels(), since, versions);
+        ReleaseCatalog catalog = new ReleaseCatalog(transport);
+        ReleaseNotes.WhatsNew suite = ReleaseNotes.load(catalog, suiteChannels(), since, versions);
+        String launcher = launcherVersion();
+        if (launcher.isBlank()) return suite;
+        List<ReleaseNotes.Application> applications = new java.util.ArrayList<>(suite.applications());
+        applications.add(ReleaseNotes.launcher(catalog, rememberLauncherVersion(), launcher));
+        return new ReleaseNotes.WhatsNew(suite.version(), suite.since(), applications);
+    }
+
+    /**
+     * Records the running launcher version and returns the one that ran before it, or null when
+     * unknown; called at startup so an update is noticed even before the notes are opened.
+     */
+    public String rememberLauncherVersion() {
+        return new org.megamek.launcher.update.LauncherVersionStore().remember(registry, launcherVersion());
+    }
+
+    /**
+     * The running launcher's version: the packaged one, or else the build's version metadata, which
+     * a launcher run from a development build also has. Empty when neither is known.
+     */
+    static String launcherVersion() {
+        String packaged = LauncherSelfUpdate.currentVersion();
+        if (!packaged.isBlank()) return packaged;
+        try (var input = LauncherServices.class.getResourceAsStream("/org/megamek/launcher/version.properties")) {
+            if (input == null) return "";
+            java.util.Properties properties = new java.util.Properties();
+            properties.load(input);
+            return properties.getProperty("version", "").replaceFirst("-.*$", "").strip();
+        } catch (IOException unreadable) {
+            return "";
+        }
     }
 
     /**

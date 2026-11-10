@@ -33,9 +33,9 @@
 package org.megamek.launcher.gui;
 
 import org.junit.jupiter.api.Test;
-import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseNotes;
 
+import javax.swing.JTabbedPane;
 import javax.swing.SwingUtilities;
 import javax.swing.event.HyperlinkEvent;
 import java.net.URI;
@@ -52,38 +52,106 @@ class WhatsNewDialogTest {
     private static final URI PR = URI.create("https://github.com/MegaMek/megamek/pull/42");
 
     @Test
-    void groupsChangesByApplicationAndEscapesTheirTitles() {
-        ReleaseNotes.WhatsNew whatsNew = new ReleaseNotes.WhatsNew("0.51.01.5", "0.51.01.2", List.of(
-                new ReleaseNotes.Application(OfficialRepository.MEGAMEK, "0.51.01.5", List.of("v0.51.01.5"),
+    void describesOneApplicationPerTabAndEscapesItsTitles() {
+        ReleaseNotes.Application megamek = new ReleaseNotes.Application("MegaMek", "0.51.01.5", null,
+                List.of("v0.51.01.5"),
+                List.of(new ReleaseNotes.Release("v0.51.01.5",
+                        URI.create("https://github.com/MegaMek/megamek/releases/tag/v0.51.01.5"),
                         List.of(new ReleaseNotes.Section("Bug fixes", List.of(
-                                new ReleaseNotes.Change("Fix <script> & 'quotes'", OptionalInt.of(42), PR)))),
-                        URI.create("https://github.com/MegaMek/megamek/releases"), null, true),
-                new ReleaseNotes.Application(OfficialRepository.LAB, "0.51.01.5", List.of(), List.of(),
-                        URI.create("https://github.com/MegaMek/megameklab/releases"), "Try again later.", false),
-                new ReleaseNotes.Application(OfficialRepository.MEKHQ, "0.51.01.5", List.of("v0.51.01.5"),
-                        List.of(), URI.create("https://github.com/MegaMek/mekhq/releases"), null, false)));
+                                new ReleaseNotes.Change("Fix <script> & 'quotes'", OptionalInt.of(42), PR)))))),
+                URI.create("https://github.com/MegaMek/megamek/releases"), null, true);
+        ReleaseNotes.Application lab = new ReleaseNotes.Application("MegaMekLab", "0.51.01.5", null, List.of(),
+                List.of(), URI.create("https://github.com/MegaMek/megameklab/releases"), "Try again later.", false);
+        ReleaseNotes.Application mekhq = new ReleaseNotes.Application("MekHQ", "0.51.01.5", null,
+                List.of("v0.51.01.5"), List.of(), URI.create("https://github.com/MegaMek/mekhq/releases"), null,
+                false);
+        ReleaseNotes.WhatsNew whatsNew = new ReleaseNotes.WhatsNew("0.51.01.5", null, List.of(megamek, lab, mekhq));
 
-        String html = WhatsNewDialog.html(GuiScale.DEFAULT, whatsNew);
-
-        assertTrue(html.indexOf("MegaMek ") < html.indexOf("MegaMekLab") && html.indexOf("MegaMekLab")
-                < html.indexOf("MekHQ"));
+        String html = WhatsNewDialog.html(GuiScale.DEFAULT, whatsNew, megamek);
         assertTrue(html.contains("Fix &lt;script&gt; &amp; &#39;quotes&#39;"));
         assertFalse(html.contains("<script>"));
         assertTrue(html.contains("href='" + PR + "'>#42</a>"));
-        assertTrue(html.contains("Try again later."));
-        assertTrue(html.contains("No changes are listed for this version."));
         assertEquals(1, html.split("Some older changes are not shown here", -1).length - 1);
-        assertFalse(html.contains("<h2>MegaMek 0.51.01.5"), "one shared version is in the dialog heading");
-        assertTrue(WhatsNewDialog.html(GuiScale.DEFAULT, null).contains("could not be loaded"));
+        assertFalse(html.contains("Version 0.51.01.5"), "the shared version is in the dialog heading");
+        assertTrue(html.contains("<h3>Bug fixes</h3>"), "one release needs no version heading");
+        assertFalse(html.contains("MegaMekLab"), "each tab holds only its own application");
 
-        ReleaseNotes.WhatsNew mixed = new ReleaseNotes.WhatsNew(null, null, List.of(
-                new ReleaseNotes.Application(OfficialRepository.MEGAMEK, "v0.51.01.5", List.of(), List.of(),
-                        URI.create("https://github.com/MegaMek/megamek/releases"), null, false),
-                new ReleaseNotes.Application(OfficialRepository.MEKHQ, "0.50.07.1", List.of(), List.of(),
-                        URI.create("https://github.com/MegaMek/mekhq/releases"), null, false)));
-        String mixedHtml = WhatsNewDialog.html(GuiScale.DEFAULT, mixed);
-        assertTrue(mixedHtml.contains("<h2>MegaMek 0.51.01.5 "));
-        assertTrue(mixedHtml.contains("<h2>MekHQ 0.50.07.1 "));
+        assertTrue(WhatsNewDialog.html(GuiScale.DEFAULT, whatsNew, lab).contains("Try again later."));
+        assertTrue(WhatsNewDialog.html(GuiScale.DEFAULT, whatsNew, mekhq)
+                .contains("No changes are listed for this version."));
+        assertTrue(WhatsNewDialog.html(GuiScale.DEFAULT, null, null).contains("could not be loaded"));
+        assertTrue(WhatsNewDialog.html(GuiScale.DEFAULT, whatsNew, null).contains("no release notes"));
+    }
+
+    @Test
+    void aTabNamesItsOwnVersionAndStartWhenTheyDifferFromTheHeading() {
+        ReleaseNotes.Application launcher = new ReleaseNotes.Application(ReleaseNotes.LAUNCHER_PRODUCT, "0.14.3",
+                "0.14.1", List.of("v0.14.3", "v0.14.2"), List.of(release(3)),
+                URI.create("https://github.com/MegaMek/mm-launcher/releases"), null, false);
+        ReleaseNotes.WhatsNew whatsNew = new ReleaseNotes.WhatsNew("0.51.01.5", null, List.of(launcher));
+
+        String html = WhatsNewDialog.html(GuiScale.DEFAULT, whatsNew, launcher);
+
+        assertTrue(html.contains("Version 0.14.3, everything that changed since 0.14.1."));
+        assertTrue(html.contains("<h3>0.51.01.3 <a class='quiet'"));
+    }
+
+    @Test
+    void severalApplicationsGetOneTabEach() throws Exception {
+        List<String> titles = new ArrayList<>();
+        SwingUtilities.invokeAndWait(() -> {
+            JTabbedPane tabs = WhatsNewDialog.tabs(GuiScale.DEFAULT, new ReleaseNotes.WhatsNew("0.51.01.5", null,
+                    List.of(application("MegaMek"), application("MegaMekLab"), application("MekHQ"),
+                            application(ReleaseNotes.LAUNCHER_PRODUCT))), uri -> {});
+            for (int index = 0; index < tabs.getTabCount(); index++) titles.add(tabs.getTitleAt(index));
+        });
+        assertEquals(List.of("MegaMek", "MegaMekLab", "MekHQ", "Launcher"), titles);
+    }
+
+    private static ReleaseNotes.Application application(String product) {
+        return new ReleaseNotes.Application(product, "0.51.01.5", null, List.of("v0.51.01.5"), List.of(),
+                URI.create("https://github.com/MegaMek/megamek/releases"), null, false);
+    }
+
+    @Test
+    void severalReleasesEachGetAVersionHeadingNewestFirst() {
+        ReleaseNotes.Application megamek = new ReleaseNotes.Application("MegaMek", "0.51.01.5", "0.51.01.3",
+                List.of("v0.51.01.5", "v0.51.01.4"), List.of(release(5), release(4)),
+                URI.create("https://github.com/MegaMek/megamek/releases"), null, false);
+        ReleaseNotes.WhatsNew whatsNew = new ReleaseNotes.WhatsNew("0.51.01.5", "0.51.01.3", List.of(megamek));
+
+        String html = WhatsNewDialog.html(GuiScale.DEFAULT, whatsNew, megamek);
+
+        String five = "<h3>0.51.01.5 <a class='quiet' href='https://github.com/MegaMek/megamek/releases/tag/"
+                + "v0.51.01.5'>View on GitHub</a></h3>";
+        String four = "<h3>0.51.01.4 <a class='quiet' href='https://github.com/MegaMek/megamek/releases/tag/"
+                + "v0.51.01.4'>View on GitHub</a></h3>";
+        assertTrue(html.contains(five));
+        assertTrue(html.contains(four));
+        assertTrue(html.contains("<h4>Bug fixes</h4>"));
+        assertFalse(html.contains("everything that changed since"), "the dialog heading says where it starts");
+        assertTrue(html.indexOf(five) < html.indexOf("#5<") && html.indexOf("#5<") < html.indexOf(four)
+                && html.indexOf(four) < html.indexOf("#4<"));
+    }
+
+    @Test
+    void aRangeWithOnlyOneChangedReleaseStillNamesIt() {
+        ReleaseNotes.Application lab = new ReleaseNotes.Application("MegaMekLab", "0.51.01.6", "0.51.01.3",
+                List.of("v0.51.01.6", "v0.51.01.5", "v0.51.01.4"), List.of(release(4)),
+                URI.create("https://github.com/MegaMek/megameklab/releases"), null, false);
+        ReleaseNotes.WhatsNew whatsNew = new ReleaseNotes.WhatsNew("0.51.01.6", "0.51.01.3", List.of(lab));
+
+        String html = WhatsNewDialog.html(GuiScale.DEFAULT, whatsNew, lab);
+
+        assertTrue(html.contains("<h3>0.51.01.4 <a class='quiet'"));
+        assertTrue(html.contains("<h4>Bug fixes</h4>"));
+    }
+
+    private static ReleaseNotes.Release release(int revision) {
+        return new ReleaseNotes.Release("v0.51.01." + revision,
+                URI.create("https://github.com/MegaMek/megamek/releases/tag/v0.51.01." + revision),
+                List.of(new ReleaseNotes.Section("Bug fixes", List.of(new ReleaseNotes.Change("Fix",
+                        OptionalInt.of(revision), URI.create("https://github.com/MegaMek/megamek/pull/" + revision))))));
     }
 
     @Test

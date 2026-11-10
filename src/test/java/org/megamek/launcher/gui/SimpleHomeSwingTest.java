@@ -1089,23 +1089,27 @@ class SimpleHomeSwingTest {
                 java.awt.Container navigation = (java.awt.Container) find(frame, "managedHomeNavigation");
                 assertEquals(List.of("manageInstallationsButton", "settingsButton"),
                         java.util.Arrays.stream(navigation.getComponents()).map(Component::getName).toList());
-                java.awt.Container links = (java.awt.Container) find(frame, "communityLinks");
-                assertEquals(List.of("openDiscordButton", "playOnlineButton", "reportBugButton"),
-                        java.util.Arrays.stream(links.getComponents()).map(Component::getName).toList());
-                java.awt.Container newsLinks = (java.awt.Container) find(frame, "homeNewsLinks");
-                assertEquals(List.of("allNewsButton", "whatsNewButton"),
-                        java.util.Arrays.stream(newsLinks.getComponents()).map(Component::getName)
-                                .filter(java.util.Objects::nonNull).toList());
-                assertTrue(SwingUtilities.isDescendingFrom(newsLinks, find(frame, "homeNewsPanel")));
-                Component allNews = find(frame, "allNewsButton");
-                assertEquals(0, allNews.getX(), "All news continues the news list on the left");
-                assertEquals(newsLinks.getWidth(), whatsNew.getX() + whatsNew.getWidth(),
-                        "What's new sits on the right");
-                for (Component link : newsLinks.getComponents()) {
-                    if (link instanceof LauncherLink) {
-                        assertTrue(link.getWidth() >= link.getPreferredSize().width,
-                                link.getName() + " keeps its full text on one line");
-                    }
+                java.awt.Container help = (java.awt.Container) find(frame, "helpLinks");
+                assertEquals(List.of("whatsNewButton", "reportBugButton"),
+                        java.util.Arrays.stream(help.getComponents()).map(Component::getName).toList());
+                java.awt.Container community = (java.awt.Container) find(frame, "communityLinks");
+                assertEquals(List.of("openDiscordButton", "playOnlineButton"),
+                        java.util.Arrays.stream(community.getComponents()).map(Component::getName).toList());
+                assertNull(find(frame, "homeNewsLinks"), "What's new left the news footer");
+                Component row = find(frame, "managedHomeNavigationRow");
+                java.awt.Rectangle nav = SwingUtilities.convertRectangle(navigation.getParent(),
+                        navigation.getBounds(), row);
+                for (Component link : help.getComponents()) {
+                    java.awt.Rectangle bounds = SwingUtilities.convertRectangle(link.getParent(),
+                            link.getBounds(), row);
+                    assertTrue(bounds.x + bounds.width <= nav.x, link.getName() + " sits left of the navigation");
+                    assertTrue(link.getWidth() >= link.getPreferredSize().width,
+                            link.getName() + " keeps its full text on one line");
+                }
+                for (Component link : community.getComponents()) {
+                    java.awt.Rectangle bounds = SwingUtilities.convertRectangle(link.getParent(),
+                            link.getBounds(), row);
+                    assertTrue(bounds.x >= nav.x + nav.width, link.getName() + " sits right of the navigation");
                 }
                 assertTrue(whatsNew instanceof LauncherLink);
                 return null;
@@ -1115,6 +1119,11 @@ class SimpleHomeSwingTest {
             SwingTestSupport.awaitCondition("What's new loaded", () -> !services.whatsNewRequests.isEmpty());
             assertEquals(List.of("home {MEGAMEK=0.51.01.5, LAB=0.51.01.5, MEKHQ=0.50.07.1}"),
                     services.whatsNewRequests, "each application is described at its own preferred version");
+            SwingTestSupport.awaitCondition("one tab per application", () -> onEdt(() -> {
+                Component tabs = find(dialog, "whatsNewTabs");
+                return tabs instanceof javax.swing.JTabbedPane pane && pane.getTabCount() == 2
+                        && "Launcher".equals(pane.getTitleAt(1));
+            }));
             SwingUtilities.invokeAndWait(dialog::dispose);
         } finally {
             dispose(frame);
@@ -2236,7 +2245,12 @@ class SimpleHomeSwingTest {
             Map<org.megamek.launcher.release.OfficialRepository, String> versions = new java.util.TreeMap<>();
             installations.forEach((repository, record) -> versions.put(repository, record.observedBuild()));
             whatsNewRequests.add("home " + versions);
-            return new org.megamek.launcher.release.ReleaseNotes.WhatsNew(null, null, List.of());
+            java.net.URI page = java.net.URI.create("https://github.com/MegaMek/megamek/releases");
+            return new org.megamek.launcher.release.ReleaseNotes.WhatsNew(null, null, List.of(
+                    new org.megamek.launcher.release.ReleaseNotes.Application("MegaMek", "0.51.01.5", null,
+                            List.of(), List.of(), page, null, false),
+                    new org.megamek.launcher.release.ReleaseNotes.Application("Launcher", "0.14.3", null,
+                            List.of(), List.of(), page, null, false)));
         }
         private volatile CountDownLatch launchOptionsSaveGate;
         private final AtomicInteger selections = new AtomicInteger();

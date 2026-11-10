@@ -125,10 +125,21 @@ public final class ReleaseCatalog {
      */
     public List<Notes> notes(OfficialRepository repository, int page, int perPage)
             throws IOException, InterruptedException {
+        if (repository == null) throw new IOException("official repository is required");
+        return notes(repository.slug(), page, perPage);
+    }
+
+    /**
+     * As {@link #notes(OfficialRepository, int, int)} for one of the {@link #NOTES_REPOSITORIES},
+     * which also covers the launcher's own releases.
+     */
+    public List<Notes> notes(String slug, int page, int perPage)
+            throws IOException, InterruptedException {
+        requireNotesRepository(slug);
         if (page < 1 || page > 1000 || perPage < 1 || perPage > MAX_PAGE_SIZE) {
             throw new IOException("page must be 1-1000 and per-page must be 1-" + MAX_PAGE_SIZE);
         }
-        JsonNode root = requestJson(API.resolve("/repos/" + repository.slug()
+        JsonNode root = requestJson(API.resolve("/repos/" + slug
                 + "/releases?per_page=" + perPage + "&page=" + page));
         if (!root.isArray()) throw new IOException("GitHub release response must be an array");
         List<Notes> notes = new ArrayList<>();
@@ -139,11 +150,28 @@ public final class ReleaseCatalog {
     /** The release notes of one exact tag; see {@link #notes(OfficialRepository, int, int)}. */
     public Notes notes(OfficialRepository repository, String tag)
             throws IOException, InterruptedException {
-        Notes notes = parseNotes(requestJson(exactMetadataUri(repository, tag)));
+        if (repository == null) throw new IOException("official repository is required");
+        return notes(repository.slug(), tag);
+    }
+
+    /** The release notes of one exact tag; see {@link #notes(String, int, int)}. */
+    public Notes notes(String slug, String tag) throws IOException, InterruptedException {
+        requireNotesRepository(slug);
+        requireTag(tag);
+        String encoded = URLEncoder.encode(tag, StandardCharsets.UTF_8).replace("+", "%20");
+        Notes notes = parseNotes(requestJson(API.resolve("/repos/" + slug + "/releases/tags/" + encoded)));
         if (!tag.equals(notes.tag())) {
             throw new IOException("GitHub returned a different tag than requested");
         }
         return notes;
+    }
+
+    /** The repositories whose release notes may be read: the suite and the launcher itself. */
+    public static final List<String> NOTES_REPOSITORIES = List.of(OfficialRepository.MEGAMEK.slug(),
+            OfficialRepository.LAB.slug(), OfficialRepository.MEKHQ.slug(), ReleaseNotes.LAUNCHER_SLUG);
+
+    private static void requireNotesRepository(String slug) throws IOException {
+        if (!NOTES_REPOSITORIES.contains(slug)) throw new IOException("unsupported release notes repository");
     }
 
     private static Notes parseNotes(JsonNode node) throws IOException {

@@ -275,15 +275,19 @@ class LauncherSwingSmokeTest {
                         find(frame, "manageInstallationsButton").getBounds(), deck);
                 int buttonsCenter = (manageBounds.x + settingsBounds.x + settingsBounds.width) / 2;
                 assertTrue(Math.abs(buttonsCenter - deck.getWidth() / 2) <= 2,
-                        "the navigation buttons stay centered beside the community links");
-                for (String name : new String[]{"openDiscordButton", "playOnlineButton",
-                        "reportBugButton"}) {
+                        "the navigation buttons stay centered between the link groups");
+                for (String name : new String[]{"openDiscordButton", "playOnlineButton"}) {
                     LauncherLink community = assertInstanceOf(LauncherLink.class, find(frame, name));
                     java.awt.Rectangle bounds = SwingUtilities.convertRectangle(community.getParent(),
                             community.getBounds(), deck);
                     assertTrue(bounds.x >= nav.x + nav.width, name + " sits right of the navigation");
                     assertTrue(bounds.x + bounds.width <= deck.getWidth(), name + " stays inside the deck");
                 }
+                LauncherLink report = assertInstanceOf(LauncherLink.class, find(frame, "reportBugButton"));
+                java.awt.Rectangle reportBounds = SwingUtilities.convertRectangle(report.getParent(),
+                        report.getBounds(), deck);
+                assertTrue(reportBounds.x + reportBounds.width <= nav.x, "Report a bug sits left of the navigation");
+                assertTrue(reportBounds.x >= 0, "Report a bug stays inside the deck");
                 return null;
             });
             onEdt(() -> {

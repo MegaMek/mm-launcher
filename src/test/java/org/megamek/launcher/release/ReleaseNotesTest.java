@@ -101,18 +101,28 @@ class ReleaseNotesTest {
     }
 
     @Test
-    void mergeOrdersHeadingsAndListsEachPullRequestOnce() {
-        List<ReleaseNotes.Section> newer = ReleaseNotes.parse(MM, body("### Bug fixes\n" + item("Fix B", "a", 2)
-                + "### Custom\n" + item("Custom thing", "a", 4)));
-        List<ReleaseNotes.Section> older = ReleaseNotes.parse(MM, body("### Behind the scenes\n"
+    void separateOrdersHeadingsAndKeepsEachPullRequestUnderItsOldestRelease() {
+        ReleaseNotes.Release newer = release("v0.51.01.5", ReleaseNotes.parse(MM, body("### Bug fixes\n"
+                + item("Fix B", "a", 2) + "### Custom\n" + item("Custom thing", "a", 4))));
+        ReleaseNotes.Release middle = release("v0.51.01.4", ReleaseNotes.parse(MM, body("### Bug fixes\n"
+                + item("Fix B", "a", 2))));
+        ReleaseNotes.Release older = release("v0.51.01.3", ReleaseNotes.parse(MM, body("### Behind the scenes\n"
                 + item("Refactor", "a", 3) + "### New features\n" + item("Feature A", "a", 1)
-                + "### Bug fixes\n" + item("Fix B", "a", 2)));
+                + "### Bug fixes\n" + item("Fix B", "a", 2))));
 
-        List<ReleaseNotes.Section> merged = ReleaseNotes.merge(List.of(newer, older));
+        List<ReleaseNotes.Release> separated = ReleaseNotes.separate(List.of(newer, middle, older));
 
-        assertEquals(List.of("New features", "Bug fixes", "Custom", "Behind the scenes"),
-                merged.stream().map(ReleaseNotes.Section::heading).toList());
-        assertEquals(1, merged.get(1).changes().size());
+        assertEquals(List.of("v0.51.01.5", "v0.51.01.3"),
+                separated.stream().map(ReleaseNotes.Release::tag).toList(), "a release with nothing new is dropped");
+        assertEquals(List.of("Custom"),
+                separated.get(0).sections().stream().map(ReleaseNotes.Section::heading).toList());
+        assertEquals(List.of("New features", "Bug fixes", "Behind the scenes"),
+                separated.get(1).sections().stream().map(ReleaseNotes.Section::heading).toList());
+    }
+
+    private static ReleaseNotes.Release release(String tag, List<ReleaseNotes.Section> sections) {
+        return new ReleaseNotes.Release(tag, URI.create("https://github.com/MegaMek/megamek/releases/tag/" + tag),
+                sections);
     }
 
     @Test
@@ -145,10 +155,14 @@ class ReleaseNotesTest {
         assertFalse(notes.incomplete());
         assertEquals("0.51.01.5", notes.version());
         assertEquals(List.of("v0.51.01.5", "v0.51.01.4", "v0.51.01.2"), notes.tags());
-        assertEquals(List.of("New features", "Bug fixes"),
-                notes.sections().stream().map(ReleaseNotes.Section::heading).toList());
-        assertEquals(List.of("Fix five", "Fix two"),
-                notes.sections().get(1).changes().stream().map(ReleaseNotes.Change::title).toList());
+        assertEquals(List.of("v0.51.01.5", "v0.51.01.4", "v0.51.01.2"),
+                notes.releases().stream().map(ReleaseNotes.Release::tag).toList());
+        assertEquals(URI.create("https://github.com/MegaMek/megamek/releases/tag/v0.51.01.4"),
+                notes.releases().get(1).page());
+        assertEquals(List.of("Feature four"), notes.releases().get(1).sections().getFirst().changes().stream()
+                .map(ReleaseNotes.Change::title).toList());
+        assertEquals(List.of("Fix two"), notes.releases().get(2).sections().getFirst().changes().stream()
+                .map(ReleaseNotes.Change::title).toList());
         assertEquals(URI.create("https://github.com/MegaMek/megamek/releases"), notes.page());
     }
 
@@ -234,8 +248,8 @@ class ReleaseNotesTest {
                 Map.of(OfficialRepository.MEGAMEK, "0.51.01.5", OfficialRepository.MEKHQ, "0.50.07.1"));
 
         assertNull(whatsNew.version(), "the applications run different versions");
-        assertEquals(List.of(OfficialRepository.MEGAMEK, OfficialRepository.MEKHQ),
-                whatsNew.applications().stream().map(ReleaseNotes.Application::repository).toList());
+        assertEquals(List.of("MegaMek", "MekHQ"),
+                whatsNew.applications().stream().map(ReleaseNotes.Application::product).toList());
         assertEquals(List.of("v0.51.01.5"), whatsNew.applications().getFirst().tags());
         assertEquals("0.50.07.1", whatsNew.applications().get(1).version());
     }
@@ -267,15 +281,37 @@ class ReleaseNotesTest {
                 "without a previous installed version only the release's own notes are shown");
     }
 
+    @Test
+    void describesTheLauncherFromItsOwnReleases() throws Exception {
+        String three = "* Three by @a in https://github.com/MegaMek/mm-launcher/pull/3\n";
+        FakeTransport transport = new FakeTransport().release("v0.14.3", false, body(three))
+                .release("v0.14.2", false, body(item("Two", "a", 2)))
+                .release("v0.14.1", false, body(item("One", "a", 1)));
+        transport.serving = "MegaMek/mm-launcher";
+        ReleaseCatalog catalog = new ReleaseCatalog(transport);
+
+        ReleaseNotes.Application updated = ReleaseNotes.launcher(catalog, "0.14.1", "0.14.3");
+        assertEquals(ReleaseNotes.LAUNCHER_PRODUCT, updated.product());
+        assertEquals("0.14.1", updated.since());
+        assertEquals(List.of("v0.14.3", "v0.14.2"), updated.tags());
+        assertEquals(URI.create("https://github.com/MegaMek/mm-launcher/pull/3"),
+                updated.releases().getFirst().sections().getFirst().changes().getFirst().link());
+
+        ReleaseNotes.Application fresh = ReleaseNotes.launcher(catalog, null, "0.14.3");
+        assertNull(fresh.since());
+        assertEquals(List.of("v0.14.3"), fresh.tags());
+    }
+
     private static VersionIdentity v(String value) {
         return VersionIdentity.fromExact(value).orElseThrow();
     }
 
-    /** Serves the same releases for MegaMek and an empty list elsewhere; exact tags fall back to 404. */
+    /** Serves the releases for one repository (MegaMek unless told otherwise) and an empty list elsewhere. */
     private static final class FakeTransport implements ReleaseTransport {
         private final List<ObjectNode> releases = new ArrayList<>();
         private final List<Integer> pages = new ArrayList<>();
         String failing;
+        String serving = "MegaMek/megamek";
 
         FakeTransport release(String tag, boolean prerelease, String body) {
             ObjectNode node = JSON.createObjectNode().put("tag_name", tag).put("draft", false)
@@ -288,7 +324,7 @@ class ReleaseNotesTest {
         public Response get(URI uri, String accept) {
             String path = uri.getPath();
             if (failing != null && path.contains(failing)) return response(500, "{}");
-            boolean megamek = path.startsWith("/repos/MegaMek/megamek/");
+            boolean megamek = path.startsWith("/repos/" + serving + "/");
             if (path.endsWith("/releases")) {
                 ArrayNode page = JSON.createArrayNode();
                 Map<String, Integer> query = new java.util.HashMap<>();
