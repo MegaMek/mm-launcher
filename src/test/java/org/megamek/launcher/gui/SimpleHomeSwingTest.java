@@ -1086,10 +1086,20 @@ class SimpleHomeSwingTest {
                 assertEquals(List.of("openDiscordButton", "playOnlineButton", "reportBugButton"),
                         java.util.Arrays.stream(links.getComponents()).map(Component::getName).toList());
                 java.awt.Container newsLinks = (java.awt.Container) find(frame, "homeNewsLinks");
-                assertEquals(List.of("whatsNewButton", "allNewsButton"),
+                assertEquals(List.of("allNewsButton", "whatsNewButton"),
                         java.util.Arrays.stream(newsLinks.getComponents()).map(Component::getName)
                                 .filter(java.util.Objects::nonNull).toList());
                 assertTrue(SwingUtilities.isDescendingFrom(newsLinks, find(frame, "homeNewsPanel")));
+                Component allNews = find(frame, "allNewsButton");
+                assertEquals(0, allNews.getX(), "All news continues the news list on the left");
+                assertEquals(newsLinks.getWidth(), whatsNew.getX() + whatsNew.getWidth(),
+                        "What's new sits on the right");
+                for (Component link : newsLinks.getComponents()) {
+                    if (link instanceof LauncherLink) {
+                        assertTrue(link.getWidth() >= link.getPreferredSize().width,
+                                link.getName() + " keeps its full text on one line");
+                    }
+                }
                 assertTrue(whatsNew instanceof LauncherLink);
                 return null;
             });

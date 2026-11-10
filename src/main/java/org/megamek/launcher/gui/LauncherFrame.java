@@ -548,15 +548,17 @@ public final class LauncherFrame extends JFrame {
             whatsNew.getAccessibleContext().setAccessibleDescription(
                     "Shows the release notes of the installed version");
             whatsNew.addActionListener(event -> showWhatsNew(null, installedVersion));
-            JPanel footer = new JPanel();
+            JPanel footer = new JPanel(new BorderLayout()) {
+                @Override
+                public Dimension getMaximumSize() {
+                    return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+                }
+            };
             footer.setName("homeNewsLinks");
-            footer.setLayout(new BoxLayout(footer, BoxLayout.X_AXIS));
             footer.setOpaque(false);
             footer.setAlignmentX(Component.LEFT_ALIGNMENT);
-            footer.add(whatsNew);
-            footer.add(Box.createHorizontalStrut(guiScale.space("lg")));
-            footer.add(archive);
-            footer.setMaximumSize(footer.getPreferredSize());
+            footer.add(archive, BorderLayout.WEST);
+            footer.add(whatsNew, BorderLayout.EAST);
             news.add(footer);
         }
         news.revalidate();
