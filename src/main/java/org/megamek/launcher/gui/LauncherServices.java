@@ -69,6 +69,7 @@ import org.megamek.launcher.release.FreshInstaller;
 import org.megamek.launcher.release.JavaReleaseTransport;
 import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
+import org.megamek.launcher.release.ReleaseNotes;
 import org.megamek.launcher.release.ReleaseTransport;
 import org.megamek.launcher.update.UpdatePreviewService;
 import org.megamek.launcher.update.OwnershipReceipt;
@@ -905,6 +906,35 @@ public class LauncherServices {
     public ReleaseCatalog.Page releases(OfficialRepository repository, int page)
             throws IOException, InterruptedException {
         return new ReleaseCatalog(transport).list(repository, page, 10);
+    }
+
+    /**
+     * What changed in every suite application between {@code since} (null when unknown) and
+     * {@code version}, from the published release notes.
+     */
+    public ReleaseNotes.WhatsNew whatsNew(String since, String version) throws InterruptedException {
+        return ReleaseNotes.load(new ReleaseCatalog(transport), suiteChannels(), since, version);
+    }
+
+    /** As above, with each application at its own preferred version, as Home shows them. */
+    public ReleaseNotes.WhatsNew whatsNew(Map<OfficialRepository, String> versions) throws InterruptedException {
+        return ReleaseNotes.load(new ReleaseCatalog(transport), suiteChannels(), null, versions);
+    }
+
+    /**
+     * Which channel each release belongs to, from the suite records; without them skipped
+     * releases cannot be told apart, so only the target's own notes are shown.
+     */
+    private ReleaseNotes.Channels suiteChannels() throws InterruptedException {
+        try {
+            Map<String, FollowChannel> channels = new OfficialSuiteChannelCatalog(transport).channelsByTag();
+            return tag -> {
+                FollowChannel channel = channels.get(tag);
+                return channel == null ? null : channel.cliName();
+            };
+        } catch (IOException unavailable) {
+            return tag -> null;
+        }
     }
 
     /**

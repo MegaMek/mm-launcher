@@ -1069,6 +1069,60 @@ class SimpleHomeSwingTest {
 
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
+    void whatsNewOnHomeShowsTheInstalledVersion() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing controls require a display");
+        FakeServices services = new FakeServices(temp.resolve("whats-new.json"));
+        services.installed = true;
+        InstallationRecord older = new InstallationRecord(services.second.id(), services.second.name(),
+                services.second.canonicalRoot(), "0.50.07.1", services.second.products(),
+                services.second.pin(), false, services.second.registeredAt());
+        InstallationRecord newer = new InstallationRecord(services.first.id(), services.first.name(),
+                services.first.canonicalRoot(), "0.51.01.5", services.first.products(),
+                services.first.pin(), false, services.first.registeredAt());
+        services.preferredApplications = Map.of("megamek", newer, "lab", newer, "mekhq", older);
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            JButton whatsNew = waitButton(frame, "whatsNewButton");
+            onEdt(() -> {
+                java.awt.Container navigation = (java.awt.Container) find(frame, "managedHomeNavigation");
+                assertEquals(List.of("manageInstallationsButton", "settingsButton"),
+                        java.util.Arrays.stream(navigation.getComponents()).map(Component::getName).toList());
+                java.awt.Container links = (java.awt.Container) find(frame, "communityLinks");
+                assertEquals(List.of("openDiscordButton", "playOnlineButton", "reportBugButton"),
+                        java.util.Arrays.stream(links.getComponents()).map(Component::getName).toList());
+                java.awt.Container newsLinks = (java.awt.Container) find(frame, "homeNewsLinks");
+                assertEquals(List.of("allNewsButton", "whatsNewButton"),
+                        java.util.Arrays.stream(newsLinks.getComponents()).map(Component::getName)
+                                .filter(java.util.Objects::nonNull).toList());
+                assertTrue(SwingUtilities.isDescendingFrom(newsLinks, find(frame, "homeNewsPanel")));
+                Component allNews = find(frame, "allNewsButton");
+                assertEquals(0, allNews.getX(), "All news continues the news list on the left");
+                assertEquals(newsLinks.getWidth(), whatsNew.getX() + whatsNew.getWidth(),
+                        "What's new sits on the right");
+                for (Component link : newsLinks.getComponents()) {
+                    if (link instanceof LauncherLink) {
+                        assertTrue(link.getWidth() >= link.getPreferredSize().width,
+                                link.getName() + " keeps its full text on one line");
+                    }
+                }
+                assertTrue(whatsNew instanceof LauncherLink);
+                return null;
+            });
+            SwingUtilities.invokeAndWait(whatsNew::doClick);
+            JDialog dialog = waitDialog(frame, WhatsNewDialog.TITLE);
+            SwingTestSupport.awaitCondition("What's new loaded", () -> !services.whatsNewRequests.isEmpty());
+            assertEquals(List.of("home {MEGAMEK=0.51.01.5, LAB=0.51.01.5, MEKHQ=0.50.07.1}"),
+                    services.whatsNewRequests, "each application is described at its own preferred version");
+            SwingUtilities.invokeAndWait(dialog::dispose);
+        } finally {
+            dispose(frame);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void installationCardsDoNotSilentlyChangePreferencesAndBlockersStayActionable()
             throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
@@ -2173,6 +2227,21 @@ class SimpleHomeSwingTest {
         private final AtomicInteger installs = new AtomicInteger();
         private final AtomicInteger releaseFetches = new AtomicInteger();
         private final AtomicInteger catalogRequests = new AtomicInteger();
+        private final List<String> whatsNewRequests = new java.util.concurrent.CopyOnWriteArrayList<>();
+        private Map<String, InstallationRecord> preferredApplications = Map.of();
+
+        @Override
+        public org.megamek.launcher.release.ReleaseNotes.WhatsNew whatsNew(String since, String version) {
+            whatsNewRequests.add(since + " -> " + version);
+            return new org.megamek.launcher.release.ReleaseNotes.WhatsNew(version, since, List.of());
+        }
+
+        @Override
+        public org.megamek.launcher.release.ReleaseNotes.WhatsNew whatsNew(
+                Map<org.megamek.launcher.release.OfficialRepository, String> versions) {
+            whatsNewRequests.add("home " + new java.util.TreeMap<>(versions));
+            return new org.megamek.launcher.release.ReleaseNotes.WhatsNew(null, null, List.of());
+        }
         private volatile CountDownLatch launchOptionsSaveGate;
         private final AtomicInteger selections = new AtomicInteger();
         private final AtomicInteger launchAttempts = new AtomicInteger();
@@ -2528,7 +2597,7 @@ class SimpleHomeSwingTest {
                     pending && current.id().equals(first.id()),
                     new ChannelPreferenceStore.ReadResult(
                             ChannelPreferenceStore.Status.CONFIGURED,
-                            preference, "Configured"), Map.of(),
+                            preference, "Configured"), preferredApplications,
                     repairManaged ? Map.of(current.id(), new InstallationStatus(
                             new ChannelPreferenceStore.ReadResult(
                                     ChannelPreferenceStore.Status.CONFIGURED,

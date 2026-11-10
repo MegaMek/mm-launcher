@@ -203,6 +203,15 @@ class UpdateApplySwingTest {
                     fixture.services.currentHome().defaultInstallationId());
             assertNotNull(waitFor(() -> find(frame, "installationCards")),
                     "clean success returns to the current Installations page");
+            JDialog whatsNew = waitForDialog(frame, WhatsNewDialog.TITLE);
+            assertTrue(whatsNew instanceof WhatsNewDialog);
+            SwingTestSupport.awaitCondition("What's new loaded",
+                    () -> !fixture.services.whatsNewRequests.isEmpty());
+            assertEquals(List.of(fixture.first.observedBuild() + " -> v2.00.00.1"),
+                    fixture.services.whatsNewRequests,
+                    "What's new covers the change from the version before the update");
+            click(whatsNew, "Close");
+            waitUntil(() -> !whatsNew.isDisplayable());
         } finally {
             fixture.services.releaseApply.countDown();
             dispose(frame);
@@ -453,6 +462,8 @@ class UpdateApplySwingTest {
             assertNull(showingDialog(frame, "Update complete"));
             waitForReloadedCards(frame, cardsBeforeUpdate);
             assertNotNull(find(frame, "installationCards"));
+            assertNull(showingDialog(frame, WhatsNewDialog.TITLE),
+                    "the cleanup warning is not covered by What's new");
             click(warning, "Close");
         } finally {
             dispose(frame);
@@ -709,6 +720,7 @@ class UpdateApplySwingTest {
         private volatile String appliedDigest;
         private volatile String appliedConfirmation;
         private volatile boolean applyOnEdt;
+        private final List<String> whatsNewRequests = new java.util.concurrent.CopyOnWriteArrayList<>();
 
         private FakeServices(Path registry, RegistryStore store, PreparedTransport network,
                              InstallationRecord first, InstallationRecord second,
@@ -742,6 +754,12 @@ class UpdateApplySwingTest {
             this.secondCurrent = secondCurrent;
             this.unavailableInspection = unavailableInspection;
             this.preferred = first;
+        }
+
+        @Override
+        public org.megamek.launcher.release.ReleaseNotes.WhatsNew whatsNew(String since, String version) {
+            whatsNewRequests.add(since + " -> " + version);
+            return new org.megamek.launcher.release.ReleaseNotes.WhatsNew(version, since, List.of());
         }
 
         @Override

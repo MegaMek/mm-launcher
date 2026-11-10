@@ -226,6 +226,7 @@ public final class LauncherFrame extends JFrame {
     private boolean launcherUpdateChecked;
     private final LauncherSelfUpdate launcherUpdater;
     private BugReportDialog bugReportDialog;
+    private WhatsNewDialog whatsNewDialog;
 
     public LauncherFrame(LauncherServices services) {
         this(services, new SwingExistingImportPrompts(),
@@ -539,7 +540,26 @@ public final class LauncherFrame extends JFrame {
         archive.getAccessibleContext().setAccessibleDescription(
                 "Open the MegaMek blog archive in your browser");
         archive.addActionListener(event -> openWebsite(LauncherNewsFeed.ARCHIVE, "news archive"));
-        news.add(archive);
+        if (homeWhatsNewVersions().isEmpty()) {
+            news.add(archive);
+        } else {
+            JButton whatsNew = new LauncherLink("What's new", "whatsNewButton", guiScale);
+            whatsNew.getAccessibleContext().setAccessibleDescription(
+                    "Shows the release notes of the installed version");
+            whatsNew.addActionListener(event -> showHomeWhatsNew());
+            JPanel footer = new JPanel(new BorderLayout()) {
+                @Override
+                public Dimension getMaximumSize() {
+                    return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+                }
+            };
+            footer.setName("homeNewsLinks");
+            footer.setOpaque(false);
+            footer.setAlignmentX(Component.LEFT_ALIGNMENT);
+            footer.add(archive, BorderLayout.WEST);
+            footer.add(whatsNew, BorderLayout.EAST);
+            news.add(footer);
+        }
         news.revalidate();
         news.repaint();
         Container plate = news.getParent();
@@ -4064,6 +4084,9 @@ public final class LauncherFrame extends JFrame {
         String release = VersionDisplay.programChannelVersion(
                 product, plan.channel().toString(), plan.version());
         String operationDescription = "Installing " + release;
+        // The very first install is welcomed by the launcher itself; later ones say what's new.
+        // An exact version picked from "Install another version" is not news.
+        boolean showWhatsNew = !state.registry().installations().isEmpty() && plan.currentChannelTarget();
         OperationProgressDialog progress = new OperationProgressDialog(this,
                 operationDescription, "normalInstallProgressLog", this::showOperationLogs);
         progress.append("Installing the confirmed official " + product + " "
@@ -4087,6 +4110,7 @@ public final class LauncherFrame extends JFrame {
                                     + "Nothing was launched.\n");
                     page = Page.HOME;
                     reload();
+                    if (showWhatsNew) showWhatsNew(null, plan.version());
                 }, error -> {
                     progress.append("\nINSTALL DID NOT COMPLETE: " + errorDetail(error) + "\n");
                     progress.setHeading(error instanceof
@@ -4720,6 +4744,7 @@ public final class LauncherFrame extends JFrame {
             ChannelUpdateChecker.Result recommended) {
         OperationProgressDialog progress = new OperationProgressDialog(this,
                 "Preparing update", "applyUpdateProgressLog", this::showOperationLogs);
+        String updatedFrom = record.observedBuild();
         progress.append("Downloading and verifying the exact consented package once for "
                 + tag + "...\n");
         progress.setVisible(true);
@@ -4771,6 +4796,7 @@ public final class LauncherFrame extends JFrame {
                 }
                 page = Page.INSTALLATIONS;
                 reload();
+                if (result.cleanupWarning() == null) showWhatsNew(updatedFrom, tag);
             }, failure -> {
                     progress.append("\nUPDATE ATTEMPT FAILED: " + errorDetail(failure)
                             + "\nNo second package download was attempted. If application "
@@ -5411,6 +5437,47 @@ public final class LauncherFrame extends JFrame {
     private static void copySanitized(String text) {
         Toolkit.getDefaultToolkit().getSystemClipboard().setContents(
                 new StringSelection(SanitizedErrors.document(text)), null);
+    }
+
+    /**
+     * Shows what changed in the suite going from {@code since} (null when unknown) to
+     * {@code version}, replacing any open What's new dialog.
+     */
+    void showWhatsNew(String since, String version) {
+        if (version == null) return;
+        if (whatsNewDialog != null && whatsNewDialog.isDisplayable()) whatsNewDialog.dispose();
+        whatsNewDialog = WhatsNewDialog.show(this, guiScale, since, version,
+                () -> services.whatsNew(since, version),
+                link -> openWebsite(link, "the release notes"));
+    }
+
+    /** Opens What's new for the versions Home's applications run, each its own preferred version. */
+    void showHomeWhatsNew() {
+        Map<OfficialRepository, String> versions = homeWhatsNewVersions();
+        if (versions.isEmpty()) return;
+        java.util.Set<String> distinct = new java.util.HashSet<>(versions.values());
+        String version = distinct.size() == 1 ? distinct.iterator().next() : null;
+        if (whatsNewDialog != null && whatsNewDialog.isDisplayable()) whatsNewDialog.dispose();
+        whatsNewDialog = WhatsNewDialog.show(this, guiScale, null, version,
+                () -> services.whatsNew(versions),
+                link -> openWebsite(link, "the release notes"));
+    }
+
+    /**
+     * The version each application on Home runs: its preferred installation's, or else the first
+     * installation's that has one, so an application is still described when nothing is preferred.
+     */
+    private Map<OfficialRepository, String> homeWhatsNewVersions() {
+        Map<String, InstallationRecord> preferred = state.preferredApplications();
+        String fallback = state.registry().installations().stream().map(InstallationRecord::observedBuild)
+                .filter(java.util.Objects::nonNull).findFirst().orElse(null);
+        Map<OfficialRepository, String> versions = new java.util.EnumMap<>(OfficialRepository.class);
+        for (OfficialRepository repository : OfficialRepository.values()) {
+            InstallationRecord record = preferred == null ? null : preferred.get(repository.key());
+            String version = record != null && record.observedBuild() != null ? record.observedBuild() : fallback;
+            if (version != null) versions.put(repository, version);
+        }
+        return versions;
     }
 
     /** Opens the bug report helper, or brings the open one to the front. */
