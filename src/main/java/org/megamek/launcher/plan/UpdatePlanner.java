@@ -212,6 +212,10 @@ public final class UpdatePlanner {
                 return new Decision(Action.REPLACE, path,
                         "local file matches a previously official override ancestor");
             }
+            if (org.megamek.launcher.update.UninstallService.regenerableCache(path)) {
+                return new Decision(Action.REPLACE, path,
+                        "regenerated cache is replaced so it matches the new version");
+            }
             if (oldEntry == null) {
                 return new Decision(Action.SKIP, path, "target collides with an untracked local file");
             }
@@ -242,6 +246,9 @@ public final class UpdatePlanner {
         if (org.megamek.launcher.update.OwnershipPolicy.runtimePath(path)) {
             return new Decision(Action.REMOVE, path,
                     "obsolete modified official runtime file will be removed (rollback backup retained until commit)");
+        }
+        if (org.megamek.launcher.update.UninstallService.regenerableCache(path)) {
+            return new Decision(Action.REMOVE, path, "regenerated cache from the old version is removed");
         }
         return new Decision(Action.SKIP, path, "obsolete local file was modified");
     }
