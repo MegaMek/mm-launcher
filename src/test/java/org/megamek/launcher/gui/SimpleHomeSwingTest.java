@@ -1074,6 +1074,13 @@ class SimpleHomeSwingTest {
                 "actual Swing controls require a display");
         FakeServices services = new FakeServices(temp.resolve("whats-new.json"));
         services.installed = true;
+        InstallationRecord older = new InstallationRecord(services.second.id(), services.second.name(),
+                services.second.canonicalRoot(), "0.50.07.1", services.second.products(),
+                services.second.pin(), false, services.second.registeredAt());
+        InstallationRecord newer = new InstallationRecord(services.first.id(), services.first.name(),
+                services.first.canonicalRoot(), "0.51.01.5", services.first.products(),
+                services.first.pin(), false, services.first.registeredAt());
+        services.preferredApplications = Map.of("megamek", newer, "lab", newer, "mekhq", older);
         LauncherFrame frame = onEdt(() -> new LauncherFrame(services));
         try {
             SwingUtilities.invokeAndWait(frame::showWindow);
@@ -1106,9 +1113,8 @@ class SimpleHomeSwingTest {
             SwingUtilities.invokeAndWait(whatsNew::doClick);
             JDialog dialog = waitDialog(frame, WhatsNewDialog.TITLE);
             SwingTestSupport.awaitCondition("What's new loaded", () -> !services.whatsNewRequests.isEmpty());
-            assertEquals(1, services.whatsNewRequests.size());
-            assertTrue(services.whatsNewRequests.getFirst().startsWith("null -> "),
-                    "Home describes the installed version on its own");
+            assertEquals(List.of("home {MEGAMEK=0.51.01.5, LAB=0.51.01.5, MEKHQ=0.50.07.1}"),
+                    services.whatsNewRequests, "each application is described at its own preferred version");
             SwingUtilities.invokeAndWait(dialog::dispose);
         } finally {
             dispose(frame);
@@ -2222,11 +2228,19 @@ class SimpleHomeSwingTest {
         private final AtomicInteger releaseFetches = new AtomicInteger();
         private final AtomicInteger catalogRequests = new AtomicInteger();
         private final List<String> whatsNewRequests = new java.util.concurrent.CopyOnWriteArrayList<>();
+        private Map<String, InstallationRecord> preferredApplications = Map.of();
 
         @Override
         public org.megamek.launcher.release.ReleaseNotes.WhatsNew whatsNew(String since, String version) {
             whatsNewRequests.add(since + " -> " + version);
             return new org.megamek.launcher.release.ReleaseNotes.WhatsNew(version, since, List.of());
+        }
+
+        @Override
+        public org.megamek.launcher.release.ReleaseNotes.WhatsNew whatsNew(
+                Map<org.megamek.launcher.release.OfficialRepository, String> versions) {
+            whatsNewRequests.add("home " + new java.util.TreeMap<>(versions));
+            return new org.megamek.launcher.release.ReleaseNotes.WhatsNew(null, null, List.of());
         }
         private volatile CountDownLatch launchOptionsSaveGate;
         private final AtomicInteger selections = new AtomicInteger();
@@ -2583,7 +2597,7 @@ class SimpleHomeSwingTest {
                     pending && current.id().equals(first.id()),
                     new ChannelPreferenceStore.ReadResult(
                             ChannelPreferenceStore.Status.CONFIGURED,
-                            preference, "Configured"), Map.of(),
+                            preference, "Configured"), preferredApplications,
                     repairManaged ? Map.of(current.id(), new InstallationStatus(
                             new ChannelPreferenceStore.ReadResult(
                                     ChannelPreferenceStore.Status.CONFIGURED,

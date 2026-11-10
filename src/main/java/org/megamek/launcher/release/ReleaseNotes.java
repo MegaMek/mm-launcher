@@ -87,22 +87,32 @@ public final class ReleaseNotes {
     }
 
     /**
-     * One application's changes. {@code problem} explains why there are none to show, or is null.
-     * {@code page} is where the full notes can be read on GitHub.
+     * One application's changes in {@code version}. {@code problem} explains why there are none to
+     * show, or is null. {@code page} is where the full notes can be read on GitHub, and
+     * {@code incomplete} says that some of the skipped releases could not be included.
      */
-    public record Application(OfficialRepository repository, List<String> tags, List<Section> sections,
-                              URI page, String problem) {
+    public record Application(OfficialRepository repository, String version, List<String> tags,
+                              List<Section> sections, URI page, String problem, boolean incomplete) {
         public Application {
             tags = List.copyOf(tags);
             sections = List.copyOf(sections);
         }
     }
 
-    /** What changed in {@code version}, since {@code since} when that is an older version. */
+    /**
+     * What changed in each application, since {@code since} when that is an older version.
+     * {@code version} is the version every application moved to, or null when they differ.
+     */
     public record WhatsNew(String version, String since, List<Application> applications) {
         public WhatsNew {
             applications = List.copyOf(applications);
         }
+    }
+
+    /** The release tags and channels of the suite records; null when a tag's channel is unknown. */
+    @FunctionalInterface
+    public interface Channels {
+        String of(String tag);
     }
 
     /**
@@ -110,71 +120,97 @@ public final class ReleaseNotes {
      * fresh install) to {@code version}. A failure for one application is reported in its
      * {@link Application#problem()} rather than hiding the others.
      */
-    public static WhatsNew load(ReleaseCatalog catalog, String since, String version)
+    public static WhatsNew load(ReleaseCatalog catalog, Channels channels, String since, String version)
             throws InterruptedException {
-        List<Application> applications = new ArrayList<>();
-        for (OfficialRepository repository : OfficialRepository.values()) {
-            applications.add(application(catalog, repository, since, version));
-        }
-        return new WhatsNew(version, since, applications);
+        Map<OfficialRepository, String> versions = new LinkedHashMap<>();
+        for (OfficialRepository repository : OfficialRepository.values()) versions.put(repository, version);
+        return load(catalog, channels, since, versions);
     }
 
-    static Application application(ReleaseCatalog catalog, OfficialRepository repository,
+    /** As above, with each application at its own version; applications without one are left out. */
+    public static WhatsNew load(ReleaseCatalog catalog, Channels channels, String since,
+                                Map<OfficialRepository, String> versions) throws InterruptedException {
+        List<Application> applications = new ArrayList<>();
+        for (OfficialRepository repository : OfficialRepository.values()) {
+            String version = versions.get(repository);
+            if (version != null) applications.add(application(catalog, channels, repository, since, version));
+        }
+        Set<String> distinct = new HashSet<>(versions.values());
+        distinct.remove(null);
+        return new WhatsNew(distinct.size() == 1 ? distinct.iterator().next() : null, since, applications);
+    }
+
+    static Application application(ReleaseCatalog catalog, Channels channels, OfficialRepository repository,
                                    String since, String version) throws InterruptedException {
         URI releases = URI.create("https://github.com/" + repository.slug() + "/releases");
         Optional<VersionIdentity> target = VersionIdentity.fromExact(version);
         if (target.isEmpty()) {
-            return new Application(repository, List.of(), List.of(), releases,
-                    "This version has no published release notes.");
+            return new Application(repository, version, List.of(), List.of(), releases,
+                    "This version has no published release notes.", false);
         }
         try {
-            List<ReleaseCatalog.Notes> chosen = choose(catalog, repository,
+            Chosen chosen = choose(catalog, channels, repository,
                     VersionIdentity.fromExact(since).orElse(null), target.get(), tag(version));
             List<List<Section>> parsed = new ArrayList<>();
-            for (ReleaseCatalog.Notes notes : chosen) parsed.add(parse(repository, notes.body()));
-            URI page = chosen.size() == 1 ? URI.create(releases + "/tag/" + chosen.getFirst().tag())
-                    : releases;
-            return new Application(repository, chosen.stream().map(ReleaseCatalog.Notes::tag).toList(),
-                    merge(parsed), page, null);
+            for (ReleaseCatalog.Notes notes : chosen.notes()) parsed.add(parse(repository, notes.body()));
+            URI page = chosen.notes().size() == 1 && !chosen.incomplete()
+                    ? URI.create(releases + "/tag/" + chosen.notes().getFirst().tag()) : releases;
+            return new Application(repository, version,
+                    chosen.notes().stream().map(ReleaseCatalog.Notes::tag).toList(),
+                    merge(parsed), page, null, chosen.incomplete());
         } catch (GitHubRateLimitException limited) {
-            return new Application(repository, List.of(), List.of(), releases, limited.getMessage());
+            return new Application(repository, version, List.of(), List.of(), releases,
+                    limited.getMessage(), false);
         } catch (IOException failure) {
-            return new Application(repository, List.of(), List.of(), releases,
+            return new Application(repository, version, List.of(), List.of(), releases,
                     failure.getMessage() != null && failure.getMessage().contains("HTTP 404")
                             ? "This version has no published release notes."
-                            : "The release notes could not be loaded right now.");
+                            : "The release notes could not be loaded right now.", false);
         }
     }
 
-    /** The releases whose notes make up the change from {@code since} to {@code target}, newest first. */
-    private static List<ReleaseCatalog.Notes> choose(ReleaseCatalog catalog, OfficialRepository repository,
-                                                     VersionIdentity since, VersionIdentity target,
-                                                     String targetTag)
+    private record Chosen(List<ReleaseCatalog.Notes> notes, boolean incomplete) {
+    }
+
+    /**
+     * The releases whose notes make up the change from {@code since} to {@code target}, newest
+     * first: the target's channel members in between, as the suite records assign them.
+     */
+    private static Chosen choose(ReleaseCatalog catalog, Channels channels, OfficialRepository repository,
+                                 VersionIdentity since, VersionIdentity target, String targetTag)
             throws IOException, InterruptedException {
         boolean combine = since != null && compare(since, target) < 0;
-        VersionIdentity lowest = combine ? since : target;
+        // GitHub lists releases newest-created first, and every release in the range was published
+        // after the one the player had, so listing can stop once that one (or the target) is seen.
+        VersionIdentity stop = combine ? since : target;
         List<ReleaseCatalog.Notes> listed = new ArrayList<>();
-        for (int page = 1; page <= MAX_PAGES; page++) {
+        boolean reached = false;
+        for (int page = 1; page <= MAX_PAGES && !reached; page++) {
             List<ReleaseCatalog.Notes> notes = catalog.notes(repository, page, PAGE_SIZE);
             listed.addAll(notes);
-            boolean reached = notes.stream().map(n -> version(n.tag()))
-                    .anyMatch(v -> v != null && compare(v, lowest) < 0);
-            if (notes.size() < PAGE_SIZE || reached) break;
+            reached = notes.stream().anyMatch(n -> stop.equals(version(n.tag())));
+            if (notes.size() < PAGE_SIZE) break;
         }
         ReleaseCatalog.Notes newest = listed.stream()
                 .filter(n -> !n.draft() && target.equals(version(n.tag()))).findFirst().orElse(null);
-        if (newest == null) return List.of(catalog.notes(repository, targetTag));
-        if (!combine) return List.of(newest);
-        return listed.stream()
-                .filter(n -> !n.draft() && n.prerelease() == newest.prerelease())
+        if (newest == null) newest = catalog.notes(repository, targetTag);
+        String channel = channels.of(newest.tag());
+        if (!combine) return new Chosen(List.of(newest), false);
+        if (channel == null) return new Chosen(List.of(newest), true);
+        String newestTag = newest.tag();
+        List<ReleaseCatalog.Notes> between = new ArrayList<>(listed.stream()
+                .filter(n -> !n.draft() && !n.tag().equals(newestTag) && channel.equals(channels.of(n.tag())))
                 .filter(n -> {
                     VersionIdentity v = version(n.tag());
-                    return v != null && compare(v, since) > 0 && compare(v, target) <= 0;
+                    return v != null && compare(v, since) > 0 && compare(v, target) < 0;
                 })
                 .sorted(Comparator.comparing((ReleaseCatalog.Notes n) -> version(n.tag()),
                         ReleaseNotes::compare).reversed())
-                .limit(MAX_RELEASES)
-                .toList();
+                .toList());
+        between.addFirst(newest);
+        // The full list ends at the release the player had (published before every skipped one).
+        boolean incomplete = !reached || between.size() > MAX_RELEASES;
+        return new Chosen(List.copyOf(between.subList(0, Math.min(between.size(), MAX_RELEASES))), incomplete);
     }
 
     /** A release version without a suffix, or null for anything else such as a development draft. */

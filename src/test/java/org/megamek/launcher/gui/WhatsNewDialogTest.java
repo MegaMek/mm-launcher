@@ -54,14 +54,14 @@ class WhatsNewDialogTest {
     @Test
     void groupsChangesByApplicationAndEscapesTheirTitles() {
         ReleaseNotes.WhatsNew whatsNew = new ReleaseNotes.WhatsNew("0.51.01.5", "0.51.01.2", List.of(
-                new ReleaseNotes.Application(OfficialRepository.MEGAMEK, List.of("v0.51.01.5"),
+                new ReleaseNotes.Application(OfficialRepository.MEGAMEK, "0.51.01.5", List.of("v0.51.01.5"),
                         List.of(new ReleaseNotes.Section("Bug fixes", List.of(
                                 new ReleaseNotes.Change("Fix <script> & 'quotes'", OptionalInt.of(42), PR)))),
-                        URI.create("https://github.com/MegaMek/megamek/releases"), null),
-                new ReleaseNotes.Application(OfficialRepository.LAB, List.of(), List.of(),
-                        URI.create("https://github.com/MegaMek/megameklab/releases"), "Try again later."),
-                new ReleaseNotes.Application(OfficialRepository.MEKHQ, List.of("v0.51.01.5"), List.of(),
-                        URI.create("https://github.com/MegaMek/mekhq/releases"), null)));
+                        URI.create("https://github.com/MegaMek/megamek/releases"), null, true),
+                new ReleaseNotes.Application(OfficialRepository.LAB, "0.51.01.5", List.of(), List.of(),
+                        URI.create("https://github.com/MegaMek/megameklab/releases"), "Try again later.", false),
+                new ReleaseNotes.Application(OfficialRepository.MEKHQ, "0.51.01.5", List.of("v0.51.01.5"),
+                        List.of(), URI.create("https://github.com/MegaMek/mekhq/releases"), null, false)));
 
         String html = WhatsNewDialog.html(GuiScale.DEFAULT, whatsNew);
 
@@ -72,7 +72,18 @@ class WhatsNewDialogTest {
         assertTrue(html.contains("href='" + PR + "'>#42</a>"));
         assertTrue(html.contains("Try again later."));
         assertTrue(html.contains("No changes are listed for this version."));
+        assertEquals(1, html.split("Some older changes are not shown here", -1).length - 1);
+        assertFalse(html.contains("<h2>MegaMek 0.51.01.5"), "one shared version is in the dialog heading");
         assertTrue(WhatsNewDialog.html(GuiScale.DEFAULT, null).contains("could not be loaded"));
+
+        ReleaseNotes.WhatsNew mixed = new ReleaseNotes.WhatsNew(null, null, List.of(
+                new ReleaseNotes.Application(OfficialRepository.MEGAMEK, "v0.51.01.5", List.of(), List.of(),
+                        URI.create("https://github.com/MegaMek/megamek/releases"), null, false),
+                new ReleaseNotes.Application(OfficialRepository.MEKHQ, "0.50.07.1", List.of(), List.of(),
+                        URI.create("https://github.com/MegaMek/mekhq/releases"), null, false)));
+        String mixedHtml = WhatsNewDialog.html(GuiScale.DEFAULT, mixed);
+        assertTrue(mixedHtml.contains("<h2>MegaMek 0.51.01.5 "));
+        assertTrue(mixedHtml.contains("<h2>MekHQ 0.50.07.1 "));
     }
 
     @Test

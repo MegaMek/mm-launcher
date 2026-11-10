@@ -913,7 +913,28 @@ public class LauncherServices {
      * {@code version}, from the published release notes.
      */
     public ReleaseNotes.WhatsNew whatsNew(String since, String version) throws InterruptedException {
-        return ReleaseNotes.load(new ReleaseCatalog(transport), since, version);
+        return ReleaseNotes.load(new ReleaseCatalog(transport), suiteChannels(), since, version);
+    }
+
+    /** As above, with each application at its own preferred version, as Home shows them. */
+    public ReleaseNotes.WhatsNew whatsNew(Map<OfficialRepository, String> versions) throws InterruptedException {
+        return ReleaseNotes.load(new ReleaseCatalog(transport), suiteChannels(), null, versions);
+    }
+
+    /**
+     * Which channel each release belongs to, from the suite records; without them skipped
+     * releases cannot be told apart, so only the target's own notes are shown.
+     */
+    private ReleaseNotes.Channels suiteChannels() throws InterruptedException {
+        try {
+            Map<String, FollowChannel> channels = new OfficialSuiteChannelCatalog(transport).channelsByTag();
+            return tag -> {
+                FollowChannel channel = channels.get(tag);
+                return channel == null ? null : channel.cliName();
+            };
+        } catch (IOException unavailable) {
+            return tag -> null;
+        }
     }
 
     /**

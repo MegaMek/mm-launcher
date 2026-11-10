@@ -240,13 +240,19 @@ final class WhatsNewDialog extends JDialog {
             return page(scale, html.toString());
         }
         for (ReleaseNotes.Application application : whatsNew.applications()) {
-            html.append("<h2>").append(escape(application.repository().productName()))
-                    .append(" <a class='quiet' href='").append(escape(application.page().toString()))
+            html.append("<h2>").append(escape(application.repository().productName()));
+            if (whatsNew.version() == null) html.append(' ').append(escape(plain(application.version())));
+            html.append(" <a class='quiet' href='").append(escape(application.page().toString()))
                     .append("'>View on GitHub</a></h2>");
             if (application.problem() != null) {
                 html.append("<p class='muted'>").append(escape(application.problem())).append("</p>");
             } else if (application.sections().isEmpty()) {
                 html.append("<p class='muted'>No changes are listed for this version.</p>");
+            }
+            if (application.incomplete()) {
+                html.append("<p class='muted'>Some older changes are not shown here. ")
+                        .append("<a href='").append(escape(application.page().toString()))
+                        .append("'>See every release on GitHub</a>.</p>");
             }
             for (ReleaseNotes.Section section : application.sections()) {
                 html.append("<h3>").append(escape(section.heading())).append("</h3><ul>");

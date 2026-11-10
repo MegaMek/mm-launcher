@@ -33,6 +33,7 @@
 package org.megamek.launcher.release;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -121,25 +122,75 @@ class ReleaseNotesTest {
         assertEquals(0, ReleaseNotes.compare(v("0.51.1.3"), v("v0.51.01.3")));
     }
 
+    /** Every 0.51.01.N is Experimental and every 0.50.N Core, as the suite records would say. */
+    private static final ReleaseNotes.Channels CHANNELS = tag -> tag.startsWith("v0.51.01.") ? "experimental"
+            : tag.startsWith("v0.50.") ? "core" : null;
+
     @Test
     void combinesEverySkippedReleaseOfTheSameChannel() throws Exception {
+        // The prerelease flags disagree with the channels on purpose: the suite records decide.
         FakeTransport transport = new FakeTransport()
                 .release("v0.51.01.5", false, body("### Bug fixes\n" + item("Fix five", "a", 5)))
-                .release("v0.51.01.4", false, body("### New features\n" + item("Feature four", "a", 4)))
-                .release("v0.51.0.9", true, body("### Bug fixes\n" + item("Core fix", "a", 90)))
-                .release("v0.51.01.3", false, body("### Bug fixes\n" + item("Fix three", "a", 3)))
-                .release("v0.51.01.2", false, body("### Bug fixes\n" + item("Fix two", "a", 2)));
+                .release("v0.51.01.4", true, body("### New features\n" + item("Feature four", "a", 4)))
+                .release("v0.51.01.3", false, body("### Bug fixes\n" + item("Core fix", "a", 90)))
+                .release("v0.51.01.2", false, body("### Bug fixes\n" + item("Fix two", "a", 2)))
+                .release("v0.51.01.1", false, body("### Bug fixes\n" + item("Fix one", "a", 1)));
+        Map<String, String> records = Map.of("v0.51.01.5", "experimental", "v0.51.01.4", "experimental",
+                "v0.51.01.3", "core", "v0.51.01.2", "experimental", "v0.51.01.1", "experimental");
 
-        ReleaseNotes.Application notes = ReleaseNotes.application(new ReleaseCatalog(transport), MM,
-                "0.51.1.2", "0.51.01.5");
+        ReleaseNotes.Application notes = ReleaseNotes.application(new ReleaseCatalog(transport), records::get,
+                MM, "0.51.1.1", "0.51.01.5");
 
         assertNull(notes.problem());
-        assertEquals(List.of("v0.51.01.5", "v0.51.01.4", "v0.51.01.3"), notes.tags());
+        assertFalse(notes.incomplete());
+        assertEquals("0.51.01.5", notes.version());
+        assertEquals(List.of("v0.51.01.5", "v0.51.01.4", "v0.51.01.2"), notes.tags());
         assertEquals(List.of("New features", "Bug fixes"),
                 notes.sections().stream().map(ReleaseNotes.Section::heading).toList());
-        assertEquals(List.of("Fix five", "Fix three"),
+        assertEquals(List.of("Fix five", "Fix two"),
                 notes.sections().get(1).changes().stream().map(ReleaseNotes.Change::title).toList());
         assertEquals(URI.create("https://github.com/MegaMek/megamek/releases"), notes.page());
+    }
+
+    @Test
+    void keepsListingPastOlderVersionLinesUntilThePlayersRelease() throws Exception {
+        FakeTransport transport = new FakeTransport()
+                .release("v0.51.01.60", false, body(item("Newest", "a", 60)));
+        // A busy Core line fills the first page with numerically older releases.
+        for (int i = 70; i > 21; i--) transport.release("v0.50.07." + i, false, body(item("Core", "a", 1000 + i)));
+        transport.release("v0.51.01.59", false, body(item("Second page", "a", 59)))
+                .release("v0.51.01.58", false, body(item("Player had this", "a", 58)))
+                .release("v0.51.01.57", false, body(item("Older", "a", 57)));
+
+        ReleaseNotes.Application notes = ReleaseNotes.application(new ReleaseCatalog(transport), CHANNELS, MM,
+                "0.51.01.58", "0.51.01.60");
+
+        assertEquals(List.of("v0.51.01.60", "v0.51.01.59"), notes.tags());
+        assertFalse(notes.incomplete());
+        assertEquals(List.of(1, 2), transport.pages, "stops at the page with the player's release");
+    }
+
+    @Test
+    void marksHistoryItCannotShowAsIncomplete() throws Exception {
+        FakeTransport many = new FakeTransport();
+        for (int i = 40; i >= 1; i--) many.release("v0.51.01." + i, false, body(item("Change " + i, "a", i)));
+        ReleaseNotes.Application capped = ReleaseNotes.application(new ReleaseCatalog(many), CHANNELS, MM,
+                "0.51.01.1", "0.51.01.40");
+        assertEquals(ReleaseNotes.MAX_RELEASES, capped.tags().size());
+        assertEquals("v0.51.01.40", capped.tags().getFirst());
+        assertTrue(capped.incomplete());
+
+        FakeTransport unlisted = new FakeTransport().release("v0.51.01.5", false, body(item("Five", "a", 5)));
+        assertTrue(ReleaseNotes.application(new ReleaseCatalog(unlisted), CHANNELS, MM,
+                "0.51.01.2", "0.51.01.5").incomplete(), "the player's release was never listed");
+
+        FakeTransport known = new FakeTransport().release("v0.51.01.5", false, body(item("Five", "a", 5)))
+                .release("v0.51.01.4", false, body(item("Four", "a", 4)))
+                .release("v0.51.01.2", false, body(item("Two", "a", 2)));
+        ReleaseNotes.Application noRecords = ReleaseNotes.application(new ReleaseCatalog(known), tag -> null, MM,
+                "0.51.01.2", "0.51.01.5");
+        assertEquals(List.of("v0.51.01.5"), noRecords.tags(), "without suite records only the target is certain");
+        assertTrue(noRecords.incomplete());
     }
 
     @Test
@@ -150,8 +201,9 @@ class ReleaseNotesTest {
         ReleaseCatalog catalog = new ReleaseCatalog(transport);
 
         for (String since : new String[]{null, "0.51.01.5", "0.51.01.9", "not a version"}) {
-            ReleaseNotes.Application notes = ReleaseNotes.application(catalog, MM, since, "0.51.1.5");
+            ReleaseNotes.Application notes = ReleaseNotes.application(catalog, CHANNELS, MM, since, "0.51.1.5");
             assertEquals(List.of("v0.51.01.5"), notes.tags(), "since " + since);
+            assertFalse(notes.incomplete());
             assertEquals(URI.create("https://github.com/MegaMek/megamek/releases/tag/v0.51.01.5"), notes.page());
         }
     }
@@ -161,14 +213,31 @@ class ReleaseNotesTest {
         FakeTransport transport = new FakeTransport().release("v0.51.01.5", false, body(item("Five", "a", 5)));
         transport.failing = "MegaMek/mekhq";
 
-        ReleaseNotes.WhatsNew whatsNew = ReleaseNotes.load(new ReleaseCatalog(transport), null, "0.51.01.5");
+        ReleaseNotes.WhatsNew whatsNew = ReleaseNotes.load(new ReleaseCatalog(transport), CHANNELS, null,
+                "0.51.01.5");
 
+        assertEquals("0.51.01.5", whatsNew.version());
         assertEquals(3, whatsNew.applications().size());
         assertNull(whatsNew.applications().get(0).problem());
         assertEquals("This version has no published release notes.", whatsNew.applications().get(1).problem());
         assertEquals("The release notes could not be loaded right now.", whatsNew.applications().get(2).problem());
         assertEquals("This version has no published release notes.",
-                ReleaseNotes.application(new ReleaseCatalog(transport), MM, null, "nightly").problem());
+                ReleaseNotes.application(new ReleaseCatalog(transport), CHANNELS, MM, null, "nightly").problem());
+    }
+
+    @Test
+    void describesEachApplicationAtItsOwnVersion() throws Exception {
+        FakeTransport transport = new FakeTransport().release("v0.51.01.5", false, body(item("Five", "a", 5)))
+                .release("v0.50.07.1", false, body(item("Old", "a", 1)));
+
+        ReleaseNotes.WhatsNew whatsNew = ReleaseNotes.load(new ReleaseCatalog(transport), CHANNELS, null,
+                Map.of(OfficialRepository.MEGAMEK, "0.51.01.5", OfficialRepository.MEKHQ, "0.50.07.1"));
+
+        assertNull(whatsNew.version(), "the applications run different versions");
+        assertEquals(List.of(OfficialRepository.MEGAMEK, OfficialRepository.MEKHQ),
+                whatsNew.applications().stream().map(ReleaseNotes.Application::repository).toList());
+        assertEquals(List.of("v0.51.01.5"), whatsNew.applications().getFirst().tags());
+        assertEquals("0.50.07.1", whatsNew.applications().get(1).version());
     }
 
     private static VersionIdentity v(String value) {
@@ -178,6 +247,7 @@ class ReleaseNotesTest {
     /** Serves the same releases for MegaMek and an empty list elsewhere; exact tags fall back to 404. */
     private static final class FakeTransport implements ReleaseTransport {
         private final List<ObjectNode> releases = new ArrayList<>();
+        private final List<Integer> pages = new ArrayList<>();
         String failing;
 
         FakeTransport release(String tag, boolean prerelease, String body) {
@@ -194,7 +264,18 @@ class ReleaseNotesTest {
             boolean megamek = path.startsWith("/repos/MegaMek/megamek/");
             if (path.endsWith("/releases")) {
                 ArrayNode page = JSON.createArrayNode();
-                if (megamek && uri.getQuery().contains("page=1")) releases.forEach(page::add);
+                Map<String, Integer> query = new java.util.HashMap<>();
+                for (String pair : uri.getQuery().split("&")) {
+                    String[] parts = pair.split("=");
+                    query.put(parts[0], Integer.parseInt(parts[1]));
+                }
+                int size = query.get("per_page");
+                int from = (query.get("page") - 1) * size;
+                if (megamek) {
+                    releases.subList(Math.min(from, releases.size()), Math.min(from + size, releases.size()))
+                            .forEach(page::add);
+                }
+                pages.add(query.get("page"));
                 return response(200, page.toString());
             }
             String tag = path.substring(path.lastIndexOf('/') + 1);

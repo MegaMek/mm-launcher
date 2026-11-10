@@ -540,14 +540,13 @@ public final class LauncherFrame extends JFrame {
         archive.getAccessibleContext().setAccessibleDescription(
                 "Open the MegaMek blog archive in your browser");
         archive.addActionListener(event -> openWebsite(LauncherNewsFeed.ARCHIVE, "news archive"));
-        String installedVersion = homeWhatsNewVersion();
-        if (installedVersion == null) {
+        if (homeWhatsNewVersions().isEmpty()) {
             news.add(archive);
         } else {
             JButton whatsNew = new LauncherLink("What's new", "whatsNewButton", guiScale);
             whatsNew.getAccessibleContext().setAccessibleDescription(
                     "Shows the release notes of the installed version");
-            whatsNew.addActionListener(event -> showWhatsNew(null, installedVersion));
+            whatsNew.addActionListener(event -> showHomeWhatsNew());
             JPanel footer = new JPanel(new BorderLayout()) {
                 @Override
                 public Dimension getMaximumSize() {
@@ -4086,7 +4085,8 @@ public final class LauncherFrame extends JFrame {
                 product, plan.channel().toString(), plan.version());
         String operationDescription = "Installing " + release;
         // The very first install is welcomed by the launcher itself; later ones say what's new.
-        boolean showWhatsNew = !state.registry().installations().isEmpty();
+        // An exact version picked from "Install another version" is not news.
+        boolean showWhatsNew = !state.registry().installations().isEmpty() && plan.currentChannelTarget();
         OperationProgressDialog progress = new OperationProgressDialog(this,
                 operationDescription, "normalInstallProgressLog", this::showOperationLogs);
         progress.append("Installing the confirmed official " + product + " "
@@ -5451,15 +5451,33 @@ public final class LauncherFrame extends JFrame {
                 link -> openWebsite(link, "the release notes"));
     }
 
-    /** The version What's new on Home describes: the one the preferred applications run. */
-    private String homeWhatsNewVersion() {
+    /** Opens What's new for the versions Home's applications run, each its own preferred version. */
+    void showHomeWhatsNew() {
+        Map<OfficialRepository, String> versions = homeWhatsNewVersions();
+        if (versions.isEmpty()) return;
+        java.util.Set<String> distinct = new java.util.HashSet<>(versions.values());
+        String version = distinct.size() == 1 ? distinct.iterator().next() : null;
+        if (whatsNewDialog != null && whatsNewDialog.isDisplayable()) whatsNewDialog.dispose();
+        whatsNewDialog = WhatsNewDialog.show(this, guiScale, null, version,
+                () -> services.whatsNew(versions),
+                link -> openWebsite(link, "the release notes"));
+    }
+
+    /**
+     * The version each application on Home runs: its preferred installation's, or else the first
+     * installation's that has one, so an application is still described when nothing is preferred.
+     */
+    private Map<OfficialRepository, String> homeWhatsNewVersions() {
         Map<String, InstallationRecord> preferred = state.preferredApplications();
-        for (String key : List.of("mekhq", "megamek", "lab")) {
-            InstallationRecord record = preferred == null ? null : preferred.get(key);
-            if (record != null && record.observedBuild() != null) return record.observedBuild();
-        }
-        return state.registry().installations().stream().map(InstallationRecord::observedBuild)
+        String fallback = state.registry().installations().stream().map(InstallationRecord::observedBuild)
                 .filter(java.util.Objects::nonNull).findFirst().orElse(null);
+        Map<OfficialRepository, String> versions = new java.util.EnumMap<>(OfficialRepository.class);
+        for (OfficialRepository repository : OfficialRepository.values()) {
+            InstallationRecord record = preferred == null ? null : preferred.get(repository.key());
+            String version = record != null && record.observedBuild() != null ? record.observedBuild() : fallback;
+            if (version != null) versions.put(repository, version);
+        }
+        return versions;
     }
 
     /** Opens the bug report helper, or brings the open one to the front. */
