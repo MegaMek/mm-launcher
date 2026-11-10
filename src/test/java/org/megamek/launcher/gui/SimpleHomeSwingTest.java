@@ -1083,8 +1083,13 @@ class SimpleHomeSwingTest {
                 assertEquals(List.of("manageInstallationsButton", "settingsButton"),
                         java.util.Arrays.stream(navigation.getComponents()).map(Component::getName).toList());
                 java.awt.Container links = (java.awt.Container) find(frame, "communityLinks");
-                assertEquals(List.of("whatsNewButton", "openDiscordButton", "playOnlineButton", "reportBugButton"),
+                assertEquals(List.of("openDiscordButton", "playOnlineButton", "reportBugButton"),
                         java.util.Arrays.stream(links.getComponents()).map(Component::getName).toList());
+                java.awt.Container newsLinks = (java.awt.Container) find(frame, "homeNewsLinks");
+                assertEquals(List.of("whatsNewButton", "allNewsButton"),
+                        java.util.Arrays.stream(newsLinks.getComponents()).map(Component::getName)
+                                .filter(java.util.Objects::nonNull).toList());
+                assertTrue(SwingUtilities.isDescendingFrom(newsLinks, find(frame, "homeNewsPanel")));
                 assertTrue(whatsNew instanceof LauncherLink);
                 return null;
             });

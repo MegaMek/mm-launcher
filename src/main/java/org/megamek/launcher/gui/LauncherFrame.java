@@ -476,7 +476,7 @@ public final class LauncherFrame extends JFrame {
         navigation.setAlignmentX(Component.CENTER_ALIGNMENT);
         navigation.add(manage);
         navigation.add(settings);
-        JPanel navigationRow = homeNavigationRow(navigation, homeWhatsNewVersion());
+        JPanel navigationRow = homeNavigationRow(navigation);
         navigationRow.setName("managedHomeNavigationRow");
         center.add(navigationRow);
 
@@ -540,7 +540,25 @@ public final class LauncherFrame extends JFrame {
         archive.getAccessibleContext().setAccessibleDescription(
                 "Open the MegaMek blog archive in your browser");
         archive.addActionListener(event -> openWebsite(LauncherNewsFeed.ARCHIVE, "news archive"));
-        news.add(archive);
+        String installedVersion = homeWhatsNewVersion();
+        if (installedVersion == null) {
+            news.add(archive);
+        } else {
+            JButton whatsNew = new LauncherLink("What's new", "whatsNewButton", guiScale);
+            whatsNew.getAccessibleContext().setAccessibleDescription(
+                    "Shows the release notes of the installed version");
+            whatsNew.addActionListener(event -> showWhatsNew(null, installedVersion));
+            JPanel footer = new JPanel();
+            footer.setName("homeNewsLinks");
+            footer.setLayout(new BoxLayout(footer, BoxLayout.X_AXIS));
+            footer.setOpaque(false);
+            footer.setAlignmentX(Component.LEFT_ALIGNMENT);
+            footer.add(whatsNew);
+            footer.add(Box.createHorizontalStrut(guiScale.space("lg")));
+            footer.add(archive);
+            footer.setMaximumSize(footer.getPreferredSize());
+            news.add(footer);
+        }
         news.revalidate();
         news.repaint();
         Container plate = news.getParent();
@@ -3332,14 +3350,9 @@ public final class LauncherFrame extends JFrame {
 
     /** {@code navigation} centered, with the community links on its right (or below when narrow). */
     private JPanel homeNavigationRow(JPanel navigation) {
-        return homeNavigationRow(navigation, null);
-    }
-
-    /** As above, led by a What's new link for {@code installedVersion} when there is one. */
-    private JPanel homeNavigationRow(JPanel navigation, String installedVersion) {
         JPanel links = new JPanel(new java.awt.GridBagLayout());
         links.setOpaque(false);
-        links.add(communityLinks(installedVersion));
+        links.add(communityLinks());
         JPanel row = new NavigationRow(navigation, links, guiScale.space("md"));
         row.setAlignmentX(Component.CENTER_ALIGNMENT);
         return row;
@@ -3359,14 +3372,7 @@ public final class LauncherFrame extends JFrame {
         return row;
     }
 
-    private JPanel communityLinks(String installedVersion) {
-        JButton whatsNew = null;
-        if (installedVersion != null) {
-            whatsNew = new LauncherLink("What's new", "whatsNewButton", guiScale);
-            whatsNew.getAccessibleContext().setAccessibleDescription(
-                    "Shows the release notes of the installed version");
-            whatsNew.addActionListener(event -> showWhatsNew(null, installedVersion));
-        }
+    private JPanel communityLinks() {
         JButton discord = new LauncherLink("Join Discord", "openDiscordButton", guiScale);
         discord.getAccessibleContext().setAccessibleDescription(
                 "Opens the MegaMek community Discord invitation in your browser");
@@ -3386,7 +3392,6 @@ public final class LauncherFrame extends JFrame {
         links.setName("communityLinks");
         links.setOpaque(false);
         links.setAlignmentX(Component.CENTER_ALIGNMENT);
-        if (whatsNew != null) links.add(whatsNew);
         links.add(discord);
         links.add(online);
         links.add(report);
