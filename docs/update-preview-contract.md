@@ -69,7 +69,8 @@ Only the union of baseline and target managed paths is inventoried; unknown loca
 untouched. A missing target is `ADD`; a target match is `KEEP`; an untouched changed baseline is
 `REPLACE`; an untouched obsolete baseline is `REMOVE`; modified official files, modified obsolete
 files, unknown target-name collisions, and non-regular collisions are `SKIP`. Modified official
-data is therefore preserved. Hashing checks identity, size, and modification time again to reject
+data is therefore preserved; regenerable caches are the exception and are replaced or removed.
+Hashing checks identity, size, and modification time again to reject
 observable concurrent changes.
 
 Case/Unicode aliases inside one package remain unsafe and fail validation. The legacy manifest
