@@ -1080,9 +1080,12 @@ class SimpleHomeSwingTest {
             JButton whatsNew = waitButton(frame, "whatsNewButton");
             onEdt(() -> {
                 java.awt.Container navigation = (java.awt.Container) find(frame, "managedHomeNavigation");
-                assertEquals(List.of("manageInstallationsButton", "whatsNewButton", "settingsButton"),
+                assertEquals(List.of("manageInstallationsButton", "settingsButton"),
                         java.util.Arrays.stream(navigation.getComponents()).map(Component::getName).toList());
-                assertTrue(whatsNew.isEnabled());
+                java.awt.Container links = (java.awt.Container) find(frame, "communityLinks");
+                assertEquals(List.of("whatsNewButton", "openDiscordButton", "playOnlineButton", "reportBugButton"),
+                        java.util.Arrays.stream(links.getComponents()).map(Component::getName).toList());
+                assertTrue(whatsNew instanceof LauncherLink);
                 return null;
             });
             SwingUtilities.invokeAndWait(whatsNew::doClick);
