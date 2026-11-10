@@ -1556,7 +1556,7 @@ public final class UninstallService {
         }
     }
 
-    private static boolean regenerableCache(String path) {
+    public static boolean regenerableCache(String path) {
         return REGENERABLE_CACHES.stream().anyMatch(cache -> cache.equalsIgnoreCase(path));
     }
 

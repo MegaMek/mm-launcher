@@ -609,6 +609,7 @@ public final class RealUpdateService {
                 }
                 InstallationRecord refreshed = registries.refreshAfterUpdate(registryPath,
                         journal.expectedRecord(), installed.observedBuild(), installed.products());
+                clearStaleCaches(root, journal.nextState().officialManifest());
                 writeJournal(journalFile, withPhase(journal, "COMMITTED"));
                 cleanupCommitted(namespace, transaction, pendingFile, journal);
                 return new RecoveryResult("completed verified post-mutation commit", refreshed);
@@ -716,6 +717,9 @@ public final class RealUpdateService {
         InstallationRecord refreshed = registries.refreshAfterUpdate(snapshot.registry(),
                 snapshot.record(), installed.observedBuild(), installed.products());
         failureHook.hit("AFTER_REGISTRY_COMMIT");
+        // Before COMMITTED, so an interrupted cleanup cannot skip it: until then recovery
+        // replays this commit, and with it the cache invalidation.
+        if (!repair) clearStaleCaches(snapshot.root(), target.manifest());
         writeJournal(journalFile, withPhase(journal, "COMMITTED"));
         cleanupCommitted(namespace, transaction, pendingFile, journal);
         long skipped = decisions.stream().filter(item -> item.action() == Action.SKIP).count();
@@ -967,27 +971,32 @@ public final class RealUpdateService {
             }
             FileEntry oldEntry = before.get(operationKey);
             FileEntry newEntry = after.get(operationKey);
+            // A regenerable cache rebuilt by the application is replaced, never kept as an edit,
+            // including when the target is the first release to ship it.
+            boolean cache = !repair && UninstallService.regenerableCache(operation.path());
+            boolean untrackedCache = cache && oldEntry == null && newEntry != null
+                    && "REPLACE".equals(operation.action());
             if (repair && (oldEntry == null || newEntry == null
                     || !oldEntry.path().equals(operation.path())
                     || !newEntry.path().equals(operation.path())
                     || !Set.of("ADD", "REPLACE").contains(operation.action()))) {
                 throw new IOException("repair journal operation is not an exact official path");
             }
-            if (oldEntry == null && !"ADD".equals(operation.action())
+            if (oldEntry == null && !"ADD".equals(operation.action()) && !untrackedCache
                     || newEntry == null && !"REMOVE".equals(operation.action())
                     || newEntry != null && "REMOVE".equals(operation.action())
                     || newEntry != null && operation.afterHash() == null
                     || newEntry != null && !newEntry.sha256().equals(operation.afterHash())
                     || operation.beforeHash() == null && !"ADD".equals(operation.action())
                     || operation.beforeHash() != null && "ADD".equals(operation.action())
-                    || oldEntry == null && operation.beforeHash() != null
+                    || oldEntry == null && operation.beforeHash() != null && !untrackedCache
                     || operation.beforeHash() != null
                     && !operation.beforeHash().matches("[0-9a-f]{64}")
                     || operation.beforeHash() != null && oldEntry != null
                     && !operation.beforeHash().equals(oldEntry.sha256())
                     && !trusted.getOrDefault(operationKey, Set.of())
                     .contains(operation.beforeHash())
-                    && !OwnershipPolicy.runtimePath(operation.path()) && !repair) {
+                    && !OwnershipPolicy.runtimePath(operation.path()) && !cache && !repair) {
                 throw new IOException("journal operation hashes do not match managed manifests");
             }
             String expectedBackup = operation.beforeHash() == null ? null
@@ -1304,6 +1313,25 @@ public final class RealUpdateService {
         if (Files.exists(transactions, LinkOption.NOFOLLOW_LINKS)
                 && RealUpdateFiles.emptyDirectory(transactions)) Files.delete(transactions);
         if (RealUpdateFiles.emptyDirectory(namespace)) Files.delete(namespace);
+    }
+
+    /**
+     * Deletes regenerable caches the new version did not ship. They were built by the previous
+     * version, and MegaMek only rescans unit files newer than its cache, so values derived by
+     * the old code would otherwise survive the update. Best effort: the update is already
+     * committed, and the application rebuilds a missing cache on its next start.
+     */
+    private static void clearStaleCaches(Path root, Manifest target) {
+        Map<String, FileEntry> shipped = index(target);
+        for (String cache : UninstallService.REGENERABLE_CACHES) {
+            if (shipped.containsKey(key(cache))) continue;
+            try {
+                Path file = RealUpdateFiles.resolve(root, cache, true);
+                if (Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) Files.delete(file);
+            } catch (IOException | ManifestException ignored) {
+                // A cache that cannot be removed now is cleared by Repair.
+            }
+        }
     }
 
     private void cleanupCommitted(Path namespace, Path transaction, Path pending,
