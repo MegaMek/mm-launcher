@@ -50,7 +50,7 @@ class LauncherNewsFeedTest {
     void sortsAndLimitsDatedOfficialHeadlinesWithoutRenderingArticleHtml() throws Exception {
         String xml = "<feed xmlns=\"http://www.w3.org/2005/Atom\">"
                 + entry("Old", "2025-01-02T00:00:00Z", "old")
-                + entry("Latest &amp;amp; news &lt;em&gt;now&lt;/em&gt;",
+                + entry("Balancing Gameplay &amp;amp; Economics in 0.51.01",
                         "2026-09-26T11:25:10+00:00", "latest")
                 + entry("Next", "2026-08-14T00:00:00Z", "next")
                 + entry("Third", "2026-07-30T00:00:00Z", "third")
@@ -63,7 +63,7 @@ class LauncherNewsFeedTest {
         });
         var articles = feed.latest();
         assertEquals(3, articles.size());
-        assertEquals("Latest & news now", articles.get(0).title());
+        assertEquals("Balancing Gameplay & Economics in 0.51.01", articles.get(0).title());
         assertEquals("2026-09-26", articles.get(0).published().toString());
         assertEquals("https://megamek.org/latest", articles.get(0).link().toString());
         assertEquals("Next", articles.get(1).title());
@@ -85,28 +85,13 @@ class LauncherNewsFeedTest {
     }
 
     @Test
-    void htmlTitlesBecomePlainText() {
-        assertEquals("Gameplay & Economics", LauncherNewsFeed.htmlToText("Gameplay &amp; Economics"));
-        assertEquals("What\u2019s \"new\" <here>",
-                LauncherNewsFeed.htmlToText("What&#8217;s &quot;new&quot; &lt;here&gt;"));
-        assertEquals("A ' b", LauncherNewsFeed.htmlToText("A &#x27; <b>b</b>"));
+    void htmlTitlesAreDecoded() {
+        assertEquals("Gameplay & Economics", LauncherNewsFeed.decodeEntities("Gameplay &amp; Economics"));
+        assertEquals("What\u2019s \"new\" for BV < 5000",
+                LauncherNewsFeed.decodeEntities("What&#8217;s &quot;new&quot; for BV &lt; 5000"));
+        assertEquals("It's A B", LauncherNewsFeed.decodeEntities("It&#x27;s A&nbsp;B"));
         assertEquals("Fish & chips; &unknown; done",
-                LauncherNewsFeed.htmlToText("Fish & chips; &unknown; done"));
-    }
-
-    @Test
-    void literalAngleBracketsAreKept() {
-        assertEquals("Rules for BV < 5000 and PV > 100",
-                LauncherNewsFeed.htmlToText("Rules for BV < 5000 and PV > 100"));
-        assertEquals("Ends with <", LauncherNewsFeed.htmlToText("Ends with <"));
-        assertEquals("Unclosed <em class=\"x", LauncherNewsFeed.htmlToText("Unclosed <em class=\"x"));
-    }
-
-    @Test
-    void quotedAttributesDoNotEndTags() {
-        assertEquals("New rules", LauncherNewsFeed.htmlToText("New <em title=\"BV > 5000\">rules</em>"));
-        assertEquals("New rules", LauncherNewsFeed.htmlToText("New <em title='a > b'>rules</em>"));
-        assertEquals("Hidden", LauncherNewsFeed.htmlToText("<!-- note -->Hidden"));
+                LauncherNewsFeed.decodeEntities("Fish & chips; &unknown; done"));
     }
 
     @Test
