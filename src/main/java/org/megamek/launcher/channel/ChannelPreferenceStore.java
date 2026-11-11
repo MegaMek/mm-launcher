@@ -206,6 +206,41 @@ public final class ChannelPreferenceStore {
     }
 
     /**
+     * Copies the fixed channel of a registered installation whose folder is missing to the record
+     * for the folder it moved to, before that record is registered. The new sidecar is published
+     * create-new; returns {@code null} when the missing installation has no current channel
+     * (unknown or retired), and fails when its channel is unreadable.
+     */
+    public ChannelPreference publishRelocated(Path registry, RegistryData data,
+                                              InstallationRecord missing,
+                                              InstallationRecord moved) throws IOException {
+        if (missing == null || moved == null || missing.id().equals(moved.id())
+                || !missing.registeredAt().equals(moved.registeredAt())) {
+            throw new IOException("relocated installation identity is invalid");
+        }
+        Path registryPath = registry.toAbsolutePath().normalize();
+        InstallationRecord registered = registries.resolve(data, missing.id());
+        if (!registered.equals(missing)) {
+            throw new IOException("installation changed; reopen Installations");
+        }
+        ReadResult existing = readStrict(registryPath, data, registered);
+        if (existing.status() != Status.CONFIGURED) return null;
+        ChannelPreference preference = new ChannelPreference(SCHEMA, moved.id(),
+                moved.canonicalRoot(), moved.registeredAt(), existing.preference().channel(),
+                existing.preference().checkOnOpen());
+        validate(preference, moved);
+        Path directory = receipts.metadataDirectory(registryPath);
+        Path file = preferencePath(directory, moved.id());
+        Path staging = stagingPath(file);
+        if (Files.exists(file, LinkOption.NOFOLLOW_LINKS)
+                || Files.exists(staging, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("channel setting for the relocated installation already exists");
+        }
+        publish(preference, staging, file, false);
+        return preference;
+    }
+
+    /**
      * Best-effort inverse used only by a failed multi-file metadata publication. It removes the
      * final channel setting only when its full value still equals the attempt-owned value.
      */

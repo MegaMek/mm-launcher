@@ -84,13 +84,19 @@ the latest state; a very short stage may finish between refreshes rather than be
 Planning and removal retain one root/process lease;
 immediate per-file verification, modified/custom-file retention, and recovery protection remain.
 When the folder is positively confirmed missing, the card shows **Folder not found**, retains
-its recorded applications/version and preferred markers, and replaces **More…** with **Remove…**.
+its recorded applications/version and preferred markers, and replaces **More…** with **Locate…**.
 It does not describe the copy as an incomplete managed setup or offer update/recovery controls.
-**Remove…** opens a styled
-**Installation not found** dialog with **Cancel** and **Remove from launcher**. The dialog
-is offered only after a fresh worker-thread folder check on every **More…** or **Remove…** click, not from cached
+**Locate…** opens a styled
+**Installation not found** dialog with **Locate folder…**, **Remove from launcher**, and
+**Cancel**. The dialog
+is offered only after a fresh worker-thread folder check on every **More…** or **Locate…** click, not from cached
 card status; a folder restored since rendering opens the ordinary menu instead. Cancellation
-keeps the registration; confirmation removes that exact registration and its owned metadata,
+keeps the registration. **Locate folder…** asks for the folder the copy was renamed or moved to
+and re-attaches the registration there only when that folder holds the same build and
+applications, is not registered or overlapping, has no interrupted update, and, for a managed
+copy, still has every official file with official hashes for its official jars. The copy keeps
+its name, release type, update history, preferred/default selections, and launch options under a
+new installation id; refused folders change nothing. **Remove from launcher** removes that exact registration and its owned metadata,
 including validated interrupted-uninstall cleanup. It never reinstalls or recreates deleted
 application files. A folder deleted after rendering also routes an affected launch or operation
 to this dialog, including when containing directories were deleted or moved.

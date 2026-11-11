@@ -705,9 +705,11 @@ with stages labelled **Checking installation files** and **Removing official fil
 Progress refreshes show the latest state and may skip a stage that has already finished.
 Every targeted file is still verified immediately before its move to recovery.
 
-If a user manually deletes an installation folder, **More…** offers a styled
+If a user manually deletes an installation folder, its card's **Locate…** offers a styled
 **Installation not found** confirmation to remove its launcher registration, including a
-validated interrupted-uninstall record. This does not recreate the folder or touch other
+validated interrupted-uninstall record. If the folder was only renamed or moved, **Locate
+folder…** in the same dialog points the installation at its new folder and keeps its updates and
+settings; the launcher checks that the folder holds the same copy first. This does not recreate the folder or touch other
 installations. Inaccessible locations and unavailable drives are not mistaken for deleted
 folders. Reinstalling the launcher intentionally preserves the per-user registry and settings;
 use this registration-removal flow rather than reinstalling to clear a missing game copy.

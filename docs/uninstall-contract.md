@@ -21,7 +21,8 @@ An unfinished registration-removal intent blocks launch, preview, repair, update
 uninstall until startup, explicit recovery, or a removal retry restores or finalizes it.
 
 If the installation folder was manually deleted, its registration remains until the user
-confirms **Remove from launcher** in a styled **Installation not found** dialog. This separate
+confirms **Remove from launcher** in a styled **Installation not found** dialog (which also offers
+**Locate folder…** for a renamed or moved folder). This separate
 path does not inspect absent product files, recreate the installation, or delete application-root
 content. It verifies the existing canonical ancestors on an accessible filesystem and positively
 identifies the first absent directory, including when the containing release folder was deleted
