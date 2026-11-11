@@ -54,8 +54,12 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Matcher;
@@ -167,8 +171,12 @@ public final class InstallationRelocationService {
                     throw new IOException("The installation folder exists again; nothing to "
                             + "locate.");
                 }
-                InstallationRecord committed = registries.relocate(registry, missing, inspection,
-                        moved.id());
+                InstallationRecord committed;
+                try {
+                    committed = registries.relocate(registry, missing, inspection, moved.id());
+                } catch (IOException | RuntimeException failure) {
+                    committed = committedAnyway(moved.id(), failure, rollback);
+                }
                 rollback.clear();
                 forgetMetadata(missing.id());
                 return committed;
@@ -177,6 +185,29 @@ public final class InstallationRelocationService {
                 throw failure;
             }
         }
+    }
+
+    /**
+     * The registry write can fail after its atomic replacement (closing the lock, for example).
+     * Returns the new record if the commit happened anyway; rolls back only when the registry
+     * confirms it did not, and keeps every new-id file when the outcome can't be read.
+     */
+    private InstallationRecord committedAnyway(String newId, Exception failure,
+                                               List<Runnable> rollback) throws IOException {
+        RegistryData after;
+        try {
+            after = registries.read(registry);
+        } catch (IOException | RuntimeException unreadable) {
+            rollback.clear();
+            failure.addSuppressed(unreadable);
+            throw new IOException("Couldn't confirm whether the installation was located; "
+                    + "reopen the launcher to check.", failure);
+        }
+        for (InstallationRecord record : after.installations()) {
+            if (record.id().equals(newId)) return record;
+        }
+        if (failure instanceof IOException io) throw io;
+        throw (RuntimeException) failure;
     }
 
     private void publishMetadata(RegistryData data, InstallationRecord missing,
@@ -210,10 +241,10 @@ public final class InstallationRelocationService {
                 rollback.add(() -> quietly(() -> channels.rollbackInitialization(registry,
                         moved, published)));
             }
+            AdoptionStateStore.requireRelocatable(oldMarker, missing, oldReceipt,
+                    oldCurrent == null ? CurrentUpdateState.initial(oldReceipt) : oldCurrent,
+                    channel);
             if (oldMarker != null) {
-                if (channel == null) {
-                    throw new IOException("adopted installation has no readable release type");
-                }
                 AdoptionStateStore.Marker marker = adoptions.write(registry, moved, receipt,
                         latest, channel, oldMarker.attemptId());
                 rollback.add(() -> quietly(() -> adoptions.rollback(registry, moved.id(),
@@ -319,33 +350,57 @@ public final class InstallationRelocationService {
         }
         Set<String> registered = data.installations().stream().map(InstallationRecord::id)
                 .collect(Collectors.toSet());
-        List<Path> markers = new ArrayList<>();
+        Map<String, String> movedTo = new HashMap<>();
+        Map<String, Path> markers = new HashMap<>();
         try (var stream = Files.newDirectoryStream(directory, "*" + RELOCATED_TO + "*")) {
-            stream.forEach(markers::add);
+            for (Path marker : stream) {
+                Matcher name = MARKER.matcher(marker.getFileName().toString());
+                // A marker whose old id is still registered has not committed (yet).
+                if (!name.matches() || registered.contains(name.group(1))
+                        || !Files.isRegularFile(marker, LinkOption.NOFOLLOW_LINKS)) {
+                    continue;
+                }
+                movedTo.put(name.group(1), name.group(2));
+                markers.put(name.group(1), marker);
+            }
         } catch (IOException unreadable) {
             return;
         }
-        for (Path marker : markers) {
-            Matcher name = MARKER.matcher(marker.getFileName().toString());
-            if (!name.matches() || !Files.isRegularFile(marker, LinkOption.NOFOLLOW_LINKS)) {
-                continue;
+        // An installation can be moved again before an earlier move finished (A->B, then B->C).
+        // Follow each chain to the registered record, finishing the newest moves first so their
+        // settings win, and hold back older links while a newer one is still failing.
+        Map<String, List<String>> chains = new HashMap<>();
+        for (String oldId : movedTo.keySet()) {
+            List<String> chain = new ArrayList<>(List.of(oldId));
+            String cursor = movedTo.get(oldId);
+            while (!registered.contains(cursor) && movedTo.containsKey(cursor)
+                    && !chain.contains(cursor)) {
+                chain.add(cursor);
+                cursor = movedTo.get(cursor);
             }
-            String oldId = name.group(1);
-            String newId = name.group(2);
-            if (registered.contains(oldId)) {
-                // Not committed (yet); a relocation may still be running.
-                continue;
-            }
-            if (registered.contains(newId)) {
-                try {
-                    finisher.finish(oldId, newId);
-                } catch (IOException retryLater) {
-                    continue;
-                }
-                forgetMetadata(oldId);
-            }
-            quietly(() -> Files.deleteIfExists(marker));
+            chain.add(cursor);
+            chains.put(oldId, chain);
         }
+        Set<String> failed = new HashSet<>();
+        chains.keySet().stream()
+                .sorted(Comparator.comparingInt((String id) -> chains.get(id).size()))
+                .forEachOrdered(oldId -> {
+                    List<String> chain = chains.get(oldId);
+                    if (chain.stream().skip(1).anyMatch(failed::contains)) {
+                        failed.add(oldId);
+                        return;
+                    }
+                    String destination = chain.get(chain.size() - 1);
+                    try {
+                        finisher.finish(oldId,
+                                registered.contains(destination) ? destination : null);
+                    } catch (IOException retryLater) {
+                        failed.add(oldId);
+                        return;
+                    }
+                    forgetMetadata(oldId);
+                    quietly(() -> Files.deleteIfExists(markers.get(oldId)));
+                });
     }
 
     private Path writeMarker(String oldId, String newId) throws IOException {
@@ -411,6 +466,7 @@ public final class InstallationRelocationService {
     /** Moves whatever is keyed by a relocated installation's old id to its new id. */
     @FunctionalInterface
     public interface Finisher {
+        /** {@code newId} is null when the installation was removed since; drop the old id's data. */
         void finish(String oldId, String newId) throws IOException;
     }
 }

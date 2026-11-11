@@ -887,7 +887,13 @@ public class LauncherServices {
     }
 
     private void finishRelocations() {
-        relocations.finishCommitted(launchOptions::rekeyInstallation);
+        relocations.finishCommitted((oldId, newId) -> {
+            if (newId != null) {
+                launchOptions.rekeyInstallation(oldId, newId);
+            } else if (!launchOptions.read().installation(oldId).inheritsEverything()) {
+                launchOptions.writeInstallation(oldId, LaunchOptions.INHERIT);
+            }
+        });
     }
 
     public UninstallService.Plan planUninstall(InstallationRecord record,

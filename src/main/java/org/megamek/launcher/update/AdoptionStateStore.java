@@ -166,6 +166,25 @@ final class AdoptionStateStore {
         return marker;
     }
 
+    /**
+     * Applies the same full binding check as {@link #validateForUse} to a missing installation's
+     * metadata, so relocation never turns inconsistent adoption evidence into a managed copy.
+     */
+    static void requireRelocatable(Marker marker, InstallationRecord missing,
+                                   OwnershipReceipt receipt, CurrentUpdateState current,
+                                   ChannelPreference channel) throws IOException {
+        if (marker == null) {
+            if (isAdoptionTransaction(current.lastTransactionId())) {
+                throw new IOException("adoption publication is incomplete");
+            }
+            return;
+        }
+        if (channel == null) {
+            throw new IOException("adopted installation has no readable release type");
+        }
+        validate(marker, missing, receipt, current, channel);
+    }
+
     void rollback(Path registry, String id, Marker expected) throws IOException {
         Path file = path(registry, id);
         Files.deleteIfExists(file.resolveSibling(file.getFileName() + ".new"));

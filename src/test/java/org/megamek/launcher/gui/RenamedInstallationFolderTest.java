@@ -250,6 +250,47 @@ class RenamedInstallationFolderTest {
         assertFalse(Files.exists(marker));
     }
 
+    @Test
+    void launchOptionsFollowAnInstallationMovedTwiceBeforeTheyCouldMove() throws Exception {
+        LauncherServices services = services();
+        Path first = suite(temp.resolve("games").resolve("MegaMek"), "1.0.0");
+        InstallationRecord installed = managed(services, first);
+        services.saveInstallationLaunchOptions(installed, OPTIONS);
+        InstallationRelocationService raw = new InstallationRelocationService(
+                services.registry(), new RegistryStore(),
+                new RootCoordinator(temp.resolve("coordination")), new InstallationInspector());
+        Path second = first.resolveSibling("Second");
+        Files.move(first, second);
+        InstallationRecord middle = raw.relocate(installed, second, CONTEXT);
+        Path third = first.resolveSibling("Third");
+        Files.move(second, third);
+        InstallationRecord last = raw.relocate(middle, third, CONTEXT);
+
+        services.loadHome();
+
+        assertEquals(OPTIONS, services.launchOptions().installation(last.id()));
+        assertEquals(1, services.launchOptions().installations().size());
+        try (Stream<Path> files = Files.list(metadata(services))) {
+            assertTrue(files.noneMatch(file -> file.getFileName().toString()
+                    .contains(".relocated-to.")));
+        }
+    }
+
+    @Test
+    void launchOptionsSavedUnderTheNewIdAreNotOverwritten() throws Exception {
+        LaunchOptionsStore store = new LaunchOptionsStore(
+                temp.resolve("state").resolve("registry.json"));
+        Files.createDirectories(temp.resolve("state"));
+        LaunchOptions newer = new LaunchOptions(4096, null, null, null, null, null);
+        store.writeInstallation("old", OPTIONS);
+        store.writeInstallation("new", newer);
+
+        store.rekeyInstallation("old", "new");
+
+        assertEquals(newer, store.read().installation("new"));
+        assertEquals(1, store.read().installations().size());
+    }
+
     private void assertUnchanged(LauncherServices services, InstallationRecord installed)
             throws Exception {
         assertEquals(java.util.List.of(installed), services.readRegistry().installations());

@@ -166,7 +166,8 @@ public final class LaunchOptionsStore {
 
     /**
      * Moves an installation's overrides to a new id in one write, so the number of entries never
-     * grows and the source entry stays put if the write fails.
+     * grows and the source entry stays put if the write fails. Overrides already saved under the
+     * new id are newer and are kept.
      */
     public Document rekeyInstallation(String fromId, String toId) throws IOException {
         if (!INSTALLATION_ID.matcher(fromId).matches()
@@ -178,7 +179,7 @@ public final class LaunchOptionsStore {
         return update(latest -> {
             Map<String, LaunchOptions> next = new TreeMap<>(latest.installations());
             LaunchOptions moved = next.remove(fromId);
-            if (moved != null) next.put(toId, moved);
+            if (moved != null) next.putIfAbsent(toId, moved);
             return new Document(latest.global(), next);
         });
     }

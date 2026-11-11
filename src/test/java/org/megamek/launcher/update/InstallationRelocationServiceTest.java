@@ -115,6 +115,40 @@ class InstallationRelocationServiceTest {
         assertEquals(List.of(record), registries.read(registry).installations());
     }
 
+    @Test
+    void locatesAnAdoptedCopyAndRefusesAnInconsistentAdoptionMarker() throws Exception {
+        Path registry = temp.resolve("state").resolve("registry.json");
+        Files.createDirectories(registry.getParent());
+        RegistryStore registries = new RegistryStore();
+        Path original = suite(temp.resolve("games").resolve("MegaMek"));
+        InstallationRecord record = registries.register(registry, "MegaMek", original, null);
+        ReceiptStore receipts = new ReceiptStore();
+        var build = new OwnershipPolicy().build(original, OfficialRepository.MEGAMEK, "v1.0.0");
+        OwnershipReceipt receipt = receipts.write(registry, registries.read(registry), record,
+                OfficialRepository.MEGAMEK, "v1.0.0", "MegaMek-v1.0.0.tar.gz", 10,
+                "sha256:" + "a".repeat(64), build);
+        var channel = new ChannelPreferenceStore().initializeManaged(registry, record, receipt,
+                FollowChannel.CORE, false);
+        AdoptionStateStore adoptions = new AdoptionStateStore(receipts);
+        adoptions.write(registry, record, receipt, CurrentUpdateState.initial(receipt), channel,
+                java.util.UUID.nameUUIDFromBytes("adopt".getBytes()).toString());
+        Path marker = adoptions.path(registry, record.id());
+        String valid = Files.readString(marker);
+        Path renamed = original.resolveSibling("Renamed");
+        Files.move(original, renamed);
+        InstallationRelocationService service = new InstallationRelocationService(registry,
+                registries, new RootCoordinator(temp.resolve("coordination")),
+                new InstallationInspector());
+
+        Files.writeString(marker, valid.replace("v1.0.0", "v9.9.9"));
+        assertThrows(IOException.class, () -> service.relocate(record, renamed, CONTEXT));
+        assertEquals(List.of(record), registries.read(registry).installations());
+
+        Files.writeString(marker, valid);
+        InstallationRecord located = service.relocate(record, renamed, CONTEXT);
+        assertTrue(Files.isRegularFile(adoptions.path(registry, located.id())));
+    }
+
     private static Path suite(Path root) throws Exception {
         Files.createDirectories(root);
         for (String folder : new String[] {"data", "mmconf", "lib", "docs"}) {
