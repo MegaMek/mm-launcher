@@ -33,6 +33,7 @@
 
 package org.megamek.launcher.update;
 
+import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.manifest.ManifestException;
 import org.megamek.launcher.manifest.ManifestReader;
 import org.megamek.launcher.operation.OperationContext;
@@ -67,6 +68,8 @@ import java.util.Set;
  */
 record RootSnapshot(String canonicalRoot, RootIdentity rootIdentity,
                     List<EntryEvidence> entries) {
+    private static final String BUNDLE = "org.megamek.launcher.services";
+
     RootSnapshot {
         Objects.requireNonNull(canonicalRoot);
         Objects.requireNonNull(rootIdentity);
@@ -79,7 +82,7 @@ record RootSnapshot(String canonicalRoot, RootIdentity rootIdentity,
         Objects.requireNonNull(context);
         Objects.requireNonNull(phase);
         Objects.requireNonNull(scan);
-        context.phase(phase, scan.progressDetail);
+        context.phase(phase, scan.progressDetail());
         Path root = StrictPathSafety.requireDirectory(requested, scan.rootLabel);
         BasicFileAttributes rootBefore = attributes(root);
         List<Path> paths;
@@ -129,8 +132,9 @@ record RootSnapshot(String canonicalRoot, RootIdentity rootIdentity,
                     before.isDirectory(), before.size(), before.lastModifiedTime().toMillis(),
                     before.fileKey() == null ? null : before.fileKey().toString(), hash));
             context.progress(phase, ++completed, paths.size(), ProgressUnit.FILES,
-                    scan.progressDetail + " — " + completed + " of " + paths.size()
-                            + " files and folders");
+                    I18n.getFormattedTextAt(BUNDLE, "RootSnapshot.scanProgress",
+                            scan.progressDetail(), String.valueOf(completed),
+                            String.valueOf(paths.size())));
         }
         BasicFileAttributes rootAfter = attributes(root);
         RootIdentity identity = new RootIdentity(
@@ -180,29 +184,32 @@ record RootSnapshot(String canonicalRoot, RootIdentity rootIdentity,
         INITIAL_IMPORTED_COPY(
                 "imported application root",
                 "imported copy",
-                "local path",
-                "Checking existing installation"),
+                "local path"),
         OFFICIAL_PACKAGE(
                 "official package root",
                 "official package",
-                "package path",
-                "Checking official package"),
+                "package path"),
         FINAL_IMPORTED_COPY(
                 "imported application root",
                 "imported copy",
-                "local path",
-                "Confirming installation has not changed");
+                "local path");
 
         private final String rootLabel;
         private final String subject;
         private final String pathLabel;
-        private final String progressDetail;
 
-        Scan(String rootLabel, String subject, String pathLabel, String progressDetail) {
+        Scan(String rootLabel, String subject, String pathLabel) {
             this.rootLabel = rootLabel;
             this.subject = subject;
             this.pathLabel = pathLabel;
-            this.progressDetail = progressDetail;
+        }
+
+        String progressDetail() {
+            return switch (this) {
+                case INITIAL_IMPORTED_COPY -> I18n.getTextAt(BUNDLE, "RootSnapshot.checkingInstallation");
+                case OFFICIAL_PACKAGE -> I18n.getTextAt(BUNDLE, "RootSnapshot.checkingPackage");
+                case FINAL_IMPORTED_COPY -> I18n.getTextAt(BUNDLE, "RootSnapshot.confirmingUnchanged");
+            };
         }
     }
 }

@@ -33,7 +33,11 @@
 
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.internationalization.I18n;
+
 final class VersionDisplay {
+    private static final String BUNDLE = "org.megamek.launcher.gui.home";
+
     private VersionDisplay() {
     }
 
@@ -60,11 +64,13 @@ final class VersionDisplay {
     }
 
     static String installLatest(String program, String channel, String version) {
-        return "Install latest " + programChannelVersion(program, channel, version);
+        return I18n.getFormattedTextAt(BUNDLE, "VersionDisplay.installLatest", programChannelVersion(program,
+                channel, version));
     }
 
     static String launch(String program, String channel, String version) {
-        return "Launch " + programChannelVersion(program, channel, version);
+        return I18n.getFormattedTextAt(BUNDLE, "VersionDisplay.launch", programChannelVersion(program, channel,
+                version));
     }
 
     /** A release's publish day in the player's own calendar and locale, e.g. "Nov 3, 2026". */

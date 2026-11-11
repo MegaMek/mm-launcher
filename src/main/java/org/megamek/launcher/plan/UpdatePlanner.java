@@ -33,6 +33,7 @@
 
 package org.megamek.launcher.plan;
 
+import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.manifest.FileEntry;
 import org.megamek.launcher.manifest.Manifest;
 import org.megamek.launcher.manifest.ManifestException;
@@ -63,6 +64,7 @@ import java.util.TreeSet;
 import java.util.Set;
 
 public final class UpdatePlanner {
+    private static final String BUNDLE = "org.megamek.launcher.services";
     public List<Decision> plan(Manifest baseline, Manifest target, Path installation)
             throws IOException, ManifestException {
         return planWithoutCancellation(baseline, target, installation, Map.of(), null,
@@ -167,7 +169,8 @@ public final class UpdatePlanner {
     private static void report(OperationContext context, OperationPhase phase, int completed,
                                int total) throws org.megamek.launcher.operation.OperationCancelledException {
         context.progress(phase, completed, total, ProgressUnit.FILES,
-                "Planned " + completed + " of " + total + " managed paths");
+                I18n.getFormattedTextAt(BUNDLE, "UpdatePlanner.planned",
+                        String.valueOf(completed), String.valueOf(total)));
     }
 
     private static String affectedStickyPrefix(String path, List<String> prefixes) {

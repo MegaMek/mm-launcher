@@ -33,6 +33,7 @@
 
 package org.megamek.launcher.update;
 
+import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.channel.ChannelUpdateChecker;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.manifest.ManifestException;
@@ -67,6 +68,7 @@ import java.util.Map;
 
 /** Produces a point-in-time plan and never writes beneath an installation root. */
 public final class UpdatePreviewService {
+    private static final String BUNDLE = "org.megamek.launcher.services";
     private final ReleaseTransport transport;
     private final RegistryStore registryStore;
     private final ReceiptStore receiptStore;
@@ -155,7 +157,7 @@ public final class UpdatePreviewService {
             throws IOException, InterruptedException, ManifestException {
         try (OperationContext.WorkerRegistration ignored = context.activate()) {
             context.phase(OperationPhase.METADATA,
-                    "Validating the selected installation and provenance");
+                    I18n.getTextAt(BUNDLE, "UpdatePreviewService.validatingInstallation"));
             Path registryPath = registry.toAbsolutePath().normalize();
             RegistryData data = registryStore.read(registryPath);
             InstallationRecord current = registryStore.resolve(data, expectedRecord.id());
@@ -211,7 +213,7 @@ public final class UpdatePreviewService {
         try (VerifiedPackageFetcher.Workspace workspace = material.workspace()) {
             return material.preview();
         } finally {
-            context.cleanupPhase("Removing the read-only preview workspace");
+            context.cleanupPhase(I18n.getTextAt(BUNDLE, "UpdatePreviewService.removingWorkspace"));
         }
     }
 
@@ -236,7 +238,7 @@ public final class UpdatePreviewService {
             throws IOException, InterruptedException, ManifestException {
         try (OperationContext.WorkerRegistration ignored = context.activate()) {
             context.phase(OperationPhase.METADATA,
-                    "Validating selected update source and provenance");
+                    I18n.getTextAt(BUNDLE, "UpdatePreviewService.validatingSource"));
             Path registryPath = registry.toAbsolutePath().normalize();
             RegistryData data = registryStore.read(registryPath);
             InstallationRecord currentRecord = registryStore.resolve(data, expectedRecord.id());
@@ -267,7 +269,7 @@ public final class UpdatePreviewService {
                     material.workspace(), trustedTarget, material.inspection(), material.pair(),
                     recommendation);
             context.phase(OperationPhase.AWAIT_CONSENT,
-                    "Package verified; waiting for Apply confirmation");
+                    I18n.getTextAt(BUNDLE, "UpdatePreviewService.awaitingApply"));
             return prepared;
         }
     }
@@ -284,7 +286,7 @@ public final class UpdatePreviewService {
                 repository, targetTag, workspaceParent, ".preview-", progress, expected, context);
         try {
             context.phase(OperationPhase.PLAN,
-                    "Inspecting package contents and planning local changes");
+                    I18n.getTextAt(BUNDLE, "UpdatePreviewService.inspectingPackage"));
             InstallationInspector inspector = new InstallationInspector();
             var targetInspection = inspector.inspect(workspace.extracted());
             if (targetInspection.products().stream()
@@ -304,7 +306,7 @@ public final class UpdatePreviewService {
                         Set.copyOf(override.officialHashes()));
             }
             context.phase(OperationPhase.PLAN,
-                    "Comparing local managed files with the verified package");
+                    I18n.getTextAt(BUNDLE, "UpdatePreviewService.comparingPackage"));
             List<Decision> decisions = new UpdatePlanner().planPreview(
                     current.officialManifest(), target.manifest(), root, validation,
                     Map.copyOf(trusted),

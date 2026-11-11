@@ -33,6 +33,8 @@
 
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.internationalization.I18n;
+
 import javax.swing.Box;
 import javax.swing.BoxLayout;
 import javax.swing.JButton;
@@ -59,7 +61,8 @@ import java.util.Objects;
  * danger and never the default), any other choices next, and Cancel last. Escape dismisses it.
  */
 final class LauncherAlertDialog extends JDialog {
-    static final String CANCEL = "Cancel";
+    private static final String BUNDLE = "org.megamek.launcher.gui.dialogs";
+    static final String CANCEL = I18n.getTextAt(BUNDLE, "LauncherAlertDialog.cancel");
 
     private final GuiScale scale;
     private String result;
@@ -147,7 +150,7 @@ final class LauncherAlertDialog extends JDialog {
 
     /** Shows a single-button informational alert and blocks until it is dismissed. */
     static void showMessage(Window owner, GuiScale scale, String title, String message) {
-        show(owner, title, message, scale, "OK");
+        show(owner, title, message, scale, I18n.getTextAt(BUNDLE, "LauncherAlertDialog.ok"));
     }
 
     /**
@@ -198,7 +201,7 @@ final class LauncherAlertDialog extends JDialog {
 
     /**
      * Shows a dialog with the given buttons in the order supplied: the first is the primary main
-     * action and the default button, and a last {@value #CANCEL} entry is the cancel action.
+     * action and the default button, and a last {@link #CANCEL} entry is the cancel action.
      * Returns the label of the button chosen, or {@code null} if the dialog was dismissed without
      * choosing one (Escape key or window close).
      */

@@ -33,6 +33,7 @@
 
 package org.megamek.launcher.update;
 
+import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.channel.ChannelPreference;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.FollowChannel;
@@ -82,12 +83,13 @@ import java.util.regex.Pattern;
  * only launcher-owned metadata. No method in this service writes beneath an application root.
  */
 public final class ImportedCopyAdoptionService {
+    private static final String BUNDLE = "org.megamek.launcher.services";
     private static final Pattern CREDIBLE_VERSION =
             Pattern.compile("[0-9]+\\.[0-9]+(?:\\.[0-9]+)?(?:[-.][A-Za-z0-9.-]+)?");
     private static final int DIAGNOSTIC_PATH_LIMIT = 40;
     public static final String AUTOMATIC_MATCH_UNAVAILABLE =
-            "We couldn’t find the matching official version. "
-                    + "This copy will remain launch-only.";
+            I18n.getTextAt(BUNDLE,
+            "ImportedCopyAdoptionService.automaticMatchUnavailable");
 
     private final Path registry;
     private final ReleaseTransport transport;
@@ -139,7 +141,7 @@ public final class ImportedCopyAdoptionService {
         String tag = version != null && CREDIBLE_VERSION.matcher(version).matches()
                 ? "v" + version : null;
         return new Suggestion(repository, tag, displayProducts(record.products()),
-                version == null || version.isBlank() ? "Unknown" : version);
+                version == null || version.isBlank() ? I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.unknownVersion") : version);
     }
 
     /**
@@ -167,7 +169,7 @@ public final class ImportedCopyAdoptionService {
         Objects.requireNonNull(context, "context");
         try (OperationContext.WorkerRegistration ignored = context.activate()) {
             context.phase(OperationPhase.METADATA,
-                    "Finding the matching official version");
+                    I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.findingVersion"));
             RegistryData data = registries.read(registry);
             InstallationRecord record = requireUnchangedRecord(data, expected);
             Path root = requireMatchingRepository(data, record, requestedRepository);
@@ -254,7 +256,7 @@ public final class ImportedCopyAdoptionService {
         Throwable preparationFailure = null;
         try (OperationContext.WorkerRegistration ignored = context.activate()) {
             context.phase(OperationPhase.METADATA,
-                    "Checking that this copy is ready for verification");
+                    I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.checkingReady"));
             RegistryData before = registries.read(registry);
             InstallationRecord record = requireUnchangedRecord(before, expected);
             Path root = requireMatchingRepository(before, record, requestedRepository);
@@ -272,7 +274,7 @@ public final class ImportedCopyAdoptionService {
             requireNoRootOverlap(attemptDirectory.root(), before);
 
             context.phase(OperationPhase.METADATA,
-                    "Finding the exact official release");
+                    I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.findingRelease"));
             ReleaseCatalog catalog = new ReleaseCatalog(transport);
             ReleaseCatalog.Release release;
             try {
@@ -299,7 +301,7 @@ public final class ImportedCopyAdoptionService {
                         AUTOMATIC_MATCH_UNAVAILABLE, error);
             }
             context.phase(OperationPhase.PLAN,
-                    "Comparing the existing copy with the verified official package");
+                    I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.comparing"));
             Inspection officialInspection = inspector.inspect(workspace.extracted());
             RootSnapshot officialSnapshot = RootSnapshot.capture(
                     workspace.extracted(), context, OperationPhase.PLAN,
@@ -449,7 +451,7 @@ public final class ImportedCopyAdoptionService {
             InstallationRecord expected = prepared.record();
             Path root = Path.of(expected.canonicalRoot()).toAbsolutePath().normalize();
             context.phase(OperationPhase.PREPARE_INSTALL,
-                    "Revalidating local imported-copy state before publication");
+                    I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.revalidating"));
             try (var gate = coordinator.acquire(root, false)) {
                 gate.requireNoPendingUpdate();
                 RegistryData currentRegistry = registries.read(registry);
@@ -467,7 +469,7 @@ public final class ImportedCopyAdoptionService {
                 context.enterFinalization("Managed-update metadata publication has begun; "
                         + "cancellation can no longer be performed safely.");
                 context.phase(OperationPhase.APPLY,
-                        "Publishing managed-update metadata outside the application folder");
+                        I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.publishing"));
                 publish(currentRegistry, current, prepared,
                         prepared.ownership(), prepared.comparison());
                 published = true;
@@ -793,18 +795,18 @@ public final class ImportedCopyAdoptionService {
         boolean eligible = identity && conflicts.isEmpty() && !criticalModified;
         String reason;
         if (!identity) {
-            reason = "This installation does not match the official release for its version.";
+            reason = I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.reasonNoMatch");
         } else if (!conflicts.isEmpty()) {
-            reason = "A file or folder conflict prevents this installation from being managed.";
+            reason = I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.reasonConflict");
         } else if (criticalModified) {
-            reason = "Core application files differ from the official release.";
+            reason = I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.reasonCoreModified");
         } else if (missing.stream().anyMatch(path -> !affectedByCase(path, casePrefixes))) {
             long restorable = missing.stream()
                     .filter(path -> !affectedByCase(path, casePrefixes)).count();
-            reason = "This copy can be managed safely. " + restorable
-                    + " missing file(s) will be restored by the next update.";
+            reason = I18n.getFormattedTextAt(BUNDLE,
+                    "ImportedCopyAdoptionService.reasonRestorable", String.valueOf(restorable));
         } else {
-            reason = "This copy can be managed safely. Existing files will not be changed.";
+            reason = I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.reasonSafe");
         }
         return new Comparison(eligible, identity, exact, List.copyOf(modified),
                 List.copyOf(missing), List.copyOf(unknown), List.copyOf(conflicts),
@@ -954,7 +956,7 @@ public final class ImportedCopyAdoptionService {
 
     private static String displayVersion(String value) {
         return value == null || value.isBlank() || "unknown".equalsIgnoreCase(value)
-                ? "Unknown" : value;
+                ? I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.unknownVersion") : value;
     }
 
     private static boolean protectedPath(String path) {

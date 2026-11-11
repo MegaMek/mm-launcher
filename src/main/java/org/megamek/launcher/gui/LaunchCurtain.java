@@ -36,6 +36,7 @@ package org.megamek.launcher.gui;
 import org.megamek.launcher.design.DesignTokens;
 import org.megamek.launcher.design.swing.TokenFonts;
 import org.megamek.launcher.design.swing.TokenMotion;
+import org.megamek.launcher.internationalization.I18n;
 
 import javax.accessibility.AccessibleContext;
 import javax.accessibility.AccessibleRole;
@@ -104,6 +105,8 @@ import java.util.function.Supplier;
  * launches still close onto the card.
  */
 final class LaunchCurtain extends JComponent {
+    private static final String BUNDLE = "org.megamek.launcher.gui.home";
+
     enum Phase { HIDDEN, GREETING, OPENING, SHIMMER, CLOSING, DEPLOYING }
 
     /** The dark beat before the status line starts typing. */
@@ -278,8 +281,8 @@ final class LaunchCurtain extends JComponent {
 
     /** The status line typed above the greeting, for launcher {@code version}. */
     static String statusLine(String version) {
-        return "MegaMek Launcher " + (version == null || version.isBlank() ? "dev" : version)
-                + "  //  Link established";
+        return I18n.getFormattedTextAt(BUNDLE, "LaunchCurtain.statusLine", version == null || version.isBlank()
+                ? I18n.getTextAt(BUNDLE, "LaunchCurtain.devVersion") : version);
     }
 
     /** While the band sweeps, clicks, hovers and the cursor go to the content underneath. */
@@ -396,7 +399,7 @@ final class LaunchCurtain extends JComponent {
 
     /** Closes the window to the centre line and shows the "Launching {@code product}" card. */
     void closeForLaunch(String product) {
-        title = "Launching " + product;
+        title = I18n.getFormattedTextAt(BUNDLE, "LaunchCurtain.launching", product);
         getAccessibleContext().setAccessibleName(title);
         if (TokenMotion.isReduced()) {
             phase = Phase.DEPLOYING;

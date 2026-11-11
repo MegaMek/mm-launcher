@@ -75,7 +75,7 @@ import javax.swing.text.JTextComponent;
 import javax.swing.text.View;
 
 import com.formdev.flatlaf.FlatLaf;
-import org.megamek.launcher.design.host.Messages;
+import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.design.DesignTokens;
 import org.megamek.launcher.design.DesignTokens.Mode;
 import org.megamek.launcher.design.swing.TokenButtons.Size;
@@ -93,6 +93,7 @@ import org.megamek.launcher.design.host.UIUtil;
  * danger action is never pressed by Enter from elsewhere, and the focus starts on Cancel.
  */
 public class TokenDialogPane extends JPanel {
+    private static final String BUNDLE = "org.megamek.launcher.design.host.messages";
     /** Material Symbols code points of the header glyphs. */
     static final int ICON_CLOSE = 0xE5CD;
     static final int ICON_HELP = 0xE887;
@@ -389,12 +390,12 @@ public class TokenDialogPane extends JPanel {
         JPanel tools = new JPanel(new FlowLayout(FlowLayout.TRAILING, space("xs"), 0));
         tools.setOpaque(false);
         if (help != null) {
-            AbstractButton helpButton = TokenButtons.icon(ICON_HELP, Messages.getString("TokenDialog.help"), false,
+            AbstractButton helpButton = TokenButtons.icon(ICON_HELP, I18n.getTextAt(BUNDLE, "TokenDialog.help"), false,
                   Size.COMPACT);
             helpButton.addActionListener(event -> help.run());
             tools.add(helpButton);
         }
-        AbstractButton close = TokenButtons.icon(ICON_CLOSE, Messages.getString("Close"), false, Size.COMPACT);
+        AbstractButton close = TokenButtons.icon(ICON_CLOSE, I18n.getTextAt(BUNDLE, "Close"), false, Size.COMPACT);
         close.addActionListener(event -> closer.accept(null));
         tools.add(close);
 

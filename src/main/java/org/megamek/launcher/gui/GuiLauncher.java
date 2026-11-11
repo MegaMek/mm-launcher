@@ -48,6 +48,7 @@ import java.util.Properties;
 
 public final class GuiLauncher {
     static final String DIRECT3D = "sun.java2d.d3d";
+    private static final String BUNDLE = "org.megamek.launcher.gui.dialogs";
 
     private GuiLauncher() {
     }
@@ -91,9 +92,8 @@ public final class GuiLauncher {
                     error.println("ERROR: launcher state migration stopped: "
                             + migrationError.getMessage());
                     LauncherAlertDialog.showMessage(null, GuiScale.DEFAULT, "MegaMek Launcher",
-                            "MegaMek Launcher cannot safely migrate previous launcher state.\n"
-                                    + migrationError.getMessage()
-                                    + "\nNo old state was removed. Resolve the conflict before retrying.");
+                            I18n.getFormattedTextAt(BUNDLE, "GuiLauncher.migrationFailed",
+                                    migrationError.getMessage()));
                     return;
                 }
             }
