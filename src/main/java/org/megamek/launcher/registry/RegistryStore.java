@@ -226,6 +226,70 @@ public final class RegistryStore {
     }
 
     /**
+     * Atomically replaces a registered installation whose folder was moved or renamed with a record
+     * for its new folder under {@code newId}. The new folder is inspected again under the registry
+     * lock and must still match {@code confirmed}, with the same build and applications as the
+     * stored record. Name, pin, update eligibility, registration time, default selection and
+     * application preferences carry over to the new id.
+     */
+    public InstallationRecord relocate(Path registry, InstallationRecord expected,
+                                       Inspection confirmed, String newId) throws IOException {
+        if (expected == null) throw new IOException("selected installation is required");
+        if (confirmed == null || confirmed.rootIdentity() == null) {
+            throw new IOException("confirmed inspection with a root identity is required");
+        }
+        if (newId == null || newId.equals(expected.id())) {
+            throw new IOException("a new installation id is required");
+        }
+        Path file = registry.toAbsolutePath().normalize();
+        Path expectedRoot;
+        try {
+            UUID.fromString(newId);
+            expectedRoot = Path.of(confirmed.canonicalRoot()).toAbsolutePath().normalize();
+        } catch (RuntimeException error) {
+            throw new IOException("installation id or folder is invalid", error);
+        }
+        rejectRegistryPlacement(file, expectedRoot);
+        InstallationRecord[] result = new InstallationRecord[1];
+        mutate(file, current -> {
+            InstallationRecord registered = find(current, expected.id());
+            if (!registered.equals(expected)) {
+                throw failure("installation changed; reopen Installations");
+            }
+            if (current.installations().stream().anyMatch(r -> r.id().equals(newId))) {
+                throw failure("installation id is already registered");
+            }
+            Inspection observed = new InstallationInspector().inspect(expectedRoot);
+            if (!observed.equals(confirmed)) {
+                throw new IOException("selected folder changed after it was checked; try again");
+            }
+            if (!observed.observedBuild().equals(registered.observedBuild())
+                    || !observed.products().equals(registered.products())) {
+                throw new IOException("selected folder holds a different build or set of "
+                        + "applications than the missing installation");
+            }
+            Path root = Path.of(observed.canonicalRoot());
+            rejectRegistryPlacement(file, root);
+            List<InstallationRecord> others = current.installations().stream()
+                    .filter(record -> !record.id().equals(expected.id())).toList();
+            rejectDuplicateOrOverlap(others, root);
+            InstallationRecord moved = new InstallationRecord(newId, registered.name(),
+                    observed.canonicalRoot(), registered.observedBuild(), registered.products(),
+                    registered.pin(), registered.updateEligible(), registered.registeredAt());
+            List<InstallationRecord> records = new ArrayList<>(current.installations());
+            records.replaceAll(record -> record.id().equals(expected.id()) ? moved : record);
+            String defaultId = expected.id().equals(current.defaultInstallationId())
+                    ? newId : current.defaultInstallationId();
+            Map<String, String> preferences =
+                    new LinkedHashMap<>(current.preferredInstallationIds());
+            preferences.replaceAll((product, id) -> id.equals(expected.id()) ? newId : id);
+            result[0] = moved;
+            return new RegistryData(SCHEMA, defaultId, preferences, records);
+        });
+        return result[0];
+    }
+
+    /**
      * Sets one application preference without changing the legacy default.  The complete captured
      * record is revalidated under the registry lock so a stale card or Home action cannot retarget
      * a launch.

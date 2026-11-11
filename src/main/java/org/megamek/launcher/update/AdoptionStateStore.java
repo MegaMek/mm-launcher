@@ -136,6 +136,55 @@ final class AdoptionStateStore {
         validate(marker, record, receipt, current, channel);
     }
 
+    /**
+     * Reads the adoption marker of a registered installation whose folder is missing, or
+     * {@code null} when there is none. Only its binding to {@code missing} is checked.
+     */
+    Marker readForRelocation(Path registry, InstallationRecord missing) throws IOException {
+        Path file = path(registry, missing.id());
+        Path staging = file.resolveSibling(file.getFileName() + ".new");
+        if (Files.exists(staging, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("interrupted adoption publication requires review");
+        }
+        if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) return null;
+        StrictPathSafety.requireFile(file, "adoption publication");
+        if (Files.size(file) <= 0 || Files.size(file) > MAX_BYTES) {
+            throw new IOException("adoption publication size is invalid");
+        }
+        final Marker marker;
+        try {
+            marker = mapper.readValue(Files.readAllBytes(file), Marker.class);
+        } catch (IOException | RuntimeException error) {
+            throw new IOException("adoption publication is invalid", error);
+        }
+        if (marker.schemaVersion() != SCHEMA
+                || !missing.id().equals(marker.installationId())
+                || !missing.canonicalRoot().equals(marker.canonicalRoot())
+                || !missing.registeredAt().equals(marker.registeredAt())) {
+            throw new IOException("adoption publication does not match the missing installation");
+        }
+        return marker;
+    }
+
+    /**
+     * Applies the same full binding check as {@link #validateForUse} to a missing installation's
+     * metadata, so relocation never turns inconsistent adoption evidence into a managed copy.
+     */
+    static void requireRelocatable(Marker marker, InstallationRecord missing,
+                                   OwnershipReceipt receipt, CurrentUpdateState current,
+                                   ChannelPreference channel) throws IOException {
+        if (marker == null) {
+            if (isAdoptionTransaction(current.lastTransactionId())) {
+                throw new IOException("adoption publication is incomplete");
+            }
+            return;
+        }
+        if (channel == null) {
+            throw new IOException("adopted installation has no readable release type");
+        }
+        validate(marker, missing, receipt, current, channel);
+    }
+
     void rollback(Path registry, String id, Marker expected) throws IOException {
         Path file = path(registry, id);
         Files.deleteIfExists(file.resolveSibling(file.getFileName() + ".new"));

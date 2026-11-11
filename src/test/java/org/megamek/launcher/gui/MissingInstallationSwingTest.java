@@ -104,7 +104,7 @@ class MissingInstallationSwingTest {
                         "installationStatus-" + fixture.removed.id(), JLabel.class).getText());
                 assertEquals("MegaMek", SwingTestSupport.find(frame,
                         "installationProvenance-" + fixture.removed.id(), JLabel.class).getText());
-                assertEquals("Remove…", SwingTestSupport.find(frame,
+                assertEquals("Locate…", SwingTestSupport.find(frame,
                         "installationMenuButton-" + fixture.removed.id(), JButton.class).getText());
                 assertNull(SwingTestSupport.find(frame, "recoverUpdateButton"));
                 assertNull(SwingTestSupport.find(frame, "checkOnOpenCheckbox-" + fixture.removed.id()));
@@ -115,8 +115,11 @@ class MissingInstallationSwingTest {
             SwingTestSupport.onEdt(() -> {
                 assertEquals(FirstLaunchPanel.BACKGROUND, notice.getContentPane().getBackground());
                 assertEquals("The folder for \"Old installation\" could not be found.\n\n"
-                                + "Remove this installation from the launcher? No game files will be deleted.",
+                                + "If you renamed or moved it, locate the folder to keep its updates "
+                                + "and settings. Or remove this installation from the launcher; no game "
+                                + "files will be deleted.",
                         notice.getAccessibleContext().getAccessibleDescription());
+                assertEquals(1, SwingTestSupport.countButtonText(notice, "Locate folder…"));
                 assertEquals(1, SwingTestSupport.countButtonText(notice, "Cancel"));
                 assertEquals(1, SwingTestSupport.countButtonText(notice, "Remove from launcher"));
                 return null;
@@ -135,6 +138,35 @@ class MissingInstallationSwingTest {
             assertTrue(Files.exists(Path.of(fixture.retained.canonicalRoot()).resolve("MegaMek.jar")));
             assertFalse(Files.exists(UninstallService.pendingJournalPath(
                     fixture.services.registry(), fixture.removed.id())));
+        } finally {
+            SwingTestSupport.dispose(frame);
+        }
+    }
+
+    @Test
+    void locatingARenamedFolderKeepsTheInstallation() throws Exception {
+        assumeFalse(GraphicsEnvironment.isHeadless(), "actual dialogs require a display");
+        Fixture fixture = fixture();
+        Path renamed = fixture.root.resolveSibling("renamed");
+        Files.move(fixture.root, renamed);
+        LauncherFrame frame = SwingTestSupport.onEdt(() ->
+                new LauncherFrame(fixture.services, parent -> renamed));
+        try {
+            SwingTestSupport.onEdt(() -> { frame.showWindow(); return null; });
+            SwingTestSupport.click(frame, "manageInstallationsButton");
+            SwingTestSupport.await("missing installation card", () ->
+                    SwingTestSupport.find(frame, "installationStatus-" + fixture.removed.id(), JLabel.class));
+            SwingTestSupport.startClick(frame, "installationMenuButton-" + fixture.removed.id());
+            JDialog notice = SwingTestSupport.dialog(frame, "Installation not found");
+            SwingTestSupport.clickText(notice, "Locate folder…");
+            Path renamedRoot = renamed.toRealPath();
+            SwingTestSupport.awaitCondition("installation located", () -> {
+                var installations = fixture.services.readRegistry().installations();
+                return installations.size() == 2 && installations.stream().anyMatch(record ->
+                        record.name().equals("Old installation")
+                                && Path.of(record.canonicalRoot()).equals(renamedRoot));
+            });
+            assertTrue(Files.exists(renamed.resolve("MegaMek.jar")));
         } finally {
             SwingTestSupport.dispose(frame);
         }

@@ -107,6 +107,41 @@ final class CurrentStateStore {
         return Files.exists(path(registry, id), LinkOption.NOFOLLOW_LINKS);
     }
 
+    /**
+     * Reads the published state of a registered installation whose folder is missing, or
+     * {@code null} when the receipt is current. Only its binding to {@code original} is checked;
+     * the caller validates the rebound state against the folder it moved to.
+     */
+    CurrentUpdateState readForRelocation(Path registry, String id, OwnershipReceipt original)
+            throws IOException {
+        Path file = path(registry, id);
+        Path staging = file.resolveSibling(file.getFileName() + ".new");
+        if (Files.exists(staging, LinkOption.NOFOLLOW_LINKS)) {
+            throw new IOException("interrupted current-provenance publication requires recovery");
+        }
+        if (!Files.exists(file, LinkOption.NOFOLLOW_LINKS)) return null;
+        StrictPathSafety.requireFile(file, "current provenance");
+        long size = Files.size(file);
+        if (size <= 0 || size > MAX_BYTES) {
+            throw new IOException("current provenance size is invalid");
+        }
+        CurrentUpdateState state;
+        try {
+            state = LegacyProvenanceJson.read(mapper, Files.readAllBytes(file),
+                    CurrentUpdateState.class);
+        } catch (IOException | RuntimeException e) {
+            throw new IOException("current provenance is invalid: " + detail(e), e);
+        }
+        if (state == null || state.schemaVersion() != SCHEMA
+                || !original.installationId().equals(state.installationId())
+                || !original.canonicalRoot().equals(state.canonicalRoot())
+                || !original.registeredAt().equals(state.registeredAt())
+                || !original.repository().equals(state.repository())) {
+            throw new IOException("current provenance does not match the missing installation");
+        }
+        return state;
+    }
+
     void write(Path registry, InstallationRecord record, OwnershipReceipt original,
                CurrentUpdateState state) throws IOException {
         try {

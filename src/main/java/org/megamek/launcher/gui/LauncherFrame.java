@@ -137,6 +137,8 @@ import java.util.function.Consumer;
 public final class LauncherFrame extends JFrame {
     private static final int LOG_LIMIT = 64_000;
     private static final String CHANGE_LOCATION = "Change location";
+    static final String LOCATE_FOLDER = "Locate folder…";
+    static final String REMOVE_FROM_LAUNCHER = "Remove from launcher";
     static final String SAVE_CHANGES = "Save";
     static final String DONT_SAVE_CHANGES = "Don't save";
     private static final DateTimeFormatter NEWS_DATE =
@@ -1628,11 +1630,11 @@ public final class LauncherFrame extends JFrame {
                 actions.add(check);
             }
         }
-        JButton more = homeButton(missing ? "Remove…" : "More…",
+        JButton more = homeButton(missing ? "Locate…" : "More…",
                 "installationMenuButton-" + record.id());
         installationMenuButtons.put(record.id(), more);
         more.getAccessibleContext().setAccessibleDescription(
-                (missing ? "Remove from launcher: " : "More actions for ") + record.name());
+                (missing ? "Locate or remove: " : "More actions for ") + record.name());
         more.addActionListener(event -> openInstallationMenu(record));
         actions.add(more);
         JPanel centeredActions = new JPanel(new java.awt.GridBagLayout());
@@ -2704,17 +2706,38 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void removeMissingInstallation(InstallationRecord record) {
-        boolean confirmed = LauncherAlertDialog.showDangerConfirm(this, guiScale,
-                "Installation not found",
+        String choice = LauncherAlertDialog.show(this, "Installation not found",
                 "The folder for \"" + record.name() + "\" could not be found.\n\n"
-                        + "Remove this installation from the launcher? No game files will be deleted.",
-                "Remove from launcher");
-        if (!confirmed) return;
+                        + "If you renamed or moved it, locate the folder to keep its updates "
+                        + "and settings. Or remove this installation from the launcher; no game "
+                        + "files will be deleted.",
+                guiScale, LOCATE_FOLDER, REMOVE_FROM_LAUNCHER, LauncherAlertDialog.CANCEL);
+        if (LOCATE_FOLDER.equals(choice)) {
+            locateMissingInstallation(record);
+            return;
+        }
+        if (!REMOVE_FROM_LAUNCHER.equals(choice)) return;
         run("Removing missing installation",
                 () -> services.removeMissingFromLauncher(record), result -> {
                     selectedInstallationId = null;
                     transientHomeMessage = "Removed missing installation from launcher."
                             + (result.warning() == null ? "" : " " + result.warning());
+                    page = Page.HOME;
+                    reload();
+                });
+    }
+
+    private void locateMissingInstallation(InstallationRecord record) {
+        Path oldRoot = Path.of(record.canonicalRoot());
+        Path selected = existingImportPrompts.chooseFolder(this, oldRoot.getParent());
+        if (selected == null) return;
+        run("Locating " + record.name(),
+                () -> services.relocate(record, selected,
+                        OperationContext.none(OperationType.IMPORT_EXISTING)),
+                moved -> {
+                    selectedInstallationId = moved.id();
+                    transientHomeMessage = "Found \"" + moved.name() + "\" at "
+                            + moved.canonicalRoot() + ".";
                     page = Page.HOME;
                     reload();
                 });

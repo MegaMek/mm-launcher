@@ -80,6 +80,7 @@ import org.megamek.launcher.update.PreparedAdoption;
 import org.megamek.launcher.update.PreparedUpdate;
 import org.megamek.launcher.update.PreparedUpdateService;
 import org.megamek.launcher.update.RealUpdateService;
+import org.megamek.launcher.update.InstallationRelocationService;
 import org.megamek.launcher.update.UninstallService;
 import org.megamek.launcher.update.LauncherSelfUpdate;
 
@@ -115,6 +116,7 @@ public class LauncherServices {
     private final LauncherSettingsStore settings;
     private final LaunchOptionsStore launchOptions;
     private final UninstallService uninstalls;
+    private final InstallationRelocationService relocations;
     private final OpenLocationService locations;
 
     public LauncherServices(Path registry) {
@@ -170,6 +172,8 @@ public class LauncherServices {
         this.adoptions = new ImportedCopyAdoptionService(this.registry, transport,
                 updateCoordinator);
         this.uninstalls = new UninstallService(this.registry, updateCoordinator);
+        this.relocations = new InstallationRelocationService(this.registry, store,
+                updateCoordinator, inspector);
         this.locations = new OpenLocationService(this.registry);
     }
 
@@ -550,6 +554,7 @@ public class LauncherServices {
     public HomeState loadHome() throws IOException {
         if (Files.exists(registry, LinkOption.NOFOLLOW_LINKS)) {
             uninstalls.recoverCommitted();
+            finishRelocations();
         }
         RegistryData data = readRegistry();
         if (data.defaultInstallationId() == null) {
@@ -867,6 +872,28 @@ public class LauncherServices {
         } catch (IOException ignored) {
             // A stale override for a removed installation is never applied.
         }
+    }
+
+    /**
+     * Re-attaches a missing installation to the folder it was renamed or moved to, keeping its
+     * release type, update history, selections and launch options. Returns the new record.
+     */
+    public InstallationRecord relocate(InstallationRecord missing, Path folder,
+                                       OperationContext context)
+            throws IOException, InterruptedException {
+        InstallationRecord moved = relocations.relocate(missing, folder, context);
+        finishRelocations();
+        return moved;
+    }
+
+    private void finishRelocations() {
+        relocations.finishCommitted((oldId, newId) -> {
+            if (newId != null) {
+                launchOptions.rekeyInstallation(oldId, newId);
+            } else if (!launchOptions.read().installation(oldId).inheritsEverything()) {
+                launchOptions.writeInstallation(oldId, LaunchOptions.INHERIT);
+            }
+        });
     }
 
     public UninstallService.Plan planUninstall(InstallationRecord record,
