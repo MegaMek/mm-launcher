@@ -33,6 +33,8 @@
 
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.internationalization.I18n;
+
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -59,6 +61,7 @@ import java.util.Objects;
  * remains usable while diagnostics are being saved in the background.
  */
 final class LauncherErrorDialog extends JDialog {
+    private static final String BUNDLE = "org.megamek.launcher.gui.dialogs";
     /** Lines of details shown initially, and kept visible when the dialog is shrunk. */
     private static final int DETAIL_LINES = 12;
     private static final int MINIMUM_DETAIL_LINES = 4;
@@ -118,17 +121,17 @@ final class LauncherErrorDialog extends JDialog {
         fields.add(Box.createVerticalStrut(scale.space("md")));
         fields.add(scroll);
 
-        JButton copy = new FirstLaunchButton("Copy sanitized details", "copyErrorDetailsButton",
+        JButton copy = new FirstLaunchButton(I18n.getTextAt(BUNDLE, "LauncherErrorDialog.copyDetails"), "copyErrorDetailsButton",
                 false, scale, FirstLaunchButton.Size.SMALL);
         copy.addActionListener(event -> copyAction.run());
-        JButton logs = new FirstLaunchButton("View logs", "viewOperationLogsButton",
+        JButton logs = new FirstLaunchButton(I18n.getTextAt(BUNDLE, "LauncherErrorDialog.viewLogs"), "viewOperationLogsButton",
                 false, scale, FirstLaunchButton.Size.SMALL);
         logs.addActionListener(event -> viewLogsAction.run());
-        JButton report = new LauncherLink("Report this problem", "reportErrorButton", scale);
+        JButton report = new LauncherLink(I18n.getTextAt(BUNDLE, "LauncherErrorDialog.report"), "reportErrorButton", scale);
         report.getAccessibleContext().setAccessibleDescription(
-                "Opens the launcher's bug report helper");
+                I18n.getTextAt(BUNDLE, "LauncherErrorDialog.reportDescription"));
         report.addActionListener(event -> reportAction.run());
-        JButton close = new FirstLaunchButton("Close", "closeErrorDialogButton",
+        JButton close = new FirstLaunchButton(I18n.getTextAt(BUNDLE, "LauncherErrorDialog.close"), "closeErrorDialogButton",
                 true, scale, FirstLaunchButton.Size.SMALL);
         close.addActionListener(event -> dispose());
 

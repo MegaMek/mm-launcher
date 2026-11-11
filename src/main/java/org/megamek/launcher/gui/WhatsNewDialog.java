@@ -60,6 +60,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.function.Consumer;
 import org.megamek.launcher.design.swing.TokenButtons;
 import org.megamek.launcher.design.swing.TokenTabs;
+import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.release.ReleaseNotes;
 
 /**
@@ -71,8 +72,9 @@ import org.megamek.launcher.release.ReleaseNotes;
  * holds up the launcher.</p>
  */
 final class WhatsNewDialog extends JDialog {
-    static final String TITLE = "Release notes";
-    static final String LOADING = "Loading the release notes…";
+    private static final String BUNDLE = "org.megamek.launcher.gui.dialogs";
+    static final String TITLE = I18n.getTextAt(BUNDLE, "WhatsNewDialog.title");
+    static final String LOADING = I18n.getTextAt(BUNDLE, "WhatsNewDialog.loading");
 
     /** Loads the notes off the event thread. */
     @FunctionalInterface
@@ -156,7 +158,7 @@ final class WhatsNewDialog extends JDialog {
     void showNotes(ReleaseNotes.WhatsNew whatsNew) {
         // Where the change starts may only be known once the notes are loaded.
         if (whatsNew.since() != null && !content.subtitle().isVisible()) {
-            content.subtitle().setText("Everything that changed since " + plain(whatsNew.since()) + ".");
+            content.subtitle().setText(I18n.getFormattedTextAt(BUNDLE, "WhatsNewDialog.changedSince", plain(whatsNew.since())));
             content.subtitle().setVisible(true);
             content.panel().revalidate();
         }
@@ -178,7 +180,8 @@ final class WhatsNewDialog extends JDialog {
         for (ReleaseNotes.Application application : whatsNew.applications()) {
             JEditorPane notes = notesPane(scale, open);
             notes.setName("whatsNewNotes-" + application.product());
-            notes.getAccessibleContext().setAccessibleName(application.product() + " release notes");
+            notes.getAccessibleContext().setAccessibleName(
+                    I18n.getFormattedTextAt(BUNDLE, "WhatsNewDialog.productNotes", application.product()));
             notes.setText(html(scale, whatsNew, application));
             notes.setCaretPosition(0);
             tabs.addTab(application.product(), notesScroll(scale, notes));
@@ -203,7 +206,7 @@ final class WhatsNewDialog extends JDialog {
         heading.setAlignmentX(Component.LEFT_ALIGNMENT);
 
         String sinceText = ReleaseNotes.combines(since, version)
-                ? "Everything that changed since " + plain(since) + "." : "";
+                ? I18n.getFormattedTextAt(BUNDLE, "WhatsNewDialog.changedSince", plain(since)) : "";
         JLabel subtitle = new JLabel(sinceText);
         subtitle.setName("whatsNewSince");
         subtitle.setForeground(FirstLaunchPanel.MUTED);
@@ -214,7 +217,7 @@ final class WhatsNewDialog extends JDialog {
 
         JEditorPane notes = notesPane(scale, open);
         notes.setName("whatsNewNotes");
-        notes.getAccessibleContext().setAccessibleName("Release notes");
+        notes.getAccessibleContext().setAccessibleName(I18n.getTextAt(BUNDLE, "WhatsNewDialog.notesName"));
         notes.setText(page(scale, "<p class='muted'>" + escape(LOADING) + "</p>"));
 
         JPanel body = new JPanel(new BorderLayout());
@@ -228,7 +231,7 @@ final class WhatsNewDialog extends JDialog {
         top.add(heading);
         top.add(subtitle);
 
-        JButton closeButton = new FirstLaunchButton("Close", "closeWhatsNewButton", true, scale,
+        JButton closeButton = new FirstLaunchButton(I18n.getTextAt(BUNDLE, "WhatsNewDialog.close"), "closeWhatsNewButton", true, scale,
                 FirstLaunchButton.Size.SMALL);
         closeButton.addActionListener(event -> close.run());
         footer.primary(closeButton);
@@ -275,7 +278,8 @@ final class WhatsNewDialog extends JDialog {
     }
 
     static String heading(String version) {
-        return version == null || version.isBlank() ? TITLE : "What's new in " + plain(version);
+        return version == null || version.isBlank() ? TITLE
+                : I18n.getFormattedTextAt(BUNDLE, "WhatsNewDialog.headingVersion", plain(version));
     }
 
     /**
@@ -285,40 +289,41 @@ final class WhatsNewDialog extends JDialog {
     static String html(GuiScale scale, ReleaseNotes.WhatsNew whatsNew, ReleaseNotes.Application application) {
         StringBuilder html = new StringBuilder();
         if (whatsNew == null) {
-            html.append("<p class='muted'>The release notes could not be loaded right now. ")
-                    .append("<a href='https://github.com/MegaMek/megamek/releases'>")
-                    .append("Read them on GitHub</a>.</p>");
+            html.append("<p class='muted'>").append(I18n.getTextAt(BUNDLE, "WhatsNewDialog.loadFailed"))
+                    .append("</p>");
             return page(scale, html.toString());
         }
         if (application == null) {
-            return page(scale, "<p class='muted'>There are no release notes to show.</p>");
+            return page(scale, "<p class='muted'>" + I18n.getTextAt(BUNDLE, "WhatsNewDialog.noNotes") + "</p>");
         }
         // The dialog heading names the version and start the applications share; others say their own.
-        String intro = same(application.version(), whatsNew.version()) ? ""
-                : "Version " + plain(application.version());
-        if (application.since() != null && !same(application.since(), whatsNew.since())) {
-            intro += intro.isEmpty() ? "Everything that changed since " + plain(application.since())
-                    : ", everything that changed since " + plain(application.since());
-        }
+        boolean ownVersion = !same(application.version(), whatsNew.version());
+        boolean ownSince = application.since() != null && !same(application.since(), whatsNew.since());
+        String intro = ownVersion && ownSince
+                ? I18n.getFormattedTextAt(BUNDLE, "WhatsNewDialog.versionChangedSince", plain(application.version()), plain(application.since()))
+                : ownVersion ? I18n.getFormattedTextAt(BUNDLE, "WhatsNewDialog.version", plain(application.version()))
+                : ownSince ? I18n.getFormattedTextAt(BUNDLE, "WhatsNewDialog.changedSince", plain(application.since()))
+                : "";
         html.append("<p class='muted'>");
-        if (!intro.isEmpty()) html.append(escape(intro)).append(". ");
+        if (!intro.isEmpty()) html.append(escape(intro)).append(" ");
         html.append("<a class='quiet' href='").append(escape(application.page().toString()))
-                .append("'>View on GitHub</a></p>");
+                .append("'>").append(I18n.getTextAt(BUNDLE, "WhatsNewDialog.viewOnGitHub")).append("</a></p>");
         if (application.problem() != null) {
             html.append("<p class='muted'>").append(escape(application.problem())).append("</p>");
         } else if (application.releases().isEmpty()) {
-            html.append("<p class='muted'>No changes are listed for this version.</p>");
+            html.append("<p class='muted'>").append(I18n.getTextAt(BUNDLE, "WhatsNewDialog.noChanges")).append("</p>");
         }
         if (application.incomplete()) {
-            html.append("<p class='muted'>Some older changes are not shown here. ")
-                    .append("<a href='").append(escape(application.page().toString()))
-                    .append("'>See every release on GitHub</a>.</p>");
+            html.append("<p class='muted'>")
+                    .append(I18n.getFormattedTextAt(BUNDLE, "WhatsNewDialog.incomplete", escape(application.page().toString())))
+                    .append("</p>");
         }
         boolean several = application.since() != null || application.tags().size() > 1;
         for (ReleaseNotes.Release release : application.releases()) {
             if (several) {
                 html.append("<h3>").append(escape(plain(release.tag()))).append(" <a class='quiet' href='")
-                        .append(escape(release.page().toString())).append("'>View on GitHub</a></h3>");
+                        .append(escape(release.page().toString())).append("'>")
+                        .append(I18n.getTextAt(BUNDLE, "WhatsNewDialog.viewOnGitHub")).append("</a></h3>");
             }
             String sectionTag = several ? "h4" : "h3";
             for (ReleaseNotes.Section section : release.sections()) {

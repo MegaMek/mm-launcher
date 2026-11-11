@@ -44,6 +44,7 @@ import org.megamek.launcher.channel.SelectedChannelReleaseCatalog;
 import org.megamek.launcher.diagnostics.BugReport;
 import org.megamek.launcher.diagnostics.OperationLogStore;
 import org.megamek.launcher.diagnostics.SanitizedErrors;
+import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.launch.ApplicationLauncher;
 import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.launch.LaunchObserver;
@@ -101,6 +102,7 @@ import java.util.Map;
  * process tests can exercise it with fake transports/runners and disposable registries.
  */
 public class LauncherServices {
+    private static final String BUNDLE = "org.megamek.launcher.gui.dialogs";
     private final Path registry;
     private final RegistryStore store;
     private final InstallationInspector inspector;
@@ -449,10 +451,11 @@ public class LauncherServices {
         }
         context.finish(OperationOutcome.FAILED, "Launcher error");
         try {
-            return "Saved local diagnostics to " + collector.persist(error);
+            return I18n.getFormattedTextAt(BUNDLE, "LauncherServices.diagnosticsSaved",
+                    String.valueOf(collector.persist(error)));
         } catch (IOException | RuntimeException loggingFailure) {
-            return "Local diagnostics could not be saved: "
-                    + SanitizedErrors.display(loggingFailure);
+            return I18n.getFormattedTextAt(BUNDLE, "LauncherServices.diagnosticsNotSaved",
+                    SanitizedErrors.display(loggingFailure));
         }
     }
 
@@ -639,18 +642,15 @@ public class LauncherServices {
                     || !current.observedBuild().equals(record.observedBuild())
                     || !current.products().equals(record.products())) {
                 return new HomeState(data, record, null,
-                        "The preferred copy no longer matches its registered build or program "
-                                + "layout. Use Manage installations to remove it, select another "
-                                + "copy, or recover an interrupted update.", eligibility, pending,
+                        I18n.getTextAt(BUNDLE, "LauncherServices.preferredCopyChanged"), eligibility, pending,
                         channel, Map.of(), Map.of());
             }
             return new HomeState(data, record, current, null, eligibility, pending, channel,
                     Map.of(), Map.of());
         } catch (IOException | RuntimeException e) {
             return new HomeState(data, record, null,
-                    "The preferred copy is unavailable: " + detail(e)
-                            + ". Use recovery if an update was interrupted, or Manage "
-                            + "installations.", eligibility, pending, channel, Map.of(), Map.of());
+                    I18n.getFormattedTextAt(BUNDLE, "LauncherServices.preferredCopyUnavailable", detail(e)),
+                    eligibility, pending, channel, Map.of(), Map.of());
         }
     }
 

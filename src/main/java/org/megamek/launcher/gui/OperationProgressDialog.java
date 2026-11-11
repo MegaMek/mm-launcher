@@ -34,6 +34,7 @@
 package org.megamek.launcher.gui;
 
 import org.megamek.launcher.diagnostics.SanitizedErrors;
+import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationOutcome;
 import org.megamek.launcher.operation.OperationPhase;
@@ -79,6 +80,7 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 final class OperationProgressDialog extends JDialog implements OperationProgressListener {
     static final String OPERATION_CONTROL = "mmLauncherOperationControl";
+    private static final String BUNDLE = "org.megamek.launcher.gui.dialogs";
     static final Color BACKGROUND = LauncherTheme.BACKGROUND;
     static final Color PANEL = LauncherTheme.PANEL;
     static final Color ACCENT = LauncherTheme.ACCENT;
@@ -90,8 +92,9 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
 
     private final GuiScale scale = GuiScale.DEFAULT;
     private final JLabel operationName = new JLabel();
-    private final JLabel phase = new JLabel("Getting ready");
-    private final JLabel detail = new JLabel("Preparing the operation…");
+    private final JLabel phase = new JLabel(I18n.getTextAt(BUNDLE, "OperationProgressDialog.gettingReady"));
+    private final JLabel detail =
+            new JLabel(I18n.getTextAt(BUNDLE, "OperationProgressDialog.preparingOperation"));
     private final JLabel loggingWarning = new JLabel();
     private final JProgressBar progress = new JProgressBar();
     private final Component beforeProgress =
@@ -99,9 +102,10 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
     private final Component afterProgress =
             Box.createVerticalStrut(scale.space("md"));
     private final JTextArea log;
-    private final JButton cancel = control("Cancel", "operationCancelButton");
-    private final JButton viewDetails =
-            control("View details", "operationViewDetailsButton");
+    private final JButton cancel =
+            control(I18n.getTextAt(BUNDLE, "OperationProgressDialog.cancel"), "operationCancelButton");
+    private final JButton viewDetails = control(
+            I18n.getTextAt(BUNDLE, "OperationProgressDialog.viewDetails"), "operationViewDetailsButton");
     private final List<JComponent> footerTools = new ArrayList<>();
     private final List<JButton> footerActions = new ArrayList<>();
     private final JPanel actions = new JPanel(new DialogFooter.FooterLayout(footerTools, footerActions,
@@ -159,7 +163,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         progress.setStringPainted(true);
         progress.setFont(scale.font(progress.getFont(), "label"));
         progress.setIndeterminate(true);
-        progress.setString("Starting…");
+        progress.setString(I18n.getTextAt(BUNDLE, "OperationProgressDialog.starting"));
         progress.setAlignmentX(LEFT_ALIGNMENT);
         progress.setUI(new BasicProgressBarUI() {
             @Override protected Color getSelectionBackground() {
@@ -230,7 +234,8 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
             if (failure == null) {
                 this.showLogs.run();
             } else {
-                owner.showOperationFailureDetails(heading + " details", failure);
+                owner.showOperationFailureDetails(I18n.getFormattedTextAt(BUNDLE,
+                        "OperationProgressDialog.failureDetailsTitle", heading), failure);
             }
         });
         addWindowListener(new WindowAdapter() {
@@ -285,7 +290,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
     }
 
     void showRepairComplete(String message, String caveat) {
-        showWarning("Repair complete", message);
+        showWarning(I18n.getTextAt(BUNDLE, "OperationProgressDialog.repairComplete"), message);
         if (caveat != null) {
             loggingWarning.setText(caveat);
             loggingWarning.setVisible(true);
@@ -337,7 +342,8 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         beforeProgress.setVisible(false);
         afterProgress.setVisible(false);
         operationName.setVisible(false);
-        phase.setText(heading == null || heading.isBlank() ? "Operation failed" : heading);
+        phase.setText(heading == null || heading.isBlank()
+                ? I18n.getTextAt(BUNDLE, "OperationProgressDialog.operationFailed") : heading);
         detail.setBorder(BorderFactory.createEmptyBorder(
                 scale.space("md"), 0, 0, 0));
         String summary = failureSummary != null
@@ -349,7 +355,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         loggingWarning.setVisible(false);
         if (!expectedFailure && logWarning != null && !logWarning.isBlank()) {
             loggingWarning.setText(
-                    "Local diagnostics could not be saved. The original failure is unchanged.");
+                    I18n.getTextAt(BUNDLE, "OperationProgressDialog.diagnosticsNotSaved"));
             loggingWarning.setBorder(BorderFactory.createEmptyBorder(
                     scale.space("md"), 0, 0, 0));
             loggingWarning.setVisible(true);
@@ -392,19 +398,22 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         for (JButton button : contextualActions) {
             button.setVisible(false);
         }
-        viewDetails.setText("View logs");
-        viewDetails.getAccessibleContext().setAccessibleName("View logs");
+        String viewLogs = I18n.getTextAt(BUNDLE, "OperationProgressDialog.viewLogs");
+        viewDetails.setText(viewLogs);
+        viewDetails.getAccessibleContext().setAccessibleName(viewLogs);
         viewDetails.getAccessibleContext().setAccessibleDescription(
-                "Open local operation logs.");
+                I18n.getTextAt(BUNDLE, "OperationProgressDialog.viewLogsDescription"));
         viewDetails.setVisible(true);
         showResultFooter();
     }
 
     /** Turns Cancel into Close at the end of the footer, which appears now that there is a result. */
     private void showResultFooter() {
-        cancel.setText("Close");
-        cancel.getAccessibleContext().setAccessibleName("Close");
-        cancel.getAccessibleContext().setAccessibleDescription("Operation control: Close");
+        String close = I18n.getTextAt(BUNDLE, "OperationProgressDialog.close");
+        cancel.setText(close);
+        cancel.getAccessibleContext().setAccessibleName(close);
+        cancel.getAccessibleContext().setAccessibleDescription(
+                I18n.getFormattedTextAt(BUNDLE, "OperationProgressDialog.controlDescription", close));
         cancel.setToolTipText(null);
         cancel.setEnabled(true);
         cancel.setVisible(true);
@@ -494,7 +503,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         cancel.setEnabled(false);
         cancel.setVisible(false);
         if (request.accepted()) {
-            detail.setText("Cancelling safely…");
+            detail.setText(I18n.getTextAt(BUNDLE, "OperationProgressDialog.cancellingSafely"));
             if (request.closeFailure() != null) {
                 append("\nCancellation resource-close warning: "
                         + SanitizedErrors.display(request.closeFailure()) + "\n");
@@ -528,18 +537,20 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
                     Math.round(100.0 * event.completed() / event.total()));
             progress.setValue(value);
             if (event.unit() == ProgressUnit.BYTES) {
-                progress.setString(value + "%");
+                progress.setString(I18n.getFormattedTextAt(BUNDLE, "OperationProgressDialog.percent",
+                        String.valueOf(value)));
             } else if (event.unit() == ProgressUnit.FILES) {
-                progress.setString(NumberFormat.getIntegerInstance().format(event.completed())
-                        + " / " + NumberFormat.getIntegerInstance().format(event.total())
-                        + " files");
+                progress.setString(I18n.getFormattedTextAt(BUNDLE, "OperationProgressDialog.filesCount",
+                        NumberFormat.getIntegerInstance().format(event.completed()),
+                        NumberFormat.getIntegerInstance().format(event.total())));
             } else {
-                progress.setString(value + "%");
+                progress.setString(I18n.getFormattedTextAt(BUNDLE, "OperationProgressDialog.percent",
+                        String.valueOf(value)));
             }
         } else {
             progress.setStringPainted(true);
             progress.setIndeterminate(true);
-            progress.setString("Working…");
+            progress.setString(I18n.getTextAt(BUNDLE, "OperationProgressDialog.working"));
         }
         progress.getAccessibleContext().setAccessibleDescription(repairProgress
                 && event.phase() != OperationPhase.DOWNLOAD
@@ -549,35 +560,36 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         cancel.setEnabled(cancellationAllowed);
         cancel.setVisible(cancellationAllowed);
         cancel.setToolTipText(cancellationAllowed
-                ? "Cancel at the next safe checkpoint" : null);
+                ? I18n.getTextAt(BUNDLE, "OperationProgressDialog.cancelTooltip") : null);
         detail.setText(repairProgress
                 ? event.phase() == OperationPhase.DOWNLOAD
                         && event.unit() == ProgressUnit.BYTES && event.total() > 0
                         ? progressDetail(event)
-                        : "Please keep the launcher open until repair finishes."
+                        : I18n.getTextAt(BUNDLE, "OperationProgressDialog.keepOpenForRepair")
                 : cancellationAllowed ? progressDetail(event) : nonCancellableDetail(event));
     }
 
     private static String repairPhaseName(OperationProgress event) {
         return switch (event.phase()) {
-            case METADATA, DOWNLOAD -> "Downloading installation files";
-            case VERIFY, EXTRACT, PLAN, PREPARE_INSTALL -> "Preparing installation files";
-            case APPLY -> "Repairing installation";
-            default -> "Finishing up";
+            case METADATA, DOWNLOAD -> I18n.getTextAt(BUNDLE, "OperationProgressDialog.repairDownloading");
+            case VERIFY, EXTRACT, PLAN, PREPARE_INSTALL ->
+                    I18n.getTextAt(BUNDLE, "OperationProgressDialog.repairPreparing");
+            case APPLY -> I18n.getTextAt(BUNDLE, "OperationProgressDialog.repairApplying");
+            default -> I18n.getTextAt(BUNDLE, "OperationProgressDialog.repairFinishing");
         };
     }
 
     private static String phaseName(OperationProgress event) {
         if (event.operationType() == OperationType.UNINSTALL
                 && event.phase() == OperationPhase.PLAN) {
-            return "Checking installation files";
+            return I18n.getTextAt(BUNDLE, "OperationProgressDialog.checkingInstallationFiles");
         }
         if (event.operationType() == OperationType.ADOPT_EXISTING) {
             if (event.phase() == OperationPhase.PREPARE_INSTALL) {
-                return "Final local check";
+                return I18n.getTextAt(BUNDLE, "OperationProgressDialog.finalLocalCheck");
             }
             if (event.phase() == OperationPhase.APPLY) {
-                return "Enabling managed updates";
+                return I18n.getTextAt(BUNDLE, "OperationProgressDialog.enablingManagedUpdates");
             }
         }
         return event.phase().displayName();
@@ -586,9 +598,8 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
     private String nonCancellableDetail(OperationProgress event) {
         if (event.operationType() == OperationType.ADOPT_EXISTING) {
             return event.phase() == OperationPhase.APPLY
-                    ? "Publishing managed-update metadata — do not close the launcher."
-                    : "Final checks complete; metadata publication is starting — "
-                    + "do not close the launcher.";
+                    ? I18n.getTextAt(BUNDLE, "OperationProgressDialog.publishingMetadataDoNotClose")
+                    : I18n.getTextAt(BUNDLE, "OperationProgressDialog.finalChecksCompleteDoNotClose");
         }
         return finishingMessage(event.operationType(), event.cancellationReason());
     }
@@ -597,13 +608,13 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         if (event.phase() == OperationPhase.DOWNLOAD
                 && event.unit() == ProgressUnit.BYTES
                 && event.completed() >= 0 && event.total() > 0) {
-            return "Downloaded " + humanSize(event.completed())
-                    + " of " + humanSize(event.total());
+            return I18n.getFormattedTextAt(BUNDLE, "OperationProgressDialog.downloadedOf",
+                    humanSize(event.completed()), humanSize(event.total()));
         }
         if (event.phase() == OperationPhase.EXTRACT
                 && event.unit() == ProgressUnit.FILES && event.completed() >= 0) {
-            return NumberFormat.getIntegerInstance().format(event.completed())
-                    + " files processed";
+            return I18n.getFormattedTextAt(BUNDLE, "OperationProgressDialog.filesProcessed",
+                    NumberFormat.getIntegerInstance().format(event.completed()));
         }
         String supplied = safeEventDetail(event.detail());
         return supplied == null ? phaseDetail(event.phase(), event.operationType()) : supplied;
@@ -614,13 +625,13 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
                 && event.unit() == ProgressUnit.BYTES && event.total() > 0) {
             long percentage = Math.min(100,
                     Math.round(100.0 * event.completed() / event.total()));
-            return "Download " + percentage + " percent. Downloaded "
-                    + humanSize(event.completed()) + " of " + humanSize(event.total()) + ".";
+            return I18n.getFormattedTextAt(BUNDLE, "OperationProgressDialog.accessibleDownload",
+                    String.valueOf(percentage), humanSize(event.completed()), humanSize(event.total()));
         }
         if (event.phase() == OperationPhase.EXTRACT
                 && event.unit() == ProgressUnit.FILES && event.completed() >= 0) {
-            return NumberFormat.getIntegerInstance().format(event.completed())
-                    + " files processed.";
+            return I18n.getFormattedTextAt(BUNDLE, "OperationProgressDialog.accessibleFilesProcessed",
+                    NumberFormat.getIntegerInstance().format(event.completed()));
         }
         return phaseName(event);
     }
@@ -660,65 +671,65 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
     private String phaseDetail(OperationPhase current, OperationType type) {
         return switch (current) {
             case METADATA -> type == OperationType.IMPORT_EXISTING
-                    ? "Checking the selected installation…"
+                    ? I18n.getTextAt(BUNDLE, "OperationProgressDialog.checkingSelectedInstallation")
                     : type == OperationType.ADOPT_EXISTING
-                    ? "Checking existing installation…"
+                    ? I18n.getTextAt(BUNDLE, "OperationProgressDialog.checkingExistingInstallation")
                     : type == OperationType.UNINSTALL
                     || type == OperationType.UNINSTALL_RECOVERY
-                    ? "Checking uninstall recovery state…"
-                    : "Checking release information…";
-            case DOWNLOAD -> "Downloading the verified package…";
+                    ? I18n.getTextAt(BUNDLE, "OperationProgressDialog.checkingUninstallRecovery")
+                    : I18n.getTextAt(BUNDLE, "OperationProgressDialog.checkingReleaseInformation");
+            case DOWNLOAD -> I18n.getTextAt(BUNDLE, "OperationProgressDialog.downloadingPackage");
             case VERIFY -> type == OperationType.IMPORT_EXISTING
-                    ? "Checking installation compatibility…"
+                    ? I18n.getTextAt(BUNDLE, "OperationProgressDialog.checkingCompatibility")
                     : type == OperationType.ADOPT_EXISTING
-                    ? "Comparing the existing files safely…"
-                    : "Checking the downloaded package…";
-            case EXTRACT -> "Processing application files…";
+                    ? I18n.getTextAt(BUNDLE, "OperationProgressDialog.comparingExistingFiles")
+                    : I18n.getTextAt(BUNDLE, "OperationProgressDialog.checkingDownloadedPackage");
+            case EXTRACT -> I18n.getTextAt(BUNDLE, "OperationProgressDialog.processingFiles");
             case PLAN -> type == OperationType.ADOPT_EXISTING
-                    ? "Checking official package…"
-                    : "Reviewing the planned changes…";
-            case AWAIT_CONSENT -> "Waiting for confirmation…";
+                    ? I18n.getTextAt(BUNDLE, "OperationProgressDialog.checkingOfficialPackage")
+                    : I18n.getTextAt(BUNDLE, "OperationProgressDialog.reviewingPlannedChanges");
+            case AWAIT_CONSENT -> I18n.getTextAt(BUNDLE, "OperationProgressDialog.waitingForConfirmation");
             case PREPARE_INSTALL -> type == OperationType.IMPORT_EXISTING
-                    ? "Registering the selected installation…"
+                    ? I18n.getTextAt(BUNDLE, "OperationProgressDialog.registeringSelectedInstallation")
                     : type == OperationType.ADOPT_EXISTING
-                    ? "Confirming installation has not changed…"
-                    : "Preparing the installation…";
+                    ? I18n.getTextAt(BUNDLE, "OperationProgressDialog.confirmingInstallationUnchanged")
+                    : I18n.getTextAt(BUNDLE, "OperationProgressDialog.preparingInstallation");
             case APPLY -> type == OperationType.ADOPT_EXISTING
-                    ? "Publishing managed-update metadata…"
-                    : "Applying the verified update…";
-            case UNINSTALL -> "Removing verified official files…";
-            case RECOVER -> "Repairing the interrupted update…";
-            case CLEANUP -> "Cleaning up temporary files…";
-            case FINAL -> "Completing the operation…";
+                    ? I18n.getTextAt(BUNDLE, "OperationProgressDialog.publishingMetadata")
+                    : I18n.getTextAt(BUNDLE, "OperationProgressDialog.applyingUpdate");
+            case UNINSTALL -> I18n.getTextAt(BUNDLE, "OperationProgressDialog.removingOfficialFiles");
+            case RECOVER -> I18n.getTextAt(BUNDLE, "OperationProgressDialog.repairingInterruptedUpdate");
+            case CLEANUP -> I18n.getTextAt(BUNDLE, "OperationProgressDialog.cleaningUp");
+            case FINAL -> I18n.getTextAt(BUNDLE, "OperationProgressDialog.completingOperation");
         };
     }
 
     private String finishingMessage(OperationType type, String reason) {
         if (reason != null && reason.toLowerCase(java.util.Locale.ROOT)
                 .contains("accepted")) {
-            return "Cancelling safely…";
+            return I18n.getTextAt(BUNDLE, "OperationProgressDialog.cancellingSafely");
         }
-        String operation = switch (type) {
-            case FRESH_INSTALL -> "installation";
-            case IMPORT_EXISTING -> "import";
-            case ADOPT_EXISTING -> "verification";
-            case UPDATE_PREVIEW -> "preview";
-            case UPDATE_APPLY -> "update";
-            case LAUNCHER_UPDATE -> "launcher update";
-            case RECOVERY -> "recovery";
-            case UNINSTALL -> "uninstall";
-            case UNINSTALL_RECOVERY -> "uninstall recovery";
-            case REPAIR -> "repair";
-            case GUI_ERROR -> "operation";
+        return switch (type) {
+            case FRESH_INSTALL -> I18n.getTextAt(BUNDLE, "OperationProgressDialog.finishingInstallation");
+            case IMPORT_EXISTING -> I18n.getTextAt(BUNDLE, "OperationProgressDialog.finishingImport");
+            case ADOPT_EXISTING -> I18n.getTextAt(BUNDLE, "OperationProgressDialog.finishingVerification");
+            case UPDATE_PREVIEW -> I18n.getTextAt(BUNDLE, "OperationProgressDialog.finishingPreview");
+            case UPDATE_APPLY -> I18n.getTextAt(BUNDLE, "OperationProgressDialog.finishingUpdate");
+            case LAUNCHER_UPDATE -> I18n.getTextAt(BUNDLE, "OperationProgressDialog.finishingLauncherUpdate");
+            case RECOVERY -> I18n.getTextAt(BUNDLE, "OperationProgressDialog.finishingRecovery");
+            case UNINSTALL -> I18n.getTextAt(BUNDLE, "OperationProgressDialog.finishingUninstall");
+            case UNINSTALL_RECOVERY ->
+                    I18n.getTextAt(BUNDLE, "OperationProgressDialog.finishingUninstallRecovery");
+            case REPAIR -> I18n.getTextAt(BUNDLE, "OperationProgressDialog.finishingRepair");
+            case GUI_ERROR -> I18n.getTextAt(BUNDLE, "OperationProgressDialog.finishingOperation");
         };
-        return "Finishing " + operation + " — do not close the launcher.";
     }
 
     private String conciseFailure(Throwable problem) {
-        if (problem == null) return "The operation could not be completed.";
+        if (problem == null) return I18n.getTextAt(BUNDLE, "OperationProgressDialog.couldNotComplete");
         String message = problem.getMessage();
         if (message == null || message.isBlank()) {
-            return "The operation could not be completed.";
+            return I18n.getTextAt(BUNDLE, "OperationProgressDialog.couldNotComplete");
         }
         return concise(SanitizedErrors.text(message));
     }
@@ -736,7 +747,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         button.putClientProperty(OPERATION_CONTROL, Boolean.TRUE);
         button.getAccessibleContext().setAccessibleName(text);
         button.getAccessibleContext().setAccessibleDescription(
-                "Operation control: " + text);
+                I18n.getFormattedTextAt(BUNDLE, "OperationProgressDialog.controlDescription", text));
         return button;
     }
 
