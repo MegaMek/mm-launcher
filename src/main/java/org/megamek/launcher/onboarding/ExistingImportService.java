@@ -33,6 +33,7 @@
 
 package org.megamek.launcher.onboarding;
 
+import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationPhase;
 import org.megamek.launcher.registry.RegistryStore;
@@ -51,6 +52,7 @@ import java.util.Objects;
  * and is deliberately not read or executed by either operation.
  */
 public final class ExistingImportService {
+    private static final String BUNDLE = "org.megamek.launcher.services";
     private final Path registry;
     private final RegistryStore registries;
     private final InstallationInspector inspector;
@@ -67,7 +69,7 @@ public final class ExistingImportService {
             throws IOException, InterruptedException {
         requireContext(context);
         context.phase(OperationPhase.METADATA,
-                "Statically inspecting the selected existing installation");
+                I18n.getTextAt(BUNDLE, "ExistingImportService.inspecting"));
         Inspection inspection = inspector.inspect(selectedRoot);
         context.checkpoint();
         return new Plan(inspection);
@@ -82,12 +84,12 @@ public final class ExistingImportService {
         if (plan == null) throw new IOException("a confirmed existing-copy plan is required");
         requireContext(context);
         context.phase(OperationPhase.VERIFY,
-                "Revalidating the selected application");
+                I18n.getTextAt(BUNDLE, "ExistingImportService.revalidating"));
         context.checkpoint();
         context.enterFinalization("Existing-copy registration has begun; cancellation can no "
                 + "longer be performed safely.");
         context.phase(OperationPhase.PREPARE_INSTALL,
-                "Atomically registering the confirmed launch-only copy");
+                I18n.getTextAt(BUNDLE, "ExistingImportService.registering"));
         ensureRegistryParent();
         RegistryStore.ImportedRegistration registered = registries.registerImported(
                 registry, name, plan.inspection());

@@ -33,26 +33,36 @@
 
 package org.megamek.launcher.operation;
 
+import org.megamek.launcher.internationalization.I18n;
+
 public enum OperationType {
-    FRESH_INSTALL("Fresh install"),
-    IMPORT_EXISTING("Import existing installation"),
-    ADOPT_EXISTING("Enable managed updates"),
-    UPDATE_PREVIEW("Update preview"),
-    UPDATE_APPLY("Update"),
-    LAUNCHER_UPDATE("Launcher update"),
-    RECOVERY("Update recovery"),
-    UNINSTALL("Uninstall"),
-    UNINSTALL_RECOVERY("Uninstall recovery"),
-    REPAIR("Repair"),
-    GUI_ERROR("Launcher error");
+    FRESH_INSTALL,
+    IMPORT_EXISTING,
+    ADOPT_EXISTING,
+    UPDATE_PREVIEW,
+    UPDATE_APPLY,
+    LAUNCHER_UPDATE,
+    RECOVERY,
+    UNINSTALL,
+    UNINSTALL_RECOVERY,
+    REPAIR,
+    GUI_ERROR;
 
-    private final String displayName;
-
-    OperationType(String displayName) {
-        this.displayName = displayName;
-    }
+    private static final String BUNDLE = "org.megamek.launcher.services";
 
     public String displayName() {
-        return displayName;
+        return switch (this) {
+            case FRESH_INSTALL -> I18n.getTextAt(BUNDLE, "OperationType.freshInstall");
+            case IMPORT_EXISTING -> I18n.getTextAt(BUNDLE, "OperationType.importExisting");
+            case ADOPT_EXISTING -> I18n.getTextAt(BUNDLE, "OperationType.adoptExisting");
+            case UPDATE_PREVIEW -> I18n.getTextAt(BUNDLE, "OperationType.updatePreview");
+            case UPDATE_APPLY -> I18n.getTextAt(BUNDLE, "OperationType.updateApply");
+            case LAUNCHER_UPDATE -> I18n.getTextAt(BUNDLE, "OperationType.launcherUpdate");
+            case RECOVERY -> I18n.getTextAt(BUNDLE, "OperationType.recovery");
+            case UNINSTALL -> I18n.getTextAt(BUNDLE, "OperationType.uninstall");
+            case UNINSTALL_RECOVERY -> I18n.getTextAt(BUNDLE, "OperationType.uninstallRecovery");
+            case REPAIR -> I18n.getTextAt(BUNDLE, "OperationType.repair");
+            case GUI_ERROR -> I18n.getTextAt(BUNDLE, "OperationType.guiError");
+        };
     }
 }

@@ -37,6 +37,7 @@ import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.launch.RootCoordinator;
 import org.megamek.launcher.manifest.FileEntry;
@@ -90,6 +91,7 @@ import java.util.regex.Pattern;
  * files and launcher metadata.</p>
  */
 public final class UninstallService {
+    private static final String BUNDLE = "org.megamek.launcher.services";
     public static final int JOURNAL_SCHEMA = 1;
     public static final String CONFIRMATION = "UNINSTALL-OFFICIAL-FILES";
     /** Runtime caches the applications rebuild from package data on the next start. */
@@ -309,7 +311,7 @@ public final class UninstallService {
                     }
                     cleanupEmptyMetadataParents();
                     return new Result(false, false, warning == null
-                            ? "Removal completed after a registry close warning."
+                            ? I18n.getTextAt(BUNDLE, "UninstallService.removalCompletedAfterWarning")
                             : warning);
                 }
                 try {
@@ -331,8 +333,8 @@ public final class UninstallService {
                 failureHook.at("remove-after-registry");
                 warning = cleanupRemoval(removal);
             } catch (IOException | RuntimeException failure) {
-                warning = "Registration removed, but launcher metadata cleanup is still required: "
-                        + detail(failure);
+                warning = I18n.getFormattedTextAt(BUNDLE,
+                    "UninstallService.metadataCleanupRequired", detail(failure));
             }
             if (pendingJournal != null) {
                 String recoveryWarning = cleanupMissingJournal(pendingJournal);
@@ -405,7 +407,7 @@ public final class UninstallService {
                 }
                 String warning = cleanupRemoval(removal);
                 if (warning != null || !hasUninstallPending(expected.id())) {
-                    return new RecoveryResult(true, "Registration removal cleanup completed.", warning);
+                    return new RecoveryResult(true, I18n.getTextAt(BUNDLE, "UninstallService.registrationRemovalCleanupCompleted"), warning);
                 }
             } else {
                 requireExact(current, expected);
@@ -416,7 +418,7 @@ public final class UninstallService {
                 }
                 if (!hasUninstallPending(expected.id())) {
                     return new RecoveryResult(false,
-                            "Registration removal was rolled back; the copy remains registered.", null);
+                            I18n.getTextAt(BUNDLE, "UninstallService.registrationRemovalRolledBack"), null);
                 }
             }
         }
@@ -432,18 +434,17 @@ public final class UninstallService {
                         + "absent without a commit authorization");
             }
             String warning = cleanupCommitted(journal);
-            return new RecoveryResult(true, "Uninstall cleanup completed.", warning);
+            return new RecoveryResult(true, I18n.getTextAt(BUNDLE, "UninstallService.cleanupCompleted"), warning);
         }
         try (OperationContext.WorkerRegistration ignoredOperation = context.activate();
              RootCoordinator.Lease ignored = coordinator.acquireForRecovery(root, false)) {
-            context.phase(OperationPhase.RECOVER, "Restoring interrupted uninstall");
+            context.phase(OperationPhase.RECOVER, I18n.getTextAt(BUNDLE, "UninstallService.restoringInterrupted"));
             if (!journal.rootRemovalStarted()) requirePresent(expected);
             ensureRootForRecovery(root, journal);
             requireExact(current, expected);
             IOException failure = rollback(journal);
             if (failure != null) throw failure;
-            return new RecoveryResult(false, "Uninstall was rolled back; the copy remains "
-                    + "registered.", null);
+            return new RecoveryResult(false, I18n.getTextAt(BUNDLE, "UninstallService.rolledBack"), null);
         }
     }
 
@@ -487,7 +488,7 @@ public final class UninstallService {
         if (context.latest() == null
                 || context.latest().phase().ordinal() < OperationPhase.PLAN.ordinal()) {
             context.phase(OperationPhase.METADATA,
-                    "Validating managed installation ownership");
+                    I18n.getTextAt(BUNDLE, "UninstallService.validatingOwnership"));
         }
         RegistryData data = registries.read(registry);
         InstallationRecord record = registries.resolve(data, expected.id());
@@ -507,7 +508,7 @@ public final class UninstallService {
         adoptions.validateForUse(registry, record, receipt, current, fixed.preference());
         Path root = StrictPathSafety.requireDirectory(Path.of(record.canonicalRoot()),
                 "uninstall root");
-        context.phase(OperationPhase.PLAN, "Comparing official application files");
+        context.phase(OperationPhase.PLAN, I18n.getTextAt(BUNDLE, "UninstallService.comparingFiles"));
         List<PlanEntry> entries = new ArrayList<>();
         Set<String> directories = new HashSet<>();
         for (String protectedPath : current.officialManifest().protectedPaths()) {
@@ -521,7 +522,7 @@ public final class UninstallService {
                 // A shipped cache is rewritten by the applications; it is planned as a cache below.
                 context.progress(OperationPhase.PLAN, ++completed,
                         current.officialManifest().files().size(), ProgressUnit.FILES,
-                        "Compared official application files");
+                        I18n.getTextAt(BUNDLE, "UninstallService.comparedFiles"));
                 continue;
             }
             Path file;
@@ -552,7 +553,7 @@ public final class UninstallService {
             }
             context.progress(OperationPhase.PLAN, ++completed,
                     current.officialManifest().files().size(), ProgressUnit.FILES,
-                    "Compared official application files");
+                    I18n.getTextAt(BUNDLE, "UninstallService.comparedFiles"));
         }
         Set<String> planned = new HashSet<>();
         entries.forEach(entry -> planned.add(entry.relativePath().toLowerCase(Locale.ROOT)));
@@ -768,7 +769,7 @@ public final class UninstallService {
             journal = withPhase(journal, "MOVING_FILES");
             writeJournal(journal);
             context.phase(OperationPhase.UNINSTALL,
-                    "Moving verified official files to recovery");
+                    I18n.getTextAt(BUNDLE, "UninstallService.movingToRecovery"));
             int moved = 0;
             for (int i = 0; i < journal.files().size(); i++) {
                 UninstallJournal.FileMove move = journal.files().get(i);
@@ -782,7 +783,7 @@ public final class UninstallService {
                 atomicMove(source, destination);
                 failureHook.at("file-moved");
                 context.progress(OperationPhase.UNINSTALL, ++moved, journal.files().size(),
-                        ProgressUnit.FILES, "Secured official application files");
+                        ProgressUnit.FILES, I18n.getTextAt(BUNDLE, "UninstallService.securedFiles"));
             }
 
             journal = withPhase(journal, "REMOVING_DIRECTORIES");
@@ -847,8 +848,8 @@ public final class UninstallService {
             failureHook.at("after-registration-commit");
             warning = cleanupCommitted(journal);
         } catch (IOException | RuntimeException cleanupFailure) {
-            warning = "Uninstall completed, but launcher recovery files could not be cleaned: "
-                    + detail(cleanupFailure);
+            warning = I18n.getFormattedTextAt(BUNDLE,
+                    "UninstallService.recoveryFilesNotCleaned", detail(cleanupFailure));
         }
         boolean rootPresent = Files.exists(root, LinkOption.NOFOLLOW_LINKS);
         return new Result(true, rootPresent, warning);
@@ -951,8 +952,8 @@ public final class UninstallService {
         try {
             return cleanupCommitted(journal);
         } catch (IOException | RuntimeException failure) {
-            return "Registration removed, but uninstall recovery cleanup is still required: "
-                    + detail(failure);
+            return I18n.getFormattedTextAt(BUNDLE,
+                    "UninstallService.recoveryCleanupRequired", detail(failure));
         }
     }
 
@@ -1112,8 +1113,8 @@ public final class UninstallService {
             cleanupEmptyMetadataParents();
             return null;
         } catch (IOException | RuntimeException failure) {
-            return "Registration removed, but launcher metadata cleanup is still required: "
-                    + detail(failure);
+            return I18n.getFormattedTextAt(BUNDLE,
+                    "UninstallService.metadataCleanupRequired", detail(failure));
         }
     }
 

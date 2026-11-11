@@ -33,6 +33,7 @@
 
 package org.megamek.launcher.update;
 
+import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.launch.RootCoordinator;
 import org.megamek.launcher.manifest.FileEntry;
 import org.megamek.launcher.manifest.ManifestException;
@@ -58,6 +59,7 @@ import java.util.List;
  * copy it installed against their recorded SHA-256 without downloading anything.
  */
 public final class InstallationRepairService {
+    private static final String BUNDLE = "org.megamek.launcher.services";
     private final Path registry;
     private final RegistryStore store;
     private final InstallationInspector inspector;
@@ -165,7 +167,7 @@ public final class InstallationRepairService {
             for (int i = 0; i < files.size(); i++) {
                 FileEntry entry = files.get(i);
                 context.progress(OperationPhase.PLAN, i, files.size(), ProgressUnit.FILES,
-                        "Checking game files");
+                        I18n.getTextAt(BUNDLE, "InstallationRepairService.checkingGameFiles"));
                 if (UninstallService.REGENERABLE_CACHES.stream()
                         .anyMatch(cache -> cache.equalsIgnoreCase(entry.path()))) {
                     continue;

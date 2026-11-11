@@ -33,6 +33,7 @@
 
 package org.megamek.launcher.release;
 
+import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.onboarding.Inspection;
 import org.megamek.launcher.manifest.ManifestException;
 import org.megamek.launcher.operation.OperationContext;
@@ -58,6 +59,7 @@ import java.util.Optional;
 import java.util.Set;
 
 public final class FreshInstaller {
+    private static final String BUNDLE = "org.megamek.launcher.services";
     public static final long MAX_DOWNLOAD = 2L * 1024 * 1024 * 1024;
     private final ReleaseTransport transport;
     private final RegistryStore registryStore;
@@ -142,7 +144,7 @@ public final class FreshInstaller {
         }
         try (OperationContext.WorkerRegistration ignored = context.activate()) {
             context.phase(OperationPhase.METADATA,
-                    "Checking destination and registry safety");
+                    I18n.getTextAt(BUNDLE, "FreshInstaller.checkingDestination"));
             Path target = destination.toAbsolutePath().normalize();
             Path registryPath = registry.toAbsolutePath().normalize();
             Path parent = requireSafeParent(target);
@@ -155,7 +157,7 @@ public final class FreshInstaller {
                 ReleaseCatalog.Asset asset = workspace.asset();
                 Path extracted = workspace.extracted();
                 context.phase(OperationPhase.PLAN,
-                        "Inspecting the extracted application package");
+                        I18n.getTextAt(BUNDLE, "FreshInstaller.inspectingPackage"));
                 Inspection inspection = inspector.inspect(extracted);
                 Set<String> foundProducts = inspection.products().stream()
                         .map(product -> product.key()).collect(java.util.stream.Collectors.toSet());
@@ -179,7 +181,7 @@ public final class FreshInstaller {
                             + e.getMessage(), e);
                 }
                 context.phase(OperationPhase.PREPARE_INSTALL,
-                        "Rechecking the unpublished destination");
+                        I18n.getTextAt(BUNDLE, "FreshInstaller.recheckingDestination"));
                 if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
                     throw new FileAlreadyExistsException(
                             "destination appeared during install: " + target);
@@ -213,7 +215,7 @@ public final class FreshInstaller {
                             repository, release.tag(), asset.name(), asset.size(),
                             workspace.resolvedDigest().canonical(),
                             ownership);
-                    context.cleanupPhase("Removing the downloaded package workspace");
+                    context.cleanupPhase(I18n.getTextAt(BUNDLE, "FreshInstaller.removingWorkspace"));
                     return new Result(record, release, asset, target, receipt);
                 } catch (IOException e) {
                     throw new IOException("installation is valid and REGISTERED at " + target
