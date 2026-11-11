@@ -124,12 +124,11 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
 
     OperationProgressDialog(LauncherFrame owner, String title, String logName,
                             Runnable showLogs) {
-        super(owner, LauncherTheme.DIALOG_TITLE, false);
+        super(owner, title, false);
         this.owner = owner;
         this.showLogs = showLogs;
         setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
 
-        // The title bar names the launcher; the operation's name is this small line above the step.
         operationName.setName("operationNameLabel");
         operationName.setForeground(MUTED);
         operationName.setFont(scale.font(operationName.getFont(), "label"));
@@ -312,6 +311,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
     void setHeading(String next) {
         heading = next;
         operationName.setText(next);
+        setTitle(next);
         getAccessibleContext().setAccessibleName(next);
     }
 

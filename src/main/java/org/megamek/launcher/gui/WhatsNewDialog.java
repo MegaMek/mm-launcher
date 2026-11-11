@@ -98,7 +98,6 @@ final class WhatsNewDialog extends JDialog {
         setName("whatsNewDialog");
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         getAccessibleContext().setAccessibleName(TITLE);
-        LauncherTheme.useLauncherTitle(this);
         DialogFooter footer = new DialogFooter(scale);
         content = content(scale, since, version, open, this::dispose, footer);
         setContentPane(content.panel());

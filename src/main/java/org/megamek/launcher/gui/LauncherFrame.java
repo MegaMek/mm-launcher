@@ -2195,7 +2195,6 @@ public final class LauncherFrame extends JFrame {
         details.add(explanation);
 
         JDialog dialog = new JDialog(this, "Enable managed updates", false);
-        LauncherTheme.useLauncherTitle(dialog);
         dialog.setName("adoptionCandidateDialog");
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         JButton cancel = homeButton("Cancel", "cancelAdoptionButton");
@@ -2310,7 +2309,6 @@ public final class LauncherFrame extends JFrame {
         body.add(LauncherTheme.scrollPane(releases), BorderLayout.CENTER);
         body.add(actions, BorderLayout.SOUTH);
         JDialog dialog = new JDialog(this, "Choose official version", false);
-        LauncherTheme.useLauncherTitle(dialog);
         dialog.setName("adoptionReleaseBrowser");
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         dialog.setContentPane(body);
@@ -2593,7 +2591,6 @@ public final class LauncherFrame extends JFrame {
 
     private JDialog adoptionResultDialog(String title, JPanel body) {
         JDialog dialog = new JDialog(this, title, false);
-        LauncherTheme.useLauncherTitle(dialog);
         dialog.setName("adoptionResultDialog");
         dialog.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
         dialog.setContentPane(body);
@@ -2620,7 +2617,6 @@ public final class LauncherFrame extends JFrame {
 
     private void renameInstallation(InstallationRecord record) {
         JDialog dialog = new JDialog(this, "Rename installation", false);
-        LauncherTheme.useLauncherTitle(dialog);
         dialog.setName("renameInstallationDialog");
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         dialog.setResizable(false);
@@ -3717,7 +3713,6 @@ public final class LauncherFrame extends JFrame {
                 "Choose a detected Java runtime or browse for a Java home or executable.");
 
         JDialog dialog = new JDialog(this, title, false);
-        LauncherTheme.useLauncherTitle(dialog);
         dialog.setName("javaSelectionDialog");
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         JPanel body = new JPanel(new BorderLayout(guiScale.space("lg"),
@@ -4376,7 +4371,6 @@ public final class LauncherFrame extends JFrame {
 
             dialog = new JDialog(LauncherFrame.this,
                     "Install another version", false);
-            LauncherTheme.useLauncherTitle(dialog);
             dialog.setName("releasePickerDialog");
             dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
             dialog.setContentPane(body);
@@ -5422,7 +5416,6 @@ public final class LauncherFrame extends JFrame {
         scroll.getViewport().setBackground(FirstLaunchPanel.PANEL);
 
         JDialog viewer = new JDialog(this, "Local operation logs", false);
-        LauncherTheme.useLauncherTitle(viewer);
         viewer.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         JPanel body = new JPanel(new BorderLayout(guiScale.space("md"),
                 guiScale.space("md")));
@@ -5570,7 +5563,6 @@ public final class LauncherFrame extends JFrame {
 
     private JDialog dialog(String title, Component center, Component south, Dimension size) {
         JDialog dialog = new JDialog(this, title, false);
-        LauncherTheme.useLauncherTitle(dialog);
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         JPanel panel = new JPanel(new BorderLayout(guiScale.space("md"), guiScale.space("md")));
         panel.setBorder(guiScale.padding("xxl", "xxl"));

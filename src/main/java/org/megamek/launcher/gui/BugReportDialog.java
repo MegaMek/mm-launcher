@@ -90,7 +90,6 @@ final class BugReportDialog extends JDialog {
         setName("bugReportDialog");
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         getAccessibleContext().setAccessibleName(TITLE);
-        LauncherTheme.useLauncherTitle(this);
         content = content(scale, actions, this::dispose);
         setContentPane(content.panel());
         getRootPane().setDefaultButton(content.openIssueForm());
