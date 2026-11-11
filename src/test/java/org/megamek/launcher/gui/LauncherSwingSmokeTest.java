@@ -385,8 +385,20 @@ class LauncherSwingSmokeTest {
                     assertNotNull(component(frame, "launchOptionsForm"));
                     JButton java = find(frame, "changeDefaultJavaButton");
                     JButton logs = find(frame, "viewOperationLogsButton");
+                    JButton report = find(frame, "reportBugSettingsButton");
                     assertEquals(java.getSize(), logs.getSize());
-                    assertEquals(java.getSize(), find(frame, "reportBugSettingsButton").getSize());
+                    assertEquals(java.getSize(), report.getSize());
+                    assertEquals(logs.getY(), report.getY(), "diagnostic actions share one row");
+                    assertTrue(report.getX() >= logs.getX() + logs.getWidth());
+                    Component column = component(frame, "settingsLeftColumn");
+                    assertTrue(SwingUtilities.convertRectangle(report.getParent(), report.getBounds(), column)
+                            .getMaxX() <= column.getWidth(), "Report a bug fits its column");
+                    Component userDirectory = component(frame, "launchOptionsUserDirectory");
+                    JButton browse = find(frame, "launchOptionsBrowseUserDirectory");
+                    assertEquals(userDirectory.getY(), browse.getY(), "Browse sits beside the user directory");
+                    assertEquals(browse.getWidth(), browse.getHeight());
+                    assertEquals("Browse…", browse.getAccessibleContext().getAccessibleName());
+                    assertNull(find(frame, "launchOptionsClearUserDirectory"));
                     JButton update = find(frame, "checkLauncherUpdateButton");
                     if (update != null) assertEquals(java.getSize(), update.getSize());
                     return null;

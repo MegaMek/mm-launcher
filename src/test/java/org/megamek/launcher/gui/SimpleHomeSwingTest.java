@@ -1844,6 +1844,28 @@ class SimpleHomeSwingTest {
 
     @Test
     @org.junit.jupiter.api.Tag("native-gui")
+    void openingSettingsLeavesTheHomeStatusAlone() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
+        FakeServices services = new FakeServices(temp.resolve("settings-status.json"));
+        services.releaseSettings = new CountDownLatch(1);
+        LauncherFrame frame = onEdt(() -> new LauncherFrame(services, unavailableNews()));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            JButton settings = waitButton(frame, "settingsButton");
+            JLabel status = onEdt(() -> find(frame, "homeStatusLabel"));
+            assertNotNull(status, "first-launch Home shows the status line");
+            String before = onEdt(status::getText);
+            SwingUtilities.invokeAndWait(settings::doClick);
+            assertEquals(before, onEdt(status::getText),
+                    "loading Settings must not grow Home with a status line before the page changes");
+        } finally {
+            services.releaseSettings.countDown();
+            dispose(frame);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
     void settingsLoadingAndErrorKeepResponsiveGroups() throws Exception {
         Assumptions.assumeFalse(GraphicsEnvironment.isHeadless());
         FakeServices services = new FakeServices(temp.resolve("settings-error-layout.json"));

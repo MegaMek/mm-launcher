@@ -646,6 +646,8 @@ public final class LauncherFrame extends JFrame {
         });
         settingsPlaceholderTimer.setRepeats(false);
         settingsPlaceholderTimer.start();
+        // Settings has its own delayed placeholder; a Home status line here would only grow the
+        // page being left for a moment.
         run(I18n.getTextAt(BUNDLE, "LauncherFrame.loadingSettingsTask"), () -> {
             LauncherServices.SettingsView view = services.settingsView();
             try {
@@ -674,7 +676,7 @@ public final class LauncherFrame extends JFrame {
             });
             renderSettingsPage();
         }, () -> {
-        }, false);
+        }, false, false);
     }
 
     private void renderLoadError(Throwable error) {
@@ -2966,17 +2968,21 @@ public final class LauncherFrame extends JFrame {
                     I18n.getTextAt(BUNDLE, "LauncherFrame.diagnostics"));
             JButton logs = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.viewLogs"),
                     "viewOperationLogsButton");
-            logs.setAlignmentX(Component.LEFT_ALIGNMENT);
             logs.addActionListener(event -> showOperationLogs());
             utilityButtons.add(logs);
-            diagnostics.add(logs);
-            diagnostics.add(Box.createVerticalStrut(guiScale.space("sm")));
             JButton report = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.reportBug"),
                     "reportBugSettingsButton");
-            report.setAlignmentX(Component.LEFT_ALIGNMENT);
             report.addActionListener(event -> showBugReport());
             utilityButtons.add(report);
-            diagnostics.add(report);
+            JPanel diagnosticActions = new JPanel();
+            diagnosticActions.setLayout(new BoxLayout(diagnosticActions, BoxLayout.X_AXIS));
+            diagnosticActions.setName("diagnosticActions");
+            diagnosticActions.setOpaque(false);
+            diagnosticActions.setAlignmentX(Component.LEFT_ALIGNMENT);
+            diagnosticActions.add(logs);
+            diagnosticActions.add(Box.createHorizontalStrut(guiScale.space("sm")));
+            diagnosticActions.add(report);
+            diagnostics.add(diagnosticActions);
             left.add(diagnostics);
             if (LauncherSelfUpdate.available() || LauncherSelfUpdate.notifyOnly()) {
                 left.add(Box.createVerticalStrut(guiScale.space("lg")));
