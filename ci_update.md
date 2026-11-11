@@ -11,7 +11,7 @@ change CI.
 | Product | Channel | Source | Trigger | Audience |
 | --- | --- | --- | --- | --- |
 | Game suite | Core | `releases/0.MM.LL` branches | On demand, with approval | For playing; the default |
-| Game suite | Experimental | `main` | Weekly (Tuesday 05:00 UTC) and on demand | Help us test, may break things; opt-in |
+| Game suite | Experimental | `main` | Weekly (Wednesday 05:00 UTC) and on demand | Help us test, may break things; opt-in |
 | Launcher | Release (no game channel) | `main` | Explicitly authorized, on demand | Everyone |
 
 There are exactly two game channels. The earlier Milestone, Development, Weekly, and Nightly
