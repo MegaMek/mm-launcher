@@ -33,6 +33,7 @@
 
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.onboarding.PlatformInstallLocations;
 
 import javax.swing.SwingUtilities;
@@ -101,6 +102,7 @@ public final class GuiLauncher {
                     : PlatformInstallLocations.customRegistry();
             LauncherServices services = new LauncherServices(
                     selection.registry(), installLocations);
+            I18n.setLanguage(services.language());
             LauncherAppearance saved = services.appearance();
             if (!saved.equals(LauncherAppearance.DEFAULT)) {
                 LauncherAppearance.install(saved);

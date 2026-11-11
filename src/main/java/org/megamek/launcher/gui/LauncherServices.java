@@ -396,6 +396,20 @@ public class LauncherServices {
         settings.writePlayIntro(playIntro);
     }
 
+    /** The saved language, or {@code null} for the system language; unreadable settings use the system language. */
+    String language() {
+        try {
+            return settings.read().language();
+        } catch (IOException | RuntimeException error) {
+            return null;
+        }
+    }
+
+    void saveLanguage(String language) throws IOException {
+        ensureRegistryParent();
+        settings.writeLanguage(language);
+    }
+
     public SettingsView settingsView() throws IOException, InterruptedException {
         LauncherSettingsStore.Settings current = settings.read();
         if (current.defaultJavaExecutable() == null) {

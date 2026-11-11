@@ -37,6 +37,7 @@ import org.megamek.launcher.design.swing.TokenPanel;
 import org.megamek.launcher.design.swing.TokenTooltips;
 
 import org.megamek.launcher.gui.AutomaticInstallationChecks.InstallationCheck;
+import org.megamek.launcher.internationalization.I18n;
 
 import org.megamek.launcher.channel.ChannelCatalog;
 import org.megamek.launcher.channel.ChannelPreference;
@@ -179,6 +180,9 @@ public final class LauncherFrame extends JFrame {
     /** The window waits to be shown until Home has loaded, when the intro is off. */
     private boolean showWhenLoaded;
     private final LatestSettingSave<Boolean> playIntroSave;
+    /** The saved language, or {@code null} for the system language; it applies on the next start. */
+    private String language;
+    private final LatestSettingSave<String> languageSave;
     private String firstLaunchMetadataFailure;
     /** The last version check worked but nothing offered has been released yet. */
     private boolean firstLaunchNothingReleased;
@@ -262,6 +266,8 @@ public final class LauncherFrame extends JFrame {
         this.showExperimentalSave = new LatestSettingSave<>(services::saveShowExperimental);
         this.playIntro = services.playIntro();
         this.playIntroSave = new LatestSettingSave<>(services::savePlayIntro);
+        this.language = services.language();
+        this.languageSave = new LatestSettingSave<>(services::saveLanguage);
         curtain.setIntro(playIntro);
         this.newsFeed = newsFeed;
         this.existingImportPrompts = existingImportPrompts;
@@ -3098,7 +3104,79 @@ public final class LauncherFrame extends JFrame {
                 "Greet and scan when the launcher opens. Off, it opens straight to Home.");
         intro.addActionListener(event -> applyPlayIntro(intro.isSelected()));
         section.add(intro);
+        section.add(Box.createVerticalStrut(guiScale.space("md")));
+        JLabel languageLabel = mutedSettingsLabel(I18n.getText("Settings.language"));
+        section.add(languageLabel);
+        section.add(Box.createVerticalStrut(guiScale.space("xs")));
+        List<LanguageChoice> choices = new ArrayList<>();
+        choices.add(new LanguageChoice(null, I18n.getText("Settings.language.system")));
+        for (String tag : I18n.LOCALE_CHOICES) {
+            choices.add(new LanguageChoice(tag, LanguageChoice.nativeName(tag)));
+        }
+        StyledComboBox<LanguageChoice> languages =
+                new StyledComboBox<>(choices.toArray(LanguageChoice[]::new), guiScale);
+        languages.setName("languageCombo");
+        choices.stream().filter(choice -> java.util.Objects.equals(choice.tag(), language))
+                .findFirst().ifPresent(languages::setSelectedItem);
+        languages.getAccessibleContext().setAccessibleName(I18n.getText("Settings.language"));
+        languageLabel.setLabelFor(languages);
+        languages.setAlignmentX(Component.LEFT_ALIGNMENT);
+        Dimension languageSize = languages.getPreferredSize();
+        languageSize.width = Math.max(languageSize.width, guiScale.scaleForGUI(180));
+        languages.setPreferredSize(languageSize);
+        languages.setMaximumSize(languageSize);
+        languages.addActionListener(event -> {
+            if (languages.getSelectedItem() instanceof LanguageChoice selected) {
+                applyLanguage(selected.tag());
+            }
+        });
+        section.add(languages);
+        section.add(Box.createVerticalStrut(guiScale.space("xs")));
+        JLabel languageNote = mutedSettingsLabel(I18n.getText("Settings.language.restart"));
+        languageNote.setName("languageRestartNote");
+        section.add(languageNote);
         return section;
+    }
+
+    /** A Language choice; {@code tag} is {@code null} for the system language. */
+    record LanguageChoice(String tag, String label) {
+        /** The language's name in that language, such as Deutsch, so players can find their own. */
+        static String nativeName(String tag) {
+            Locale locale = Locale.forLanguageTag(tag);
+            String name = locale.getDisplayLanguage(locale);
+            return name.isEmpty() ? tag : name.substring(0, 1).toUpperCase(locale) + name.substring(1);
+        }
+
+        @Override
+        public String toString() {
+            return label;
+        }
+    }
+
+    private void applyLanguage(String requested) {
+        if (java.util.Objects.equals(requested, language)) return;
+        language = requested;
+        long revision = languageSave.request();
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                languageSave.saveIfLatest(revision, requested);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    get();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                } catch (java.util.concurrent.ExecutionException failure) {
+                    if (isDisplayable()) {
+                        showError(I18n.getText("Settings.language.notSaved"), failure.getCause());
+                    }
+                }
+            }
+        }.execute();
     }
 
     private JPanel releasesSection() {
