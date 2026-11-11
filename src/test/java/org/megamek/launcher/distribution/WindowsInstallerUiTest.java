@@ -41,19 +41,25 @@ import javax.imageio.ImageIO;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class WindowsInstallerUiTest {
     private static final Path RESOURCES = Path.of("src/distribution/windows/msi");
     private static final String WIX = "http://schemas.microsoft.com/wix/2006/wi";
+    private static final String WIX_LOCALIZATION = "http://schemas.microsoft.com/wix/2006/localization";
+    private static final String ENGLISH_STRINGS = "MegaMekLauncher_en-us.wxl";
+    private static final Pattern LOC_REFERENCE = Pattern.compile("!\\(loc\\.([A-Za-z0-9_.]+)\\)");
 
     @Test
     void progressLabelDoesNotRenderUnresolvedInstallerActionTokens() throws Exception {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setNamespaceAware(true);
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxf").toFile());
+        Document doc = loadLocalizedUi();
 
         Element progress = find(doc, "Dialog", "LauncherProgress");
         Element status = find(doc, "Control", "StatusText");
@@ -81,10 +87,7 @@ class WindowsInstallerUiTest {
 
     @Test
     void progressDoesNotBlockExecuteActionAndOnlyFinishCanLaunch() throws Exception {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setNamespaceAware(true);
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxf").toFile());
+        Document doc = loadLocalizedUi();
 
         Element progress = find(doc, "Dialog", "LauncherProgress");
         assertEquals("yes", progress.getAttribute("Modeless"),
@@ -164,10 +167,7 @@ class WindowsInstallerUiTest {
 
     @Test
     void wizardArtIsOnlyOnTheLeftAndRightPanelUsesNativeDialogBackground() throws Exception {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setNamespaceAware(true);
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxf").toFile());
+        Document doc = loadLocalizedUi();
         for (String dialogId : new String[] {"LauncherWelcome", "LauncherWelcomeRefresh", "Exit"}) {
             Element dialogElement = find(doc, "Dialog", dialogId);
             var controls = dialogElement.getElementsByTagNameNS(WIX, "Control");
@@ -202,10 +202,7 @@ class WindowsInstallerUiTest {
 
     @Test
     void requiredInstallerUiTablesAndPerUserFolderCleanupAreAuthored() throws Exception {
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setNamespaceAware(true);
-            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-            Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxf").toFile());
+            Document doc = loadLocalizedUi();
 
             // These map to ICE20's Property, Dialog, InstallUISequence and
             // AdminUISequence checks; don't silence ICE20 in light.exe instead.
@@ -283,10 +280,7 @@ class WindowsInstallerUiTest {
 
     @Test
     void chosenInstallFolderIsAlwaysOwnedAndRememberedForUpgrades() throws Exception {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setNamespaceAware(true);
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxf").toFile());
+        Document doc = loadLocalizedUi();
 
         Element change = find(doc, "Control", "ChangeFolder");
         assertSame(find(doc, "Dialog", "LauncherWelcome"), change.getParentNode());
@@ -358,6 +352,99 @@ class WindowsInstallerUiTest {
             }
         }
         assertEquals(2, restores, "Interactive and silent upgrades must both keep the folder");
+    }
+
+    @Test
+    void everyUiLocalizationReferenceIsDefinedInTheEnglishStrings() throws Exception {
+        Document strings = parse(RESOURCES.resolve(ENGLISH_STRINGS));
+        Element root = strings.getDocumentElement();
+        assertEquals(WIX_LOCALIZATION, root.getNamespaceURI());
+        assertEquals("WixLocalization", root.getLocalName());
+        assertEquals("en-us", root.getAttribute("Culture"),
+                "jpackage adds this Culture to light's -cultures list");
+        assertFalse(ENGLISH_STRINGS.startsWith("MsiInstallerStrings_"),
+                "jpackage would treat this as an override of its own strings, not an extra file");
+
+        Map<String, String> english = englishStrings();
+        Set<String> used = new TreeSet<>();
+        Matcher references = LOC_REFERENCE.matcher(Files.readString(RESOURCES.resolve("ui.wxf")));
+        while (references.find()) {
+            used.add(references.group(1));
+        }
+        assertFalse(used.isEmpty());
+        for (String id : used) {
+            assertTrue(english.containsKey(id), "ui.wxf uses !(loc." + id + ") but "
+                    + ENGLISH_STRINGS + " does not define it");
+        }
+        assertEquals(used, english.keySet(), "Remove strings that ui.wxf no longer uses");
+        for (String id : english.keySet()) {
+            // jpackage passes its MsiInstallerStrings_*.wxl to the same light run.
+            assertTrue(id.startsWith("MmlUi"), "Prefix launcher string ids to avoid jpackage's: " + id);
+        }
+    }
+
+    @Test
+    void playerVisibleUiTextIsLocalized() throws Exception {
+        Document doc = parse(RESOURCES.resolve("ui.wxf"));
+        Pattern allowed = Pattern.compile("(\\{\\\\\\w+})?" + LOC_REFERENCE.pattern() + "|\\[\\w+]");
+        var dialogs = doc.getElementsByTagNameNS(WIX, "Dialog");
+        for (int i = 0; i < dialogs.getLength(); i++) {
+            Element dialog = (Element) dialogs.item(i);
+            assertTrue(allowed.matcher(dialog.getAttribute("Title")).matches(),
+                    "Dialog " + dialog.getAttribute("Id") + " has a hard-coded title");
+        }
+        var controls = doc.getElementsByTagNameNS(WIX, "Control");
+        for (int i = 0; i < controls.getLength(); i++) {
+            Element control = (Element) controls.item(i);
+            if ("Bitmap".equals(control.getAttribute("Type")) || !control.hasAttribute("Text")) {
+                continue;
+            }
+            assertTrue(allowed.matcher(control.getAttribute("Text")).matches(),
+                    "Control " + control.getAttribute("Id") + " has hard-coded text: "
+                            + control.getAttribute("Text"));
+        }
+    }
+
+    private static Document parse(Path file) throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        return factory.newDocumentBuilder().parse(file.toFile());
+    }
+
+    private static Map<String, String> englishStrings() throws Exception {
+        var strings = parse(RESOURCES.resolve(ENGLISH_STRINGS))
+                .getElementsByTagNameNS(WIX_LOCALIZATION, "String");
+        Map<String, String> english = new TreeMap<>();
+        for (int i = 0; i < strings.getLength(); i++) {
+            Element string = (Element) strings.item(i);
+            assertNull(english.put(string.getAttribute("Id"), string.getTextContent()),
+                    "Duplicate string id " + string.getAttribute("Id"));
+        }
+        return english;
+    }
+
+    /** Parses ui.wxf with every !(loc.Id) resolved to its en-us text, as light.exe does. */
+    private static Document loadLocalizedUi() throws Exception {
+        Map<String, String> english = englishStrings();
+        Document doc = parse(RESOURCES.resolve("ui.wxf"));
+        var elements = doc.getElementsByTagNameNS(WIX, "*");
+        for (int i = 0; i < elements.getLength(); i++) {
+            var attributes = elements.item(i).getAttributes();
+            for (int j = 0; j < attributes.getLength(); j++) {
+                var attribute = attributes.item(j);
+                Matcher reference = LOC_REFERENCE.matcher(attribute.getNodeValue());
+                StringBuilder resolved = new StringBuilder();
+                while (reference.find()) {
+                    String text = english.get(reference.group(1));
+                    assertNotNull(text, "Undefined !(loc." + reference.group(1) + ")");
+                    reference.appendReplacement(resolved, Matcher.quoteReplacement(text));
+                }
+                reference.appendTail(resolved);
+                attribute.setNodeValue(resolved.toString());
+            }
+        }
+        return doc;
     }
 
     private static String describeDialog(Element dialog) {
