@@ -38,6 +38,8 @@ import org.megamek.launcher.design.swing.TokenTooltips;
 
 import org.megamek.launcher.gui.AutomaticInstallationChecks.InstallationCheck;
 import org.megamek.launcher.internationalization.I18n;
+import org.megamek.launcher.internationalization.LocalizedIOException;
+import org.megamek.launcher.internationalization.LocalizedText;
 
 import org.megamek.launcher.channel.ChannelCatalog;
 import org.megamek.launcher.channel.ChannelPreference;
@@ -1719,7 +1721,7 @@ public final class LauncherFrame extends JFrame {
                     status.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.installationFolderNotFound"));
                     removeMissingInstallation(missing.record());
                 } else {
-                    showError(I18n.getTextAt(BUNDLE, problem instanceof InterruptedException
+                    showError(LocalizedText.of(BUNDLE, problem instanceof InterruptedException
                             ? "LauncherFrame.checkingFolderInterrupted"
                             : "LauncherFrame.checkingFolderFailed"), problem);
                 }
@@ -1731,8 +1733,8 @@ public final class LauncherFrame extends JFrame {
         JButton currentButton = installationMenuButtons.get(record.id());
         if (page != Page.INSTALLATIONS || currentButton == null || !currentButton.isShowing()) return;
         if (state.registry().installations().stream().noneMatch(record::equals)) {
-            showError(I18n.getTextAt(BUNDLE, "LauncherFrame.installationChanged"), new IOException(
-                    I18n.getTextAt(BUNDLE, "LauncherFrame.reopenInstallations")));
+            showError(LocalizedText.of(BUNDLE, "LauncherFrame.installationChanged"), new LocalizedIOException(
+                    LocalizedText.of(BUNDLE, "LauncherFrame.reopenInstallations")));
             return;
         }
         LauncherServices.InstallationStatus local = installationLocalStatus(record);
@@ -1778,12 +1780,12 @@ public final class LauncherFrame extends JFrame {
                     Thread.currentThread().interrupt();
                     checkbox.setSelected(expectedPreference.checkOnOpen());
                     checkbox.setEnabled(true);
-                    showError(I18n.getTextAt(BUNDLE, "LauncherFrame.updateCheckSettingNotSaved"), interrupted);
+                    showError(LocalizedText.of(BUNDLE, "LauncherFrame.updateCheckSettingNotSaved"), interrupted);
                     return;
                 } catch (java.util.concurrent.ExecutionException failure) {
                     checkbox.setSelected(expectedPreference.checkOnOpen());
                     checkbox.setEnabled(true);
-                    showError(I18n.getTextAt(BUNDLE, "LauncherFrame.updateCheckSettingNotSaved"), failure.getCause());
+                    showError(LocalizedText.of(BUNDLE, "LauncherFrame.updateCheckSettingNotSaved"), failure.getCause());
                     return;
                 }
                 if (outcome.authoritative() != null) {
@@ -1811,7 +1813,7 @@ public final class LauncherFrame extends JFrame {
                     checkbox.setEnabled(true);
                 }
                 if (outcome.failure() != null) {
-                    showError(I18n.getTextAt(BUNDLE, "LauncherFrame.updateCheckSettingNotSaved"), outcome.failure());
+                    showError(LocalizedText.of(BUNDLE, "LauncherFrame.updateCheckSettingNotSaved"), outcome.failure());
                 }
             }
         }.execute();
@@ -2432,8 +2434,8 @@ public final class LauncherFrame extends JFrame {
             String exactTag, FollowChannel fixedChannel, long generation) {
         if (!isCurrentAdoption(generation, record)) return;
         if (!FollowChannel.offered(showExperimental).contains(fixedChannel)) {
-            showError(I18n.getTextAt(BUNDLE, "LauncherFrame.releaseTypeNotAvailable"),
-                    new IOException(I18n.getFormattedTextAt(BUNDLE,
+            showError(LocalizedText.of(BUNDLE, "LauncherFrame.releaseTypeNotAvailable"),
+                    new LocalizedIOException(LocalizedText.of(BUNDLE,
                             "LauncherFrame.turnOnShowReleases", String.valueOf(fixedChannel))));
             return;
         }
@@ -2742,7 +2744,7 @@ public final class LauncherFrame extends JFrame {
             services.openLocation(record);
             return null;
         }, ignored -> status.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.openedInstallationFolder")),
-                error -> showError(I18n.getTextAt(BUNDLE, "LauncherFrame.openLocationFailed"), error));
+                error -> showError(LocalizedText.of(BUNDLE, "LauncherFrame.openLocationFailed"), error));
     }
 
     private void removeFromLauncher(InstallationRecord record) {
@@ -3249,7 +3251,7 @@ public final class LauncherFrame extends JFrame {
                     Thread.currentThread().interrupt();
                 } catch (java.util.concurrent.ExecutionException failure) {
                     if (isDisplayable()) {
-                        showError(I18n.getText("Settings.language.notSaved"), failure.getCause());
+                        showError(LocalizedText.of("org.megamek.launcher.messages", "Settings.language.notSaved"), failure.getCause());
                     }
                 }
             }
@@ -3310,7 +3312,7 @@ public final class LauncherFrame extends JFrame {
                     Thread.currentThread().interrupt();
                 } catch (java.util.concurrent.ExecutionException failure) {
                     if (isDisplayable()) {
-                        showError(I18n.getTextAt(BUNDLE, "LauncherFrame.releaseSettingNotSaved"),
+                        showError(LocalizedText.of(BUNDLE, "LauncherFrame.releaseSettingNotSaved"),
                                 failure.getCause());
                     }
                 }
@@ -3338,7 +3340,7 @@ public final class LauncherFrame extends JFrame {
                     Thread.currentThread().interrupt();
                 } catch (java.util.concurrent.ExecutionException failure) {
                     if (isDisplayable()) {
-                        showError(I18n.getTextAt(BUNDLE, "LauncherFrame.introSettingNotSaved"),
+                        showError(LocalizedText.of(BUNDLE, "LauncherFrame.introSettingNotSaved"),
                                 failure.getCause());
                     }
                 }
@@ -3367,7 +3369,7 @@ public final class LauncherFrame extends JFrame {
                     Thread.currentThread().interrupt();
                 } catch (java.util.concurrent.ExecutionException failure) {
                     if (isDisplayable()) {
-                        showError(I18n.getTextAt(BUNDLE, "LauncherFrame.appearanceNotSaved"),
+                        showError(LocalizedText.of(BUNDLE, "LauncherFrame.appearanceNotSaved"),
                                 failure.getCause());
                     }
                 }
@@ -3790,7 +3792,7 @@ public final class LauncherFrame extends JFrame {
             if (!explicit) {
                 setLauncherUpdateStatus(false,
                         I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.launcherUpdateStatus",
-                                SanitizedErrors.text(error.getMessage())));
+                                SanitizedErrors.text(error.getLocalizedMessage())));
                 recordErrorAsync("Automatic launcher update check", error, ignored -> {});
             }
         }, () -> {}, explicit, explicit);
@@ -3820,7 +3822,7 @@ public final class LauncherFrame extends JFrame {
             if (!explicit) {
                 setLauncherUpdateStatus(false,
                         I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.launcherUpdateStatus",
-                                SanitizedErrors.text(error.getMessage())));
+                                SanitizedErrors.text(error.getLocalizedMessage())));
                 recordErrorAsync("Automatic launcher update check", error, ignored -> {});
             }
         }, () -> {}, explicit, explicit);
@@ -3989,11 +3991,11 @@ public final class LauncherFrame extends JFrame {
                     return;
                 }
                 if (problem != null) {
-                    showError(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.launchingFailed",
+                    showError(LocalizedText.of(BUNDLE, "LauncherFrame.launchingFailed",
                                     displayProduct(capturedProduct)), problem);
                 } else {
                     int code = exit == null ? -1 : exit;
-                    showError(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.gameExitedWithCode",
+                    showError(LocalizedText.of(BUNDLE, "LauncherFrame.gameExitedWithCode",
                                     String.valueOf(code)),
                             new IOException("The selected program returned nonzero "
                                     + "exit code " + code));
@@ -4015,7 +4017,7 @@ public final class LauncherFrame extends JFrame {
             setExtendedState(restoreState);
             setVisible(true);
             toFront();
-            showError(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.launchingFailed",
+            showError(LocalizedText.of(BUNDLE, "LauncherFrame.launchingFailed",
                     displayProduct(capturedProduct)), error);
             status.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.launchFailedDetailsShown"));
         }
@@ -4060,7 +4062,7 @@ public final class LauncherFrame extends JFrame {
             target = destination == null
                     ? services.normalInstallDestination(repository, channel) : destination;
         } catch (IOException error) {
-            showError(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.preparingFailed",
+            showError(LocalizedText.of(BUNDLE, "LauncherFrame.preparingFailed",
                     quickChoiceName(repository, channel)), error);
             resumeFirstLaunchOptions();
             return;
@@ -4205,7 +4207,7 @@ public final class LauncherFrame extends JFrame {
                     target == null ? null : target.getParent(),
                     NormalInstallService.defaultFolderName(repository, channel));
         } catch (IOException error) {
-            showError(I18n.getTextAt(BUNDLE, "LauncherFrame.preparingInstallLocationFailed"), error);
+            showError(LocalizedText.of(BUNDLE, "LauncherFrame.preparingInstallLocationFailed"), error);
             return null;
         }
     }
@@ -4229,7 +4231,7 @@ public final class LauncherFrame extends JFrame {
                         changed = normalInstallLocationPrompts.choose(source,
                                 plan.destination().getParent(), typed);
                     } catch (IOException error) {
-                        showError(I18n.getTextAt(BUNDLE, "LauncherFrame.preparingInstallLocationFailed"),
+                        showError(LocalizedText.of(BUNDLE, "LauncherFrame.preparingInstallLocationFailed"),
                                 error);
                         return false;
                     }
@@ -4239,7 +4241,7 @@ public final class LauncherFrame extends JFrame {
                     if (plan.capturedCurrentTarget()) {
                         QuickInstallOption captured = capturedOption(plan);
                         if (captured == null) {
-                            showError(I18n.getTextAt(BUNDLE,
+                            showError(LocalizedText.of(BUNDLE,
                                             "LauncherFrame.preparingChangedInstallLocationFailed"),
                                     new IOException("The session install target is no longer "
                                             + "available; no new target was selected."));
@@ -4790,7 +4792,7 @@ public final class LauncherFrame extends JFrame {
                         previous.setEnabled(displayedPage > 1);
                         next.setEnabled(displayedPage > 0 && displayedMayHaveNext);
                         if (failure == null) {
-                            showError(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.runFailed", description),
+                            showError(LocalizedText.of(BUNDLE, "LauncherFrame.runFailed", description),
                                     error.getCause());
                         } else {
                             updateInstallEnabled();
@@ -4801,13 +4803,13 @@ public final class LauncherFrame extends JFrame {
                         requestStatus.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.requestInterruptedRetry"));
                         previous.setEnabled(displayedPage > 1);
                         next.setEnabled(displayedPage > 0 && displayedMayHaveNext);
-                        showError(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.runInterrupted", description),
+                        showError(LocalizedText.of(BUNDLE, "LauncherFrame.runInterrupted", description),
                                 error);
                     } catch (RuntimeException error) {
                         requestStatus.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.requestFailedRetry"));
                         previous.setEnabled(displayedPage > 1);
                         next.setEnabled(displayedPage > 0 && displayedMayHaveNext);
-                        showError(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.runFailed", description), error);
+                        showError(LocalizedText.of(BUNDLE, "LauncherFrame.runFailed", description), error);
                     }
                     updateInstallEnabled();
                 }
@@ -4823,7 +4825,7 @@ public final class LauncherFrame extends JFrame {
                 requestStatus.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.requestCouldNotStartRetry"));
                 previous.setEnabled(displayedPage > 1);
                 next.setEnabled(displayedPage > 0 && displayedMayHaveNext);
-                showError(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.runFailed", description), error);
+                showError(LocalizedText.of(BUNDLE, "LauncherFrame.runFailed", description), error);
             }
         }
     }
@@ -4832,13 +4834,13 @@ public final class LauncherFrame extends JFrame {
         run(I18n.getTextAt(BUNDLE, "LauncherFrame.loadingSelectedInstallation"),
                 () -> services.loadInstallation(record.id()), selected -> {
                     if (!selected.preferred().equals(record)) {
-                        showError(I18n.getTextAt(BUNDLE, "LauncherFrame.openingSelectedInstallationFailed"),
+                        showError(LocalizedText.of(BUNDLE, "LauncherFrame.openingSelectedInstallationFailed"),
                                 new IOException("selected installation changed; choose it again"));
                         return;
                     }
                     if (selected.previewEligibility() == null
                             || !selected.previewEligibility().available()) {
-                        showError(I18n.getTextAt(BUNDLE, "LauncherFrame.updatesUnavailable"),
+                        showError(LocalizedText.of(BUNDLE, "LauncherFrame.updatesUnavailable"),
                                 new IOException(selected.previewEligibility() == null
                                         ? "No verified update information is available."
                                         : selected.previewEligibility().reason()));
@@ -4862,7 +4864,7 @@ public final class LauncherFrame extends JFrame {
         try {
             repository = OfficialRepository.parse(sourceReceipt.repository());
         } catch (IOException e) {
-            showError(I18n.getTextAt(BUNDLE, "LauncherFrame.openingUpdatePreviewFailed"), e);
+            showError(LocalizedText.of(BUNDLE, "LauncherFrame.openingUpdatePreviewFailed"), e);
             return;
         }
         DefaultListModel<ReleaseChoice> model = new DefaultListModel<>();
@@ -5088,7 +5090,7 @@ public final class LauncherFrame extends JFrame {
                         if (!showRepairResult(record, result)) reload();
                     }, error -> progress.setHeading(I18n.getTextAt(BUNDLE, "LauncherFrame.repairFailed")), () -> {
                     });
-        }, error -> showError(I18n.getTextAt(BUNDLE, "LauncherFrame.repairUnavailable"), error));
+        }, error -> showError(LocalizedText.of(BUNDLE, "LauncherFrame.repairUnavailable"), error));
     }
 
     /** Reports the offline repair and returns whether a download repair was started. */
@@ -5522,7 +5524,7 @@ public final class LauncherFrame extends JFrame {
                     }
                     failure.accept(problem);
                     if (showAutomaticError) {
-                        showError(I18n.getFormattedTextAt(BUNDLE, problem instanceof InterruptedException
+                        showError(LocalizedText.of(BUNDLE, problem instanceof InterruptedException
                                 ? "LauncherFrame.runInterrupted" : "LauncherFrame.runFailed", description), problem);
                         if (updateStatus) {
                             status.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.operationFailedDetailsShown"));
@@ -5572,15 +5574,16 @@ public final class LauncherFrame extends JFrame {
         }
     }
 
-    private void showError(String title, Throwable error) {
+    /** Shows {@code title} in the player's language; the diagnostics record keeps it in English. */
+    private void showError(LocalizedText title, Throwable error) {
         showError(title, error, true);
     }
 
     void showOperationFailureDetails(String title, Throwable error) {
-        showError(title, error, false);
+        showError(LocalizedText.literal(title), error, false);
     }
 
-    private void showError(String title, Throwable error, boolean record) {
+    private void showError(LocalizedText title, Throwable error, boolean record) {
         if (error instanceof UninstallService.MissingInstallationException missing) {
             removeMissingInstallation(missing.record());
             return;
@@ -5588,11 +5591,11 @@ public final class LauncherFrame extends JFrame {
         String details = SanitizedErrors.display(error);
         String loggingStatus = I18n.getTextAt(BUNDLE, record ? "LauncherFrame.savingLocalDiagnostics"
                 : "LauncherFrame.localDiagnosticsAvailable");
-        LauncherErrorDialog errorDialog = LauncherErrorDialog.show(this, title, details,
+        LauncherErrorDialog errorDialog = LauncherErrorDialog.show(this, title.text(), details,
                 loggingStatus, guiScale, () -> copySanitized(details), this::showOperationLogs,
                 this::showBugReport);
         if (record) {
-            recordErrorAsync(title, error, errorDialog::updateLoggingStatus);
+            recordErrorAsync(title.english(), error, errorDialog::updateLoggingStatus);
         }
     }
 

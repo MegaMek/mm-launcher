@@ -45,6 +45,8 @@ import org.megamek.launcher.diagnostics.BugReport;
 import org.megamek.launcher.diagnostics.OperationLogStore;
 import org.megamek.launcher.diagnostics.SanitizedErrors;
 import org.megamek.launcher.internationalization.I18n;
+import org.megamek.launcher.internationalization.LocalizedIOException;
+import org.megamek.launcher.internationalization.LocalizedText;
 import org.megamek.launcher.launch.ApplicationLauncher;
 import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.launch.LaunchObserver;
@@ -235,14 +237,15 @@ public class LauncherServices {
             return new LauncherUpdateCheck(null, notice, true);
         }
         if (report != null && !report.installed() && !report.recovered()) {
-            throw new IOException(notice);
+            throw new LocalizedIOException(report.text());
         }
         try {
             return new LauncherUpdateCheck(lookup.check(), notice, false);
         } catch (IOException | InterruptedException error) {
             if (notice != null) {
-                throw new IOException(notice + "\nLauncher release lookup also failed: "
-                        + error.getMessage(), error);
+                throw new LocalizedIOException(LocalizedText.concat(report.text(),
+                        LocalizedText.literal("\nLauncher release lookup also failed: " + error.getMessage())),
+                        error);
             }
             throw error;
         }
@@ -255,7 +258,7 @@ public class LauncherServices {
         if (!recovered && report.state() != LauncherSelfUpdate.ReportState.INSTALLED) return report.message();
         LoggedOperation operation = beginOperation(
                 recovered ? OperationType.RECOVERY : OperationType.LAUNCHER_UPDATE, ignored -> {}, List.of());
-        operation.context().phase(OperationPhase.METADATA, report.message());
+        operation.context().phase(OperationPhase.METADATA, report.text());
         String warning = operation.finish(OperationOutcome.SUCCEEDED, recovered
                 ? "Stale launcher update report reconciled; previous installer completion result is unknown."
                 : "Launcher update confirmed successfully.", null);

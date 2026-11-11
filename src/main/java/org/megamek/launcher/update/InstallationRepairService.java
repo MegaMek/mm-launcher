@@ -33,7 +33,7 @@
 
 package org.megamek.launcher.update;
 
-import org.megamek.launcher.internationalization.I18n;
+import org.megamek.launcher.internationalization.LocalizedText;
 import org.megamek.launcher.launch.RootCoordinator;
 import org.megamek.launcher.manifest.FileEntry;
 import org.megamek.launcher.manifest.ManifestException;
@@ -167,7 +167,7 @@ public final class InstallationRepairService {
             for (int i = 0; i < files.size(); i++) {
                 FileEntry entry = files.get(i);
                 context.progress(OperationPhase.PLAN, i, files.size(), ProgressUnit.FILES,
-                        I18n.getTextAt(BUNDLE, "InstallationRepairService.checkingGameFiles"));
+                        LocalizedText.of(BUNDLE, "InstallationRepairService.checkingGameFiles"));
                 if (UninstallService.REGENERABLE_CACHES.stream()
                         .anyMatch(cache -> cache.equalsIgnoreCase(entry.path()))) {
                     continue;

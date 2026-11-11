@@ -33,7 +33,7 @@
 
 package org.megamek.launcher.update;
 
-import org.megamek.launcher.internationalization.I18n;
+import org.megamek.launcher.internationalization.LocalizedText;
 import org.megamek.launcher.channel.ChannelUpdateChecker;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.manifest.ManifestException;
@@ -157,7 +157,7 @@ public final class UpdatePreviewService {
             throws IOException, InterruptedException, ManifestException {
         try (OperationContext.WorkerRegistration ignored = context.activate()) {
             context.phase(OperationPhase.METADATA,
-                    I18n.getTextAt(BUNDLE, "UpdatePreviewService.validatingInstallation"));
+                    LocalizedText.of(BUNDLE, "UpdatePreviewService.validatingInstallation"));
             Path registryPath = registry.toAbsolutePath().normalize();
             RegistryData data = registryStore.read(registryPath);
             InstallationRecord current = registryStore.resolve(data, expectedRecord.id());
@@ -213,7 +213,7 @@ public final class UpdatePreviewService {
         try (VerifiedPackageFetcher.Workspace workspace = material.workspace()) {
             return material.preview();
         } finally {
-            context.cleanupPhase(I18n.getTextAt(BUNDLE, "UpdatePreviewService.removingWorkspace"));
+            context.cleanupPhase(LocalizedText.of(BUNDLE, "UpdatePreviewService.removingWorkspace"));
         }
     }
 
@@ -238,7 +238,7 @@ public final class UpdatePreviewService {
             throws IOException, InterruptedException, ManifestException {
         try (OperationContext.WorkerRegistration ignored = context.activate()) {
             context.phase(OperationPhase.METADATA,
-                    I18n.getTextAt(BUNDLE, "UpdatePreviewService.validatingSource"));
+                    LocalizedText.of(BUNDLE, "UpdatePreviewService.validatingSource"));
             Path registryPath = registry.toAbsolutePath().normalize();
             RegistryData data = registryStore.read(registryPath);
             InstallationRecord currentRecord = registryStore.resolve(data, expectedRecord.id());
@@ -269,7 +269,7 @@ public final class UpdatePreviewService {
                     material.workspace(), trustedTarget, material.inspection(), material.pair(),
                     recommendation);
             context.phase(OperationPhase.AWAIT_CONSENT,
-                    I18n.getTextAt(BUNDLE, "UpdatePreviewService.awaitingApply"));
+                    LocalizedText.of(BUNDLE, "UpdatePreviewService.awaitingApply"));
             return prepared;
         }
     }
@@ -286,7 +286,7 @@ public final class UpdatePreviewService {
                 repository, targetTag, workspaceParent, ".preview-", progress, expected, context);
         try {
             context.phase(OperationPhase.PLAN,
-                    I18n.getTextAt(BUNDLE, "UpdatePreviewService.inspectingPackage"));
+                    LocalizedText.of(BUNDLE, "UpdatePreviewService.inspectingPackage"));
             InstallationInspector inspector = new InstallationInspector();
             var targetInspection = inspector.inspect(workspace.extracted());
             if (targetInspection.products().stream()
@@ -306,7 +306,7 @@ public final class UpdatePreviewService {
                         Set.copyOf(override.officialHashes()));
             }
             context.phase(OperationPhase.PLAN,
-                    I18n.getTextAt(BUNDLE, "UpdatePreviewService.comparingPackage"));
+                    LocalizedText.of(BUNDLE, "UpdatePreviewService.comparingPackage"));
             List<Decision> decisions = new UpdatePlanner().planPreview(
                     current.officialManifest(), target.manifest(), root, validation,
                     Map.copyOf(trusted),

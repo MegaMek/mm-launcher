@@ -616,7 +616,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
             return I18n.getFormattedTextAt(BUNDLE, "OperationProgressDialog.filesProcessed",
                     NumberFormat.getIntegerInstance().format(event.completed()));
         }
-        String supplied = safeEventDetail(event.detail());
+        String supplied = safeEventDetail(event.displayDetail());
         return supplied == null ? phaseDetail(event.phase(), event.operationType()) : supplied;
     }
 
@@ -727,7 +727,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
 
     private String conciseFailure(Throwable problem) {
         if (problem == null) return I18n.getTextAt(BUNDLE, "OperationProgressDialog.couldNotComplete");
-        String message = problem.getMessage();
+        String message = problem.getLocalizedMessage();
         if (message == null || message.isBlank()) {
             return I18n.getTextAt(BUNDLE, "OperationProgressDialog.couldNotComplete");
         }

@@ -60,6 +60,7 @@ public class I18n {
 
     private final String defaultBundle;
     private final ConcurrentHashMap<String, ResourceBundle> resourceBundles = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, ResourceBundle> fixedLocaleBundles = new ConcurrentHashMap<>();
     private volatile Locale locale = Locale.getDefault();
     protected static volatile I18n instance;
 
@@ -111,6 +112,7 @@ public class I18n {
               : Locale.forLanguageTag(language);
         getInstance().locale = next;
         getInstance().resourceBundles.clear();
+        getInstance().fixedLocaleBundles.clear();
     }
 
     /** The language bundles are read in. */
@@ -121,6 +123,46 @@ public class I18n {
     ResourceBundle getResourceBundle(String bundleName) {
         return resourceBundles.computeIfAbsent(bundleName, k ->
               ResourceBundle.getBundle(bundleName, locale, I18n.class.getClassLoader(), new UTF8Control()));
+    }
+
+    ResourceBundle getResourceBundle(String bundleName, Locale bundleLocale) {
+        if (bundleLocale.equals(locale)) {
+            return getResourceBundle(bundleName);
+        }
+        return fixedLocaleBundles.computeIfAbsent(bundleLocale.toLanguageTag() + '\n' + bundleName, k ->
+              ResourceBundle.getBundle(bundleName, bundleLocale, I18n.class.getClassLoader(), new UTF8Control()));
+    }
+
+    /**
+     * Get a string from a specific bundle in a given language rather than the launcher's language. Logs and
+     * diagnostics use this to stay in English.
+     *
+     * @param locale     the language to read
+     * @param bundleName the name of the bundle
+     * @param key        the key of the string
+     *
+     * @return the string in that language, falling back to English
+     */
+    public static String getTextAt(Locale locale, String bundleName, String key) {
+        ResourceBundle bundle = I18n.getInstance().getResourceBundle(bundleName, locale);
+        if (bundle.containsKey(key)) {
+            return bundle.getString(key);
+        }
+        return MISSING_RESOURCE_TAG + key + MISSING_RESOURCE_TAG;
+    }
+
+    /**
+     * Get a formatted string from a specific bundle in a given language rather than the launcher's language.
+     *
+     * @param locale     the language to read
+     * @param bundleName the name of the bundle
+     * @param key        the key of the string
+     * @param args       the arguments to format the string
+     *
+     * @return the formatted string in that language, falling back to English
+     */
+    public static String getFormattedTextAt(Locale locale, String bundleName, String key, Object... args) {
+        return new MessageFormat(getTextAt(locale, bundleName, key), locale).format(args);
     }
 
     /**

@@ -34,6 +34,8 @@
 package org.megamek.launcher.update;
 
 import org.megamek.launcher.internationalization.I18n;
+import org.megamek.launcher.internationalization.LocalizedIOException;
+import org.megamek.launcher.internationalization.LocalizedText;
 import org.megamek.launcher.channel.ChannelPreference;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.FollowChannel;
@@ -87,9 +89,9 @@ public final class ImportedCopyAdoptionService {
     private static final Pattern CREDIBLE_VERSION =
             Pattern.compile("[0-9]+\\.[0-9]+(?:\\.[0-9]+)?(?:[-.][A-Za-z0-9.-]+)?");
     private static final int DIAGNOSTIC_PATH_LIMIT = 40;
-    public static final String AUTOMATIC_MATCH_UNAVAILABLE =
-            I18n.getTextAt(BUNDLE,
-            "ImportedCopyAdoptionService.automaticMatchUnavailable");
+    private static final LocalizedText AUTOMATIC_MATCH_UNAVAILABLE_TEXT =
+            LocalizedText.of(BUNDLE, "ImportedCopyAdoptionService.automaticMatchUnavailable");
+    public static final String AUTOMATIC_MATCH_UNAVAILABLE = AUTOMATIC_MATCH_UNAVAILABLE_TEXT.text();
 
     private final Path registry;
     private final ReleaseTransport transport;
@@ -169,7 +171,7 @@ public final class ImportedCopyAdoptionService {
         Objects.requireNonNull(context, "context");
         try (OperationContext.WorkerRegistration ignored = context.activate()) {
             context.phase(OperationPhase.METADATA,
-                    I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.findingVersion"));
+                    LocalizedText.of(BUNDLE, "ImportedCopyAdoptionService.findingVersion"));
             RegistryData data = registries.read(registry);
             InstallationRecord record = requireUnchangedRecord(data, expected);
             Path root = requireMatchingRepository(data, record, requestedRepository);
@@ -191,7 +193,7 @@ public final class ImportedCopyAdoptionService {
             Throwable technical = resolution.failure() == null
                     ? new IOException(resolution.diagnostic())
                     : resolution.failure();
-            throw new CandidateResolutionException(AUTOMATIC_MATCH_UNAVAILABLE, technical);
+            throw new CandidateResolutionException(AUTOMATIC_MATCH_UNAVAILABLE_TEXT, technical);
         }
     }
 
@@ -256,7 +258,7 @@ public final class ImportedCopyAdoptionService {
         Throwable preparationFailure = null;
         try (OperationContext.WorkerRegistration ignored = context.activate()) {
             context.phase(OperationPhase.METADATA,
-                    I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.checkingReady"));
+                    LocalizedText.of(BUNDLE, "ImportedCopyAdoptionService.checkingReady"));
             RegistryData before = registries.read(registry);
             InstallationRecord record = requireUnchangedRecord(before, expected);
             Path root = requireMatchingRepository(before, record, requestedRepository);
@@ -274,17 +276,17 @@ public final class ImportedCopyAdoptionService {
             requireNoRootOverlap(attemptDirectory.root(), before);
 
             context.phase(OperationPhase.METADATA,
-                    I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.findingRelease"));
+                    LocalizedText.of(BUNDLE, "ImportedCopyAdoptionService.findingRelease"));
             ReleaseCatalog catalog = new ReleaseCatalog(transport);
             ReleaseCatalog.Release release;
             try {
                 release = catalog.exact(repository, exactTag);
             } catch (IOException error) {
-                throw new CandidateResolutionException(AUTOMATIC_MATCH_UNAVAILABLE, error);
+                throw new CandidateResolutionException(AUTOMATIC_MATCH_UNAVAILABLE_TEXT, error);
             }
             ReleaseCatalog.Assessment assessment = catalog.assess(repository, release);
             if (!assessment.eligible()) {
-                throw new CandidateResolutionException(AUTOMATIC_MATCH_UNAVAILABLE,
+                throw new CandidateResolutionException(AUTOMATIC_MATCH_UNAVAILABLE_TEXT,
                         new IOException("selected exact release is no longer eligible: "
                                 + assessment.reason()));
             }
@@ -298,10 +300,10 @@ public final class ImportedCopyAdoptionService {
                         diagnostics, expectedAsset, context);
             } catch (IOException error) {
                 throw new CandidateResolutionException(
-                        AUTOMATIC_MATCH_UNAVAILABLE, error);
+                        AUTOMATIC_MATCH_UNAVAILABLE_TEXT, error);
             }
             context.phase(OperationPhase.PLAN,
-                    I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.comparing"));
+                    LocalizedText.of(BUNDLE, "ImportedCopyAdoptionService.comparing"));
             Inspection officialInspection = inspector.inspect(workspace.extracted());
             RootSnapshot officialSnapshot = RootSnapshot.capture(
                     workspace.extracted(), context, OperationPhase.PLAN,
@@ -314,7 +316,7 @@ public final class ImportedCopyAdoptionService {
             String application = displayProducts(record.products());
             String version = displayVersion(record.observedBuild());
             PreparedAdoption.Report report = new PreparedAdoption.Report(comparison.eligible(),
-                    application, version, fixedChannel, comparison.reason());
+                    application, version, fixedChannel, comparison.reason().text());
             VerifiedPackageFetcher.Workspace retainedWorkspace = workspace;
             AttemptDirectory retainedDirectory = attemptDirectory;
             PreparedAdoption prepared = new PreparedAdoption(owner, record, repository,
@@ -451,7 +453,7 @@ public final class ImportedCopyAdoptionService {
             InstallationRecord expected = prepared.record();
             Path root = Path.of(expected.canonicalRoot()).toAbsolutePath().normalize();
             context.phase(OperationPhase.PREPARE_INSTALL,
-                    I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.revalidating"));
+                    LocalizedText.of(BUNDLE, "ImportedCopyAdoptionService.revalidating"));
             try (var gate = coordinator.acquire(root, false)) {
                 gate.requireNoPendingUpdate();
                 RegistryData currentRegistry = registries.read(registry);
@@ -469,7 +471,7 @@ public final class ImportedCopyAdoptionService {
                 context.enterFinalization("Managed-update metadata publication has begun; "
                         + "cancellation can no longer be performed safely.");
                 context.phase(OperationPhase.APPLY,
-                        I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.publishing"));
+                        LocalizedText.of(BUNDLE, "ImportedCopyAdoptionService.publishing"));
                 publish(currentRegistry, current, prepared,
                         prepared.ownership(), prepared.comparison());
                 published = true;
@@ -793,20 +795,20 @@ public final class ImportedCopyAdoptionService {
         // restores any official path that isn't present locally (see UpdatePlanner.decide), so
         // missing files carry no more risk here than they do for any later managed update.
         boolean eligible = identity && conflicts.isEmpty() && !criticalModified;
-        String reason;
+        LocalizedText reason;
         if (!identity) {
-            reason = I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.reasonNoMatch");
+            reason = LocalizedText.of(BUNDLE, "ImportedCopyAdoptionService.reasonNoMatch");
         } else if (!conflicts.isEmpty()) {
-            reason = I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.reasonConflict");
+            reason = LocalizedText.of(BUNDLE, "ImportedCopyAdoptionService.reasonConflict");
         } else if (criticalModified) {
-            reason = I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.reasonCoreModified");
+            reason = LocalizedText.of(BUNDLE, "ImportedCopyAdoptionService.reasonCoreModified");
         } else if (missing.stream().anyMatch(path -> !affectedByCase(path, casePrefixes))) {
             long restorable = missing.stream()
                     .filter(path -> !affectedByCase(path, casePrefixes)).count();
-            reason = I18n.getFormattedTextAt(BUNDLE,
+            reason = LocalizedText.of(BUNDLE,
                     "ImportedCopyAdoptionService.reasonRestorable", String.valueOf(restorable));
         } else {
-            reason = I18n.getTextAt(BUNDLE, "ImportedCopyAdoptionService.reasonSafe");
+            reason = LocalizedText.of(BUNDLE, "ImportedCopyAdoptionService.reasonSafe");
         }
         return new Comparison(eligible, identity, exact, List.copyOf(modified),
                 List.copyOf(missing), List.copyOf(unknown), List.copyOf(conflicts),
@@ -907,7 +909,7 @@ public final class ImportedCopyAdoptionService {
             diagnostics.println("ADOPTION additional detail entries omitted="
                     + (details.size() - DIAGNOSTIC_PATH_LIMIT));
         }
-        if (!comparison.eligible()) diagnostics.println("ADOPTION blocked: " + comparison.reason());
+        if (!comparison.eligible()) diagnostics.println("ADOPTION blocked: " + comparison.reason().english());
     }
 
     private void cleanupAttemptArtifacts(String id) throws IOException {
@@ -1023,12 +1025,17 @@ public final class ImportedCopyAdoptionService {
                                String cleanupWarning) {
     }
 
-    public static final class CandidateResolutionException extends IOException {
+    /** {@link #getMessage()} stays English for logs; {@link #getLocalizedMessage()} is for the player. */
+    public static final class CandidateResolutionException extends LocalizedIOException {
         public CandidateResolutionException(String message) {
-            super(message);
+            super(LocalizedText.literal(message));
         }
 
         public CandidateResolutionException(String message, Throwable cause) {
+            super(LocalizedText.literal(message), cause);
+        }
+
+        public CandidateResolutionException(LocalizedText message, Throwable cause) {
             super(message, cause);
         }
     }
@@ -1071,7 +1078,7 @@ public final class ImportedCopyAdoptionService {
     record Comparison(boolean eligible, boolean productIdentity, int exact,
                       List<PathMatch> modified, List<String> missing, List<String> unknown,
                       List<String> conflicts, List<CaseOverride> caseOverrides,
-                      int protectedFiles, String reason) {
+                      int protectedFiles, LocalizedText reason) {
         Comparison {
             modified = List.copyOf(modified);
             missing = List.copyOf(missing);

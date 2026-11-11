@@ -30,9 +30,12 @@ class FrameBundleTest {
             "frame.properties");
     /** Every key literal, including keys chosen by a ternary inside a getTextAt call. */
     private static final Pattern KEY = Pattern.compile("\"(LauncherFrame\\.\\w+)\"");
-    /** A formatted lookup, with either a literal key or a ternary choosing between two literal keys. */
-    private static final Pattern FORMATTED = Pattern.compile("getFormattedTextAt\\(\\s*BUNDLE\\s*,\\s*"
-            + "(?:[^\"]*\\?\\s*)?\"(LauncherFrame\\.\\w+)\"(?:\\s*:\\s*\"(LauncherFrame\\.\\w+)\")?");
+    /**
+     * A formatted lookup, with either a literal key or a ternary choosing between two literal keys. A
+     * {@code LocalizedText.of} call is formatted only when arguments follow the key.
+     */
+    private static final Pattern FORMATTED = Pattern.compile("(getFormattedTextAt|LocalizedText\\.of)\\(\\s*BUNDLE\\s*,\\s*"
+            + "(?:[^\"]*\\?\\s*)?\"(LauncherFrame\\.\\w+)\"(?:\\s*:\\s*\"(LauncherFrame\\.\\w+)\")?(\\s*,)?");
 
     private static Properties bundle() throws IOException {
         Properties properties = new Properties();
@@ -50,8 +53,9 @@ class FrameBundleTest {
         Matcher matcher = FORMATTED.matcher(source);
         Set<String> keys = new TreeSet<>();
         while (matcher.find()) {
-            keys.add(matcher.group(1));
-            if (matcher.group(2) != null) keys.add(matcher.group(2));
+            if (matcher.group(1).startsWith("LocalizedText") && matcher.group(4) == null) continue;
+            keys.add(matcher.group(2));
+            if (matcher.group(3) != null) keys.add(matcher.group(3));
         }
         return keys;
     }

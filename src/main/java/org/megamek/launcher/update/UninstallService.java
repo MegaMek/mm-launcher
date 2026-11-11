@@ -38,6 +38,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import org.megamek.launcher.internationalization.I18n;
+import org.megamek.launcher.internationalization.LocalizedText;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.launch.RootCoordinator;
 import org.megamek.launcher.manifest.FileEntry;
@@ -438,7 +439,7 @@ public final class UninstallService {
         }
         try (OperationContext.WorkerRegistration ignoredOperation = context.activate();
              RootCoordinator.Lease ignored = coordinator.acquireForRecovery(root, false)) {
-            context.phase(OperationPhase.RECOVER, I18n.getTextAt(BUNDLE, "UninstallService.restoringInterrupted"));
+            context.phase(OperationPhase.RECOVER, LocalizedText.of(BUNDLE, "UninstallService.restoringInterrupted"));
             if (!journal.rootRemovalStarted()) requirePresent(expected);
             ensureRootForRecovery(root, journal);
             requireExact(current, expected);
@@ -488,7 +489,7 @@ public final class UninstallService {
         if (context.latest() == null
                 || context.latest().phase().ordinal() < OperationPhase.PLAN.ordinal()) {
             context.phase(OperationPhase.METADATA,
-                    I18n.getTextAt(BUNDLE, "UninstallService.validatingOwnership"));
+                    LocalizedText.of(BUNDLE, "UninstallService.validatingOwnership"));
         }
         RegistryData data = registries.read(registry);
         InstallationRecord record = registries.resolve(data, expected.id());
@@ -508,7 +509,7 @@ public final class UninstallService {
         adoptions.validateForUse(registry, record, receipt, current, fixed.preference());
         Path root = StrictPathSafety.requireDirectory(Path.of(record.canonicalRoot()),
                 "uninstall root");
-        context.phase(OperationPhase.PLAN, I18n.getTextAt(BUNDLE, "UninstallService.comparingFiles"));
+        context.phase(OperationPhase.PLAN, LocalizedText.of(BUNDLE, "UninstallService.comparingFiles"));
         List<PlanEntry> entries = new ArrayList<>();
         Set<String> directories = new HashSet<>();
         for (String protectedPath : current.officialManifest().protectedPaths()) {
@@ -522,7 +523,7 @@ public final class UninstallService {
                 // A shipped cache is rewritten by the applications; it is planned as a cache below.
                 context.progress(OperationPhase.PLAN, ++completed,
                         current.officialManifest().files().size(), ProgressUnit.FILES,
-                        I18n.getTextAt(BUNDLE, "UninstallService.comparedFiles"));
+                        LocalizedText.of(BUNDLE, "UninstallService.comparedFiles"));
                 continue;
             }
             Path file;
@@ -553,7 +554,7 @@ public final class UninstallService {
             }
             context.progress(OperationPhase.PLAN, ++completed,
                     current.officialManifest().files().size(), ProgressUnit.FILES,
-                    I18n.getTextAt(BUNDLE, "UninstallService.comparedFiles"));
+                    LocalizedText.of(BUNDLE, "UninstallService.comparedFiles"));
         }
         Set<String> planned = new HashSet<>();
         entries.forEach(entry -> planned.add(entry.relativePath().toLowerCase(Locale.ROOT)));
@@ -769,7 +770,7 @@ public final class UninstallService {
             journal = withPhase(journal, "MOVING_FILES");
             writeJournal(journal);
             context.phase(OperationPhase.UNINSTALL,
-                    I18n.getTextAt(BUNDLE, "UninstallService.movingToRecovery"));
+                    LocalizedText.of(BUNDLE, "UninstallService.movingToRecovery"));
             int moved = 0;
             for (int i = 0; i < journal.files().size(); i++) {
                 UninstallJournal.FileMove move = journal.files().get(i);
@@ -783,7 +784,7 @@ public final class UninstallService {
                 atomicMove(source, destination);
                 failureHook.at("file-moved");
                 context.progress(OperationPhase.UNINSTALL, ++moved, journal.files().size(),
-                        ProgressUnit.FILES, I18n.getTextAt(BUNDLE, "UninstallService.securedFiles"));
+                        ProgressUnit.FILES, LocalizedText.of(BUNDLE, "UninstallService.securedFiles"));
             }
 
             journal = withPhase(journal, "REMOVING_DIRECTORIES");

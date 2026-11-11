@@ -38,6 +38,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import org.megamek.launcher.internationalization.I18n;
+import org.megamek.launcher.internationalization.LocalizedText;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.ChannelUpdateChecker;
 import org.megamek.launcher.launch.RootCoordinator;
@@ -182,7 +183,7 @@ public final class RealUpdateService {
         // Repair cannot be abandoned after a journal is started. Unlike Apply, this entire
         // operation is non-cancellable, including acquisition and preflight.
         context.enterFinalization("Repair must run through completion or retain recovery state.");
-        context.phase(OperationPhase.METADATA, I18n.getTextAt(BUNDLE, "RealUpdateService.checkingProvenance"));
+        context.phase(OperationPhase.METADATA, LocalizedText.of(BUNDLE, "RealUpdateService.checkingProvenance"));
         Snapshot expected = snapshot(registry, id);
         try (RootCoordinator.Lease gate = coordinator.acquire(expected.root(), true)) {
             gate.requireNoPendingUpdate();
@@ -211,7 +212,7 @@ public final class RealUpdateService {
                 if (!source.assetSha256().equals(workspace.resolvedDigest().hex())) {
                     throw new IOException("repair archive digest differs from persisted provenance");
                 }
-                context.phase(OperationPhase.PLAN, I18n.getTextAt(BUNDLE, "RealUpdateService.checkingOfficialFiles"));
+                context.phase(OperationPhase.PLAN, LocalizedText.of(BUNDLE, "RealUpdateService.checkingOfficialFiles"));
                 Inspection targetInspection = new InstallationInspector().inspect(
                         workspace.extracted());
                 if (targetInspection.products().stream().noneMatch(
@@ -240,12 +241,12 @@ public final class RealUpdateService {
                 }
                 List<String> extraJars = OwnershipPolicy.extraLibJars(current.root(),
                         source.officialManifest(), target.manifest());
-                context.phase(OperationPhase.PREPARE_INSTALL, I18n.getTextAt(BUNDLE, "RealUpdateService.checkingRepairDestinations"));
+                context.phase(OperationPhase.PREPARE_INSTALL, LocalizedText.of(BUNDLE, "RealUpdateService.checkingRepairDestinations"));
                 preflight(current.root(), decisions, context);
-                context.phase(OperationPhase.APPLY, I18n.getTextAt(BUNDLE, "RealUpdateService.restoringOfficialFiles"));
+                context.phase(OperationPhase.APPLY, LocalizedText.of(BUNDLE, "RealUpdateService.restoringOfficialFiles"));
                 ApplyResult result = transactRepair(current, workspace.extracted(),
                         targetInspection, decisions);
-                context.cleanupPhase(I18n.getTextAt(BUNDLE, "RealUpdateService.finishingRepair"));
+                context.cleanupPhase(LocalizedText.of(BUNDLE, "RealUpdateService.finishingRepair"));
                 return new RepairResult(result.record(), missing, modified, extraJars,
                         I18n.getTextAt(BUNDLE, "RealUpdateService.repairBackupWarning"));
             }
@@ -326,7 +327,7 @@ public final class RealUpdateService {
         try (OperationContext.WorkerRegistration operationRegistration = context.activate()) {
             Objects.requireNonNull(expected, "expected snapshot");
             context.phase(OperationPhase.METADATA,
-                    I18n.getTextAt(BUNDLE, "RealUpdateService.validatingSource"));
+                    LocalizedText.of(BUNDLE, "RealUpdateService.validatingSource"));
             validateAuthorization(expected.current().tag(), targetTag, expectedSize, expectedDigest,
                     confirmation);
             try (RootCoordinator.Lease gate = coordinator.acquire(expected.root(), true)) {
@@ -349,7 +350,7 @@ public final class RealUpdateService {
                                              expectedAssetName, expectedSize, expectedDigest),
                                      context)) {
                     context.phase(OperationPhase.PLAN,
-                            I18n.getTextAt(BUNDLE, "RealUpdateService.inspectingPackage"));
+                            LocalizedText.of(BUNDLE, "RealUpdateService.inspectingPackage"));
                     Inspection targetInspection = new InstallationInspector().inspect(
                             workspace.extracted());
                     if (targetInspection.products().stream().noneMatch(
@@ -364,7 +365,7 @@ public final class RealUpdateService {
                             .validatePreviewPair(current.current().officialManifest(),
                                     target.manifest());
                     context.phase(OperationPhase.PLAN,
-                            I18n.getTextAt(BUNDLE, "RealUpdateService.comparingTarget"));
+                            LocalizedText.of(BUNDLE, "RealUpdateService.comparingTarget"));
                     List<Decision> decisions = new UpdatePlanner().planPreview(
                             current.current().officialManifest(), target.manifest(), current.root(),
                             pair, trustedHashes(current.current()),
@@ -373,7 +374,7 @@ public final class RealUpdateService {
                             decisions, context);
                     preflight(current.root(), decisions, context);
                     context.phase(OperationPhase.APPLY,
-                            I18n.getTextAt(BUNDLE, "RealUpdateService.enteringTransaction"));
+                            LocalizedText.of(BUNDLE, "RealUpdateService.enteringTransaction"));
                     context.enterFinalization("The update transaction and recovery journal have "
                             + "begun; cancellation can no longer be performed safely.");
                     return transact(current, workspace.extracted(), workspace.release(),
@@ -407,12 +408,12 @@ public final class RealUpdateService {
             } catch (IOException | InterruptedException | ManifestException | RuntimeException
                      | Error failure) {
                 context.cleanupPhase(
-                        I18n.getTextAt(BUNDLE, "RealUpdateService.discardingPackageData"));
+                        LocalizedText.of(BUNDLE, "RealUpdateService.discardingPackageData"));
                 IOException cleanup = prepared.finishClaim();
                 if (cleanup != null) failure.addSuppressed(cleanup);
                 throw failure;
             }
-            context.cleanupPhase(I18n.getTextAt(BUNDLE, "RealUpdateService.removingPackageData"));
+            context.cleanupPhase(LocalizedText.of(BUNDLE, "RealUpdateService.removingPackageData"));
             IOException cleanup = prepared.finishClaim();
             if (cleanup == null) return result;
             return new ApplyResult(result.record(), result.state(), result.decisions(),
@@ -426,7 +427,7 @@ public final class RealUpdateService {
                                              OperationContext context)
             throws IOException, InterruptedException, ManifestException {
         context.phase(OperationPhase.PREPARE_INSTALL,
-                I18n.getTextAt(BUNDLE, "RealUpdateService.revalidatingRetained"));
+                LocalizedText.of(BUNDLE, "RealUpdateService.revalidatingRetained"));
         Snapshot expected = prepared.source();
         UpdatePreviewService.Preview preview = prepared.capturedPreview();
         try (RootCoordinator.Lease gate = coordinator.acquire(expected.root(), true)) {
@@ -490,7 +491,7 @@ public final class RealUpdateService {
                         + "update attempt");
             }
             context.phase(OperationPhase.PREPARE_INSTALL,
-                    I18n.getTextAt(BUNDLE, "RealUpdateService.replanning"));
+                    LocalizedText.of(BUNDLE, "RealUpdateService.replanning"));
             List<Decision> decisions = new UpdatePlanner().planPreview(
                     current.current().officialManifest(), prepared.target().manifest(),
                     current.root(), pair, trustedHashes(current.current()),
@@ -499,7 +500,7 @@ public final class RealUpdateService {
             validatePristineRuntime(current.root(), current.current(),
                     prepared.target().manifest(), decisions, context);
             preflight(current.root(), decisions, context);
-            context.phase(OperationPhase.APPLY, I18n.getTextAt(BUNDLE, "RealUpdateService.enteringTransaction"));
+            context.phase(OperationPhase.APPLY, LocalizedText.of(BUNDLE, "RealUpdateService.enteringTransaction"));
             context.enterFinalization("The update transaction and recovery journal have begun; "
                     + "cancellation can no longer be performed safely.");
             return transact(current, extracted, preview.targetRelease(), preview.targetAsset(),
@@ -533,7 +534,7 @@ public final class RealUpdateService {
         if (!CONFIRM.equals(confirmation)) {
             throw new IOException("recovery confirmation must be exactly " + CONFIRM);
         }
-        context.phase(OperationPhase.RECOVER, I18n.getTextAt(BUNDLE, "RealUpdateService.startingRecovery"));
+        context.phase(OperationPhase.RECOVER, LocalizedText.of(BUNDLE, "RealUpdateService.startingRecovery"));
         context.enterFinalization("Recovery replay and cleanup have begun; cancellation is disabled.");
         Path registryPath = registry.toAbsolutePath().normalize();
         RegistryData data = registries.read(registryPath);

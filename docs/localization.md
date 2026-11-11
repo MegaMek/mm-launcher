@@ -23,6 +23,26 @@ What is translated: everything a player reads in the launcher window and its dia
 English: log files, exception details, bug-report content and command-line output, so that logs and
 bug reports stay readable for the team.
 
+### Text that reaches both the player and the logs
+
+Some text is shown on screen and also written to logs. Progress steps, launcher update results, error
+titles and a few error messages are examples. Code passes this text as a
+[`LocalizedText`](../src/main/java/org/megamek/launcher/internationalization/LocalizedText.java) (a
+bundle key plus arguments) instead of an already-translated string:
+
+- `LocalizedText.of(bundle, key, args...)` builds it. With arguments, the value is a `MessageFormat`
+  pattern, the same as `getFormattedTextAt`. `LocalizedText.literal(text)` wraps text that isn't
+  translated.
+- `text()` is in the player's language, for the screen. `english()` is for logs and diagnostics.
+- `OperationContext.phase`, `progress` and `cleanupPhase` take a `LocalizedText`. The progress
+  dialog shows `OperationProgress.displayDetail()`, and operation logs keep the English
+  `detail()`.
+- [`LocalizedIOException`](../src/main/java/org/megamek/launcher/internationalization/LocalizedIOException.java)
+  returns English from `getMessage()` and the player's language from `getLocalizedMessage()`.
+  `SanitizedErrors.display` uses the localized message, and `SanitizedErrors.persistent` uses the
+  English one.
+- Error dialogs show their title in the player's language. Diagnostics record the English title.
+
 ## Bundles
 
 | Bundle | Covers |

@@ -59,9 +59,11 @@ class ServicesBundleTest {
     private static final Set<String> EXCLUDED_PACKAGES = Set.of("gui", "design", "internationalization");
     private static final Set<String> EXCLUDED_FILES =
             Set.of("Main.java", "WindowsBootstrap.java", "DesktopLauncher.java");
-    private static final Pattern TEXT_KEY = Pattern.compile("getTextAt\\(\\s*BUNDLE,\\s*\"([^\"]+)\"");
-    private static final Pattern FORMATTED_KEY =
-            Pattern.compile("getFormattedTextAt\\(\\s*BUNDLE,\\s*\"([^\"]+)\"");
+    private static final Pattern TEXT_KEY =
+            Pattern.compile("(?:getTextAt|LocalizedText\\.of)\\(\\s*BUNDLE,\\s*\"([^\"]+)\"");
+    /** A {@code LocalizedText.of} call with arguments after the key is formatted too. */
+    private static final Pattern FORMATTED_KEY = Pattern.compile("getFormattedTextAt\\(\\s*BUNDLE,\\s*\"([^\"]+)\""
+            + "|LocalizedText\\.of\\(\\s*BUNDLE,\\s*\"([^\"]+)\"\\s*,");
 
     @Test
     void everyServiceKeyExistsAndFormattedValuesParse() throws IOException {
@@ -100,7 +102,9 @@ class ServicesBundleTest {
     private static void collect(Pattern pattern, String source, Set<String> keys) {
         Matcher matcher = pattern.matcher(source);
         while (matcher.find()) {
-            keys.add(matcher.group(1));
+            for (int group = 1; group <= matcher.groupCount(); group++) {
+                if (matcher.group(group) != null) keys.add(matcher.group(group));
+            }
         }
     }
 }

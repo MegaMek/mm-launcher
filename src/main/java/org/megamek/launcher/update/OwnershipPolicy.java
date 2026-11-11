@@ -33,7 +33,7 @@
 
 package org.megamek.launcher.update;
 
-import org.megamek.launcher.internationalization.I18n;
+import org.megamek.launcher.internationalization.LocalizedText;
 import org.megamek.launcher.manifest.FileEntry;
 import org.megamek.launcher.manifest.Manifest;
 import org.megamek.launcher.manifest.ManifestException;
@@ -157,7 +157,7 @@ public final class OwnershipPolicy {
                 }
             }
             context.progress(phase, ++completed, paths.size(), ProgressUnit.FILES,
-                    I18n.getFormattedTextAt(BUNDLE, "OwnershipPolicy.inventoried",
+                    LocalizedText.of(BUNDLE, "OwnershipPolicy.inventoried",
                             String.valueOf(completed), String.valueOf(paths.size())));
         }
         return finish(repository, releaseId, managed, excluded, protectedFiles);

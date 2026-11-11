@@ -33,7 +33,7 @@
 
 package org.megamek.launcher.update;
 
-import org.megamek.launcher.internationalization.I18n;
+import org.megamek.launcher.internationalization.LocalizedText;
 import org.megamek.launcher.manifest.ManifestException;
 import org.megamek.launcher.manifest.ManifestReader;
 import org.megamek.launcher.operation.OperationContext;
@@ -132,7 +132,7 @@ record RootSnapshot(String canonicalRoot, RootIdentity rootIdentity,
                     before.isDirectory(), before.size(), before.lastModifiedTime().toMillis(),
                     before.fileKey() == null ? null : before.fileKey().toString(), hash));
             context.progress(phase, ++completed, paths.size(), ProgressUnit.FILES,
-                    I18n.getFormattedTextAt(BUNDLE, "RootSnapshot.scanProgress",
+                    LocalizedText.of(BUNDLE, "RootSnapshot.scanProgress",
                             scan.progressDetail(), String.valueOf(completed),
                             String.valueOf(paths.size())));
         }
@@ -204,11 +204,11 @@ record RootSnapshot(String canonicalRoot, RootIdentity rootIdentity,
             this.pathLabel = pathLabel;
         }
 
-        String progressDetail() {
+        LocalizedText progressDetail() {
             return switch (this) {
-                case INITIAL_IMPORTED_COPY -> I18n.getTextAt(BUNDLE, "RootSnapshot.checkingInstallation");
-                case OFFICIAL_PACKAGE -> I18n.getTextAt(BUNDLE, "RootSnapshot.checkingPackage");
-                case FINAL_IMPORTED_COPY -> I18n.getTextAt(BUNDLE, "RootSnapshot.confirmingUnchanged");
+                case INITIAL_IMPORTED_COPY -> LocalizedText.of(BUNDLE, "RootSnapshot.checkingInstallation");
+                case OFFICIAL_PACKAGE -> LocalizedText.of(BUNDLE, "RootSnapshot.checkingPackage");
+                case FINAL_IMPORTED_COPY -> LocalizedText.of(BUNDLE, "RootSnapshot.confirmingUnchanged");
             };
         }
     }

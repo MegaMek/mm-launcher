@@ -36,7 +36,7 @@ package org.megamek.launcher.release;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
-import org.megamek.launcher.internationalization.I18n;
+import org.megamek.launcher.internationalization.LocalizedText;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationPhase;
 import org.megamek.launcher.operation.OperationType;
@@ -147,7 +147,7 @@ public final class SafeTarExtractor {
                     }
                 }
                 context.progress(phase, entries, -1, ProgressUnit.FILES,
-                        I18n.getFormattedTextAt(BUNDLE, "SafeTarExtractor.extractedEntries",
+                        LocalizedText.of(BUNDLE, "SafeTarExtractor.extractedEntries",
                         String.valueOf(entries)));
             }
         }

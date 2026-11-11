@@ -33,7 +33,7 @@
 
 package org.megamek.launcher.onboarding;
 
-import org.megamek.launcher.internationalization.I18n;
+import org.megamek.launcher.internationalization.LocalizedText;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationPhase;
 import org.megamek.launcher.registry.RegistryStore;
@@ -69,7 +69,7 @@ public final class ExistingImportService {
             throws IOException, InterruptedException {
         requireContext(context);
         context.phase(OperationPhase.METADATA,
-                I18n.getTextAt(BUNDLE, "ExistingImportService.inspecting"));
+                LocalizedText.of(BUNDLE, "ExistingImportService.inspecting"));
         Inspection inspection = inspector.inspect(selectedRoot);
         context.checkpoint();
         return new Plan(inspection);
@@ -84,12 +84,12 @@ public final class ExistingImportService {
         if (plan == null) throw new IOException("a confirmed existing-copy plan is required");
         requireContext(context);
         context.phase(OperationPhase.VERIFY,
-                I18n.getTextAt(BUNDLE, "ExistingImportService.revalidating"));
+                LocalizedText.of(BUNDLE, "ExistingImportService.revalidating"));
         context.checkpoint();
         context.enterFinalization("Existing-copy registration has begun; cancellation can no "
                 + "longer be performed safely.");
         context.phase(OperationPhase.PREPARE_INSTALL,
-                I18n.getTextAt(BUNDLE, "ExistingImportService.registering"));
+                LocalizedText.of(BUNDLE, "ExistingImportService.registering"));
         ensureRegistryParent();
         RegistryStore.ImportedRegistration registered = registries.registerImported(
                 registry, name, plan.inspection());

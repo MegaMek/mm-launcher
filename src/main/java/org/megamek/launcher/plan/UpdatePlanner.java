@@ -33,7 +33,7 @@
 
 package org.megamek.launcher.plan;
 
-import org.megamek.launcher.internationalization.I18n;
+import org.megamek.launcher.internationalization.LocalizedText;
 import org.megamek.launcher.manifest.FileEntry;
 import org.megamek.launcher.manifest.Manifest;
 import org.megamek.launcher.manifest.ManifestException;
@@ -169,7 +169,7 @@ public final class UpdatePlanner {
     private static void report(OperationContext context, OperationPhase phase, int completed,
                                int total) throws org.megamek.launcher.operation.OperationCancelledException {
         context.progress(phase, completed, total, ProgressUnit.FILES,
-                I18n.getFormattedTextAt(BUNDLE, "UpdatePlanner.planned",
+                LocalizedText.of(BUNDLE, "UpdatePlanner.planned",
                         String.valueOf(completed), String.valueOf(total)));
     }
 

@@ -33,7 +33,7 @@
 
 package org.megamek.launcher.update;
 
-import org.megamek.launcher.internationalization.I18n;
+import org.megamek.launcher.internationalization.LocalizedText;
 import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.channel.OfficialSuiteChannelCatalog;
 import org.megamek.launcher.diagnostics.SanitizedErrors;
@@ -110,7 +110,7 @@ public final class AutomaticAdoptionResolver {
             for (int page = 1; page <= MAX_PAGES; page++) {
                 context.checkpoint();
                 context.progress(OperationPhase.METADATA, scanned, MAX_RELEASES,
-                        ProgressUnit.FILES, I18n.getTextAt(BUNDLE, "AutomaticAdoptionResolver.searching"));
+                        ProgressUnit.FILES, LocalizedText.of(BUNDLE, "AutomaticAdoptionResolver.searching"));
                 ReleaseCatalog.Page result = catalog.list(repository, page, PAGE_SIZE);
                 pages++;
                 for (ReleaseCatalog.Release release : result.releases()) {
