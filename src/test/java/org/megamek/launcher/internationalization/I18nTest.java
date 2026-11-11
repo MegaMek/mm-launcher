@@ -57,6 +57,8 @@ import org.junit.jupiter.api.Test;
 class I18nTest {
     private static final Path RESOURCES = Path.of("src", "main", "resources");
     private static final Pattern TRANSLATION = Pattern.compile("(.+)_([a-z]{2})\\.properties");
+    /** Test-only bundle: German and English everywhere, Russian missing one key on purpose. */
+    private static final String FALLBACK = "org.megamek.launcher.internationalization.fallback";
 
     @AfterEach
     void restoreLanguage() {
@@ -78,7 +80,8 @@ class I18nTest {
             Locale.setDefault(Locale.GERMAN);
             I18n.setLanguage("ru");
             assertEquals(Locale.forLanguageTag("ru"), I18n.getLocale());
-            assertEquals("Language", I18n.getText("Settings.language"));
+            assertEquals("Русский", I18n.getTextAt(FALLBACK, "Test.everywhere"));
+            assertEquals("English only", I18n.getTextAt(FALLBACK, "Test.notInRussian"));
         } finally {
             Locale.setDefault(system);
         }
@@ -86,8 +89,15 @@ class I18nTest {
 
     @Test
     void blankLanguageFollowsTheSystemLanguage() {
-        I18n.setLanguage(null);
-        assertEquals(Locale.getDefault(), I18n.getLocale());
+        Locale system = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.GERMAN);
+            I18n.setLanguage(null);
+            assertEquals(Locale.GERMAN, I18n.getLocale());
+            assertEquals("Deutsch", I18n.getTextAt(FALLBACK, "Test.everywhere"));
+        } finally {
+            Locale.setDefault(system);
+        }
     }
 
     @Test

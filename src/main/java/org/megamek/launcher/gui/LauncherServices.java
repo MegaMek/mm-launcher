@@ -403,6 +403,15 @@ public class LauncherServices {
 
     /** The saved language, or {@code null} for the system language; unreadable settings use the system language. */
     String language() {
+        return savedLanguage(settings);
+    }
+
+    /** {@link #language()} for {@code registry}, read without constructing the services. */
+    static String savedLanguage(Path registry) {
+        return savedLanguage(new LauncherSettingsStore(registry.toAbsolutePath().normalize()));
+    }
+
+    private static String savedLanguage(LauncherSettingsStore settings) {
         try {
             return settings.read().language();
         } catch (IOException | RuntimeException error) {

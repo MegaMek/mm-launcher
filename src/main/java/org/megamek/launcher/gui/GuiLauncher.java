@@ -100,9 +100,10 @@ public final class GuiLauncher {
             PlatformInstallLocations installLocations = selection.defaultRegistry()
                     ? PlatformInstallLocations.system(selection.registry())
                     : PlatformInstallLocations.customRegistry();
+            // Before any class that reads text into a constant is loaded.
+            I18n.setLanguage(LauncherServices.savedLanguage(selection.registry()));
             LauncherServices services = new LauncherServices(
                     selection.registry(), installLocations);
-            I18n.setLanguage(services.language());
             LauncherAppearance saved = services.appearance();
             if (!saved.equals(LauncherAppearance.DEFAULT)) {
                 LauncherAppearance.install(saved);

@@ -2170,7 +2170,7 @@ public final class LauncherFrame extends JFrame {
                     if (!isCurrentAdoption(generation, record)) return;
                     showIneligibleAdoption(new PreparedAdoption.Report(false,
                             record.name(), record.observedBuild(), FollowChannel.CORE,
-                            ImportedCopyAdoptionService.AUTOMATIC_MATCH_UNAVAILABLE));
+                            ImportedCopyAdoptionService.automaticMatchUnavailable()));
                     recordErrorAsync("Mapping imported copy to an official product",
                             error, ignored -> {});
                 }, () -> {}, false);

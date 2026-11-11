@@ -91,7 +91,11 @@ public final class ImportedCopyAdoptionService {
     private static final int DIAGNOSTIC_PATH_LIMIT = 40;
     private static final LocalizedText AUTOMATIC_MATCH_UNAVAILABLE_TEXT =
             LocalizedText.of(BUNDLE, "ImportedCopyAdoptionService.automaticMatchUnavailable");
-    public static final String AUTOMATIC_MATCH_UNAVAILABLE = AUTOMATIC_MATCH_UNAVAILABLE_TEXT.text();
+
+    /** Read each time, so it follows the launcher's current language. */
+    public static String automaticMatchUnavailable() {
+        return AUTOMATIC_MATCH_UNAVAILABLE_TEXT.text();
+    }
 
     private final Path registry;
     private final ReleaseTransport transport;

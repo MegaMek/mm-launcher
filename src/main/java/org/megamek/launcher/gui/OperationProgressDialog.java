@@ -349,7 +349,7 @@ final class OperationProgressDialog extends JDialog implements OperationProgress
         String summary = failureSummary != null
                 ? failureSummary
                 : simpleAdoptionResolution
-                ? ImportedCopyAdoptionService.AUTOMATIC_MATCH_UNAVAILABLE
+                ? ImportedCopyAdoptionService.automaticMatchUnavailable()
                 : null;
         detail.setText(summary == null ? conciseFailure(problem) : "<html>" + summary + "</html>");
         loggingWarning.setVisible(false);
