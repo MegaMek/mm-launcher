@@ -40,6 +40,7 @@ import org.megamek.launcher.design.host.FontHandler;
 import org.megamek.launcher.design.swing.MegaMekDarkLaf;
 import org.megamek.launcher.design.swing.MegaMekLightLaf;
 import org.megamek.launcher.design.swing.TokenMotion;
+import org.megamek.launcher.internationalization.I18n;
 
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
@@ -55,19 +56,18 @@ import java.util.Objects;
  * window in the new look without rebuilding it.
  */
 record LauncherAppearance(Theme theme) {
+    static final String BUNDLE = "org.megamek.launcher.gui.home";
     static final LauncherAppearance DEFAULT = new LauncherAppearance(Theme.DARK);
 
     private static volatile LauncherAppearance current = DEFAULT;
 
     enum Theme {
-        DARK("Dark", Mode.DARK),
-        LIGHT("Light", Mode.LIGHT);
+        DARK(Mode.DARK),
+        LIGHT(Mode.LIGHT);
 
-        private final String label;
         private final Mode mode;
 
-        Theme(String label, Mode mode) {
-            this.label = label;
+        Theme(Mode mode) {
             this.mode = mode;
         }
 
@@ -88,7 +88,10 @@ record LauncherAppearance(Theme theme) {
 
         @Override
         public String toString() {
-            return label;
+            return switch (this) {
+                case DARK -> I18n.getTextAt(BUNDLE, "LauncherAppearance.themeDark");
+                case LIGHT -> I18n.getTextAt(BUNDLE, "LauncherAppearance.themeLight");
+            };
         }
     }
 
