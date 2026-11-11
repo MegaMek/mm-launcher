@@ -44,12 +44,15 @@ import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.LayoutFocusTraversalPolicy;
 import javax.swing.WindowConstants;
 import java.awt.BorderLayout;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.Toolkit;
+import java.awt.Window;
 import java.util.Objects;
 import java.util.function.Consumer;
 
@@ -140,15 +143,16 @@ final class LaunchOptionsDialog {
         body.add(south, BorderLayout.SOUTH);
 
         dialog.setContentPane(body);
-        footer.install(dialog, dialog::dispose);
-        // Start on the first option rather than the reset link above the form.
-        dialog.addWindowListener(new java.awt.event.WindowAdapter() {
+        // Start on the first option rather than the reset link above the form. This lives in the policy
+        // because a windowOpened focus request can lose to the window's own activation focus.
+        dialog.setFocusTraversalPolicy(new LayoutFocusTraversalPolicy() {
             @Override
-            public void windowOpened(java.awt.event.WindowEvent event) {
-                java.awt.Component first = dialog.getFocusTraversalPolicy().getComponentAfter(dialog, restore);
-                if (first != null) first.requestFocusInWindow();
+            public Component getInitialComponent(Window window) {
+                Component first = getComponentAfter(dialog, restore);
+                return first != null ? first : super.getInitialComponent(window);
             }
         });
+        footer.install(dialog, dialog::dispose);
         dialog.pack();
         Rectangle usable = (owner != null ? owner.getGraphicsConfiguration()
                 : dialog.getGraphicsConfiguration()).getBounds();
