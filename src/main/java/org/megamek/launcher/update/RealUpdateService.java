@@ -60,6 +60,7 @@ import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
 import org.megamek.launcher.release.ReleaseTransport;
 import org.megamek.launcher.release.VerifiedPackageFetcher;
+import org.megamek.launcher.release.VersionIdentity;
 import org.megamek.launcher.sandbox.OverrideEntry;
 
 import java.io.IOException;
@@ -111,6 +112,7 @@ public final class RealUpdateService {
     private final ChannelPreferenceStore channelPreferences;
     private final RootCoordinator coordinator;
     private final FailureHook failureHook;
+    private final PreviousBuildStore previousBuilds = new PreviousBuildStore();
     private final ObjectMapper mapper = JsonMapper.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build()
             .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
@@ -559,6 +561,9 @@ public final class RealUpdateService {
                             Inspection installed = inspectTarget(root, journal);
                             registries.refreshAfterUpdate(registryPath, journal.expectedRecord(),
                                     installed.observedBuild(), installed.products());
+                            rememberPreviousBuild(registryPath, record.id(),
+                                    journal.expectedRecord().observedBuild(),
+                                    installed.observedBuild());
                             validateNamespaceEntries(namespace, transaction, pendingFile, false);
                             deleteValidatedTransaction(transaction, journal);
                             Path transactions = namespace.resolve("transactions");
@@ -609,6 +614,8 @@ public final class RealUpdateService {
                 }
                 InstallationRecord refreshed = registries.refreshAfterUpdate(registryPath,
                         journal.expectedRecord(), installed.observedBuild(), installed.products());
+                rememberPreviousBuild(registryPath, record.id(),
+                        journal.expectedRecord().observedBuild(), installed.observedBuild());
                 clearStaleCaches(root, journal.nextState().officialManifest());
                 writeJournal(journalFile, withPhase(journal, "COMMITTED"));
                 cleanupCommitted(namespace, transaction, pendingFile, journal);
@@ -632,6 +639,23 @@ public final class RealUpdateService {
 
     public boolean hasPending(Path root) throws IOException {
         return coordinator.pending(root);
+    }
+
+    /**
+     * Remembers the build an update started from, where What's new starts. A repair keeps the
+     * build, and with it what is already remembered. Failing to remember only makes What's new
+     * show the installed release's own notes, so it never fails the update.
+     */
+    private void rememberPreviousBuild(Path registry, String id, String previous, String current) {
+        if (previous == null || current == null
+                || VersionIdentity.fromExact(previous).equals(VersionIdentity.fromExact(current))) {
+            return;
+        }
+        try {
+            previousBuilds.write(registry, id, previous, current);
+        } catch (IOException | RuntimeException ignored) {
+            // Best effort, see above.
+        }
     }
 
     private ApplyResult transact(Snapshot snapshot, Path extracted,
@@ -717,9 +741,12 @@ public final class RealUpdateService {
         InstallationRecord refreshed = registries.refreshAfterUpdate(snapshot.registry(),
                 snapshot.record(), installed.observedBuild(), installed.products());
         failureHook.hit("AFTER_REGISTRY_COMMIT");
-        // Before COMMITTED, so an interrupted cleanup cannot skip it: until then recovery
-        // replays this commit, and with it the cache invalidation.
-        if (!repair) clearStaleCaches(snapshot.root(), target.manifest());
+        // Before COMMITTED as well, so recovery replays it after an interruption.
+        if (!repair) {
+            rememberPreviousBuild(snapshot.registry(), snapshot.record().id(),
+                    snapshot.record().observedBuild(), installed.observedBuild());
+            clearStaleCaches(snapshot.root(), target.manifest());
+        }
         writeJournal(journalFile, withPhase(journal, "COMMITTED"));
         cleanupCommitted(namespace, transaction, pendingFile, journal);
         long skipped = decisions.stream().filter(item -> item.action() == Action.SKIP).count();

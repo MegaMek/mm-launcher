@@ -374,6 +374,8 @@ public final class LauncherFrame extends JFrame {
         installationChecks.clear();
         status.setText("Loading installations…");
         run("Loading installations", () -> {
+            // Notices a launcher update before the release notes are first opened.
+            services.rememberLauncherVersion();
             try {
                 LauncherServices.HomeState home = services.loadHome();
                 java.awt.image.BufferedImage artwork = firstLaunchArtwork;
@@ -540,26 +542,7 @@ public final class LauncherFrame extends JFrame {
         archive.getAccessibleContext().setAccessibleDescription(
                 "Open the MegaMek blog archive in your browser");
         archive.addActionListener(event -> openWebsite(LauncherNewsFeed.ARCHIVE, "news archive"));
-        if (homeWhatsNewVersions().isEmpty()) {
-            news.add(archive);
-        } else {
-            JButton whatsNew = new LauncherLink("What's new", "whatsNewButton", guiScale);
-            whatsNew.getAccessibleContext().setAccessibleDescription(
-                    "Shows the release notes of the installed version");
-            whatsNew.addActionListener(event -> showHomeWhatsNew());
-            JPanel footer = new JPanel(new BorderLayout()) {
-                @Override
-                public Dimension getMaximumSize() {
-                    return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
-                }
-            };
-            footer.setName("homeNewsLinks");
-            footer.setOpaque(false);
-            footer.setAlignmentX(Component.LEFT_ALIGNMENT);
-            footer.add(archive, BorderLayout.WEST);
-            footer.add(whatsNew, BorderLayout.EAST);
-            news.add(footer);
-        }
+        news.add(archive);
         news.revalidate();
         news.repaint();
         Container plate = news.getParent();
@@ -3253,23 +3236,27 @@ public final class LauncherFrame extends JFrame {
     }
 
     /**
-     * Keeps the home navigation centered with the community links on its right, and stacks the links below the
-     * navigation when the deck is too narrow for both.
+     * Keeps the home navigation centered with link groups at its left and right edges, and stacks both groups below the
+     * navigation, side by side, when the deck is too narrow for all three on one line.
      */
     private static final class NavigationRow extends JPanel {
         private final java.awt.Container navigation;
-        private final java.awt.Container links;
+        private final java.awt.Container leading;
+        private final java.awt.Container trailing;
         private final int gap;
         private boolean stacked;
 
-        NavigationRow(java.awt.Container navigation, java.awt.Container links, int gap) {
+        NavigationRow(java.awt.Container navigation, java.awt.Container leading, java.awt.Container trailing,
+                      int gap) {
             super(null);
             this.navigation = navigation;
-            this.links = links;
+            this.leading = leading;
+            this.trailing = trailing;
             this.gap = gap;
             setOpaque(false);
+            add(leading);
             add(navigation);
-            add(links);
+            add(trailing);
             addComponentListener(new java.awt.event.ComponentAdapter() {
                 @Override
                 public void componentResized(java.awt.event.ComponentEvent event) {
@@ -3294,30 +3281,41 @@ public final class LauncherFrame extends JFrame {
             return getWidth();
         }
 
+        /** The width each side of the navigation needs, so the navigation stays centered between equal margins. */
+        private int side() {
+            return Math.max(leading.getPreferredSize().width, trailing.getPreferredSize().width);
+        }
+
+        /** Both link groups side by side, as they sit below the navigation when stacked. */
+        private Dimension stackedLinks() {
+            Dimension left = leading.getPreferredSize();
+            Dimension right = trailing.getPreferredSize();
+            return new Dimension(left.width + gap + right.width, Math.max(left.height, right.height));
+        }
+
         private boolean shouldStack(int width) {
             if (width <= 0) return false;
             java.awt.Insets insets = getInsets();
             int available = width - insets.left - insets.right;
-            // The links sit on the right and an equal empty margin on the left keeps the navigation centered.
-            return navigation.getPreferredSize().width + 2 * (links.getPreferredSize().width + gap) > available;
+            return navigation.getPreferredSize().width + 2 * (side() + gap) > available;
         }
 
         @Override
         public Dimension getPreferredSize() {
             if (isPreferredSizeSet()) return super.getPreferredSize();
             Dimension nav = navigation.getPreferredSize();
-            Dimension link = links.getPreferredSize();
+            Dimension links = stackedLinks();
             java.awt.Insets insets = getInsets();
             boolean stack = shouldStack(rowWidth());
-            int width = stack ? Math.max(nav.width, link.width) : nav.width + 2 * (link.width + gap);
-            int height = stack ? nav.height + gap + link.height : Math.max(nav.height, link.height);
+            int width = stack ? Math.max(nav.width, links.width) : nav.width + 2 * (side() + gap);
+            int height = stack ? nav.height + gap + links.height : Math.max(nav.height, links.height);
             return new Dimension(width + insets.left + insets.right, height + insets.top + insets.bottom);
         }
 
         @Override
         public Dimension getMinimumSize() {
             java.awt.Insets insets = getInsets();
-            return new Dimension(Math.max(navigation.getPreferredSize().width, links.getPreferredSize().width)
+            return new Dimension(Math.max(navigation.getPreferredSize().width, stackedLinks().width)
                     + insets.left + insets.right, getPreferredSize().height);
         }
 
@@ -3334,27 +3332,32 @@ public final class LauncherFrame extends JFrame {
             int width = Math.max(0, getWidth() - insets.left - insets.right);
             int height = Math.max(0, getHeight() - insets.top - insets.bottom);
             Dimension nav = navigation.getPreferredSize();
-            Dimension link = links.getPreferredSize();
+            Dimension left = leading.getPreferredSize();
+            Dimension right = trailing.getPreferredSize();
             stacked = shouldStack(getWidth());
             if (stacked) {
                 int navWidth = Math.min(width, nav.width);
                 navigation.setBounds(x + (width - navWidth) / 2, y, navWidth, nav.height);
-                int linkWidth = Math.min(width, link.width);
-                links.setBounds(x + (width - linkWidth) / 2, y + nav.height + gap, linkWidth, link.height);
+                Dimension links = stackedLinks();
+                int linksX = x + Math.max(0, (width - links.width) / 2);
+                int linksY = y + nav.height + gap;
+                leading.setBounds(linksX, linksY + (links.height - left.height) / 2, left.width, left.height);
+                int rightX = Math.min(linksX + left.width + gap, x + width - right.width);
+                trailing.setBounds(rightX, linksY + (links.height - right.height) / 2, right.width, right.height);
             } else {
                 navigation.setBounds(x + (width - nav.width) / 2, y + (height - nav.height) / 2,
                         nav.width, nav.height);
-                links.setBounds(x + width - link.width, y + (height - link.height) / 2, link.width, link.height);
+                leading.setBounds(x, y + (height - left.height) / 2, left.width, left.height);
+                trailing.setBounds(x + width - right.width, y + (height - right.height) / 2,
+                        right.width, right.height);
             }
         }
     }
 
-    /** {@code navigation} centered, with the community links on its right (or below when narrow). */
+    /** {@code navigation} centered, with the help links on its left and the community links on its right. */
     private JPanel homeNavigationRow(JPanel navigation) {
-        JPanel links = new JPanel(new java.awt.GridBagLayout());
-        links.setOpaque(false);
-        links.add(communityLinks());
-        JPanel row = new NavigationRow(navigation, links, guiScale.space("md"));
+        JPanel row = new NavigationRow(navigation, linkGroup("helpLinks", helpLinks()),
+                linkGroup("communityLinks", communityLinks()), guiScale.space("md"));
         row.setAlignmentX(Component.CENTER_ALIGNMENT);
         return row;
     }
@@ -3373,7 +3376,25 @@ public final class LauncherFrame extends JFrame {
         return row;
     }
 
-    private JPanel communityLinks() {
+    /** "Release notes", when Home has an installation to describe, and the bug report helper. */
+    private List<JButton> helpLinks() {
+        List<JButton> links = new ArrayList<>();
+        if (!homeWhatsNewInstallations().isEmpty()) {
+            JButton whatsNew = new LauncherLink("Release notes", "whatsNewButton", guiScale);
+            whatsNew.getAccessibleContext().setAccessibleDescription(
+                    "Shows what changed in the installed versions and in the launcher");
+            whatsNew.addActionListener(event -> showHomeWhatsNew());
+            links.add(whatsNew);
+        }
+        JButton report = new LauncherLink("Report a bug", "reportBugButton", guiScale);
+        report.getAccessibleContext().setAccessibleDescription(
+                "Opens the launcher's bug report helper");
+        report.addActionListener(event -> showBugReport());
+        links.add(report);
+        return links;
+    }
+
+    private List<JButton> communityLinks() {
         JButton discord = new LauncherLink("Join Discord", "openDiscordButton", guiScale);
         discord.getAccessibleContext().setAccessibleDescription(
                 "Opens the MegaMek community Discord invitation in your browser");
@@ -3384,20 +3405,20 @@ public final class LauncherFrame extends JFrame {
                 "Opens megamek.games, the list of public MegaMek servers, in your browser");
         online.addActionListener(event -> openWebsite(
                 java.net.URI.create(PLAY_ONLINE_URL), "megamek.games"));
-        JButton report = new LauncherLink("Report a bug", "reportBugButton", guiScale);
-        report.getAccessibleContext().setAccessibleDescription(
-                "Opens the launcher's bug report helper");
-        report.addActionListener(event -> showBugReport());
+        return List.of(discord, online);
+    }
+
+    /** One row of links, vertically centered on the navigation buttons beside it. */
+    private JPanel linkGroup(String name, List<JButton> buttons) {
         JPanel links = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.CENTER,
                 guiScale.space("lg"), 0));
-        links.setName("communityLinks");
+        links.setName(name);
         links.setOpaque(false);
-        links.setAlignmentX(Component.CENTER_ALIGNMENT);
-        links.add(discord);
-        links.add(online);
-        links.add(report);
-        links.setMaximumSize(new Dimension(Integer.MAX_VALUE, links.getPreferredSize().height));
-        return links;
+        for (JButton button : buttons) links.add(button);
+        JPanel group = new JPanel(new java.awt.GridBagLayout());
+        group.setOpaque(false);
+        group.add(links);
+        return group;
     }
 
     private void openWebsite(java.net.URI address, String description) {
@@ -4084,9 +4105,6 @@ public final class LauncherFrame extends JFrame {
         String release = VersionDisplay.programChannelVersion(
                 product, plan.channel().toString(), plan.version());
         String operationDescription = "Installing " + release;
-        // The very first install is welcomed by the launcher itself; later ones say what's new.
-        // An exact version picked from "Install another version" is not news.
-        boolean showWhatsNew = !state.registry().installations().isEmpty() && plan.currentChannelTarget();
         OperationProgressDialog progress = new OperationProgressDialog(this,
                 operationDescription, "normalInstallProgressLog", this::showOperationLogs);
         progress.append("Installing the confirmed official " + product + " "
@@ -4110,7 +4128,6 @@ public final class LauncherFrame extends JFrame {
                                     + "Nothing was launched.\n");
                     page = Page.HOME;
                     reload();
-                    if (showWhatsNew) showWhatsNew(null, plan.version());
                 }, error -> {
                     progress.append("\nINSTALL DID NOT COMPLETE: " + errorDetail(error) + "\n");
                     progress.setHeading(error instanceof
@@ -4744,7 +4761,6 @@ public final class LauncherFrame extends JFrame {
             ChannelUpdateChecker.Result recommended) {
         OperationProgressDialog progress = new OperationProgressDialog(this,
                 "Preparing update", "applyUpdateProgressLog", this::showOperationLogs);
-        String updatedFrom = record.observedBuild();
         progress.append("Downloading and verifying the exact consented package once for "
                 + tag + "...\n");
         progress.setVisible(true);
@@ -4796,7 +4812,6 @@ public final class LauncherFrame extends JFrame {
                 }
                 page = Page.INSTALLATIONS;
                 reload();
-                if (result.cleanupWarning() == null) showWhatsNew(updatedFrom, tag);
             }, failure -> {
                     progress.append("\nUPDATE ATTEMPT FAILED: " + errorDetail(failure)
                             + "\nNo second package download was attempted. If application "
@@ -5440,44 +5455,36 @@ public final class LauncherFrame extends JFrame {
     }
 
     /**
-     * Shows what changed in the suite going from {@code since} (null when unknown) to
-     * {@code version}, replacing any open What's new dialog.
+     * Opens What's new for the versions Home's applications run, each its own preferred version,
+     * starting where each installation was before its last update.
      */
-    void showWhatsNew(String since, String version) {
-        if (version == null) return;
-        if (whatsNewDialog != null && whatsNewDialog.isDisplayable()) whatsNewDialog.dispose();
-        whatsNewDialog = WhatsNewDialog.show(this, guiScale, since, version,
-                () -> services.whatsNew(since, version),
-                link -> openWebsite(link, "the release notes"));
-    }
-
-    /** Opens What's new for the versions Home's applications run, each its own preferred version. */
     void showHomeWhatsNew() {
-        Map<OfficialRepository, String> versions = homeWhatsNewVersions();
-        if (versions.isEmpty()) return;
-        java.util.Set<String> distinct = new java.util.HashSet<>(versions.values());
+        Map<OfficialRepository, InstallationRecord> installations = homeWhatsNewInstallations();
+        if (installations.isEmpty()) return;
+        java.util.Set<String> distinct = new java.util.HashSet<>();
+        for (InstallationRecord record : installations.values()) distinct.add(record.observedBuild());
         String version = distinct.size() == 1 ? distinct.iterator().next() : null;
         if (whatsNewDialog != null && whatsNewDialog.isDisplayable()) whatsNewDialog.dispose();
         whatsNewDialog = WhatsNewDialog.show(this, guiScale, null, version,
-                () -> services.whatsNew(versions),
+                () -> services.whatsNew(installations),
                 link -> openWebsite(link, "the release notes"));
     }
 
     /**
-     * The version each application on Home runs: its preferred installation's, or else the first
-     * installation's that has one, so an application is still described when nothing is preferred.
+     * The installation each application on Home runs: its preferred one, or else the first one
+     * with a version, so an application is still described when nothing is preferred.
      */
-    private Map<OfficialRepository, String> homeWhatsNewVersions() {
+    private Map<OfficialRepository, InstallationRecord> homeWhatsNewInstallations() {
         Map<String, InstallationRecord> preferred = state.preferredApplications();
-        String fallback = state.registry().installations().stream().map(InstallationRecord::observedBuild)
-                .filter(java.util.Objects::nonNull).findFirst().orElse(null);
-        Map<OfficialRepository, String> versions = new java.util.EnumMap<>(OfficialRepository.class);
+        InstallationRecord fallback = state.registry().installations().stream()
+                .filter(record -> record.observedBuild() != null).findFirst().orElse(null);
+        Map<OfficialRepository, InstallationRecord> installations = new java.util.EnumMap<>(OfficialRepository.class);
         for (OfficialRepository repository : OfficialRepository.values()) {
             InstallationRecord record = preferred == null ? null : preferred.get(repository.key());
-            String version = record != null && record.observedBuild() != null ? record.observedBuild() : fallback;
-            if (version != null) versions.put(repository, version);
+            InstallationRecord chosen = record != null && record.observedBuild() != null ? record : fallback;
+            if (chosen != null) installations.put(repository, chosen);
         }
-        return versions;
+        return installations;
     }
 
     /** Opens the bug report helper, or brings the open one to the front. */

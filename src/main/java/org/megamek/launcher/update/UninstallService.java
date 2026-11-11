@@ -1231,7 +1231,8 @@ public final class UninstallService {
                 id + ".current.json", id + ".current.json.new",
                 id + ".adoption.json", id + ".adoption.json.new",
                 id + ".channel.json", id + ".channel.json.new",
-                id + ".channel.json.lock"));
+                id + ".channel.json.lock", id + PreviousBuildStore.SUFFIX,
+                id + PreviousBuildStore.SUFFIX + ".new"));
         try (DirectoryStream<Path> stream =
                      Files.newDirectoryStream(directory, id + ".json.new-*")) {
             for (Path candidate : stream) {
@@ -1255,7 +1256,8 @@ public final class UninstallService {
         if (name == null) return false;
         if (Set.of(id + ".json", id + ".json.lock", id + ".current.json",
                 id + ".current.json.new", id + ".adoption.json", id + ".adoption.json.new",
-                id + ".channel.json", id + ".channel.json.new", id + ".channel.json.lock")
+                id + ".channel.json", id + ".channel.json.new", id + ".channel.json.lock",
+                id + PreviousBuildStore.SUFFIX, id + PreviousBuildStore.SUFFIX + ".new")
                 .contains(name)) return true;
         if (!name.startsWith(id + ".json.new-")) return false;
         try {

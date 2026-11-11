@@ -72,6 +72,9 @@ public final class ReleaseNotes {
             "^(.+?) by @([A-Za-z0-9-]+(?:\\[bot])?) in (https://\\S+)$");
     /** A dependency bump in Dependabot's wording, even when a person merged it. */
     private static final Pattern BUMP = Pattern.compile("^Bump \\S+ from \\S+ to \\S+$");
+    /** The launcher's own notes appear beside the suite's under this name. */
+    public static final String LAUNCHER_PRODUCT = "Launcher";
+    static final String LAUNCHER_SLUG = "MegaMek/mm-launcher";
 
     private ReleaseNotes() {
     }
@@ -86,16 +89,26 @@ public final class ReleaseNotes {
         }
     }
 
+    /** The changes one release lists, under its tag and its page on GitHub. */
+    public record Release(String tag, URI page, List<Section> sections) {
+        public Release {
+            sections = List.copyOf(sections);
+        }
+    }
+
     /**
-     * One application's changes in {@code version}. {@code problem} explains why there are none to
-     * show, or is null. {@code page} is where the full notes can be read on GitHub, and
-     * {@code incomplete} says that some of the skipped releases could not be included.
+     * One application's changes in {@code version}, newest release first. {@code product} names it,
+     * and {@code since} is the older version the changes start after, or null for {@code version}'s
+     * own notes. {@code tags} are the releases whose notes were read, and {@code releases} those
+     * with changes to show. {@code problem} explains why there are none to show, or is null.
+     * {@code page} is where the full notes can be read on GitHub, and {@code incomplete} says that
+     * some of the skipped releases could not be included.
      */
-    public record Application(OfficialRepository repository, String version, List<String> tags,
-                              List<Section> sections, URI page, String problem, boolean incomplete) {
+    public record Application(String product, String version, String since, List<String> tags,
+                              List<Release> releases, URI page, String problem, boolean incomplete) {
         public Application {
             tags = List.copyOf(tags);
-            sections = List.copyOf(sections);
+            releases = List.copyOf(releases);
         }
     }
 
@@ -123,46 +136,77 @@ public final class ReleaseNotes {
     public static WhatsNew load(ReleaseCatalog catalog, Channels channels, String since, String version)
             throws InterruptedException {
         Map<OfficialRepository, String> versions = new LinkedHashMap<>();
-        for (OfficialRepository repository : OfficialRepository.values()) versions.put(repository, version);
-        return load(catalog, channels, since, versions);
+        Map<OfficialRepository, String> sinces = new LinkedHashMap<>();
+        for (OfficialRepository repository : OfficialRepository.values()) {
+            versions.put(repository, version);
+            sinces.put(repository, since);
+        }
+        return load(catalog, channels, sinces, versions);
     }
 
-    /** As above, with each application at its own version; applications without one are left out. */
-    public static WhatsNew load(ReleaseCatalog catalog, Channels channels, String since,
+    /**
+     * As above, with each application at its own version, going from its own {@code since}
+     * (missing or null when unknown, which shows only its version's own release notes);
+     * applications without a version are left out.
+     */
+    public static WhatsNew load(ReleaseCatalog catalog, Channels channels, Map<OfficialRepository, String> since,
                                 Map<OfficialRepository, String> versions) throws InterruptedException {
         List<Application> applications = new ArrayList<>();
+        Set<String> starts = new HashSet<>();
         for (OfficialRepository repository : OfficialRepository.values()) {
             String version = versions.get(repository);
-            if (version != null) applications.add(application(catalog, channels, repository, since, version));
+            if (version == null) continue;
+            String from = since.get(repository);
+            starts.add(combines(from, version) ? from : null);
+            applications.add(application(catalog, channels, repository, from, version));
         }
         Set<String> distinct = new HashSet<>(versions.values());
         distinct.remove(null);
-        return new WhatsNew(distinct.size() == 1 ? distinct.iterator().next() : null, since, applications);
+        return new WhatsNew(distinct.size() == 1 ? distinct.iterator().next() : null,
+                starts.size() == 1 ? starts.iterator().next() : null, applications);
     }
 
     static Application application(ReleaseCatalog catalog, Channels channels, OfficialRepository repository,
                                    String since, String version) throws InterruptedException {
-        URI releases = URI.create("https://github.com/" + repository.slug() + "/releases");
+        return application(catalog, channels, repository.productName(), repository.slug(), since, version);
+    }
+
+    /**
+     * The launcher's own changes from {@code since} (null when unknown) to {@code version}, the
+     * launcher that is running. Every published launcher release belongs to one channel.
+     */
+    public static Application launcher(ReleaseCatalog catalog, String since, String version)
+            throws InterruptedException {
+        return application(catalog, tag -> LAUNCHER_PRODUCT, LAUNCHER_PRODUCT, LAUNCHER_SLUG, since, version);
+    }
+
+    private static Application application(ReleaseCatalog catalog, Channels channels, String product, String slug,
+                                           String since, String version) throws InterruptedException {
+        URI releases = URI.create("https://github.com/" + slug + "/releases");
+        String from = combines(since, version) ? since : null;
         Optional<VersionIdentity> target = VersionIdentity.fromExact(version);
         if (target.isEmpty()) {
-            return new Application(repository, version, List.of(), List.of(), releases,
+            return new Application(product, version, from, List.of(), List.of(), releases,
                     "This version has no published release notes.", false);
         }
         try {
-            Chosen chosen = choose(catalog, channels, repository,
+            Chosen chosen = choose(catalog, channels, slug,
                     VersionIdentity.fromExact(since).orElse(null), target.get(), tag(version));
-            List<List<Section>> parsed = new ArrayList<>();
-            for (ReleaseCatalog.Notes notes : chosen.notes()) parsed.add(parse(repository, notes.body()));
+            List<Release> parsed = new ArrayList<>();
+            for (ReleaseCatalog.Notes notes : chosen.notes()) {
+                parsed.add(new Release(notes.tag(), URI.create(releases + "/tag/" + notes.tag()),
+                        parse(slug, notes.body())));
+            }
             URI page = chosen.notes().size() == 1 && !chosen.incomplete()
                     ? URI.create(releases + "/tag/" + chosen.notes().getFirst().tag()) : releases;
-            return new Application(repository, version,
+            return new Application(product, version, from,
                     chosen.notes().stream().map(ReleaseCatalog.Notes::tag).toList(),
-                    merge(parsed), page, null, chosen.incomplete());
+                    separate(parsed), page, null, chosen.incomplete());
         } catch (GitHubRateLimitException limited) {
-            return new Application(repository, version, List.of(), List.of(), releases,
+            return new Application(product, version, from, List.of(), List.of(), releases,
                     limited.getMessage(), false);
         } catch (IOException failure) {
-            return new Application(repository, version, List.of(), List.of(), releases,
+            return new Application(product, version, from, List.of(), List.of(), releases,
                     failure.getMessage() != null && failure.getMessage().contains("HTTP 404")
                             ? "This version has no published release notes."
                             : "The release notes could not be loaded right now.", false);
@@ -176,7 +220,7 @@ public final class ReleaseNotes {
      * The releases whose notes make up the change from {@code since} to {@code target}, newest
      * first: the target's channel members in between, as the suite records assign them.
      */
-    private static Chosen choose(ReleaseCatalog catalog, Channels channels, OfficialRepository repository,
+    private static Chosen choose(ReleaseCatalog catalog, Channels channels, String slug,
                                  VersionIdentity since, VersionIdentity target, String targetTag)
             throws IOException, InterruptedException {
         boolean combine = since != null && compare(since, target) < 0;
@@ -186,14 +230,14 @@ public final class ReleaseNotes {
         List<ReleaseCatalog.Notes> listed = new ArrayList<>();
         boolean reached = false;
         for (int page = 1; page <= MAX_PAGES && !reached; page++) {
-            List<ReleaseCatalog.Notes> notes = catalog.notes(repository, page, PAGE_SIZE);
+            List<ReleaseCatalog.Notes> notes = catalog.notes(slug, page, PAGE_SIZE);
             listed.addAll(notes);
             reached = notes.stream().anyMatch(n -> stop.equals(version(n.tag())));
             if (notes.size() < PAGE_SIZE) break;
         }
         ReleaseCatalog.Notes newest = listed.stream()
                 .filter(n -> !n.draft() && target.equals(version(n.tag()))).findFirst().orElse(null);
-        if (newest == null) newest = catalog.notes(repository, targetTag);
+        if (newest == null) newest = catalog.notes(slug, targetTag);
         String channel = channels.of(newest.tag());
         if (!combine) return new Chosen(List.of(newest), false);
         if (channel == null) return new Chosen(List.of(newest), true);
@@ -248,6 +292,10 @@ public final class ReleaseNotes {
      * below it, and Dependabot's dependency bumps are left out.
      */
     static List<Section> parse(OfficialRepository repository, String body) {
+        return parse(repository.slug(), body);
+    }
+
+    private static List<Section> parse(String slug, String body) {
         Map<String, List<Change>> sections = new LinkedHashMap<>();
         boolean changes = false;
         String heading = UNGROUPED;
@@ -268,7 +316,7 @@ public final class ReleaseNotes {
             }
             Matcher item = ITEM.matcher(line);
             if (!item.matches()) continue;
-            Change change = change(repository, item.group(1).strip());
+            Change change = change(slug, item.group(1).strip());
             if (change != null) sections.computeIfAbsent(heading, ignored -> new ArrayList<>()).add(change);
         }
         List<Section> parsed = new ArrayList<>();
@@ -276,47 +324,47 @@ public final class ReleaseNotes {
         return parsed;
     }
 
-    private static Change change(OfficialRepository repository, String text) {
+    private static Change change(String slug, String text) {
         Matcher generated = GENERATED.matcher(text);
         if (!generated.matches()) return new Change(text, OptionalInt.empty(), null);
         if (generated.group(2).toLowerCase(Locale.ROOT).startsWith("dependabot")) return null;
         String title = generated.group(1).strip();
         if (BUMP.matcher(title).matches()) return null;
-        Matcher pull = Pattern.compile("^https://github\\.com/" + Pattern.quote(repository.slug())
+        Matcher pull = Pattern.compile("^https://github\\.com/" + Pattern.quote(slug)
                 + "/pull/([0-9]{1,9})$", Pattern.CASE_INSENSITIVE).matcher(generated.group(3));
         if (!pull.matches()) return new Change(title, OptionalInt.empty(), null);
         int number = Integer.parseInt(pull.group(1));
         return new Change(title, OptionalInt.of(number),
-                URI.create("https://github.com/" + repository.slug() + "/pull/" + number));
+                URI.create("https://github.com/" + slug + "/pull/" + number));
     }
 
     /**
-     * Combines the sections of several releases, newest first, into one list per heading in the
-     * order the release notes use. A pull request listed by more than one release appears once.
+     * Keeps several releases, newest first, each with its sections in the order the release notes
+     * use. A pull request listed by more than one release stays only under the oldest, and
+     * releases left without changes are dropped.
      */
-    static List<Section> merge(List<List<Section>> releases) {
-        Map<String, String> names = new LinkedHashMap<>();
-        Map<String, List<Change>> merged = new LinkedHashMap<>();
+    static List<Release> separate(List<Release> releases) {
         Set<Integer> seen = new HashSet<>();
-        for (List<Section> release : releases) {
-            for (Section section : release) {
+        List<Release> separated = new ArrayList<>();
+        for (Release release : releases.reversed()) {
+            Map<String, String> names = new LinkedHashMap<>();
+            Map<String, List<Change>> kept = new LinkedHashMap<>();
+            for (Section section : release.sections()) {
                 String key = section.heading().toLowerCase(Locale.ROOT);
                 names.putIfAbsent(key, section.heading());
-                List<Change> target = merged.computeIfAbsent(key, ignored -> new ArrayList<>());
                 for (Change change : section.changes()) {
                     if (change.pullRequest().isEmpty() || seen.add(change.pullRequest().getAsInt())) {
-                        target.add(change);
+                        kept.computeIfAbsent(key, ignored -> new ArrayList<>()).add(change);
                     }
                 }
             }
+            List<String> order = new ArrayList<>(kept.keySet());
+            order.sort(Comparator.comparingInt(ReleaseNotes::rank));
+            List<Section> sections = new ArrayList<>();
+            for (String key : order) sections.add(new Section(names.get(key), kept.get(key)));
+            if (!sections.isEmpty()) separated.addFirst(new Release(release.tag(), release.page(), sections));
         }
-        List<String> order = new ArrayList<>(merged.keySet());
-        order.sort(Comparator.comparingInt(ReleaseNotes::rank));
-        List<Section> sections = new ArrayList<>();
-        for (String key : order) {
-            if (!merged.get(key).isEmpty()) sections.add(new Section(names.get(key), merged.get(key)));
-        }
-        return sections;
+        return separated;
     }
 
     /** Known headings keep the release notes' order; others go just before "Behind the scenes". */

@@ -99,6 +99,7 @@ import java.util.jar.Manifest;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -955,6 +956,10 @@ class RealUpdateServiceTest {
         assertEquals("my-data", Files.readString(fixture.root.resolve("data/keep.txt")));
         assertEquals("save", Files.readString(fixture.root.resolve("saves/game.sav")));
         assertFalse(Files.exists(fixture.root.resolve(RootCoordinator.UPDATE_NAMESPACE)));
+        RegistryStore store = new RegistryStore();
+        assertEquals("1.0.0", new PreviousBuildStore().read(fixture.registry,
+                        store.resolve(store.read(fixture.registry), fixture.id)),
+                "every update, from the GUI or the command line, tells What's new where it started");
     }
 
     @Test
@@ -1515,6 +1520,8 @@ class RealUpdateServiceTest {
                 assertEquals("old", Files.readString(fixture.root.resolve("docs/change.txt")));
                 assertEquals("v1", recovery.snapshot(fixture.registry, fixture.id).current().tag());
                 assertEquals("built by v1", Files.readString(cache));
+                assertNull(new PreviousBuildStore().read(fixture.registry, recovered),
+                        "a rolled-back update leaves nothing for What's new to start from");
             } else {
                 assertTrue(first.outcome().contains("completed"));
                 assertEquals("new", Files.readString(fixture.root.resolve("docs/change.txt")));
@@ -1522,6 +1529,9 @@ class RealUpdateServiceTest {
                 assertEquals("v2", recovery.snapshot(fixture.registry, fixture.id).current().tag());
                 assertEquals("2.0.0", new RegistryStore().resolve(
                         new RegistryStore().read(fixture.registry), fixture.id).observedBuild());
+                assertEquals(before.observedBuild(), new PreviousBuildStore().read(fixture.registry,
+                                store.resolve(store.read(fixture.registry), fixture.id)),
+                        "a recovered update still tells What's new where it started");
             }
             assertFalse(Files.exists(fixture.root.resolve(RootCoordinator.UPDATE_NAMESPACE)));
             assertEquals("no pending transaction", recovery.recover(fixture.registry, fixture.id,
