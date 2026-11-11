@@ -63,7 +63,6 @@ final class LaunchOptionsDialog {
                         Consumer<LaunchOptions> onSave, Consumer<LaunchOptions> onCopyCommands) {
         Objects.requireNonNull(scale, "scale");
         dialog = new JDialog(owner, title, false);
-        LauncherTheme.useLauncherTitle(dialog);
         dialog.setName("launchOptionsDialog");
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
 

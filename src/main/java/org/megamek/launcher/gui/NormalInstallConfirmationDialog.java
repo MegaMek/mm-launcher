@@ -104,7 +104,6 @@ final class NormalInstallConfirmationDialog extends JDialog {
         setName("normalInstallConfirmationDialog");
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         getAccessibleContext().setAccessibleName(getTitle());
-        LauncherTheme.useLauncherTitle(this);
         getAccessibleContext().setAccessibleDescription(
                 "Review the validated version, included programs, download size, and "
                         + "destination before installing.");
