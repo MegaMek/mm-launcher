@@ -369,14 +369,18 @@ class UpdateApplySwingTest {
                 OperationProgressDialog dialog = new OperationProgressDialog(frame,
                         "Preparing update", "applyUpdateProgressLog", () -> {});
                 dialog.setVisible(true);
+                assertEquals("Preparing update", dialog.getTitle());
                 dialog.setHeadingIfCurrent("Preparing update", "Applying verified update");
                 assertEquals("Applying verified update", dialog.getAccessibleContext().getAccessibleName());
+                assertEquals("Applying verified update", dialog.getTitle());
                 dialog.setHeading("Update failed — recovery may be required");
                 dialog.setHeadingIfCurrent("Preparing update", "Applying verified update");
                 assertEquals("Update failed — recovery may be required", dialog.getAccessibleContext().getAccessibleName());
+                assertEquals("Update failed — recovery may be required", dialog.getTitle());
                 dialog.showFailure(new IOException("simulated apply failure"));
                 dialog.setHeadingIfCurrent("Preparing update", "Applying verified update");
                 assertEquals("Update failed — recovery may be required", dialog.getAccessibleContext().getAccessibleName());
+                assertEquals("Update failed — recovery may be required", dialog.getTitle());
                 dialog.dispose();
                 return null;
             });
