@@ -37,7 +37,7 @@ import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.launch.LaunchOptions;
 
 import javax.swing.BorderFactory;
-import javax.swing.Box;
+import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
@@ -53,10 +53,14 @@ import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.Rectangle;
+import java.awt.RenderingHints;
+import java.awt.geom.Path2D;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -133,25 +137,19 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         userDirField = textField(current.userDirectory() != null
                 ? current.userDirectory() : inherited.userDirectory(), "launchOptionsUserDirectory");
         userDirField.getAccessibleContext().setAccessibleName(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.userDirectory"));
-        JPanel userDirEditor = new JPanel(new BorderLayout(0, scale.space("sm")));
+        JPanel userDirEditor = new JPanel(new BorderLayout(scale.space("sm"), 0));
         userDirEditor.setOpaque(false);
         userDirEditor.add(userDirField, BorderLayout.CENTER);
-        JPanel userDirButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-        userDirButtons.setOpaque(false);
-        JButton browse = smallButton(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.browse"), "launchOptionsBrowseUserDirectory");
+        JButton browse = folderButton(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.browse"), "launchOptionsBrowseUserDirectory",
+                userDirField.getPreferredSize().height);
         browse.addActionListener(event -> chooseUserDirectory());
-        JButton clear = smallButton(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.clear"), "launchOptionsClearUserDirectory");
-        clear.addActionListener(event -> userDirField.setText(""));
-        userDirButtons.add(browse);
-        userDirButtons.add(Box.createHorizontalStrut(scale.space("md")));
-        userDirButtons.add(clear);
-        userDirEditor.add(userDirButtons, BorderLayout.SOUTH);
+        userDirEditor.add(browse, BorderLayout.EAST);
         userDirectory = row(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.userDirectory"), "userDirectory", userDirEditor,
                 current.userDirectory() == null,
                 I18n.getFormattedTextAt(BUNDLE, "LaunchOptionsForm.inheritWithValue", inheritLabel, describeText(inherited.userDirectory())),
                 () -> userDirField.setText(inherited.userDirectory()),
                 I18n.getTextAt(BUNDLE, "LaunchOptionsForm.userDirectoryHint"));
-        userDirectory.extraEditors = List.of(userDirField, browse, clear);
+        userDirectory.extraEditors = List.of(userDirField, browse);
         userDirectory.refresh();
     }
 
@@ -324,10 +322,58 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         return field;
     }
 
-    private JButton smallButton(String text, String name) {
-        JButton button = new FirstLaunchButton(text, name, false, scale, FirstLaunchButton.Size.SMALL);
-        button.getAccessibleContext().setAccessibleDescription(I18n.getFormattedTextAt(BUNDLE, "LaunchOptionsForm.activateDescription", text));
+    /** A square, icon-only button as tall as the field beside it; the label lives in its tooltip. */
+    private JButton folderButton(String label, String name, int side) {
+        JButton button = new FirstLaunchButton("", name, false, scale, FirstLaunchButton.Size.COMPACT);
+        button.setIcon(new FolderIcon(scale));
+        button.setBorder(BorderFactory.createEmptyBorder());
+        Dimension size = new Dimension(side, side);
+        button.setPreferredSize(size);
+        button.setMinimumSize(size);
+        button.setToolTipText(label);
+        button.getAccessibleContext().setAccessibleName(label);
+        button.getAccessibleContext().setAccessibleDescription(I18n.getFormattedTextAt(BUNDLE, "LaunchOptionsForm.activateDescription", label));
         return button;
+    }
+
+    private static final class FolderIcon implements Icon {
+        private final int width;
+        private final int height;
+
+        private FolderIcon(GuiScale scale) {
+            width = scale.size("icon.sm");
+            height = width * 3 / 4;
+        }
+
+        @Override public int getIconWidth() {
+            return width;
+        }
+
+        @Override public int getIconHeight() {
+            return height;
+        }
+
+        @Override
+        public void paintIcon(Component component, Graphics graphics, int x, int y) {
+            Graphics2D canvas = (Graphics2D) graphics.create();
+            try {
+                canvas.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                canvas.setColor(LauncherTheme.buttonText(false, component.isEnabled()));
+                int tab = Math.max(2, height / 4);
+                Path2D folder = new Path2D.Float();
+                folder.moveTo(x, y + tab);
+                folder.lineTo(x, y);
+                folder.lineTo(x + width * 0.4f, y);
+                folder.lineTo(x + width * 0.5f, y + tab);
+                folder.lineTo(x + width, y + tab);
+                folder.lineTo(x + width, y + height);
+                folder.lineTo(x, y + height);
+                folder.closePath();
+                canvas.fill(folder);
+            } finally {
+                canvas.dispose();
+            }
+        }
     }
 
     private void chooseUserDirectory() {
