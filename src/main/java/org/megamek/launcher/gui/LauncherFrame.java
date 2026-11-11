@@ -646,6 +646,8 @@ public final class LauncherFrame extends JFrame {
         });
         settingsPlaceholderTimer.setRepeats(false);
         settingsPlaceholderTimer.start();
+        // Settings has its own delayed placeholder; a Home status line here would only grow the
+        // page being left for a moment.
         run(I18n.getTextAt(BUNDLE, "LauncherFrame.loadingSettingsTask"), () -> {
             LauncherServices.SettingsView view = services.settingsView();
             try {
@@ -674,7 +676,7 @@ public final class LauncherFrame extends JFrame {
             });
             renderSettingsPage();
         }, () -> {
-        }, false);
+        }, false, false);
     }
 
     private void renderLoadError(Throwable error) {
