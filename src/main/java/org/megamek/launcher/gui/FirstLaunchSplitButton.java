@@ -38,6 +38,7 @@ import org.megamek.launcher.design.swing.TokenPresentation;
 import org.megamek.launcher.channel.QuickInstallOption;
 import org.megamek.launcher.channel.QuickInstallSnapshot;
 import org.megamek.launcher.release.OfficialRepository;
+import org.megamek.launcher.internationalization.I18n;
 
 import javax.swing.AbstractAction;
 import javax.swing.Icon;
@@ -74,9 +75,10 @@ import java.util.function.Consumer;
  * push buttons, while this parent paints one joined plate and one separator.
  */
 final class FirstLaunchSplitButton extends JPanel {
+    private static final String BUNDLE = "org.megamek.launcher.gui.home";
     static final String PRIMARY_NAME = "downloadAndInstallButton";
     static final String OPTIONS_NAME = "downloadOptionsButton";
-    static final String PRIMARY_LABEL = "Install latest";
+    static final String PRIMARY_LABEL = I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.primaryLabel");
     static final String PRIMARY_SUBJECT = "MekHQ Core";
     static final String PRIMARY_ACCESSIBLE_NAME =
             VersionDisplay.installLatest("MekHQ", "Core", null);
@@ -117,17 +119,16 @@ final class FirstLaunchSplitButton extends JPanel {
         setLayout(new BorderLayout());
         setOpaque(false);
         setAlignmentX(Component.LEFT_ALIGNMENT);
-        getAccessibleContext().setAccessibleName("Install latest official applications");
+        getAccessibleContext().setAccessibleName(I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.accessibleName"));
         getAccessibleContext().setAccessibleDescription(
-                "Install the latest MekHQ Core, or open the adjacent menu of other choices.");
+                I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.accessibleDescription"));
 
         primaryButton = new SegmentButton(PRIMARY_LABEL, PRIMARY_NAME, false);
         primaryButton.setMnemonic(KeyEvent.VK_D);
         ButtonDetail.setDetail(primaryButton, PRIMARY_SUBJECT);
         primaryButton.getAccessibleContext().setAccessibleName(PRIMARY_ACCESSIBLE_NAME);
         primaryButton.getAccessibleContext().setAccessibleDescription(
-                "Review and install the latest official Core MekHQ bundle containing "
-                        + "MegaMek, MekHQ, and MegaMekLab.");
+                I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.primaryDescription"));
         primaryButton.addActionListener(event -> {
             if (!disposed) primaryAction.run();
         });
@@ -138,24 +139,26 @@ final class FirstLaunchSplitButton extends JPanel {
         optionsButton.setToolTipText(optionsTooltip());
         optionsButton.getAccessibleContext().setAccessibleName(optionsAccessibleName());
         optionsButton.getAccessibleContext().setAccessibleDescription(
-                "Open the quick-install menu. Opening it performs no network request.");
+                I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.optionsDescription"));
         optionsButton.addActionListener(event -> openPopup());
 
         popupMenu = new JPopupMenu();
         popupMenu.setName("downloadOptionsPopup");
-        popupMenu.getAccessibleContext().setAccessibleName("Latest application choices");
+        popupMenu.getAccessibleContext().setAccessibleName(I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.popupName"));
         popupMenu.getAccessibleContext().setAccessibleDescription(
-                menuChoices() + ". Opening this menu performs no network request.");
+                I18n.getFormattedTextAt(BUNDLE, "FirstLaunchSplitButton.popupDescription", menuChoices()));
         for (QuickInstallOption.Key key : QuickInstallSnapshot.menuKeys(showExperimental)) {
-            JMenuItem item = menuItem(menuLabel(key, "Loading…"), menuItemName(key),
-                    menuLabel(key) + " version metadata is loading.");
+            JMenuItem item = menuItem(menuLabel(key, I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.loading")),
+                    menuItemName(key),
+                    I18n.getFormattedTextAt(BUNDLE, "FirstLaunchSplitButton.itemMetadataLoading", menuLabel(key)));
             item.setEnabled(false);
             item.addActionListener(event -> invokeMenuAction(key, optionAction));
             optionItems.put(key, item);
             popupMenu.add(item);
         }
-        retryItem = menuItem("Retry version check", "retryQuickInstallMetadataMenuItem",
-                "Retry loading the official current install choices.");
+        retryItem = menuItem(I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.retry"),
+                "retryQuickInstallMetadataMenuItem",
+                I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.retryDescription"));
         retryItem.addActionListener(event -> {
             closePopup();
             if (!disposed && isEnabled() && (optionState == OptionState.FAILED
@@ -223,35 +226,37 @@ final class FirstLaunchSplitButton extends JPanel {
                     + "Experimental releases setting");
         }
         QuickInstallOption primary = snapshot.option(QuickInstallSnapshot.DEFAULT_KEY);
-        setPrimaryValue(primary.available() ? primary.version() : "Unavailable");
+        setPrimaryValue(primary.available() ? primary.version() : I18n.getTextAt(BUNDLE,
+                "FirstLaunchSplitButton.unavailable"));
         optionState = OptionState.READY;
         popupMenu.remove(retryItem);
         primaryButton.getAccessibleContext().setAccessibleDescription(
                 primary.available()
-                        ? "Review and install this captured official Core MekHQ bundle containing "
-                        + "MegaMek, MekHQ, and MegaMekLab."
+                        ? I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.primaryReadyDescription")
                         : primary.unavailableReason());
         primaryButton.setToolTipText(primary.available() ? null : primary.unavailableReason());
         getAccessibleContext().setAccessibleDescription(
-                "Install an available complete suite; unavailable release types are disabled.");
+                I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.readyDescription"));
         setNormalOptionsDescription();
         availableOptions = snapshot.options().stream().filter(QuickInstallOption::available)
                 .map(QuickInstallOption::key).collect(java.util.stream.Collectors.toUnmodifiableSet());
         for (Map.Entry<QuickInstallOption.Key, JMenuItem> entry : optionItems.entrySet()) {
             QuickInstallOption option = snapshot.option(entry.getKey());
-            String label = menuLabel(entry.getKey(), option.available() ? option.version() : "Unavailable");
+            String label = menuLabel(entry.getKey(), option.available() ? option.version()
+                    : I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.unavailable"));
             JMenuItem item = entry.getValue();
             item.setText(label);
             item.setToolTipText(option.available() ? null : option.unavailableReason());
             item.getAccessibleContext().setAccessibleName(label);
             item.getAccessibleContext().setAccessibleDescription(
-                    label + ". " + (option.available() ? "Review this exact normal-install choice."
-                            : option.unavailableReason()));
+                    option.available() ? I18n.getFormattedTextAt(BUNDLE,
+                            "FirstLaunchSplitButton.itemReadyDescription", label)
+                            : I18n.getFormattedTextAt(BUNDLE, "FirstLaunchSplitButton.itemReasonDescription",
+                                    label, option.unavailableReason()));
         }
         if (availableOptions.size() < choiceCount) popupMenu.add(retryItem);
         popupMenu.getAccessibleContext().setAccessibleDescription(
-                menuChoices() + " with versions or explicit unavailable reasons. "
-                        + "Opening this menu performs no network request.");
+                I18n.getFormattedTextAt(BUNDLE, "FirstLaunchSplitButton.popupReadyDescription", menuChoices()));
         applyEnabledState();
         popupMenu.revalidate();
         popupMenu.repaint();
@@ -259,32 +264,31 @@ final class FirstLaunchSplitButton extends JPanel {
 
     void setOptionsLoading() {
         if (disposed) return;
-        setPrimaryValue("Loading…");
+        setPrimaryValue(I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.loading"));
         optionState = OptionState.LOADING;
         popupMenu.remove(retryItem);
         primaryButton.getAccessibleContext().setAccessibleDescription(
-                "Install version metadata is loading. This action is unavailable.");
-        optionsButton.setToolTipText("Official install choices are loading.");
+                I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.primaryLoadingDescription"));
+        optionsButton.setToolTipText(I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.optionsLoadingTooltip"));
         optionsButton.getAccessibleContext().setAccessibleName(
-                "Install choices loading");
+                I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.optionsLoadingName"));
         optionsButton.getAccessibleContext().setAccessibleDescription(
-                "Official install choices are loading. This action is unavailable.");
+                I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.optionsLoadingDescription"));
         getAccessibleContext().setAccessibleDescription(
-                "Official install choices are loading; both install segments are unavailable.");
+                I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.loadingDescription"));
         availableOptions = Set.of();
         for (Map.Entry<QuickInstallOption.Key, JMenuItem> entry : optionItems.entrySet()) {
-            String label = menuLabel(entry.getKey(), "Loading…");
+            String label = menuLabel(entry.getKey(), I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.loading"));
             JMenuItem item = entry.getValue();
             item.setText(label);
-            item.setToolTipText("Official release information is loading.");
+            item.setToolTipText(I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.itemLoadingTooltip"));
             item.getAccessibleContext().setAccessibleName(label);
             item.getAccessibleContext().setAccessibleDescription(
-                    label + ". Wait for validated metadata.");
+                    I18n.getFormattedTextAt(BUNDLE, "FirstLaunchSplitButton.itemLoadingDescription", label));
             item.setEnabled(false);
         }
         popupMenu.getAccessibleContext().setAccessibleDescription(
-                menuChoices() + " are loading. Opening this menu performs no "
-                        + "network request.");
+                I18n.getFormattedTextAt(BUNDLE, "FirstLaunchSplitButton.popupLoadingDescription", menuChoices()));
         applyEnabledState();
         popupMenu.revalidate();
         popupMenu.repaint();
@@ -293,39 +297,39 @@ final class FirstLaunchSplitButton extends JPanel {
     void setOptionsUnavailable(String detail) {
         if (disposed) return;
         closePopup();
-        setPrimaryValue("Unavailable");
+        setPrimaryValue(I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.unavailable"));
         optionState = OptionState.FAILED;
         primaryButton.getAccessibleContext().setAccessibleDescription(
-                "Install version metadata is unavailable. This action is unavailable.");
+                I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.primaryUnavailableDescription"));
         getAccessibleContext().setAccessibleDescription(
-                "Install choices are unavailable; open the Retry install version check "
-                        + "segment to retry.");
+                I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.unavailableDescription"));
         availableOptions = Set.of();
         String explanation = detail == null || detail.isBlank()
-                ? "Install versions are unavailable. Choose Retry version check."
+                ? I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.unavailableExplanation")
                 : detail;
         for (Map.Entry<QuickInstallOption.Key, JMenuItem> entry : optionItems.entrySet()) {
-            String label = menuLabel(entry.getKey(), "Unavailable");
+            String label = menuLabel(entry.getKey(), I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.unavailable"));
             JMenuItem item = entry.getValue();
             item.setText(label);
             item.setToolTipText(explanation);
             item.getAccessibleContext().setAccessibleName(label);
-            item.getAccessibleContext().setAccessibleDescription(label + ". " + explanation);
+            item.getAccessibleContext().setAccessibleDescription(
+                    I18n.getFormattedTextAt(BUNDLE, "FirstLaunchSplitButton.itemReasonDescription", label,
+                            explanation));
             item.setEnabled(false);
         }
         popupMenu.getAccessibleContext().setAccessibleDescription(
-                menuChoices() + " are unavailable. Retry version check is the only "
-                        + "available menu command.");
+                I18n.getFormattedTextAt(BUNDLE, "FirstLaunchSplitButton.popupUnavailableDescription", menuChoices()));
         if (retryItem.getParent() != popupMenu) popupMenu.add(retryItem);
         retryItem.setToolTipText(explanation);
         retryItem.getAccessibleContext().setAccessibleDescription(
-                "Explicitly retry loading the official current install choices. "
-                        + explanation);
+                I18n.getFormattedTextAt(BUNDLE, "FirstLaunchSplitButton.retryUnavailableDescription", explanation));
         optionsButton.setToolTipText(
-                "Open the unavailable choices and select Retry version check.");
-        optionsButton.getAccessibleContext().setAccessibleName("Retry install version check");
+                I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.optionsRetryTooltip"));
+        optionsButton.getAccessibleContext().setAccessibleName(I18n.getTextAt(BUNDLE,
+                "FirstLaunchSplitButton.optionsRetryName"));
         optionsButton.getAccessibleContext().setAccessibleDescription(
-                "Open the unavailable quick-install choices and explicit Retry command.");
+                I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.optionsRetryDescription"));
         applyEnabledState();
         popupMenu.revalidate();
         popupMenu.repaint();
@@ -369,8 +373,7 @@ final class FirstLaunchSplitButton extends JPanel {
         optionsButton.getAccessibleContext().setAccessibleName(optionsAccessibleName());
         optionsButton.setToolTipText(optionsTooltip());
         optionsButton.getAccessibleContext().setAccessibleDescription(
-                "Open the quick-install menu. Opening it performs no "
-                        + "network request while metadata is loading or available.");
+                I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.optionsReadyDescription"));
     }
 
     void closePopup() {
@@ -429,19 +432,18 @@ final class FirstLaunchSplitButton extends JPanel {
 
     private String optionsTooltip() {
         return showExperimental
-                ? "Choose another official application, on Core (for playing) or Experimental "
-                        + "(help us test, may break things)."
-                : "Choose another official Core application.";
+                ? I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.optionsTooltipExperimental")
+                : I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.optionsTooltip");
     }
 
     private String optionsAccessibleName() {
-        return showExperimental ? "Choose another application and release type"
-                : "Choose another application";
+        return showExperimental ? I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.optionsNameExperimental")
+                : I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.optionsName");
     }
 
     private String menuChoices() {
-        return showExperimental ? "Official Core and Experimental choices"
-                : "Official Core choices";
+        return showExperimental ? I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.menuChoicesExperimental")
+                : I18n.getTextAt(BUNDLE, "FirstLaunchSplitButton.menuChoices");
     }
 
     private static String menuLabel(QuickInstallOption.Key key) {

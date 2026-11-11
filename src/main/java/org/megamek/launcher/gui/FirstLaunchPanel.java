@@ -35,6 +35,7 @@ package org.megamek.launcher.gui;
 
 import org.megamek.launcher.design.DesignTokens.Presentation;
 import org.megamek.launcher.design.swing.TokenPresentation;
+import org.megamek.launcher.internationalization.I18n;
 
 import javax.imageio.ImageIO;
 import javax.swing.BorderFactory;
@@ -68,6 +69,7 @@ import java.io.IOException;
 
 /** Empty-home presentation only; all user actions are supplied by the existing launcher frame. */
 final class FirstLaunchPanel extends JPanel {
+    private static final String BUNDLE = "org.megamek.launcher.gui.home";
     /** Matches the Home launch column cap. */
     private static final int ACTION_WIDTH = 380;
     static final String ART_RESOURCE = "/org/megamek/launcher/gui/first-launch-art.png";
@@ -101,7 +103,7 @@ final class FirstLaunchPanel extends JPanel {
         setBackground(BACKGROUND);
         artwork = new ArtworkPanel(image, scale, true);
         artwork.setName("firstLaunchArtwork");
-        artwork.getAccessibleContext().setAccessibleName("MegaMek launcher artwork");
+        artwork.getAccessibleContext().setAccessibleName(I18n.getTextAt(BUNDLE, "FirstLaunchPanel.artworkName"));
         add(artwork);
 
         controls = new ContentPanel();
@@ -118,7 +120,7 @@ final class FirstLaunchPanel extends JPanel {
         existingAction = new JPanel(new BorderLayout(0, scale.space("xs")));
         existingAction.setOpaque(false);
         existingAction.add(useExisting, BorderLayout.CENTER);
-        JLabel existingCaption = label("MegaMek, MekHQ, or MegaMekLab",
+        JLabel existingCaption = label(I18n.getTextAt(BUNDLE, "FirstLaunchPanel.existingCaption"),
                 scale.font(base, "small"), MUTED);
         existingCaption.setName("existingCopyCaption");
         existingCaption.setHorizontalAlignment(SwingConstants.CENTER);
@@ -340,7 +342,7 @@ final class FirstLaunchPanel extends JPanel {
             setBackground(BACKGROUND);
             artwork = new ArtworkPanel(image, scale, true);
             artwork.setName("homeArtwork");
-            artwork.getAccessibleContext().setAccessibleName("MegaMek launcher artwork");
+            artwork.getAccessibleContext().setAccessibleName(I18n.getTextAt(BUNDLE, "FirstLaunchPanel.artworkName"));
             controls.setOpaque(true);
             controls.setBackground(PANEL);
             controls.setBorder(scale.padding("xl", "xxl"));
@@ -455,7 +457,8 @@ final class FirstLaunchPanel extends JPanel {
             super.paintComponent(graphics);
             if (image == null) {
                 graphics.setColor(MUTED);
-                graphics.drawString("Artwork unavailable", scale.space("xxl"), scale.space("xxxl"));
+                graphics.drawString(I18n.getTextAt(BUNDLE, "FirstLaunchPanel.artworkUnavailable"),
+                        scale.space("xxl"), scale.space("xxxl"));
                 return;
             }
             Graphics2D canvas = (Graphics2D) graphics.create();

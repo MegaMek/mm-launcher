@@ -33,6 +33,7 @@
 
 package org.megamek.launcher.launch;
 
+import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.onboarding.InstallationInspector;
 
 import java.nio.file.InvalidPathException;
@@ -50,6 +51,7 @@ import java.util.Set;
 public record LaunchOptions(Integer megamekHeapMb, Integer mekhqHeapMb, Integer labHeapMb,
                             Renderer renderer, String extraJvmArguments, String userDirectory) {
     public static final LaunchOptions INHERIT = new LaunchOptions(null, null, null, null, null, null);
+    private static final String BUNDLE = "org.megamek.launcher.services";
     public static final int MIN_HEAP_MB = 512;
     public static final int MAX_HEAP_MB = 65_536;
     public static final int MAX_ARGUMENTS_LENGTH = 2048;
@@ -64,20 +66,22 @@ public record LaunchOptions(Integer megamekHeapMb, Integer mekhqHeapMb, Integer 
             "--validate-modules");
 
     public enum Renderer {
-        DEFAULT("Java default", List.of()),
-        NO_DIRECT3D("Disable Direct3D (Windows)", List.of("-Dsun.java2d.d3d=false")),
-        OPENGL("OpenGL", List.of("-Dsun.java2d.opengl=true"));
+        DEFAULT(List.of()),
+        NO_DIRECT3D(List.of("-Dsun.java2d.d3d=false")),
+        OPENGL(List.of("-Dsun.java2d.opengl=true"));
 
-        private final String label;
         private final List<String> arguments;
 
-        Renderer(String label, List<String> arguments) {
-            this.label = label;
+        Renderer(List<String> arguments) {
             this.arguments = arguments;
         }
 
         public String label() {
-            return label;
+            return switch (this) {
+                case DEFAULT -> I18n.getTextAt(BUNDLE, "LaunchOptions.rendererDefault");
+                case NO_DIRECT3D -> I18n.getTextAt(BUNDLE, "LaunchOptions.rendererNoDirect3d");
+                case OPENGL -> "OpenGL";
+            };
         }
 
         public List<String> arguments() {
@@ -85,7 +89,7 @@ public record LaunchOptions(Integer megamekHeapMb, Integer mekhqHeapMb, Integer 
         }
 
         @Override public String toString() {
-            return label;
+            return label();
         }
     }
 

@@ -32,6 +32,8 @@
  */
 package org.megamek.launcher.release;
 
+import org.megamek.launcher.internationalization.I18n;
+
 import java.io.IOException;
 import java.math.BigInteger;
 import java.net.URI;
@@ -57,6 +59,7 @@ import java.util.regex.Pattern;
  * display-only and never take part in choosing or installing a release.</p>
  */
 public final class ReleaseNotes {
+    private static final String BUNDLE = "org.megamek.launcher.services";
     static final int PAGE_SIZE = 50;
     static final int MAX_PAGES = 3;
     static final int MAX_RELEASES = 30;
@@ -187,7 +190,7 @@ public final class ReleaseNotes {
         Optional<VersionIdentity> target = VersionIdentity.fromExact(version);
         if (target.isEmpty()) {
             return new Application(product, version, from, List.of(), List.of(), releases,
-                    "This version has no published release notes.", false);
+                    I18n.getTextAt(BUNDLE, "ReleaseNotes.noPublishedNotes"), false);
         }
         try {
             Chosen chosen = choose(catalog, channels, slug,
@@ -208,8 +211,8 @@ public final class ReleaseNotes {
         } catch (IOException failure) {
             return new Application(product, version, from, List.of(), List.of(), releases,
                     failure.getMessage() != null && failure.getMessage().contains("HTTP 404")
-                            ? "This version has no published release notes."
-                            : "The release notes could not be loaded right now.", false);
+                            ? I18n.getTextAt(BUNDLE, "ReleaseNotes.noPublishedNotes")
+                            : I18n.getTextAt(BUNDLE, "ReleaseNotes.notesUnavailable"), false);
         }
     }
 

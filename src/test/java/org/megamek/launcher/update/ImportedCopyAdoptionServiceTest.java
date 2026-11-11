@@ -462,7 +462,7 @@ class ImportedCopyAdoptionServiceTest {
                         FollowChannel.CORE, new PrintStream(logs),
                         OperationContext.none(OperationType.ADOPT_EXISTING)));
 
-        assertEquals(ImportedCopyAdoptionService.AUTOMATIC_MATCH_UNAVAILABLE,
+        assertEquals(ImportedCopyAdoptionService.automaticMatchUnavailable(),
                 failure.getMessage());
         assertFalse(failure.getMessage().contains(privatePath));
         assertEquals(1, failure.getSuppressed().length);

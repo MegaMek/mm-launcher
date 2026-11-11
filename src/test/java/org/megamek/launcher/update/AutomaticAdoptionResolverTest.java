@@ -187,7 +187,7 @@ class AutomaticAdoptionResolverTest {
         assertEquals(AutomaticAdoptionResolver.Status.REQUEST_FAILED, result.status());
         assertTrue(result.failure() instanceof IOException);
         assertTrue(diagnostics.toString(StandardCharsets.UTF_8).contains("HTTP 404"));
-        assertFalse(ImportedCopyAdoptionService.AUTOMATIC_MATCH_UNAVAILABLE.contains("404"));
+        assertFalse(ImportedCopyAdoptionService.automaticMatchUnavailable().contains("404"));
     }
 
     @Test

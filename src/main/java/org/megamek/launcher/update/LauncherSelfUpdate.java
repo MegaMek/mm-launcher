@@ -38,6 +38,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import org.megamek.launcher.internationalization.LocalizedText;
 import org.megamek.launcher.release.GitHubRateLimitException;
 import org.megamek.launcher.release.JavaReleaseTransport;
 import org.megamek.launcher.release.ReleaseTransport;
@@ -65,6 +66,7 @@ import java.util.regex.Pattern;
 
 /** Shared release discovery, verified downloads, and user-authorized native installer handoff. */
 public final class LauncherSelfUpdate {
+    private static final String BUNDLE = "org.megamek.launcher.services";
     private static final String UPGRADE = "{616FFD64-0D7F-4FBE-9BB9-63FD6D9D32FA}";
     private static final URI LATEST = URI.create(
             "https://api.github.com/repos/MegaMek/mm-launcher/releases/latest");
@@ -353,7 +355,8 @@ public final class LauncherSelfUpdate {
                 ? "mm-launcher-msi-" : "mm-launcher-update-").toRealPath();
         Path file = directory.resolve(candidate.name());
         try {
-            context.phase(OperationPhase.DOWNLOAD, "Downloading the official launcher installer");
+            context.phase(OperationPhase.DOWNLOAD,
+                    LocalizedText.of(BUNDLE, "LauncherSelfUpdate.downloadingInstaller"));
             URI uri = candidate.url();
             MessageDigest sha = MessageDigest.getInstance("SHA-256");
             try (var output = Files.newOutputStream(file)) {
@@ -384,7 +387,8 @@ public final class LauncherSelfUpdate {
                             output.write(buffer, 0, n);
                             count += n;
                             context.progress(OperationPhase.DOWNLOAD, count, candidate.size(),
-                                    ProgressUnit.BYTES, "Downloading launcher " + candidate.version());
+                                    ProgressUnit.BYTES, LocalizedText.of(BUNDLE,
+                                            "LauncherSelfUpdate.downloadingLauncher", candidate.version()));
                         }
                         break;
                     }
@@ -392,7 +396,8 @@ public final class LauncherSelfUpdate {
                 if (count != candidate.size() || !HexFormat.of().formatHex(sha.digest())
                         .equalsIgnoreCase(candidate.sha256())) throw new IOException("Launcher installer size or SHA-256 mismatch");
             }
-            context.phase(OperationPhase.VERIFY, "Checking the launcher installer");
+            context.phase(OperationPhase.VERIFY,
+                    LocalizedText.of(BUNDLE, "LauncherSelfUpdate.checkingInstaller"));
             identityCheck.verify(file, candidate.version());
             context.checkpoint();
             staged.put(file, candidate.sha256());
@@ -551,9 +556,19 @@ public final class LauncherSelfUpdate {
 
     public enum ReportState { INSTALLED, INSTALLED_WARNING, FAILED, PENDING, RECOVERED, INSTALLED_RECOVERED }
 
-    public record ReportResult(ReportState state, String message) {
-        public ReportResult(boolean installed, String message) {
-            this(installed ? ReportState.INSTALLED : ReportState.FAILED, message);
+    /** {@link #message()} is in the player's language; {@link #englishMessage()} is for logs. */
+    public record ReportResult(ReportState state, LocalizedText text) {
+        public ReportResult(ReportState state, String message) {
+            this(state, LocalizedText.literal(message));
+        }
+        public ReportResult(boolean installed, LocalizedText text) {
+            this(installed ? ReportState.INSTALLED : ReportState.FAILED, text);
+        }
+        public String message() {
+            return text == null ? null : text.text();
+        }
+        public String englishMessage() {
+            return text == null ? null : text.english();
         }
         public boolean installed() {
             return state == ReportState.INSTALLED || state == ReportState.INSTALLED_WARNING
@@ -629,9 +644,8 @@ public final class LauncherSelfUpdate {
         if (original == null) return null;
         String outcome = new String(original, StandardCharsets.UTF_8);
         if (outcome.startsWith("starting:") && VERSION.matcher(outcome.substring(9)).matches()) {
-            return new ReportResult(ReportState.PENDING,
-                    "An update handoff started, but its helper identity was not recorded yet. "
-                    + "The report was retained; wait or review diagnostics before retrying: " + helperLog(report));
+            return new ReportResult(ReportState.PENDING, LocalizedText.of(BUNDLE,
+                    "LauncherSelfUpdate.handoffIdentityMissing", helperLog(report)));
         }
         if ("pending".equals(outcome)) {
             if (helperCheck.active(report, 0, 0)) return pendingResult(report);
@@ -639,10 +653,8 @@ public final class LauncherSelfUpdate {
                 throw new IOException("Cannot reconcile an incomplete report without a valid launcher version");
             installedVersionCheck.verify();
             Path saved = acknowledgeReport(report, original, true);
-            return new ReportResult(ReportState.RECOVERED,
-                    "The previous updater did not record its completion result. The system confirms this "
-                    + "installed launcher is " + runningVersion + ". The incomplete report was retained at "
-                    + saved + "; update checks can continue.");
+            return new ReportResult(ReportState.RECOVERED, LocalizedText.of(BUNDLE,
+                    "LauncherSelfUpdate.completionUnrecorded", runningVersion, saved));
         }
         if (outcome.startsWith("pending:")) {
             String[] fields = outcome.split(":", -1);
@@ -661,16 +673,14 @@ public final class LauncherSelfUpdate {
             if (!fields[1].equals(runningVersion)) {
                 installedVersionCheck.verify();
                 Path saved = acknowledgeReport(report, original, true);
-                return new ReportResult(false, "The updater stopped without a completion result for " + fields[1]
-                        + ". The system confirms the installed launcher is still " + runningVersion
-                        + ". The incomplete report was retained at " + saved
-                        + "; another update check can retry. Diagnostics: " + helperLog(report));
+                return new ReportResult(false, LocalizedText.of(BUNDLE,
+                        "LauncherSelfUpdate.updaterStopped", fields[1], runningVersion, saved,
+                        helperLog(report)));
             }
             installedVersionCheck.verify();
             Path saved = acknowledgeReport(report, original, true);
-            return new ReportResult(ReportState.INSTALLED_RECOVERED, "The system confirms launcher " + runningVersion
-                    + " is installed, but the helper did not save its final result. The incomplete report "
-                    + "was retained at " + saved + ". Diagnostics: " + helperLog(report));
+            return new ReportResult(ReportState.INSTALLED_RECOVERED, LocalizedText.of(BUNDLE,
+                    "LauncherSelfUpdate.finalResultUnsaved", runningVersion, saved, helperLog(report)));
         }
         ReportResult result;
         String[] completed = outcome.split(":", -1);
@@ -679,26 +689,27 @@ public final class LauncherSelfUpdate {
                 "installed-reopen-warning", "installed-cleanup-reopen-warning").contains(completed[0])
                 && VERSION.matcher(completed[1]).matches()) {
             if (!completed[1].equals(runningVersion)) {
-                result = new ReportResult(false, "Previous launcher update reported version "
-                        + completed[1] + ", but this launcher is " + runningVersion
-                        + ". Check the installed launcher and retry the update check.");
+                result = new ReportResult(false, LocalizedText.of(BUNDLE,
+                        "LauncherSelfUpdate.versionMismatch", completed[1], runningVersion));
             } else {
                 try {
                     installedVersionCheck.verify();
                     result = new ReportResult("installed".equals(completed[0])
                             ? ReportState.INSTALLED : ReportState.INSTALLED_WARNING,
-                            "Launcher updated to " + runningVersion + "."
-                            + (completed[0].contains("-cleanup")
-                            ? " Staged installer cleanup failed; review the leftover temporary files when safe. Diagnostics: "
-                            + helperLog(report) : "")
-                            + (completed[0].contains("-reboot-required")
-                            ? " Windows reports that a computer restart is required; no restart was forced." : "")
-                            + (completed[0].contains("-reopen")
-                            ? " Reopen the launcher manually. Diagnostics: " + helperLog(report) : ""));
+                            LocalizedText.concat(
+                                    LocalizedText.of(BUNDLE, "LauncherSelfUpdate.updated", runningVersion),
+                                    completed[0].contains("-cleanup")
+                                            ? LocalizedText.of(BUNDLE, "LauncherSelfUpdate.updatedCleanupFailed",
+                                            helperLog(report)) : null,
+                                    completed[0].contains("-reboot-required")
+                                            ? LocalizedText.of(BUNDLE, "LauncherSelfUpdate.updatedRestartRequired")
+                                            : null,
+                                    completed[0].contains("-reopen")
+                                            ? LocalizedText.of(BUNDLE, "LauncherSelfUpdate.updatedReopen",
+                                            helperLog(report)) : null));
                 } catch (IOException error) {
-                    result = new ReportResult(false, "The updater reported success, but the "
-                            + "installed launcher version could not be confirmed: "
-                            + error.getMessage() + ". Check the installation and retry.");
+                    result = new ReportResult(false, LocalizedText.of(BUNDLE,
+                            "LauncherSelfUpdate.updatedUnconfirmed", error.getMessage()));
                 }
             }
         } else if ("installation succeeded; staged MSI cleanup failed".equals(outcome)
@@ -706,22 +717,21 @@ public final class LauncherSelfUpdate {
             try {
                 installedVersionCheck.verify();
                 result = new ReportResult(ReportState.INSTALLED_WARNING,
-                        "Launcher MSI installation succeeded, but staged MSI "
-                        + "cleanup failed. Remove the leftover mm-launcher-msi- directory from "
-                        + "your temporary files when safe."
-                        + (outcome.endsWith("; restart required") ? " Windows also requires a computer restart." : ""));
+                        LocalizedText.concat(
+                                LocalizedText.of(BUNDLE, "LauncherSelfUpdate.msiCleanupFailed"),
+                                outcome.endsWith("; restart required")
+                                        ? LocalizedText.of(BUNDLE, "LauncherSelfUpdate.msiRestartRequired")
+                                        : null));
             } catch (IOException error) {
-                result = new ReportResult(false, "The MSI helper reported installation success with "
-                        + "a cleanup warning, but the installed version could not be confirmed: "
-                        + error.getMessage() + ". Check the installation and retry.");
+                result = new ReportResult(false, LocalizedText.of(BUNDLE,
+                        "LauncherSelfUpdate.msiUnconfirmed", error.getMessage()));
             }
         } else if (outcome.matches("[0-9]{1,10}")
                 || outcome.startsWith("handoff failed: ")
                 && outcome.length() > "handoff failed: ".length()) {
-            result = new ReportResult(false, "Previous launcher update did not complete (installer "
-                    + "result: " + outcome.replaceAll("\\p{Cntrl}", " ") + "). "
-                    + "Check the installer and retry the launcher update check. Diagnostics: "
-                    + helperLog(report) + " and " + failedOrInstallerLog(report, outcome));
+            result = new ReportResult(false, LocalizedText.of(BUNDLE,
+                    "LauncherSelfUpdate.previousIncomplete", outcome.replaceAll("\\p{Cntrl}", " "),
+                    helperLog(report), failedOrInstallerLog(report, outcome)));
         } else {
             throw new IOException("Unrecognized launcher update result. The report was retained at "
                     + report + " for inspection; do not retry until it is resolved.");
@@ -733,9 +743,8 @@ public final class LauncherSelfUpdate {
     }
 
     private static ReportResult pendingResult(Path report) {
-        return new ReportResult(ReportState.PENDING,
-                "The installer is still finishing the launcher update. Wait, then check again. "
-                + "Diagnostics: " + helperLog(report));
+        return new ReportResult(ReportState.PENDING, LocalizedText.of(BUNDLE,
+                "LauncherSelfUpdate.stillFinishing", helperLog(report)));
     }
 
     private static Path acknowledgeReport(Path report, byte[] original, boolean retain) throws IOException {

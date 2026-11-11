@@ -37,6 +37,9 @@ import org.megamek.launcher.design.swing.TokenPanel;
 import org.megamek.launcher.design.swing.TokenTooltips;
 
 import org.megamek.launcher.gui.AutomaticInstallationChecks.InstallationCheck;
+import org.megamek.launcher.internationalization.I18n;
+import org.megamek.launcher.internationalization.LocalizedIOException;
+import org.megamek.launcher.internationalization.LocalizedText;
 
 import org.megamek.launcher.channel.ChannelCatalog;
 import org.megamek.launcher.channel.ChannelPreference;
@@ -136,25 +139,23 @@ import java.util.function.Consumer;
 
 public final class LauncherFrame extends JFrame {
     private static final int LOG_LIMIT = 64_000;
-    private static final String CHANGE_LOCATION = "Change location";
-    static final String LOCATE_FOLDER = "Locate folder…";
-    static final String REMOVE_FROM_LAUNCHER = "Remove from launcher";
-    static final String SAVE_CHANGES = "Save";
-    static final String DONT_SAVE_CHANGES = "Don't save";
+    private static final String BUNDLE = "org.megamek.launcher.gui.frame";
+    private static final String CHANGE_LOCATION = I18n.getTextAt(BUNDLE, "LauncherFrame.changeLocation");
+    static final String LOCATE_FOLDER = I18n.getTextAt(BUNDLE, "LauncherFrame.locateFolder");
+    static final String REMOVE_FROM_LAUNCHER = I18n.getTextAt(BUNDLE, "LauncherFrame.removeFromLauncher");
+    static final String SAVE_CHANGES = I18n.getTextAt(BUNDLE, "LauncherFrame.saveChanges");
+    static final String DONT_SAVE_CHANGES = I18n.getTextAt(BUNDLE, "LauncherFrame.dontSaveChanges");
     private static final DateTimeFormatter NEWS_DATE =
             DateTimeFormatter.ofPattern("MMM d, uuuu", Locale.ENGLISH);
     static final String DISCORD_INVITE_URL = "https://discord.gg/megamek";
     static final String PLAY_ONLINE_URL = "https://megamek.games/";
     static final String MEKBAY_URL = "https://mekbay.com/";
     static final String FIRST_CORE_BUILD = "0.51.1";
-    static final String RETIRED_CHANNEL_STATUS = "Still launches. Install a new copy to get updates.";
-    static final String EXPERIMENTAL_CONFIRM_TITLE = "Show Experimental releases?";
-    static final String EXPERIMENTAL_CONFIRM_MESSAGE = "Experimental releases are for testing. "
-            + "Features may break or be incomplete. Keep backups of your campaigns and saves.";
-    static final String CORE_RELEASE_INFO = "Core releases are recommended for most players. "
-            + "Choose Core if you want to play the game.";
-    static final String EXPERIMENTAL_RELEASE_INFO = "Experimental releases are for testing. "
-            + "Features may break or be incomplete.";
+    static final String RETIRED_CHANNEL_STATUS = I18n.getTextAt(BUNDLE, "LauncherFrame.retiredChannelStatus");
+    static final String EXPERIMENTAL_CONFIRM_TITLE = I18n.getTextAt(BUNDLE, "LauncherFrame.experimentalConfirmTitle");
+    static final String EXPERIMENTAL_CONFIRM_MESSAGE = I18n.getTextAt(BUNDLE, "LauncherFrame.experimentalConfirmMessage");
+    static final String CORE_RELEASE_INFO = I18n.getTextAt(BUNDLE, "LauncherFrame.coreReleaseInfo");
+    static final String EXPERIMENTAL_RELEASE_INFO = I18n.getTextAt(BUNDLE, "LauncherFrame.experimentalReleaseInfo");
     private final LauncherServices services;
     private final Object appearanceSaveLock = new Object();
     private final LauncherNewsFeed newsFeed;
@@ -164,7 +165,7 @@ public final class LauncherFrame extends JFrame {
     private final Map<Component, Boolean> enabledBeforeWork = new IdentityHashMap<>();
     private final JPanel content = new JPanel(new BorderLayout(
             GuiScale.DEFAULT.space("lg"), GuiScale.DEFAULT.space("lg")));
-    private final JLabel status = new JLabel("Loading installations…");
+    private final JLabel status = new JLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.loadingInstallations"));
     private final Set<String> checkedOnOpen =
             java.util.Collections.synchronizedSet(new HashSet<>());
     private final Map<String, Boolean> checkPreferenceSaves = new HashMap<>();
@@ -179,6 +180,9 @@ public final class LauncherFrame extends JFrame {
     /** The window waits to be shown until Home has loaded, when the intro is off. */
     private boolean showWhenLoaded;
     private final LatestSettingSave<Boolean> playIntroSave;
+    /** The saved language, or {@code null} for the system language; it applies on the next start. */
+    private String language;
+    private final LatestSettingSave<String> languageSave;
     private String firstLaunchMetadataFailure;
     /** The last version check worked but nothing offered has been released yet. */
     private boolean firstLaunchNothingReleased;
@@ -262,6 +266,8 @@ public final class LauncherFrame extends JFrame {
         this.showExperimentalSave = new LatestSettingSave<>(services::saveShowExperimental);
         this.playIntro = services.playIntro();
         this.playIntroSave = new LatestSettingSave<>(services::savePlayIntro);
+        this.language = services.language();
+        this.languageSave = new LatestSettingSave<>(services::saveLanguage);
         curtain.setIntro(playIntro);
         this.newsFeed = newsFeed;
         this.existingImportPrompts = existingImportPrompts;
@@ -290,20 +296,21 @@ public final class LauncherFrame extends JFrame {
                     if (operation != null) {
                         if (operation.type() == OperationType.RECOVERY
                                 || operation.type() == OperationType.UNINSTALL_RECOVERY) {
-                            status.setText(
-                                    "Recovery is finishing — keep the launcher open.");
+                            status.setText(I18n.getTextAt(BUNDLE,
+                                    "LauncherFrame.recoveryFinishing"));
                             return;
                         }
                         OperationContext.CancellationRequest request =
                                 operation.requestCancellation();
                         if (request.accepted()) {
-                            status.setText("Cancelling at a safe checkpoint...");
+                            status.setText(I18n.getTextAt(BUNDLE,
+                                    "LauncherFrame.cancellingAtCheckpoint"));
                             return;
                         }
-                        status.setText("The operation is finishing — keep the launcher open.");
+                        status.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.operationFinishing"));
                         return;
                     }
-                    status.setText("An operation is still running — keep the launcher open.");
+                    status.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.operationStillRunning"));
                 } else {
                     dispose();
                 }
@@ -317,14 +324,16 @@ public final class LauncherFrame extends JFrame {
     }
 
     static String titleFor(String version) {
-        return "MegaMek Launcher" + (version == null || version.isBlank()
-                ? " (development build)" : " " + version);
+        return version == null || version.isBlank()
+                ? I18n.getTextAt(BUNDLE, "LauncherFrame.titleDevelopmentBuild")
+                : I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.titleVersion", version);
     }
 
     private void prepareExactNormalInstall(OfficialRepository repository,
                                            FollowChannel futureChannel, String tag,
                                            String source, Path destination) {
-        run("Checking exact " + displayProduct(repository.key()) + " " + tag,
+        run(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.checkingExact",
+                        displayProduct(repository.key()), tag),
                 () -> services.prepareExactNormalInstall(repository, futureChannel, tag,
                         source, destination),
                 this::showNormalInstallConfirmation,
@@ -374,8 +383,8 @@ public final class LauncherFrame extends JFrame {
         disposeHomeLaunchButtons();
         cancelCheckWorkers();
         installationChecks.clear();
-        status.setText("Loading installations…");
-        run("Loading installations", () -> {
+        status.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.loadingInstallations"));
+        run(I18n.getTextAt(BUNDLE, "LauncherFrame.loadingInstallationsTask"), () -> {
             // Notices a launcher update before the release notes are first opened.
             services.rememberLauncherVersion();
             try {
@@ -399,11 +408,12 @@ public final class LauncherFrame extends JFrame {
                 firstLaunchArtwork = loaded.artwork();
                 firstLaunchArtworkError = loaded.artworkError();
                 renderCurrentPage();
-                curtain.contentReady("Welcome, Commander");
+                curtain.contentReady(I18n.getTextAt(BUNDLE, "LauncherFrame.welcomeCommander"));
                 showIfWaitingForHome();
                 if (firstLaunchArtworkError != null) {
                     recordErrorAsync("Loading first-launch artwork", firstLaunchArtworkError,
-                            message -> status.setText("Artwork unavailable. " + message));
+                            message -> status.setText(I18n.getFormattedTextAt(BUNDLE,
+                                    "LauncherFrame.artworkUnavailableWithStatus", message)));
                 }
                 maybeCheckManagedCopiesOnOpen();
                 if (!launcherUpdateChecked
@@ -465,12 +475,13 @@ public final class LauncherFrame extends JFrame {
 
         center.add(Box.createVerticalStrut(guiScale.space("lg")));
 
-        JButton manage = homeButton("Installations", "manageInstallationsButton");
+        JButton manage = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.installations"),
+                "manageInstallationsButton");
         manage.setMnemonic(java.awt.event.KeyEvent.VK_I);
         manage.addActionListener(event -> navigateTo(Page.INSTALLATIONS));
         homeInstallationsButton = manage;
         updateHomeInstallationsLabel();
-        JButton settings = homeButton("Settings", "settingsButton");
+        JButton settings = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.settings"), "settingsButton");
         settings.setMnemonic(java.awt.event.KeyEvent.VK_S);
         settings.addActionListener(event -> navigateTo(Page.SETTINGS));
         JPanel navigation = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.CENTER,
@@ -487,7 +498,8 @@ public final class LauncherFrame extends JFrame {
         homeNewsBody = new JPanel();
         homeNewsBody.setName("homeNewsBody");
         homeNewsBody.setLayout(new BoxLayout(homeNewsBody, BoxLayout.Y_AXIS));
-        TokenPanel newsPanel = new TokenPanel("Latest news").body(homeNewsBody);
+        TokenPanel newsPanel = new TokenPanel(I18n.getTextAt(BUNDLE, "LauncherFrame.latestNews"))
+                .body(homeNewsBody);
         newsPanel.setName("homeNewsPanel");
         homeNewsPanel = newsPanel;
         fillHomeNews();
@@ -503,14 +515,14 @@ public final class LauncherFrame extends JFrame {
         if (news == null) return;
         news.removeAll();
         if (newsLoading || !newsRequested) {
-            JLabel loading = new JLabel("Loading MegaMek news...");
+            JLabel loading = new JLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.loadingNews"));
             loading.setName("newsLoadingMessage");
             loading.setForeground(FirstLaunchPanel.MUTED);
             loading.setAlignmentX(Component.LEFT_ALIGNMENT);
             news.add(loading);
             news.add(Box.createVerticalStrut(guiScale.space("sm")));
         } else if (newsError != null) {
-            JLabel unavailable = new JLabel("News is unavailable right now.");
+            JLabel unavailable = new JLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.newsUnavailable"));
             unavailable.setName("newsUnavailableMessage");
             unavailable.setForeground(FirstLaunchPanel.MUTED);
             unavailable.setToolTipText(errorDetail(newsError));
@@ -534,16 +546,19 @@ public final class LauncherFrame extends JFrame {
                 link.setHorizontalAlignment(javax.swing.SwingConstants.LEFT);
                 link.setToolTipText(headline);
                 link.getAccessibleContext().setAccessibleName(headline);
-                link.addActionListener(event -> openWebsite(article.link(), "MegaMek news"));
+                link.addActionListener(event -> openWebsite(article.link(),
+                        I18n.getTextAt(BUNDLE, "LauncherFrame.websiteMegaMekNews")));
                 news.add(link);
                 news.add(Box.createVerticalStrut(guiScale.space("sm")));
             }
         }
-        JButton archive = new LauncherLink("All news", "allNewsButton", guiScale);
+        JButton archive = new LauncherLink(I18n.getTextAt(BUNDLE, "LauncherFrame.allNews"),
+                "allNewsButton", guiScale);
         archive.setAlignmentX(Component.LEFT_ALIGNMENT);
         archive.getAccessibleContext().setAccessibleDescription(
-                "Open the MegaMek blog archive in your browser");
-        archive.addActionListener(event -> openWebsite(LauncherNewsFeed.ARCHIVE, "news archive"));
+                I18n.getTextAt(BUNDLE, "LauncherFrame.allNewsDescription"));
+        archive.addActionListener(event -> openWebsite(LauncherNewsFeed.ARCHIVE,
+                I18n.getTextAt(BUNDLE, "LauncherFrame.websiteNewsArchive")));
         news.add(archive);
         news.revalidate();
         news.repaint();
@@ -565,8 +580,9 @@ public final class LauncherFrame extends JFrame {
     private void navigateTo(Page next) {
         if (gate.isBusy()) return;
         if (page == Page.SETTINGS && next != Page.SETTINGS && launchOptionsDirty()) {
-            String answer = LauncherAlertDialog.show(this, "Save launch options?",
-                    "You've changed launch options but haven't saved them.", guiScale,
+            String answer = LauncherAlertDialog.show(this,
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.saveLaunchOptionsTitle"),
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.saveLaunchOptionsMessage"), guiScale,
                     SAVE_CHANGES, DONT_SAVE_CHANGES, LauncherAlertDialog.CANCEL);
             if (SAVE_CHANGES.equals(answer)) {
                 saveLaunchOptionsThenNavigate(next);
@@ -630,7 +646,7 @@ public final class LauncherFrame extends JFrame {
         });
         settingsPlaceholderTimer.setRepeats(false);
         settingsPlaceholderTimer.start();
-        run("Loading settings", () -> {
+        run(I18n.getTextAt(BUNDLE, "LauncherFrame.loadingSettingsTask"), () -> {
             LauncherServices.SettingsView view = services.settingsView();
             try {
                 return new SettingsLoad(view, services.launchOptions(), null);
@@ -667,7 +683,7 @@ public final class LauncherFrame extends JFrame {
         restoreStandardChrome();
         JPanel panel = new JPanel();
         panel.setLayout(new BoxLayout(panel, BoxLayout.Y_AXIS));
-        JLabel heading = new JLabel("Launcher registry could not be loaded");
+        JLabel heading = new JLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.registryLoadFailed"));
         heading.setName("registryErrorTitle");
         heading.setFont(guiScale.font(heading.getFont(), "headline"));
         panel.add(heading);
@@ -675,21 +691,22 @@ public final class LauncherFrame extends JFrame {
         JTextArea details = textArea(errorDetail(error));
         details.setName("registryErrorDetails");
         panel.add(details);
-        JLabel logging = new JLabel("Checking local diagnostics storage...");
+        JLabel logging = new JLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.checkingDiagnosticsStorage"));
         logging.setName("registryErrorLoggingStatus");
         panel.add(logging);
         recordErrorAsync("Launcher registry could not be loaded", error, logging::setText);
         panel.add(Box.createVerticalStrut(guiScale.space("lg")));
-        JButton retry = button("Retry", "retryRegistryButton");
+        JButton retry = button(I18n.getTextAt(BUNDLE, "LauncherFrame.retry"), "retryRegistryButton");
         retry.addActionListener(event -> reload());
         panel.add(retry);
-        JButton home = button("Home", "homeButton");
+        JButton home = button(I18n.getTextAt(BUNDLE, "LauncherFrame.home"), "homeButton");
         home.addActionListener(event -> {
             page = Page.HOME;
             reload();
         });
         panel.add(home);
-        JButton logs = button("View logs", "viewOperationLogsButton");
+        JButton logs = button(I18n.getTextAt(BUNDLE, "LauncherFrame.viewLogs"),
+                "viewOperationLogsButton");
         logs.addActionListener(event -> showOperationLogs());
         panel.add(logs);
         content.add(panel, BorderLayout.CENTER);
@@ -725,18 +742,18 @@ public final class LauncherFrame extends JFrame {
                 showExperimental);
         source[0] = download;
         firstLaunchSplitButton = download;
-        JButton useExisting = new FirstLaunchButton("Use existing installation",
+        JButton useExisting = new FirstLaunchButton(
+                I18n.getTextAt(BUNDLE, "LauncherFrame.useExistingInstallation"),
                 "useExistingCopyButton", false, guiScale);
         useExisting.setMnemonic(java.awt.event.KeyEvent.VK_U);
         useExisting.getAccessibleContext().setAccessibleDescription(
-                "Choose and statically inspect an existing MegaMek, MekHQ, or MegaMekLab "
-                        + "installation without moving its files.");
+                I18n.getTextAt(BUNDLE, "LauncherFrame.useExistingInstallationDescription"));
         useExisting.addActionListener(event -> chooseExisting());
         status.setText(transientHomeMessage != null && !transientHomeMessage.isBlank()
                 ? transientHomeMessage
                 : firstLaunchArtworkError == null
                 ? ""
-                : "Artwork unavailable; diagnostics are available in Settings.");
+                : I18n.getTextAt(BUNDLE, "LauncherFrame.artworkUnavailable"));
         FirstLaunchPanel firstLaunch = new FirstLaunchPanel(firstLaunchArtwork, guiScale,
                 download, useExisting, status, firstLaunchNavigation());
         firstLaunchPanel = firstLaunch;
@@ -784,8 +801,8 @@ public final class LauncherFrame extends JFrame {
                 try {
                     QuickInstallSnapshot loaded = get();
                     if (loaded == null) {
-                        firstLaunchOptionsFailed(
-                                "Install versions unavailable: no catalog returned. Choose Retry version check.");
+                        firstLaunchOptionsFailed(I18n.getTextAt(BUNDLE,
+                                "LauncherFrame.installVersionsNoCatalog"));
                     } else {
                         firstLaunchSnapshot = loaded;
                         firstLaunchMetadataFailure = null;
@@ -796,17 +813,17 @@ public final class LauncherFrame extends JFrame {
                 } catch (java.util.concurrent.ExecutionException error) {
                     if (error.getCause() instanceof ChannelCatalog.UnpublishedChannelException) {
                         firstLaunchNothingReleased = true;
-                        firstLaunchOptionsFailed("No release is available to install yet.");
+                        firstLaunchOptionsFailed(I18n.getTextAt(BUNDLE,
+                                "LauncherFrame.noReleaseToInstall"));
                     } else {
-                        firstLaunchOptionsFailed(
-                                "Install versions unavailable: "
-                                        + SanitizedErrors.display(error.getCause())
-                                        + ". Choose Retry version check.");
+                        firstLaunchOptionsFailed(I18n.getFormattedTextAt(BUNDLE,
+                                "LauncherFrame.installVersionsUnavailable",
+                                SanitizedErrors.display(error.getCause())));
                     }
                 } catch (InterruptedException error) {
                     Thread.currentThread().interrupt();
-                    firstLaunchOptionsFailed(
-                            "Version check interrupted. Choose Retry version check.");
+                    firstLaunchOptionsFailed(I18n.getTextAt(BUNDLE,
+                            "LauncherFrame.versionCheckInterrupted"));
                 }
                 applyFirstLaunchMetadata(false);
             }
@@ -815,9 +832,8 @@ public final class LauncherFrame extends JFrame {
             firstLaunchOptionsWorker.execute();
         } catch (RuntimeException error) {
             firstLaunchOptionsWorker = null;
-            firstLaunchOptionsFailed(
-                    "Version check could not start: " + SanitizedErrors.display(error)
-                            + ". Choose Retry version check.");
+            firstLaunchOptionsFailed(I18n.getFormattedTextAt(BUNDLE,
+                    "LauncherFrame.versionCheckCouldNotStart", SanitizedErrors.display(error)));
             applyFirstLaunchMetadata(false);
         }
     }
@@ -867,9 +883,8 @@ public final class LauncherFrame extends JFrame {
                 if (firstLaunchNothingReleased) {
                     status.setText("");
                 } else {
-                    status.setText(wrappingStatus("Couldn't check for install versions. Check "
-                            + "your connection, then open the arrow menu and choose Retry version "
-                            + "check."));
+                    status.setText(wrappingStatus(I18n.getTextAt(BUNDLE,
+                            "LauncherFrame.couldNotCheckInstallVersions")));
                     status.setToolTipText(firstLaunchMetadataFailure);
                 }
             }
@@ -892,14 +907,14 @@ public final class LauncherFrame extends JFrame {
     private void setStableFirstLaunchStatus() {
         if (isCurrentEmptyFirstLaunch() && firstLaunchMetadataFailure != null
                 && firstLaunchSnapshot != null) {
-            status.setText(wrappingStatus(
-                    "Version refresh failed — using previous versions. Choose Retry."));
+            status.setText(wrappingStatus(I18n.getTextAt(BUNDLE,
+                    "LauncherFrame.versionRefreshFailed")));
             status.setToolTipText(firstLaunchMetadataFailure);
             return;
         }
         status.setToolTipText(null);
         status.setText(isCurrentEmptyFirstLaunch() && firstLaunchArtworkError != null
-                ? wrappingStatus("Artwork unavailable; diagnostics are available in Settings.")
+                ? wrappingStatus(I18n.getTextAt(BUNDLE, "LauncherFrame.artworkUnavailable"))
                 : "");
     }
 
@@ -934,14 +949,20 @@ public final class LauncherFrame extends JFrame {
                 .filter(check -> check.result() != null && check.result().updateAvailable())
                 .count();
         String count = updates == 0 ? null
-                : updates + (updates == 1 ? " update" : " updates");
+                : updates == 1 ? I18n.getTextAt(BUNDLE, "LauncherFrame.oneUpdate")
+                : I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.updatesCount",
+                String.valueOf(updates));
         ButtonDetail.setBadge(homeInstallationsButton, count);
         homeInstallationsButton.getAccessibleContext().setAccessibleName(
-                count == null ? "Installations" : "Installations (" + count + ")");
+                count == null ? I18n.getTextAt(BUNDLE, "LauncherFrame.installations")
+                        : I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.installationsWithCount",
+                        count));
         homeInstallationsButton.getAccessibleContext().setAccessibleDescription(
-                updates == 0 ? "Open installation management."
-                        : "Open installation management for " + updates
-                        + (updates == 1 ? " available update." : " available updates."));
+                updates == 0 ? I18n.getTextAt(BUNDLE, "LauncherFrame.openInstallationManagement")
+                        : updates == 1
+                        ? I18n.getTextAt(BUNDLE, "LauncherFrame.openInstallationManagementOneUpdate")
+                        : I18n.getFormattedTextAt(BUNDLE,
+                        "LauncherFrame.openInstallationManagementUpdates", String.valueOf(updates)));
         updateHomeInformationMessage();
     }
 
@@ -952,7 +973,7 @@ public final class LauncherFrame extends JFrame {
         homeInformationRow.setMaximumSize(new Dimension(Integer.MAX_VALUE,
                 homeInformationRow.getPreferredSize().height));
         homeInformationLabel.getAccessibleContext().setAccessibleName(
-                text.isBlank() ? "No launcher message" : text);
+                text.isBlank() ? I18n.getTextAt(BUNDLE, "LauncherFrame.noLauncherMessage") : text);
         homeInformationRow.revalidate();
         homeInformationRow.repaint();
     }
@@ -965,7 +986,7 @@ public final class LauncherFrame extends JFrame {
                 || installationCheckWorker != null
                 || installationChecks.values().stream()
                 .anyMatch(check -> "Checking".equals(check.error()))) {
-            return "Checking for updates…";
+            return I18n.getTextAt(BUNDLE, "LauncherFrame.checkingForUpdates");
         }
         if (state == null || state.registry() == null
                 || state.installationStatuses() == null) {
@@ -990,7 +1011,7 @@ public final class LauncherFrame extends JFrame {
                 .anyMatch(check -> check.error() != null || check.result() == null
                         || check.result().retryable()
                         && check.result().status() != ChannelUpdateChecker.Status.CHANNEL_NOT_PUBLISHED);
-        if (failed) return "Some installations could not be checked";
+        if (failed) return I18n.getTextAt(BUNDLE, "LauncherFrame.someInstallationsNotChecked");
         java.util.EnumSet<FollowChannel> unpublished = java.util.EnumSet.noneOf(FollowChannel.class);
         for (InstallationRecord record : checkedRecords) {
             InstallationCheck check = installationChecks.get(record.id());
@@ -1000,7 +1021,9 @@ public final class LauncherFrame extends JFrame {
             }
         }
         if (unpublished.size() == 1) return unpublishedChannelMessage(unpublished.iterator().next());
-        if (!unpublished.isEmpty()) return "Update information is not available yet for some release types";
+        if (!unpublished.isEmpty()) {
+            return I18n.getTextAt(BUNDLE, "LauncherFrame.updateInformationNotAvailableSome");
+        }
         boolean allChecked = checkedRecords.stream().allMatch(record -> {
             InstallationCheck check = installationChecks.get(record.id());
             return check != null && check.error() == null && check.result() != null;
@@ -1009,8 +1032,8 @@ public final class LauncherFrame extends JFrame {
                 checkedRecords.size() == state.registry().installations().size();
         if (!allChecked) return "";
         return allInstallationsManaged
-                ? "All installations are up to date"
-                : "Checked installations are up to date";
+                ? I18n.getTextAt(BUNDLE, "LauncherFrame.allInstallationsUpToDate")
+                : I18n.getTextAt(BUNDLE, "LauncherFrame.checkedInstallationsUpToDate");
     }
 
     private void resumeFirstLaunchOptions() {
@@ -1072,14 +1095,17 @@ public final class LauncherFrame extends JFrame {
             if (local != null && local.missing()) {
                 String value = VersionDisplay.channelVersion(channel, record.observedBuild());
                 ButtonDetail.setDetail(launch.primaryButton(),
-                        value.isEmpty() ? "Not found" : "Not found · " + value);
+                        value.isEmpty() ? I18n.getTextAt(BUNDLE, "LauncherFrame.notFound")
+                                : I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.notFoundWithValue",
+                                value));
                 launch.primaryButton().getAccessibleContext().setAccessibleName(
-                        VersionDisplay.programChannelVersion(displayProduct(productKey), channel,
-                                record.observedBuild()) + " · Not found");
+                        I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.valueNotFound",
+                                VersionDisplay.programChannelVersion(displayProduct(productKey),
+                                        channel, record.observedBuild())));
                 launch.primaryButton().getAccessibleContext().setAccessibleDescription(
-                        "Preferred installation folder not found.");
+                        I18n.getTextAt(BUNDLE, "LauncherFrame.preferredFolderNotFound"));
                 launch.getAccessibleContext().setAccessibleDescription(
-                        "Preferred installation folder not found.");
+                        I18n.getTextAt(BUNDLE, "LauncherFrame.preferredFolderNotFound"));
             } else {
                 pending |= local != null && local.pendingUpdate();
                 pendingUninstall |= local != null && local.pendingUninstall();
@@ -1092,8 +1118,8 @@ public final class LauncherFrame extends JFrame {
         if (launches.getComponentCount() > 0) {
             // MekBay is the suite's web tool; it sits with the programs once any of them is installed
             HomeLaunchSplitButton mekBay = HomeLaunchSplitButton.website(guiScale, "mekbay",
-                    "MekBay", "Web app",
-                    "Opens MekBay, the BattleTech force builder and record sheets, in your browser",
+                    "MekBay", I18n.getTextAt(BUNDLE, "LauncherFrame.webApp"),
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.mekBayDescription"),
                     () -> openWebsite(java.net.URI.create(MEKBAY_URL), "MekBay"));
             homeLaunchButtons.add(mekBay);
             launches.add(mekBay);
@@ -1102,10 +1128,10 @@ public final class LauncherFrame extends JFrame {
         if (pending || pendingUninstall || unavailable) {
             panel.add(Box.createVerticalStrut(guiScale.space("md")));
             String message = pendingUninstall
-                    ? "Uninstall recovery required."
+                    ? I18n.getTextAt(BUNDLE, "LauncherFrame.uninstallRecoveryRequiredHome")
                     : pending
-                    ? "An installation needs update recovery before it can be played."
-                    : "An installation changed or is unavailable.";
+                    ? I18n.getTextAt(BUNDLE, "LauncherFrame.updateRecoveryNeededHome")
+                    : I18n.getTextAt(BUNDLE, "LauncherFrame.installationChangedHome");
             JLabel blocker = homeStatusLabel(message);
             blocker.setName("homeActionRequiredMessage");
             blocker.setForeground(LauncherTheme.WARNING);
@@ -1147,13 +1173,14 @@ public final class LauncherFrame extends JFrame {
                 ? null : channelStatus(check.result(), check.error());
         String product = displayProduct(productKey);
         String details = VersionDisplay.programChannelVersion(product, channel,
-                version == null ? "Unknown version" : version);
+                version == null ? I18n.getTextAt(BUNDLE, "LauncherFrame.unknownVersion") : version);
         String label = name.equalsIgnoreCase(product)
                 ? name + (version == null ? "" : " · " + version)
                         + (channel == null ? "" : " · " + channel)
                 : name + " · " + details;
-        return label + (local != null && local.missing()
-                ? " · Not found" : update == null ? "" : " · " + update);
+        return local != null && local.missing()
+                ? I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.valueNotFound", label)
+                : label + (update == null ? "" : " · " + update);
     }
 
     private static String knownInstallationVersion(InstallationRecord record) {
@@ -1214,21 +1241,22 @@ public final class LauncherFrame extends JFrame {
     }
 
     private static String channelStatus(ChannelUpdateChecker.Result result, String error) {
-        if (error != null) return "Could not check";
-        if (result == null) return "Not checked";
+        if (error != null) return I18n.getTextAt(BUNDLE, "LauncherFrame.couldNotCheck");
+        if (result == null) return I18n.getTextAt(BUNDLE, "LauncherFrame.notChecked");
         return switch (result.status()) {
-            case EXACT_CURRENT -> "Up to date";
-            case UPDATE_AVAILABLE -> "Update available";
-            case INSTALLED_AHEAD -> "Installed ahead";
-            case UNCONFIGURED -> "Release type not set";
+            case EXACT_CURRENT -> I18n.getTextAt(BUNDLE, "LauncherFrame.upToDate");
+            case UPDATE_AVAILABLE -> I18n.getTextAt(BUNDLE, "LauncherFrame.updateAvailable");
+            case INSTALLED_AHEAD -> I18n.getTextAt(BUNDLE, "LauncherFrame.installedAhead");
+            case UNCONFIGURED -> I18n.getTextAt(BUNDLE, "LauncherFrame.releaseTypeNotSet");
             case RETIRED_CHANNEL -> RETIRED_CHANNEL_STATUS;
             case CHANNEL_NOT_PUBLISHED -> unpublishedChannelMessage(result.preference().channel());
-            case UNAVAILABLE, NON_COMPARABLE -> "Could not check";
+            case UNAVAILABLE, NON_COMPARABLE -> I18n.getTextAt(BUNDLE, "LauncherFrame.couldNotCheck");
         };
     }
 
     private static String unpublishedChannelMessage(FollowChannel channel) {
-        return channel + " update information is not available yet";
+        return I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.channelUpdateInformationNotAvailable",
+                String.valueOf(channel));
     }
 
     private void cancelCheckWorkers() {
@@ -1267,13 +1295,14 @@ public final class LauncherFrame extends JFrame {
                     ChannelUpdateChecker.Result result = services.checkUpdates(record);
                     if (result.preference() != null
                             && !services.isCheckBindingCurrent(record, result.preference())) {
-                        return new InstallationCheck(null,
-                                "Copy or release type changed; check again");
+                        return new InstallationCheck(null, I18n.getTextAt(BUNDLE,
+                                "LauncherFrame.checkBindingChanged"));
                     }
                     return new InstallationCheck(result, null);
                 } catch (InterruptedException error) {
                     Thread.currentThread().interrupt();
-                    return new InstallationCheck(null, "Check cancelled");
+                    return new InstallationCheck(null, I18n.getTextAt(BUNDLE,
+                            "LauncherFrame.checkCancelled"));
                 } catch (IOException | RuntimeException error) {
                     return new InstallationCheck(null, errorDetail(error));
                 }
@@ -1361,13 +1390,15 @@ public final class LauncherFrame extends JFrame {
         Path selected = existingImportPrompts.chooseFolder(this, preferredParent);
         if (selected == null) return;
         OperationProgressDialog progress = new OperationProgressDialog(this,
-                "Adding existing installation", "existingImportProgressLog",
+                I18n.getTextAt(BUNDLE, "LauncherFrame.addingExistingInstallation"),
+                "existingImportProgressLog",
                 this::showOperationLogs);
         progress.append("Inspecting and adding the selected installation...\n");
         progress.setVisible(true);
         java.util.concurrent.atomic.AtomicBoolean inspectionComplete =
                 new java.util.concurrent.atomic.AtomicBoolean();
-        runOperation("Adding existing installation", OperationType.IMPORT_EXISTING,
+        runOperation(I18n.getTextAt(BUNDLE, "LauncherFrame.addingExistingInstallation"),
+                OperationType.IMPORT_EXISTING,
                 List.of(selected), progress, context -> {
                     ExistingImportService.Plan plan =
                             services.prepareExistingImport(selected, context);
@@ -1382,12 +1413,12 @@ public final class LauncherFrame extends JFrame {
                 }, error -> {
                     progress.append("\nIMPORT DID NOT COMPLETE: " + errorDetail(error) + "\n");
                     if (inspectionComplete.get()) {
-                        progress.setHeading("Could not add installation");
+                        progress.setHeading(I18n.getTextAt(BUNDLE,
+                                "LauncherFrame.couldNotAddInstallation"));
                     } else {
-                        progress.setHeading("This folder can't be used");
-                        progress.setExpectedFailureSummary(
-                                "Choose the main MegaMek, MekHQ, or MegaMekLab installation "
-                                        + "folder, then try again.");
+                        progress.setHeading(I18n.getTextAt(BUNDLE, "LauncherFrame.folderCannotBeUsed"));
+                        progress.setExpectedFailureSummary(I18n.getTextAt(BUNDLE,
+                                "LauncherFrame.chooseMainInstallationFolder"));
                     }
                 }, () -> {});
     }
@@ -1401,7 +1432,7 @@ public final class LauncherFrame extends JFrame {
         String version = plan.inspection().observedBuild();
         if (version == null || version.isBlank()
                 || "unknown".equalsIgnoreCase(version)) {
-            return product + " existing installation";
+            return I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.existingInstallationName", product);
         }
         return VersionDisplay.programChannelVersion(product, null, version);
     }
@@ -1415,7 +1446,8 @@ public final class LauncherFrame extends JFrame {
         header.setBackground(FirstLaunchPanel.BACKGROUND);
         header.setBorder(BorderFactory.createEmptyBorder(0, 0,
                 guiScale.space("lg"), 0));
-        JLabel title = new JLabel("Installations", javax.swing.SwingConstants.CENTER);
+        JLabel title = new JLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.installations"),
+                javax.swing.SwingConstants.CENTER);
         title.setName("pageTitle");
         title.setForeground(FirstLaunchPanel.TEXT);
         title.setFont(guiScale.font(title.getFont(), "headline"));
@@ -1424,19 +1456,21 @@ public final class LauncherFrame extends JFrame {
                 0, 0));
         topActions.setName("installationTopActions");
         topActions.setOpaque(false);
-        JButton install = homeButton("Install another version",
+        JButton install = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.installAnotherVersion"),
                 "installAnotherVersionButton");
         install.addActionListener(event -> downloadDialog());
-        JButton importExisting = homeButton("Import existing installation",
+        JButton importExisting = homeButton(
+                I18n.getTextAt(BUNDLE, "LauncherFrame.importExistingInstallation"),
                 "manageAddExistingButton");
         importExisting.addActionListener(event -> chooseExisting());
         OfficialRepository coreRepository = coreInstallRepository();
         if (coreRepository != null) {
-            JButton installCore = new FirstLaunchButton("Install Core", "installCoreButton",
+            JButton installCore = new FirstLaunchButton(
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.installCore"), "installCoreButton",
                     true, guiScale, FirstLaunchButton.Size.SMALL);
             installCore.getAccessibleContext().setAccessibleDescription(
-                    "Install the latest " + displayProduct(coreRepository.key())
-                            + " Core release as a new copy. Your other installations are not changed.");
+                    I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.installCoreDescription",
+                            displayProduct(coreRepository.key())));
             installCore.addActionListener(event ->
                     prepareNormalInstall(coreRepository, FollowChannel.CORE, null));
             topActions.add(installCore);
@@ -1535,18 +1569,19 @@ public final class LauncherFrame extends JFrame {
         String provenance = missing
                 ? products
                 : legacyRelease(record, local)
-                ? "Legacy release · Launch only"
+                ? I18n.getTextAt(BUNDLE, "LauncherFrame.provenanceLegacyRelease")
                 : trueImported
-                ? "Imported copy · Launch only"
+                ? I18n.getTextAt(BUNDLE, "LauncherFrame.provenanceImportedCopy")
                 : fixedChannel
                 ? products
-                : "Managed setup incomplete · Launch only · Updates unavailable";
+                : I18n.getTextAt(BUNDLE, "LauncherFrame.provenanceSetupIncomplete");
         String markers = record.products().stream().map(Product::key)
                 .filter(key -> (state.preferredApplications() != null
                         && record.equals(state.preferredApplications().get(key)))
                         || record.id().equals(
                                 state.registry().preferredInstallationIds().get(key)))
-                .map(key -> "Preferred for " + displayProduct(key))
+                .map(key -> I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.preferredFor",
+                        displayProduct(key)))
                 .collect(java.util.stream.Collectors.joining(" · "));
         if (!markers.isBlank()) {
             JLabel preferred = new JLabel(markers);
@@ -1575,7 +1610,7 @@ public final class LauncherFrame extends JFrame {
             ChannelPreference expectedPreference = local.channelPreference().preference();
             Boolean pendingSelection = checkPreferenceSaves.get(record.id());
             JCheckBox checkOnOpen = new MapCheckBox(
-                    "Check for updates when the launcher opens",
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.checkOnOpen"),
                     pendingSelection == null
                             ? expectedPreference.checkOnOpen() : pendingSelection, guiScale);
             checkOnOpen.setName("checkOnOpenCheckbox-" + record.id());
@@ -1585,10 +1620,9 @@ public final class LauncherFrame extends JFrame {
             checkOnOpen.setBorder(BorderFactory.createEmptyBorder());
             checkOnOpen.setMargin(new java.awt.Insets(0, 0, 0, 0));
             checkOnOpen.getAccessibleContext().setAccessibleName(
-                    "Check for updates when the launcher opens for " + record.name());
+                    I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.checkOnOpenFor", record.name()));
             checkOnOpen.getAccessibleContext().setAccessibleDescription(
-                    "Saves immediately for this installation only. It does not change the "
-                            + "release type or affect an update check already in progress.");
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.checkOnOpenDescription"));
             checkOnOpen.setEnabled(pendingSelection == null);
             checkOnOpen.addActionListener(event -> saveCheckOnOpen(
                     record, expectedPreference, checkOnOpen));
@@ -1604,11 +1638,13 @@ public final class LauncherFrame extends JFrame {
         boolean updateAvailable = checked != null && checked.result() != null
                 && checked.result().updateAvailable();
         if (ownershipProvenance && local.pendingUpdate()) {
-            JButton recover = homeButton("Recover", "recoverUpdateButton");
+            JButton recover = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.recover"),
+                    "recoverUpdateButton");
             recover.addActionListener(event -> recoverUpdate(record));
             actions.add(recover);
         } else if (updateAvailable && updateManaged) {
-            JButton update = homeButton("Update", "applyUpdateButton");
+            JButton update = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.update"),
+                    "applyUpdateButton");
             update.setFont(guiScale.font(update.getFont(), "label"));
             ChannelUpdateChecker.Result captured = checked.result();
             UpdatePreviewService.Eligibility eligibility = local.previewEligibility();
@@ -1622,19 +1658,22 @@ public final class LauncherFrame extends JFrame {
                     || checked.result() == null
                     || checked.result().retryable();
             if (needsCheck) {
-                String checkText = checking ? "Checking…"
-                        : checked != null ? "Retry check" : "Check";
+                String checkText = checking ? I18n.getTextAt(BUNDLE, "LauncherFrame.checking")
+                        : checked != null ? I18n.getTextAt(BUNDLE, "LauncherFrame.retryCheck")
+                        : I18n.getTextAt(BUNDLE, "LauncherFrame.check");
                 JButton check = homeButton(checkText, "checkUpdatesButton");
                 check.setEnabled(installationCheckWorker == null && !checking);
                 check.addActionListener(event -> startInstallationCheck(record));
                 actions.add(check);
             }
         }
-        JButton more = homeButton(missing ? "Locate…" : "More…",
+        JButton more = homeButton(missing ? I18n.getTextAt(BUNDLE, "LauncherFrame.locate")
+                        : I18n.getTextAt(BUNDLE, "LauncherFrame.more"),
                 "installationMenuButton-" + record.id());
         installationMenuButtons.put(record.id(), more);
-        more.getAccessibleContext().setAccessibleDescription(
-                (missing ? "Locate or remove: " : "More actions for ") + record.name());
+        more.getAccessibleContext().setAccessibleDescription(missing
+                ? I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.locateOrRemove", record.name())
+                : I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.moreActionsFor", record.name()));
         more.addActionListener(event -> openInstallationMenu(record));
         actions.add(more);
         JPanel centeredActions = new JPanel(new java.awt.GridBagLayout());
@@ -1652,8 +1691,8 @@ public final class LauncherFrame extends JFrame {
     private void openInstallationMenu(InstallationRecord record) {
         if (installationMenuPending) return;
         if (!gate.tryEnter()) {
-            LauncherAlertDialog.showMessage(this, guiScale, "Please wait",
-                    "Another operation is already running.");
+            LauncherAlertDialog.showMessage(this, guiScale, I18n.getTextAt(BUNDLE, "LauncherFrame.pleaseWait"),
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.anotherOperationRunning"));
             return;
         }
         installationMenuPending = true;
@@ -1679,11 +1718,12 @@ public final class LauncherFrame extends JFrame {
                 if (problem == null) {
                     showInstallationMenu(record);
                 } else if (problem instanceof UninstallService.MissingInstallationException missing) {
-                    status.setText("Installation folder not found.");
+                    status.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.installationFolderNotFound"));
                     removeMissingInstallation(missing.record());
                 } else {
-                    showError("Checking installation folder " + (problem instanceof InterruptedException
-                            ? "interrupted" : "failed"), problem);
+                    showError(LocalizedText.of(BUNDLE, problem instanceof InterruptedException
+                            ? "LauncherFrame.checkingFolderInterrupted"
+                            : "LauncherFrame.checkingFolderFailed"), problem);
                 }
             }
         }.execute();
@@ -1693,7 +1733,8 @@ public final class LauncherFrame extends JFrame {
         JButton currentButton = installationMenuButtons.get(record.id());
         if (page != Page.INSTALLATIONS || currentButton == null || !currentButton.isShowing()) return;
         if (state.registry().installations().stream().noneMatch(record::equals)) {
-            showError("Installation changed", new IOException("Reopen Installations and try again."));
+            showError(LocalizedText.of(BUNDLE, "LauncherFrame.installationChanged"), new LocalizedIOException(
+                    LocalizedText.of(BUNDLE, "LauncherFrame.reopenInstallations")));
             return;
         }
         LauncherServices.InstallationStatus local = installationLocalStatus(record);
@@ -1739,12 +1780,12 @@ public final class LauncherFrame extends JFrame {
                     Thread.currentThread().interrupt();
                     checkbox.setSelected(expectedPreference.checkOnOpen());
                     checkbox.setEnabled(true);
-                    showError("Update check setting was not saved", interrupted);
+                    showError(LocalizedText.of(BUNDLE, "LauncherFrame.updateCheckSettingNotSaved"), interrupted);
                     return;
                 } catch (java.util.concurrent.ExecutionException failure) {
                     checkbox.setSelected(expectedPreference.checkOnOpen());
                     checkbox.setEnabled(true);
-                    showError("Update check setting was not saved", failure.getCause());
+                    showError(LocalizedText.of(BUNDLE, "LauncherFrame.updateCheckSettingNotSaved"), failure.getCause());
                     return;
                 }
                 if (outcome.authoritative() != null) {
@@ -1772,7 +1813,7 @@ public final class LauncherFrame extends JFrame {
                     checkbox.setEnabled(true);
                 }
                 if (outcome.failure() != null) {
-                    showError("Update check setting was not saved", outcome.failure());
+                    showError(LocalizedText.of(BUNDLE, "LauncherFrame.updateCheckSettingNotSaved"), outcome.failure());
                 }
             }
         }.execute();
@@ -1827,55 +1868,54 @@ public final class LauncherFrame extends JFrame {
         addPreferenceActions(menu, record);
         menu.add(installationMenuSeparator());
         if (local != null && local.pendingUninstall()) {
-            JMenuItem recover = installationMenuItem("Recover uninstall");
+            JMenuItem recover = installationMenuItem(I18n.getTextAt(BUNDLE, "LauncherFrame.recoverUninstall"));
             recover.addActionListener(event -> recoverUninstall(record));
             menu.add(recover);
             return menu;
         }
         if (ownershipProvenance && local.pendingUpdate()) {
-            JMenuItem recover = installationMenuItem("Recover interrupted update");
+            JMenuItem recover = installationMenuItem(
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.recoverInterruptedUpdate"));
             recover.addActionListener(event -> recoverUpdate(record));
             menu.add(recover);
         }
-        JMenuItem location = installationMenuItem("Open location");
+        JMenuItem location = installationMenuItem(I18n.getTextAt(BUNDLE, "LauncherFrame.openLocation"));
         location.getAccessibleContext().setAccessibleDescription(
-                "Open " + record.name() + " in the platform file manager");
+                I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.openLocationDescription", record.name()));
         location.addActionListener(event -> openLocation(record));
         menu.add(location);
-        JMenuItem rename = installationMenuItem("Rename…");
+        JMenuItem rename = installationMenuItem(I18n.getTextAt(BUNDLE, "LauncherFrame.renameMenu"));
         rename.setName("renameInstallation-" + record.id());
         rename.addActionListener(event -> renameInstallation(record));
         menu.add(rename);
-        JMenuItem launchOptions = installationMenuItem("Launch options…");
+        JMenuItem launchOptions = installationMenuItem(I18n.getTextAt(BUNDLE, "LauncherFrame.launchOptionsMenu"));
         launchOptions.setName("launchOptions-" + record.id());
         launchOptions.getAccessibleContext().setAccessibleDescription(
-                "Set memory, rendering, and other launch options for " + record.name());
+                I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.launchOptionsDescription", record.name()));
         launchOptions.addActionListener(event -> openInstallationLaunchOptions(record));
         menu.add(launchOptions);
-        JMenuItem repair = installationMenuItem("Repair…");
+        JMenuItem repair = installationMenuItem(I18n.getTextAt(BUNDLE, "LauncherFrame.repairMenu"));
         repair.setName("repairInstallation-" + record.id());
         repair.getAccessibleContext().setAccessibleDescription(
-                "Clear caches, check the game files, and optionally reset settings for "
-                        + record.name());
+                I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.repairDescription", record.name()));
         repair.setEnabled(local == null || !local.pendingUpdate() && !local.missing());
         repair.addActionListener(event -> repairInstallation(record));
         menu.add(repair);
-        JMenuItem remove = installationMenuItem("Remove from launcher…");
+        JMenuItem remove = installationMenuItem(I18n.getTextAt(BUNDLE, "LauncherFrame.removeFromLauncherMenu"));
         remove.addActionListener(event -> removeFromLauncher(record));
         menu.add(remove);
         if (enableUpdatesOffered(record, local)) {
             menu.add(installationMenuSeparator());
-            JMenuItem adopt = installationMenuItem("Enable updates…");
+            JMenuItem adopt = installationMenuItem(I18n.getTextAt(BUNDLE, "LauncherFrame.enableUpdatesMenu"));
             adopt.setName("enableManagedUpdates-" + record.id());
             adopt.getAccessibleContext().setAccessibleDescription(
-                    "Verify this imported copy against one exact official release, without "
-                            + "changing application files.");
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.enableUpdatesDescription"));
             adopt.addActionListener(event -> beginAdoption(record));
             menu.add(adopt);
         }
         if (updateManaged) {
             menu.add(installationMenuSeparator());
-            JMenuItem uninstall = installationMenuItem("Uninstall…");
+            JMenuItem uninstall = installationMenuItem(I18n.getTextAt(BUNDLE, "LauncherFrame.uninstallMenu"));
             uninstall.addActionListener(event -> uninstall(record));
             menu.add(uninstall);
         }
@@ -1893,11 +1933,12 @@ public final class LauncherFrame extends JFrame {
         for (Product product : record.products()) {
             String label = displayProduct(product.key());
             JMenuItem item = installationMenuItem(
-                    record.products().size() > 1 ? label : "Use as preferred for " + label);
+                    record.products().size() > 1 ? label
+                            : I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.useAsPreferredFor", label));
             item.setName("preferFor-" + product.key() + "-" + record.id());
             item.setEnabled(!record.id().equals(preferred.get(product.key())));
             item.addActionListener(event -> run(
-                    "Changing " + label + " preference",
+                    I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.changingPreference", label),
                     () -> {
                         services.selectPreferred(product.key(), record);
                         return null;
@@ -1909,16 +1950,17 @@ public final class LauncherFrame extends JFrame {
             return;
         }
         boolean anyChangeable = perApplication.stream().anyMatch(JMenuItem::isEnabled);
-        JMenuItem all = installationMenuItem("Use as preferred for all applications");
+        JMenuItem all = installationMenuItem(
+                I18n.getTextAt(BUNDLE, "LauncherFrame.useAsPreferredForAll"));
         all.setName("preferForAll-" + record.id());
         all.setEnabled(anyChangeable);
-        all.addActionListener(event -> run("Changing application preferences",
+        all.addActionListener(event -> run(I18n.getTextAt(BUNDLE, "LauncherFrame.changingApplicationPreferences"),
                 () -> {
                     services.selectPreferredForAll(record);
                     return null;
                 }, ignored -> reload()));
         menu.add(all);
-        JMenu submenu = installationSubmenu("Use as preferred for");
+        JMenu submenu = installationSubmenu(I18n.getTextAt(BUNDLE, "LauncherFrame.useAsPreferredForMenu"));
         submenu.setName("preferForSubmenu-" + record.id());
         submenu.setEnabled(anyChangeable);
         perApplication.forEach(submenu::add);
@@ -2090,33 +2132,34 @@ public final class LauncherFrame extends JFrame {
     private String installationUpdateStatus(InstallationRecord record,
                                             LauncherServices.InstallationStatus local) {
         if (local != null && local.missing()) {
-            return "Folder not found";
+            return I18n.getTextAt(BUNDLE, "LauncherFrame.folderNotFound");
         }
         if (local != null && local.pendingUninstall()) {
-            return "Uninstall recovery required";
+            return I18n.getTextAt(BUNDLE, "LauncherFrame.uninstallRecoveryRequired");
         }
         if (local != null && local.error() != null) {
-            return "Installation needs attention";
+            return I18n.getTextAt(BUNDLE, "LauncherFrame.installationNeedsAttention");
         }
         if (legacyRelease(record, local)) return RETIRED_CHANNEL_STATUS;
-        if (!hasOwnershipProvenance(local)) return "Launch only";
+        if (!hasOwnershipProvenance(local)) return I18n.getTextAt(BUNDLE, "LauncherFrame.launchOnly");
         if (!managedUpdatesAvailable(local)) {
-            return "Release type information needs repair";
+            return I18n.getTextAt(BUNDLE, "LauncherFrame.releaseTypeNeedsRepair");
         }
-        if (local.pendingUpdate()) return "Recovery required";
+        if (local.pendingUpdate()) return I18n.getTextAt(BUNDLE, "LauncherFrame.recoveryRequired");
         InstallationCheck checked = installationChecks.get(record.id());
         if (checked == null) {
             return local != null && local.previewEligibility() != null
                     && !local.previewEligibility().available()
-                    ? "Launch only · updates unavailable" : "Update status not checked";
+                    ? I18n.getTextAt(BUNDLE, "LauncherFrame.launchOnlyUpdatesUnavailable")
+                    : I18n.getTextAt(BUNDLE, "LauncherFrame.updateStatusNotChecked");
         }
-        if ("Checking".equals(checked.error())) return "Checking…";
+        if ("Checking".equals(checked.error())) return I18n.getTextAt(BUNDLE, "LauncherFrame.checking");
         return channelStatus(checked.result(), checked.error());
     }
 
     private void beginAdoption(InstallationRecord record) {
         final long generation = homeGeneration;
-        run("Checking imported copy",
+        run(I18n.getTextAt(BUNDLE, "LauncherFrame.checkingImportedCopy"),
                 () -> services.adoptionSuggestion(record),
                 suggestion -> {
                     if (isCurrentAdoption(generation, record)) {
@@ -2127,7 +2170,7 @@ public final class LauncherFrame extends JFrame {
                     if (!isCurrentAdoption(generation, record)) return;
                     showIneligibleAdoption(new PreparedAdoption.Report(false,
                             record.name(), record.observedBuild(), FollowChannel.CORE,
-                            ImportedCopyAdoptionService.AUTOMATIC_MATCH_UNAVAILABLE));
+                            ImportedCopyAdoptionService.automaticMatchUnavailable()));
                     recordErrorAsync("Mapping imported copy to an official product",
                             error, ignored -> {});
                 }, () -> {}, false);
@@ -2145,7 +2188,7 @@ public final class LauncherFrame extends JFrame {
         details.setBorder(guiScale.padding("xl", "xxl", "md", "xxl"));
         int detailGap = guiScale.space("md");
 
-        JLabel heading = new JLabel("Enable managed updates");
+        JLabel heading = new JLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.enableManagedUpdates"));
         heading.setName("adoptionCandidateHeading");
         heading.setForeground(FirstLaunchPanel.ACCENT);
         heading.setFont(guiScale.font(heading.getFont(), "headline"));
@@ -2153,8 +2196,9 @@ public final class LauncherFrame extends JFrame {
         details.add(heading);
         details.add(Box.createVerticalStrut(detailGap));
 
-        JLabel application = new JLabel(suggestion.detectedApplication() + " ("
-                + suggestion.detectedVersion() + ")");
+        JLabel application = new JLabel(I18n.getFormattedTextAt(BUNDLE,
+                "LauncherFrame.detectedApplicationVersion", suggestion.detectedApplication(),
+                suggestion.detectedVersion()));
         application.setName("adoptionDetectedApplicationVersion");
         application.setForeground(FirstLaunchPanel.TEXT);
         application.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -2164,7 +2208,7 @@ public final class LauncherFrame extends JFrame {
         JPanel channelRow = new JPanel(new java.awt.FlowLayout(
                 java.awt.FlowLayout.LEFT, 0, 0));
         channelRow.setOpaque(false);
-        JLabel channelLabel = new JLabel("Release type:");
+        JLabel channelLabel = new JLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.releaseTypeLabel"));
         channelLabel.setForeground(FirstLaunchPanel.TEXT);
         StyledComboBox<FollowChannel> channel = new StyledComboBox<>(
                 FollowChannel.offered(showExperimental).toArray(FollowChannel[]::new),
@@ -2174,9 +2218,10 @@ public final class LauncherFrame extends JFrame {
                 guiScale.scaleForGUI(180), channel.getPreferredSize().height));
         channel.setSelectedItem(FollowChannel.CORE);
         channel.setToolTipText(channelChoiceDescription());
-        channel.getAccessibleContext().setAccessibleName("Release type");
-        channel.getAccessibleContext().setAccessibleDescription(
-                channelChoiceDescription() + " This choice is fixed after enabling.");
+        channel.getAccessibleContext().setAccessibleName(
+                I18n.getTextAt(BUNDLE, "LauncherFrame.releaseType"));
+        channel.getAccessibleContext().setAccessibleDescription(I18n.getFormattedTextAt(BUNDLE,
+                "LauncherFrame.channelChoiceFixedAfterEnabling", channelChoiceDescription()));
         channelLabel.setLabelFor(channel);
         channelRow.add(channelLabel);
         channelRow.add(Box.createHorizontalStrut(detailGap));
@@ -2188,24 +2233,27 @@ public final class LauncherFrame extends JFrame {
         details.add(Box.createVerticalStrut(detailGap));
 
         JLabel explanation = new JLabel(
-                "Existing application and personal files will not be changed.");
+                I18n.getTextAt(BUNDLE, "LauncherFrame.existingFilesUnchanged"));
         explanation.setName("adoptionExplanation");
         explanation.setForeground(FirstLaunchPanel.MUTED);
         explanation.setAlignmentX(Component.LEFT_ALIGNMENT);
         details.add(explanation);
 
-        JDialog dialog = new JDialog(this, "Enable managed updates", false);
+        JDialog dialog = new JDialog(this,
+                I18n.getTextAt(BUNDLE, "LauncherFrame.enableManagedUpdates"), false);
         dialog.setName("adoptionCandidateDialog");
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
-        JButton cancel = homeButton("Cancel", "cancelAdoptionButton");
-        JButton continueButton = homeButton("Continue", "continueAdoptionButton", true);
+        JButton cancel = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.cancel"),
+                "cancelAdoptionButton");
+        JButton continueButton = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.continue"),
+                "continueAdoptionButton", true);
         continueButton.setFont(guiScale.font(continueButton.getFont(), "label"));
         continueButton.setMnemonic(KeyEvent.VK_C);
         continueButton.getAccessibleContext().setAccessibleDescription(
-                "Find the matching official version and verify this copy without changing it.");
+                I18n.getTextAt(BUNDLE, "LauncherFrame.continueAdoptionDescription"));
         cancel.setMnemonic(KeyEvent.VK_A);
         cancel.getAccessibleContext().setAccessibleDescription(
-                "Close without contacting the release service.");
+                I18n.getTextAt(BUNDLE, "LauncherFrame.cancelAdoptionDescription"));
         DialogFooter footer = new DialogFooter(guiScale).primary(continueButton).cancel(cancel);
         JPanel actions = footer.panel();
         actions.setName("adoptionCandidateActions");
@@ -2256,15 +2304,19 @@ public final class LauncherFrame extends JFrame {
         releases.setForeground(FirstLaunchPanel.TEXT);
         releases.setSelectionBackground(LauncherTheme.SELECTION_BACKGROUND);
         releases.setSelectionForeground(LauncherTheme.TEXT);
-        releases.getAccessibleContext().setAccessibleName("Official releases");
+        releases.getAccessibleContext().setAccessibleName(
+                I18n.getTextAt(BUNDLE, "LauncherFrame.officialReleases"));
 
-        JLabel status = new JLabel("Select Fetch versions to view official releases.");
+        JLabel status = new JLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.selectFetchVersions"));
         status.setName("adoptionReleaseStatus");
         status.setForeground(FirstLaunchPanel.MUTED);
-        JButton fetch = homeButton("Fetch versions", "fetchAdoptionReleasesButton");
-        JButton next = homeButton("Next page", "nextAdoptionReleasePageButton");
-        JButton cancel = homeButton("Cancel", "cancelAdoptionReleaseButton");
-        JButton continueButton = homeButton("Continue",
+        JButton fetch = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.fetchVersions"),
+                "fetchAdoptionReleasesButton");
+        JButton next = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.nextPage"),
+                "nextAdoptionReleasePageButton");
+        JButton cancel = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.cancel"),
+                "cancelAdoptionReleaseButton");
+        JButton continueButton = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.continue"),
                 "continueSelectedAdoptionButton", true);
         next.setEnabled(false);
         continueButton.setEnabled(false);
@@ -2274,13 +2326,12 @@ public final class LauncherFrame extends JFrame {
         JPanel heading = new JPanel();
         heading.setOpaque(false);
         heading.setLayout(new BoxLayout(heading, BoxLayout.Y_AXIS));
-        JLabel title = new JLabel("Choose the matching official version");
+        JLabel title = new JLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.chooseMatchingOfficialVersion"));
         title.setForeground(FirstLaunchPanel.ACCENT);
         title.setFont(guiScale.font(title.getFont(), "headline"));
         title.setAlignmentX(Component.LEFT_ALIGNMENT);
-        JLabel explanation = new JLabel("<html>Use this list when the detected version could "
-                + "not be resolved automatically. The selected package must still match the "
-                + "copy exactly.</html>");
+        JLabel explanation = new JLabel(
+                I18n.getTextAt(BUNDLE, "LauncherFrame.chooseMatchingOfficialVersionExplanation"));
         explanation.setForeground(FirstLaunchPanel.MUTED);
         explanation.setAlignmentX(Component.LEFT_ALIGNMENT);
         heading.add(title);
@@ -2308,7 +2359,8 @@ public final class LauncherFrame extends JFrame {
         body.add(heading, BorderLayout.NORTH);
         body.add(LauncherTheme.scrollPane(releases), BorderLayout.CENTER);
         body.add(actions, BorderLayout.SOUTH);
-        JDialog dialog = new JDialog(this, "Choose official version", false);
+        JDialog dialog = new JDialog(this,
+                I18n.getTextAt(BUNDLE, "LauncherFrame.chooseOfficialVersionTitle"), false);
         dialog.setName("adoptionReleaseBrowser");
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         dialog.setContentPane(body);
@@ -2319,7 +2371,7 @@ public final class LauncherFrame extends JFrame {
             fetch.setEnabled(false);
             next.setEnabled(false);
             continueButton.setEnabled(false);
-            run("Fetching official versions",
+            run(I18n.getTextAt(BUNDLE, "LauncherFrame.fetchingOfficialVersions"),
                     () -> services.releases(suggestion.repository(), requested),
                     result -> {
                         if (!dialog.isDisplayable()
@@ -2336,12 +2388,13 @@ public final class LauncherFrame extends JFrame {
                         fetch.setEnabled(true);
                         next.setEnabled(more[0]);
                         status.setText(result.releases().isEmpty()
-                                ? "No releases were found on this page."
-                                : "Select the version that matches this copy.");
+                                ? I18n.getTextAt(BUNDLE, "LauncherFrame.noReleasesOnPage")
+                                : I18n.getTextAt(BUNDLE, "LauncherFrame.selectMatchingVersion"));
                     }, error -> {
                         fetch.setEnabled(true);
                         next.setEnabled(pageNumber[0] > 0 && more[0]);
-                        status.setText("Official versions could not be loaded. Try again.");
+                        status.setText(I18n.getTextAt(BUNDLE,
+                                "LauncherFrame.officialVersionsNotLoaded"));
                         recordErrorAsync("Loading official versions for adoption",
                                 error, ignored -> {});
                     }, () -> {}, false);
@@ -2353,7 +2406,7 @@ public final class LauncherFrame extends JFrame {
             continueButton.setEnabled(selected != null
                     && selected.assessment().eligible());
             if (selected != null && !selected.assessment().eligible()) {
-                status.setText("This release cannot be used for safe verification.");
+                status.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.releaseNotVerifiable"));
             }
         });
         cancel.addActionListener(event -> dialog.dispose());
@@ -2381,13 +2434,15 @@ public final class LauncherFrame extends JFrame {
             String exactTag, FollowChannel fixedChannel, long generation) {
         if (!isCurrentAdoption(generation, record)) return;
         if (!FollowChannel.offered(showExperimental).contains(fixedChannel)) {
-            showError("Release type not available", new IOException("Turn on Show "
-                    + fixedChannel + " releases in Settings first."));
+            showError(LocalizedText.of(BUNDLE, "LauncherFrame.releaseTypeNotAvailable"),
+                    new LocalizedIOException(LocalizedText.of(BUNDLE,
+                            "LauncherFrame.turnOnShowReleases", String.valueOf(fixedChannel))));
             return;
         }
         OperationProgressDialog progress = new OperationProgressDialog(this,
-                "Verifying imported copy", "adoptionProgressLog", this::showOperationLogs);
-        JButton browse = button("Choose a different version…",
+                I18n.getTextAt(BUNDLE, "LauncherFrame.verifyingImportedCopy"),
+                "adoptionProgressLog", this::showOperationLogs);
+        JButton browse = button(I18n.getTextAt(BUNDLE, "LauncherFrame.chooseDifferentVersion"),
                 "browseAfterAdoptionFailureButton");
         browse.setEnabled(false);
         browse.addActionListener(event -> {
@@ -2402,7 +2457,8 @@ public final class LauncherFrame extends JFrame {
                 StandardCharsets.UTF_8);
         java.util.concurrent.atomic.AtomicBoolean publicationAttempted =
                 new java.util.concurrent.atomic.AtomicBoolean();
-        runOperation("Verifying imported copy", OperationType.ADOPT_EXISTING,
+        runOperation(I18n.getTextAt(BUNDLE, "LauncherFrame.verifyingImportedCopy"),
+                OperationType.ADOPT_EXISTING,
                 List.of(Path.of(record.canonicalRoot())), progress,
                 context -> {
                     PreparedAdoption prepared = exactTag == null
@@ -2454,10 +2510,10 @@ public final class LauncherFrame extends JFrame {
                         }
                         return;
                     }
-                    progress.setHeading("This copy remains launch-only");
+                    progress.setHeading(I18n.getTextAt(BUNDLE, "LauncherFrame.copyRemainsLaunchOnly"));
                     if (publicationAttempted.get()) {
-                        progress.setFailureSummary(
-                                "This copy could not be enabled and will remain launch-only.");
+                        progress.setFailureSummary(I18n.getTextAt(BUNDLE,
+                                "LauncherFrame.copyCouldNotBeEnabled"));
                     }
                     browse.setEnabled(isCurrentAdoption(generation, record)
                             && error instanceof
@@ -2473,14 +2529,14 @@ public final class LauncherFrame extends JFrame {
 
 
     void showIneligibleAdoption(PreparedAdoption.Report report) {
-        JPanel body = adoptionResultBody("Updates can't be enabled",
-                report.message()
-                        + "<br><br>No files were changed. You can keep using this installation, "
-                        + "or install a separate managed copy for updates.");
-        JButton close = homeButton("Close", "closeAdoptionResultButton", true);
+        JPanel body = adoptionResultBody(I18n.getTextAt(BUNDLE, "LauncherFrame.updatesCannotBeEnabled"),
+                I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.updatesCannotBeEnabledMessage",
+                        report.message()));
+        JButton close = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.close"), "closeAdoptionResultButton", true);
         DialogFooter footer = new DialogFooter(guiScale).primary(close);
         body.add(footer.panel(), BorderLayout.SOUTH);
-        JDialog dialog = adoptionResultDialog("Updates can't be enabled", body);
+        JDialog dialog = adoptionResultDialog(
+                I18n.getTextAt(BUNDLE, "LauncherFrame.updatesCannotBeEnabled"), body);
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         close.addActionListener(event -> dialog.dispose());
         footer.install(dialog, dialog::dispose);
@@ -2492,22 +2548,21 @@ public final class LauncherFrame extends JFrame {
             ImportedCopyAdoptionService.Suggestion suggestion,
             ImportedCopyAdoptionService.ChannelMismatchException mismatch,
             long generation) {
-        String headingText = "Use " + mismatch.requiredChannel()
-                + " for this installation";
+        String headingText = I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.useChannelForInstallation",
+                String.valueOf(mismatch.requiredChannel()));
         boolean retryOffered = FollowChannel.offered(showExperimental)
                 .contains(mismatch.requiredChannel());
         String guidance = retryOffered
-                ? "Select " + mismatch.requiredChannel()
-                        + " to verify this copy and enable managed updates."
-                : "To enable managed updates for this copy, first turn on Show "
-                        + mismatch.requiredChannel() + " releases in Settings.";
+                ? I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.selectChannelToVerify",
+                        String.valueOf(mismatch.requiredChannel()))
+                : I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.turnOnChannelToEnable",
+                        String.valueOf(mismatch.requiredChannel()));
         JPanel body = adoptionResultBody(headingText,
-                "Version " + mismatch.currentVersion() + " is currently "
-                        + withArticle(mismatch.requiredChannel()) + " release, not "
-                        + withArticle(mismatch.selectedChannel()) + " release."
-                        + "<br><br>No files were changed. " + guidance);
+                I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.channelMismatchMessage",
+                        mismatch.currentVersion(), withArticle(mismatch.requiredChannel()),
+                        withArticle(mismatch.selectedChannel()), guidance));
         if (!retryOffered) {
-            JButton close = homeButton("Close", "closeAdoptionResultButton", true);
+            JButton close = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.close"), "closeAdoptionResultButton", true);
             DialogFooter footer = new DialogFooter(guiScale).primary(close);
             body.add(footer.panel(), BorderLayout.SOUTH);
             JDialog dialog = adoptionResultDialog(headingText, body);
@@ -2517,8 +2572,9 @@ public final class LauncherFrame extends JFrame {
             dialog.setVisible(true);
             return;
         }
-        JButton close = homeButton("Close", "closeAdoptionResultButton");
-        JButton retry = homeButton("Try " + mismatch.requiredChannel(),
+        JButton close = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.close"), "closeAdoptionResultButton");
+        JButton retry = homeButton(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.tryChannel",
+                        String.valueOf(mismatch.requiredChannel())),
                 "retrySuggestedAdoptionButton", true);
         retry.setFont(guiScale.font(retry.getFont(), "label"));
         DialogFooter footer = new DialogFooter(guiScale).primary(retry).cancel(close);
@@ -2551,7 +2607,8 @@ public final class LauncherFrame extends JFrame {
     }
 
     private static String withArticle(FollowChannel channel) {
-        return (channel == FollowChannel.EXPERIMENTAL ? "an " : "a ") + channel;
+        return I18n.getFormattedTextAt(BUNDLE, channel == FollowChannel.EXPERIMENTAL
+                ? "LauncherFrame.channelWithAn" : "LauncherFrame.channelWithA", String.valueOf(channel));
     }
 
     private JPanel adoptionResultBody(String headingText, String result) {
@@ -2616,7 +2673,8 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void renameInstallation(InstallationRecord record) {
-        JDialog dialog = new JDialog(this, "Rename installation", false);
+        JDialog dialog = new JDialog(this,
+                I18n.getTextAt(BUNDLE, "LauncherFrame.renameInstallationTitle"), false);
         dialog.setName("renameInstallationDialog");
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         dialog.setResizable(false);
@@ -2624,7 +2682,7 @@ public final class LauncherFrame extends JFrame {
                 guiScale.space("lg")));
         body.setBackground(FirstLaunchPanel.BACKGROUND);
         body.setBorder(guiScale.padding("xl", "xxl"));
-        JLabel heading = new JLabel("Name this installation");
+        JLabel heading = new JLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.nameThisInstallation"));
         heading.setForeground(FirstLaunchPanel.ACCENT);
         heading.setFont(guiScale.font(heading.getFont(), "headline"));
         body.add(heading, BorderLayout.NORTH);
@@ -2638,22 +2696,25 @@ public final class LauncherFrame extends JFrame {
         name.setBackground(FirstLaunchPanel.PANEL);
         name.setCaretColor(FirstLaunchPanel.TEXT);
         name.setFont(guiScale.font(name.getFont(), "body"));
-        name.getAccessibleContext().setAccessibleName("Installation name");
+        name.getAccessibleContext().setAccessibleName(
+                I18n.getTextAt(BUNDLE, "LauncherFrame.installationName"));
         fields.add(name);
         fields.add(Box.createVerticalStrut(guiScale.space("xs")));
-        JLabel hint = new JLabel("Only the launcher label changes, not the installation folder.");
+        JLabel hint = new JLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.renameHint"));
         hint.setForeground(FirstLaunchPanel.MUTED);
         fields.add(hint);
         body.add(fields, BorderLayout.CENTER);
 
-        JButton cancel = homeButton("Cancel", "cancelRenameButton");
+        JButton cancel = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.cancel"),
+                "cancelRenameButton");
         cancel.addActionListener(event -> dialog.dispose());
-        JButton save = homeButton("Save name", "saveInstallationNameButton", true);
+        JButton save = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.saveName"),
+                "saveInstallationNameButton", true);
         save.addActionListener(event -> {
             String requested = name.getText().strip();
             if (requested.isEmpty() || requested.length() > 120
                     || requested.chars().anyMatch(Character::isISOControl)) {
-                hint.setText("Use a name of 1–120 printable characters.");
+                hint.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.renameInvalid"));
                 hint.setForeground(LauncherTheme.WARNING);
                 name.requestFocusInWindow();
                 return;
@@ -2663,7 +2724,8 @@ public final class LauncherFrame extends JFrame {
                 return;
             }
             dialog.dispose();
-            run("Renaming installation", () -> services.renameInstallation(record, requested),
+            run(I18n.getTextAt(BUNDLE, "LauncherFrame.renamingInstallation"),
+                    () -> services.renameInstallation(record, requested),
                     ignored -> reload(), ignored -> {}, () -> {}, true, false);
         });
         DialogFooter footer = new DialogFooter(guiScale).primary(save).cancel(cancel);
@@ -2678,46 +2740,50 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void openLocation(InstallationRecord record) {
-        run("Opening installation folder", () -> {
+        run(I18n.getTextAt(BUNDLE, "LauncherFrame.openingInstallationFolder"), () -> {
             services.openLocation(record);
             return null;
-        }, ignored -> status.setText("Opened installation folder."),
-                error -> showError("Open location failed", error));
+        }, ignored -> status.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.openedInstallationFolder")),
+                error -> showError(LocalizedText.of(BUNDLE, "LauncherFrame.openLocationFailed"), error));
     }
 
     private void removeFromLauncher(InstallationRecord record) {
-        boolean confirmed = LauncherAlertDialog.showDangerConfirm(this, guiScale, "Remove from launcher",
-                "Remove “" + record.name()
-                        + "” from the launcher?\nIts files will stay in the installation folder.",
-                "Remove");
+        boolean confirmed = LauncherAlertDialog.showDangerConfirm(this, guiScale,
+                I18n.getTextAt(BUNDLE, "LauncherFrame.removeFromLauncherTitle"),
+                I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.removeFromLauncherMessage",
+                        record.name()),
+                I18n.getTextAt(BUNDLE, "LauncherFrame.remove"));
         if (!confirmed) return;
-        run("Removing from launcher", () -> services.removeFromLauncher(record), result -> {
+        run(I18n.getTextAt(BUNDLE, "LauncherFrame.removingFromLauncher"),
+                () -> services.removeFromLauncher(record), result -> {
             selectedInstallationId = null;
             transientHomeMessage = result.warning() == null
-                    ? "Removed from launcher. Files were kept."
-                    : "Removed from launcher. Files were kept. " + result.warning();
+                    ? I18n.getTextAt(BUNDLE, "LauncherFrame.removedFilesKept")
+                    : I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.removedFilesKeptWarning",
+                            result.warning());
             page = Page.HOME;
             reload();
         });
     }
 
     private void removeMissingInstallation(InstallationRecord record) {
-        String choice = LauncherAlertDialog.show(this, "Installation not found",
-                "The folder for \"" + record.name() + "\" could not be found.\n\n"
-                        + "If you renamed or moved it, locate the folder to keep its updates "
-                        + "and settings. Or remove this installation from the launcher; no game "
-                        + "files will be deleted.",
+        String choice = LauncherAlertDialog.show(this,
+                I18n.getTextAt(BUNDLE, "LauncherFrame.installationNotFoundTitle"),
+                I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.installationNotFoundMessage",
+                        record.name()),
                 guiScale, LOCATE_FOLDER, REMOVE_FROM_LAUNCHER, LauncherAlertDialog.CANCEL);
         if (LOCATE_FOLDER.equals(choice)) {
             locateMissingInstallation(record);
             return;
         }
         if (!REMOVE_FROM_LAUNCHER.equals(choice)) return;
-        run("Removing missing installation",
+        run(I18n.getTextAt(BUNDLE, "LauncherFrame.removingMissingInstallation"),
                 () -> services.removeMissingFromLauncher(record), result -> {
                     selectedInstallationId = null;
-                    transientHomeMessage = "Removed missing installation from launcher."
-                            + (result.warning() == null ? "" : " " + result.warning());
+                    transientHomeMessage = result.warning() == null
+                            ? I18n.getTextAt(BUNDLE, "LauncherFrame.removedMissingInstallation")
+                            : I18n.getFormattedTextAt(BUNDLE,
+                            "LauncherFrame.removedMissingInstallationWarning", result.warning());
                     page = Page.HOME;
                     reload();
                 });
@@ -2727,62 +2793,69 @@ public final class LauncherFrame extends JFrame {
         Path oldRoot = Path.of(record.canonicalRoot());
         Path selected = existingImportPrompts.chooseFolder(this, oldRoot.getParent());
         if (selected == null) return;
-        run("Locating " + record.name(),
+        run(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.locating", record.name()),
                 () -> services.relocate(record, selected,
                         OperationContext.none(OperationType.IMPORT_EXISTING)),
                 moved -> {
                     selectedInstallationId = moved.id();
-                    transientHomeMessage = "Found \"" + moved.name() + "\" at "
-                            + moved.canonicalRoot() + ".";
+                    transientHomeMessage = I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.foundAt",
+                            moved.name(), moved.canonicalRoot());
                     page = Page.HOME;
                     reload();
                 });
     }
 
     private void uninstall(InstallationRecord record) {
-        Boolean removeLogs = LauncherAlertDialog.showConfirmWithOption(this, guiScale, "Uninstall",
-                "Uninstall " + record.name() + "?\nOfficial application files will be removed. "
-                        + "Saves, settings, custom files, and modified files will be kept.",
-                "Also delete log files (logs and data/logs)", true, "Uninstall", true);
+        Boolean removeLogs = LauncherAlertDialog.showConfirmWithOption(this, guiScale,
+                I18n.getTextAt(BUNDLE, "LauncherFrame.uninstall"),
+                I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.uninstallMessage", record.name()),
+                I18n.getTextAt(BUNDLE, "LauncherFrame.alsoDeleteLogs"), true,
+                I18n.getTextAt(BUNDLE, "LauncherFrame.uninstall"), true);
         if (removeLogs == null) return;
         boolean deleteLogs = removeLogs;
         OperationProgressDialog progress = new OperationProgressDialog(this,
-                "Uninstalling", "uninstallProgressLog", this::showOperationLogs);
+                I18n.getTextAt(BUNDLE, "LauncherFrame.uninstalling"), "uninstallProgressLog",
+                this::showOperationLogs);
         progress.setVisible(true);
-        runOperation("Uninstalling " + record.name(), OperationType.UNINSTALL,
+        runOperation(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.uninstallingName", record.name()),
+                OperationType.UNINSTALL,
                 List.of(Path.of(record.canonicalRoot())), progress,
                 context -> services.uninstall(record, deleteLogs, context), result -> {
                     progress.dispose();
                     selectedInstallationId = null;
-                    transientHomeMessage = result.retainedFiles()
-                            ? "Uninstalled. Your custom files were kept in the installation folder."
-                            : "Uninstalled.";
+                    transientHomeMessage = I18n.getTextAt(BUNDLE, result.retainedFiles()
+                            ? "LauncherFrame.uninstalledKeptFiles" : "LauncherFrame.uninstalled");
                     if (result.warning() != null) {
-                        transientHomeMessage += " " + result.warning();
+                        transientHomeMessage = I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.messageWithWarning",
+                                transientHomeMessage, result.warning());
                     }
                     page = Page.HOME;
                     reload();
-                }, error -> progress.setHeading("Uninstall failed"), () -> {
+                }, error -> progress.setHeading(I18n.getTextAt(BUNDLE, "LauncherFrame.uninstallFailed")),
+                () -> {
                 });
     }
 
     private void recoverUninstall(InstallationRecord record) {
         OperationProgressDialog progress = new OperationProgressDialog(this,
-                "Recovering uninstall", "uninstallRecoveryProgressLog",
-                this::showOperationLogs);
+                I18n.getTextAt(BUNDLE, "LauncherFrame.recoveringUninstall"),
+                "uninstallRecoveryProgressLog", this::showOperationLogs);
         progress.startNonCancellable(
-                "Uninstall recovery must remain open until it finishes.");
+                I18n.getTextAt(BUNDLE, "LauncherFrame.uninstallRecoveryMustRemainOpen"));
         progress.setVisible(true);
-        runOperation("Recovering uninstall", OperationType.UNINSTALL_RECOVERY,
+        runOperation(I18n.getTextAt(BUNDLE, "LauncherFrame.recoveringUninstall"),
+                OperationType.UNINSTALL_RECOVERY,
                 List.of(Path.of(record.canonicalRoot())), progress,
                 context -> services.recoverUninstall(record, context),
                 result -> {
                     progress.dispose();
-                    transientHomeMessage = result.message()
-                            + (result.warning() == null ? "" : " " + result.warning());
+                    transientHomeMessage = result.warning() == null ? result.message()
+                            : I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.messageWithWarning",
+                            result.message(), result.warning());
                     page = Page.HOME;
                     reload();
-                }, error -> progress.setHeading("Uninstall recovery failed"), () -> {
+                }, error -> progress.setHeading(I18n.getTextAt(BUNDLE,
+                        "LauncherFrame.uninstallRecoveryFailed")), () -> {
                 });
     }
 
@@ -2799,13 +2872,14 @@ public final class LauncherFrame extends JFrame {
 
     private JPanel pageNavigation(Page current) {
         JPanel navigation = new JPanel();
-        JButton home = homeButton("Home", "homeButton");
+        JButton home = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.home"), "homeButton");
         home.setMnemonic(java.awt.event.KeyEvent.VK_H);
         home.addActionListener(event -> navigateTo(Page.HOME));
-        JButton installations = homeButton("Installations", "installationsButton");
+        JButton installations = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.installations"),
+                "installationsButton");
         installations.setEnabled(current != Page.INSTALLATIONS);
         installations.addActionListener(event -> navigateTo(Page.INSTALLATIONS));
-        JButton settings = homeButton("Settings", "settingsButton");
+        JButton settings = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.settings"), "settingsButton");
         settings.setEnabled(current != Page.SETTINGS);
         settings.addActionListener(event -> navigateTo(Page.SETTINGS));
         navigation.add(home);
@@ -2821,8 +2895,8 @@ public final class LauncherFrame extends JFrame {
         content.removeAll();
         content.setBorder(guiScale.padding("xxl", "xxl", "xl", "xxl"));
         content.setBackground(FirstLaunchPanel.BACKGROUND);
-        JPanel heading = pageHeader("Settings",
-                "Launcher preferences and local diagnostics.");
+        JPanel heading = pageHeader(I18n.getTextAt(BUNDLE, "LauncherFrame.settings"),
+                I18n.getTextAt(BUNDLE, "LauncherFrame.settingsSubtitle"));
         heading.setBackground(FirstLaunchPanel.BACKGROUND);
         for (Component child : heading.getComponents()) child.setForeground(FirstLaunchPanel.TEXT);
         content.add(heading, BorderLayout.NORTH);
@@ -2841,7 +2915,7 @@ public final class LauncherFrame extends JFrame {
         center.add(right);
         List<JButton> utilityButtons = new java.util.ArrayList<>();
         if (settingsLoading) {
-            JLabel loading = new JLabel("Loading settings…");
+            JLabel loading = new JLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.loadingSettings"));
             loading.setName("settingsLoadingMessage");
             loading.setForeground(FirstLaunchPanel.MUTED);
             left.add(loading);
@@ -2850,8 +2924,9 @@ public final class LauncherFrame extends JFrame {
             left.add(Box.createVerticalStrut(guiScale.space("lg")));
             left.add(releasesSection());
             left.add(Box.createVerticalStrut(guiScale.space("lg")));
-            JPanel java = settingsSection("Game Java");
-            JLabel runtime = new JLabel("Java " + launcherSettings.defaultJavaFeature());
+            JPanel java = settingsSection("GameJava", I18n.getTextAt(BUNDLE, "LauncherFrame.gameJava"));
+            JLabel runtime = new JLabel(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.javaVersion",
+                    String.valueOf(launcherSettings.defaultJavaFeature())));
             runtime.setName("defaultJavaStatus");
             runtime.setForeground(FirstLaunchPanel.TEXT);
             runtime.setAlignmentX(Component.LEFT_ALIGNMENT);
@@ -2871,9 +2946,10 @@ public final class LauncherFrame extends JFrame {
             javaPath.setFont(guiScale.font(javaPath.getFont(), "small"));
             javaPath.setForeground(FirstLaunchPanel.MUTED);
             javaPath.setCaretPosition(0);
-            javaPath.getAccessibleContext().setAccessibleName("Game Java path");
+            javaPath.getAccessibleContext().setAccessibleName(
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.gameJavaPath"));
             javaRow.add(javaPath, BorderLayout.CENTER);
-            JButton changeJava = homeButton("Change default Java",
+            JButton changeJava = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.changeDefaultJava"),
                     "changeDefaultJavaButton");
             changeJava.setAlignmentX(Component.LEFT_ALIGNMENT);
             changeJava.addActionListener(event -> chooseDefaultJava());
@@ -2886,14 +2962,17 @@ public final class LauncherFrame extends JFrame {
             left.add(java);
             left.add(Box.createVerticalStrut(guiScale.space("lg")));
 
-            JPanel diagnostics = settingsSection("Diagnostics");
-            JButton logs = homeButton("View logs", "viewOperationLogsButton");
+            JPanel diagnostics = settingsSection("Diagnostics",
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.diagnostics"));
+            JButton logs = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.viewLogs"),
+                    "viewOperationLogsButton");
             logs.setAlignmentX(Component.LEFT_ALIGNMENT);
             logs.addActionListener(event -> showOperationLogs());
             utilityButtons.add(logs);
             diagnostics.add(logs);
             diagnostics.add(Box.createVerticalStrut(guiScale.space("sm")));
-            JButton report = homeButton("Report a bug", "reportBugSettingsButton");
+            JButton report = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.reportBug"),
+                    "reportBugSettingsButton");
             report.setAlignmentX(Component.LEFT_ALIGNMENT);
             report.addActionListener(event -> showBugReport());
             utilityButtons.add(report);
@@ -2901,8 +2980,10 @@ public final class LauncherFrame extends JFrame {
             left.add(diagnostics);
             if (LauncherSelfUpdate.available() || LauncherSelfUpdate.notifyOnly()) {
                 left.add(Box.createVerticalStrut(guiScale.space("lg")));
-                JPanel updater = settingsSection("Launcher update");
-                JButton check = homeButton("Check for launcher update", "checkLauncherUpdateButton");
+                JPanel updater = settingsSection("LauncherUpdate",
+                        I18n.getTextAt(BUNDLE, "LauncherFrame.launcherUpdate"));
+                JButton check = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.checkForLauncherUpdate"),
+                        "checkLauncherUpdateButton");
                 check.setAlignmentX(Component.LEFT_ALIGNMENT);
                 check.addActionListener(event -> checkLauncherUpdate(true));
                 utilityButtons.add(check);
@@ -2910,13 +2991,14 @@ public final class LauncherFrame extends JFrame {
                 left.add(updater);
             }
         } else {
-            JLabel unavailable = new JLabel("Settings could not be read and were not reset.");
+            JLabel unavailable = new JLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.settingsUnreadable"));
             unavailable.setName("settingsErrorMessage");
             unavailable.setForeground(LauncherTheme.WARNING);
             unavailable.setToolTipText(launcherSettingsError == null ? null
                     : errorDetail(launcherSettingsError));
             left.add(unavailable);
-            JButton retry = homeButton("Retry settings", "retrySettingsButton");
+            JButton retry = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.retrySettings"),
+                    "retrySettingsButton");
             retry.addActionListener(event -> loadSettingsPage());
             utilityButtons.add(retry);
             left.add(retry);
@@ -2946,10 +3028,11 @@ public final class LauncherFrame extends JFrame {
     }
 
     private JPanel launchOptionsSection() {
-        JPanel section = settingsSection("Launch options");
+        JPanel section = settingsSection("LaunchOptions",
+                I18n.getTextAt(BUNDLE, "LauncherFrame.launchOptions"));
         launchOptionsForm = null;
         if (launchOptionsDocument == null) {
-            JLabel unavailable = new JLabel("Launch options could not be read and were not reset.");
+            JLabel unavailable = new JLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.launchOptionsUnreadable"));
             unavailable.setName("launchOptionsErrorMessage");
             unavailable.setForeground(LauncherTheme.WARNING);
             unavailable.setToolTipText(launchOptionsError == null ? null : errorDetail(launchOptionsError));
@@ -2957,7 +3040,7 @@ public final class LauncherFrame extends JFrame {
             section.add(unavailable);
             return section;
         }
-        JLabel intro = mutedSettingsLabel("Used by every installation unless it sets its own.");
+        JLabel intro = mutedSettingsLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.launchOptionsIntro"));
         intro.setName("launchOptionsIntro");
         section.add(intro);
         section.add(Box.createVerticalStrut(guiScale.space("md")));
@@ -2966,11 +3049,13 @@ public final class LauncherFrame extends JFrame {
         message.setForeground(LauncherTheme.WARNING);
         message.setAlignmentX(Component.LEFT_ALIGNMENT);
         launchOptionsMessage = message;
-        JButton revert = homeButton("Revert", "revertLaunchOptionsButton");
-        JButton save = homeButton("Save launch options", "saveGlobalLaunchOptionsButton");
+        JButton revert = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.revert"),
+                "revertLaunchOptionsButton");
+        JButton save = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.saveLaunchOptions"),
+                "saveGlobalLaunchOptionsButton");
         LaunchOptions current = launchOptionsDraft != null ? launchOptionsDraft : launchOptionsDocument.global();
         LaunchOptionsForm form = new LaunchOptionsForm(guiScale, LaunchOptions.builtIn(), current,
-                "Use built-in default", () -> {
+                I18n.getTextAt(BUNDLE, "LauncherFrame.useBuiltInDefault"), () -> {
                     message.setText(" ");
                     boolean dirty = launchOptionsDirty();
                     revert.setEnabled(dirty);
@@ -2998,14 +3083,15 @@ public final class LauncherFrame extends JFrame {
                 message.setText(invalid.getMessage());
                 return;
             }
-            run("Saving launch options", () -> services.saveGlobalLaunchOptions(options), saved -> {
+            run(I18n.getTextAt(BUNDLE, "LauncherFrame.savingLaunchOptions"),
+                    () -> services.saveGlobalLaunchOptions(options), saved -> {
                 // Text fields stay editable while saving; keep anything changed after Save was pressed.
                 LaunchOptions live = launchOptionsForm == form ? form.values() : null;
                 launchOptionsDocument = saved;
                 launchOptionsError = null;
                 launchOptionsDraft = live != null && !live.equals(saved.global()) ? live : null;
                 launchOptionsForm = null;
-                status.setText("Saved launch options.");
+                status.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.savedLaunchOptions"));
                 if (page == Page.SETTINGS) renderSettingsPage();
             });
         });
@@ -3036,7 +3122,8 @@ public final class LauncherFrame extends JFrame {
             return;
         }
         LaunchOptionsForm form = launchOptionsForm;
-        run("Saving launch options", () -> services.saveGlobalLaunchOptions(options), saved -> {
+        run(I18n.getTextAt(BUNDLE, "LauncherFrame.savingLaunchOptions"),
+                () -> services.saveGlobalLaunchOptions(options), saved -> {
             // Text fields stay editable while saving; an edit made since then keeps Settings open.
             LaunchOptions live = launchOptionsForm == form ? form.values() : null;
             boolean editedSince = live != null && !live.equals(saved.global());
@@ -3044,7 +3131,7 @@ public final class LauncherFrame extends JFrame {
             launchOptionsError = null;
             launchOptionsDraft = editedSince ? live : null;
             launchOptionsForm = null;
-            status.setText("Saved launch options.");
+            status.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.savedLaunchOptions"));
             if (page != Page.SETTINGS) return;
             if (editedSince) {
                 renderSettingsPage();
@@ -3061,16 +3148,17 @@ public final class LauncherFrame extends JFrame {
     }
 
     private JPanel appearanceSection() {
-        JPanel section = settingsSection("Appearance");
+        JPanel section = settingsSection("Appearance",
+                I18n.getTextAt(BUNDLE, "LauncherFrame.appearance"));
         LauncherAppearance current = LauncherAppearance.current();
-        JLabel themeLabel = mutedSettingsLabel("Theme");
+        JLabel themeLabel = mutedSettingsLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.theme"));
         section.add(themeLabel);
         section.add(Box.createVerticalStrut(guiScale.space("xs")));
         StyledComboBox<LauncherAppearance.Theme> theme =
                 new StyledComboBox<>(LauncherAppearance.Theme.values(), guiScale);
         theme.setName("appearanceThemeCombo");
         theme.setSelectedItem(current.theme());
-        theme.getAccessibleContext().setAccessibleName("Theme");
+        theme.getAccessibleContext().setAccessibleName(I18n.getTextAt(BUNDLE, "LauncherFrame.theme"));
         themeLabel.setLabelFor(theme);
         theme.setAlignmentX(Component.LEFT_ALIGNMENT);
         Dimension themeSize = theme.getPreferredSize();
@@ -3084,22 +3172,97 @@ public final class LauncherFrame extends JFrame {
         });
         section.add(theme);
         section.add(Box.createVerticalStrut(guiScale.space("md")));
-        JCheckBox intro = new MapCheckBox("Play intro animation", playIntro, guiScale);
+        JCheckBox intro = new MapCheckBox(I18n.getTextAt(BUNDLE, "LauncherFrame.playIntro"),
+                playIntro, guiScale);
         intro.setName("playIntroCheckbox");
         intro.setOpaque(false);
         intro.setAlignmentX(Component.LEFT_ALIGNMENT);
         intro.setBorder(BorderFactory.createEmptyBorder());
         intro.setMargin(new java.awt.Insets(0, 0, 0, 0));
         intro.getAccessibleContext().setAccessibleDescription(
-                "Greet and scan when the launcher opens. Off, it opens straight to Home.");
+                I18n.getTextAt(BUNDLE, "LauncherFrame.playIntroDescription"));
         intro.addActionListener(event -> applyPlayIntro(intro.isSelected()));
         section.add(intro);
+        section.add(Box.createVerticalStrut(guiScale.space("md")));
+        JLabel languageLabel = mutedSettingsLabel(I18n.getText("Settings.language"));
+        section.add(languageLabel);
+        section.add(Box.createVerticalStrut(guiScale.space("xs")));
+        List<LanguageChoice> choices = new ArrayList<>();
+        choices.add(new LanguageChoice(null, I18n.getText("Settings.language.system")));
+        for (String tag : I18n.LOCALE_CHOICES) {
+            choices.add(new LanguageChoice(tag, LanguageChoice.nativeName(tag)));
+        }
+        StyledComboBox<LanguageChoice> languages =
+                new StyledComboBox<>(choices.toArray(LanguageChoice[]::new), guiScale);
+        languages.setName("languageCombo");
+        choices.stream().filter(choice -> java.util.Objects.equals(choice.tag(), language))
+                .findFirst().ifPresent(languages::setSelectedItem);
+        languages.getAccessibleContext().setAccessibleName(I18n.getText("Settings.language"));
+        languageLabel.setLabelFor(languages);
+        languages.setAlignmentX(Component.LEFT_ALIGNMENT);
+        Dimension languageSize = languages.getPreferredSize();
+        languageSize.width = Math.max(languageSize.width, guiScale.scaleForGUI(180));
+        languages.setPreferredSize(languageSize);
+        languages.setMaximumSize(languageSize);
+        languages.addActionListener(event -> {
+            if (languages.getSelectedItem() instanceof LanguageChoice selected) {
+                applyLanguage(selected.tag());
+            }
+        });
+        section.add(languages);
+        section.add(Box.createVerticalStrut(guiScale.space("xs")));
+        JLabel languageNote = mutedSettingsLabel(I18n.getText("Settings.language.restart"));
+        languageNote.setName("languageRestartNote");
+        section.add(languageNote);
         return section;
     }
 
+    /** A Language choice; {@code tag} is {@code null} for the system language. */
+    record LanguageChoice(String tag, String label) {
+        /** The language's name in that language, such as Deutsch, so players can find their own. */
+        static String nativeName(String tag) {
+            Locale locale = Locale.forLanguageTag(tag);
+            String name = locale.getDisplayLanguage(locale);
+            return name.isEmpty() ? tag : name.substring(0, 1).toUpperCase(locale) + name.substring(1);
+        }
+
+        @Override
+        public String toString() {
+            return label;
+        }
+    }
+
+    private void applyLanguage(String requested) {
+        if (java.util.Objects.equals(requested, language)) return;
+        language = requested;
+        long revision = languageSave.request();
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                languageSave.saveIfLatest(revision, requested);
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    get();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                } catch (java.util.concurrent.ExecutionException failure) {
+                    if (isDisplayable()) {
+                        showError(LocalizedText.of("org.megamek.launcher.messages", "Settings.language.notSaved"), failure.getCause());
+                    }
+                }
+            }
+        }.execute();
+    }
+
     private JPanel releasesSection() {
-        JPanel section = settingsSection("Releases");
-        JCheckBox experimental = new MapCheckBox("Show Experimental releases",
+        JPanel section = settingsSection("Releases",
+                I18n.getTextAt(BUNDLE, "LauncherFrame.releases"));
+        JCheckBox experimental = new MapCheckBox(
+                I18n.getTextAt(BUNDLE, "LauncherFrame.showExperimentalReleases"),
                 showExperimental, guiScale);
         experimental.setName("showExperimentalReleasesCheckbox");
         experimental.setOpaque(false);
@@ -3107,12 +3270,12 @@ public final class LauncherFrame extends JFrame {
         experimental.setBorder(BorderFactory.createEmptyBorder());
         experimental.setMargin(new java.awt.Insets(0, 0, 0, 0));
         experimental.getAccessibleContext().setAccessibleDescription(
-                "Also offer Experimental installs. Existing installations keep their release type.");
+                I18n.getTextAt(BUNDLE, "LauncherFrame.showExperimentalReleasesDescription"));
         experimental.addActionListener(event -> {
             boolean requested = experimental.isSelected();
             if (requested && !showExperimental && !LauncherAlertDialog.showConfirm(this, guiScale,
                     EXPERIMENTAL_CONFIRM_TITLE, EXPERIMENTAL_CONFIRM_MESSAGE,
-                    "Show Experimental")) {
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.showExperimental"))) {
                 experimental.setSelected(false);
                 return;
             }
@@ -3121,7 +3284,7 @@ public final class LauncherFrame extends JFrame {
         section.add(experimental);
         section.add(Box.createVerticalStrut(guiScale.space("xs")));
         JLabel warning = mutedSettingsLabel(
-                "Experimental builds help us test and may break things. Keep backups.");
+                I18n.getTextAt(BUNDLE, "LauncherFrame.experimentalWarning"));
         warning.setName("experimentalReleasesWarning");
         warning.setForeground(LauncherTheme.WARNING);
         section.add(warning);
@@ -3149,7 +3312,8 @@ public final class LauncherFrame extends JFrame {
                     Thread.currentThread().interrupt();
                 } catch (java.util.concurrent.ExecutionException failure) {
                     if (isDisplayable()) {
-                        showError("Release setting was not saved", failure.getCause());
+                        showError(LocalizedText.of(BUNDLE, "LauncherFrame.releaseSettingNotSaved"),
+                                failure.getCause());
                     }
                 }
             }
@@ -3176,7 +3340,8 @@ public final class LauncherFrame extends JFrame {
                     Thread.currentThread().interrupt();
                 } catch (java.util.concurrent.ExecutionException failure) {
                     if (isDisplayable()) {
-                        showError("Intro setting was not saved", failure.getCause());
+                        showError(LocalizedText.of(BUNDLE, "LauncherFrame.introSettingNotSaved"),
+                                failure.getCause());
                     }
                 }
             }
@@ -3203,24 +3368,32 @@ public final class LauncherFrame extends JFrame {
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
                 } catch (java.util.concurrent.ExecutionException failure) {
-                    if (isDisplayable()) showError("Appearance was not saved", failure.getCause());
+                    if (isDisplayable()) {
+                        showError(LocalizedText.of(BUNDLE, "LauncherFrame.appearanceNotSaved"),
+                                failure.getCause());
+                    }
                 }
             }
         }.execute();
     }
 
     private void openInstallationLaunchOptions(InstallationRecord record) {
-        run("Reading launch options", services::launchOptions, document -> {
+        run(I18n.getTextAt(BUNDLE, "LauncherFrame.readingLaunchOptions"), services::launchOptions, document -> {
             LaunchOptions inherited = document.global().over(LaunchOptions.builtIn());
             LaunchOptionsDialog[] dialog = new LaunchOptionsDialog[1];
-            dialog[0] = new LaunchOptionsDialog(this, guiScale, "Launch options",
-                    "Launch options for " + installationDisplayName(record),
-                    "Override the launcher-wide options for this installation only.",
-                    inherited, document.installation(record.id()), "Use launcher default",
-                    options -> run("Saving launch options",
+            dialog[0] = new LaunchOptionsDialog(this, guiScale,
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.launchOptions"),
+                    I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.launchOptionsFor",
+                            installationDisplayName(record)),
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.launchOptionsOverride"),
+                    inherited, document.installation(record.id()),
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.useLauncherDefault"),
+                    options -> run(I18n.getTextAt(BUNDLE, "LauncherFrame.savingLaunchOptions"),
                             () -> services.saveInstallationLaunchOptions(record, options), saved -> {
                                 launchOptionsDocument = saved;
-                                status.setText("Saved launch options for " + installationDisplayName(record) + ".");
+                                status.setText(I18n.getFormattedTextAt(BUNDLE,
+                                        "LauncherFrame.savedLaunchOptionsFor",
+                                        installationDisplayName(record)));
                             }),
                     options -> copyLaunchCommands(record, options, dialog[0]));
             dialog[0].show();
@@ -3231,7 +3404,7 @@ public final class LauncherFrame extends JFrame {
     private void copyLaunchCommands(InstallationRecord record, LaunchOptions overrides,
                                     LaunchOptionsDialog dialog) {
         List<Product> products = record.products() == null ? List.of() : record.products();
-        run("Preparing launch commands", () -> {
+        run(I18n.getTextAt(BUNDLE, "LauncherFrame.preparingLaunchCommands"), () -> {
             StringBuilder commands = new StringBuilder();
             for (Product product : products) {
                 List<String> command = services.preview(record, product.key(), overrides);
@@ -3242,8 +3415,8 @@ public final class LauncherFrame extends JFrame {
             return commands.toString().strip();
         }, text -> {
             Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(text), null);
-            status.setText("Copied launch commands.");
-            dialog.note("Copied launch commands to the clipboard.");
+            status.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.copiedLaunchCommands"));
+            dialog.note(I18n.getTextAt(BUNDLE, "LauncherFrame.copiedLaunchCommandsToClipboard"));
         });
     }
 
@@ -3383,7 +3556,7 @@ public final class LauncherFrame extends JFrame {
 
     /** Empty Home has no installations to manage, but Settings must stay reachable. */
     private JPanel firstLaunchNavigation() {
-        JButton settings = homeButton("Settings", "settingsButton");
+        JButton settings = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.settings"), "settingsButton");
         settings.setMnemonic(java.awt.event.KeyEvent.VK_S);
         settings.addActionListener(event -> navigateTo(Page.SETTINGS));
         JPanel navigation = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.CENTER, 0, 0));
@@ -3399,29 +3572,33 @@ public final class LauncherFrame extends JFrame {
     private List<JButton> helpLinks() {
         List<JButton> links = new ArrayList<>();
         if (!homeWhatsNewInstallations().isEmpty()) {
-            JButton whatsNew = new LauncherLink("Release notes", "whatsNewButton", guiScale);
+            JButton whatsNew = new LauncherLink(I18n.getTextAt(BUNDLE, "LauncherFrame.releaseNotes"),
+                    "whatsNewButton", guiScale);
             whatsNew.getAccessibleContext().setAccessibleDescription(
-                    "Shows what changed in the installed versions and in the launcher");
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.releaseNotesDescription"));
             whatsNew.addActionListener(event -> showHomeWhatsNew());
             links.add(whatsNew);
         }
-        JButton report = new LauncherLink("Report a bug", "reportBugButton", guiScale);
+        JButton report = new LauncherLink(I18n.getTextAt(BUNDLE, "LauncherFrame.reportBug"),
+                "reportBugButton", guiScale);
         report.getAccessibleContext().setAccessibleDescription(
-                "Opens the launcher's bug report helper");
+                I18n.getTextAt(BUNDLE, "LauncherFrame.reportBugDescription"));
         report.addActionListener(event -> showBugReport());
         links.add(report);
         return links;
     }
 
     private List<JButton> communityLinks() {
-        JButton discord = new LauncherLink("Join Discord", "openDiscordButton", guiScale);
+        JButton discord = new LauncherLink(I18n.getTextAt(BUNDLE, "LauncherFrame.joinDiscord"),
+                "openDiscordButton", guiScale);
         discord.getAccessibleContext().setAccessibleDescription(
-                "Opens the MegaMek community Discord invitation in your browser");
+                I18n.getTextAt(BUNDLE, "LauncherFrame.joinDiscordDescription"));
         discord.addActionListener(event -> openWebsite(
                 java.net.URI.create(DISCORD_INVITE_URL), "Discord"));
-        JButton online = new LauncherLink("Play online", "playOnlineButton", guiScale);
+        JButton online = new LauncherLink(I18n.getTextAt(BUNDLE, "LauncherFrame.playOnline"),
+                "playOnlineButton", guiScale);
         online.getAccessibleContext().setAccessibleDescription(
-                "Opens megamek.games, the list of public MegaMek servers, in your browser");
+                I18n.getTextAt(BUNDLE, "LauncherFrame.playOnlineDescription"));
         online.addActionListener(event -> openWebsite(
                 java.net.URI.create(PLAY_ONLINE_URL), "megamek.games"));
         return List.of(discord, online);
@@ -3441,13 +3618,13 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void openWebsite(java.net.URI address, String description) {
-        run("Opening " + description, () -> {
+        run(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.openingWebsite", description), () -> {
             new PlatformOpener().browse(address);
             return null;
         }, ignored -> {});
     }
 
-    private JPanel settingsSection(String titleText) {
+    private JPanel settingsSection(String id, String titleText) {
         JPanel section = new JPanel() {
             @Override
             public Dimension getMaximumSize() {
@@ -3455,7 +3632,7 @@ public final class LauncherFrame extends JFrame {
                 return new Dimension(Integer.MAX_VALUE, preferred.height);
             }
         };
-        section.setName("settings" + titleText.replace(" ", "") + "Section");
+        section.setName("settings" + id + "Section");
         section.setLayout(new BoxLayout(section, BoxLayout.Y_AXIS));
         section.setOpaque(false);
         section.setBorder(guiScale.padding("lg", "xl"));
@@ -3561,28 +3738,30 @@ public final class LauncherFrame extends JFrame {
             checkLauncherRelease(explicit);
             return;
         }
-        run("Checking launcher release", () -> services.checkLauncherUpdate(
+        run(I18n.getTextAt(BUNDLE, "LauncherFrame.checkingLauncherRelease"), () -> services.checkLauncherUpdate(
                 LauncherSelfUpdate.consumeReport(launcherUpdateReport(), LauncherSelfUpdate.currentVersion()),
                 launcherUpdater::check), checked -> curtain.whenUncovered(() -> {
             if (checked.pending()) {
                 setLauncherUpdateStatus(explicit, checked.message());
                 if (explicit) LauncherAlertDialog.showMessage(this, guiScale,
-                        "Launcher update in progress", checked.message());
+                        I18n.getTextAt(BUNDLE, "LauncherFrame.launcherUpdateInProgress"), checked.message());
                 return;
             }
             LauncherSelfUpdate.Candidate candidate = checked.candidate();
             if (candidate == null) {
                 setLauncherUpdateStatus(explicit,
-                        checked.message() == null ? "Launcher is up to date." : checked.message());
+                        checked.message() == null
+                                ? I18n.getTextAt(BUNDLE, "LauncherFrame.launcherUpToDate") : checked.message());
                 if (checked.message() != null) LauncherAlertDialog.showMessage(this, guiScale,
-                        "Launcher update result", checked.message());
+                        I18n.getTextAt(BUNDLE, "LauncherFrame.launcherUpdateResult"), checked.message());
                 return;
             }
             if (!confirmLauncherUpdate(this, guiScale, candidate, checked.message())) return;
             OperationProgressDialog progress = new OperationProgressDialog(this,
-                    "Updating launcher", "launcherUpdateProgressLog", this::showOperationLogs);
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.updatingLauncher"), "launcherUpdateProgressLog",
+                    this::showOperationLogs);
             progress.setVisible(true);
-            runOperation("Updating launcher", OperationType.LAUNCHER_UPDATE, List.of(), progress, context -> {
+            runOperation(I18n.getTextAt(BUNDLE, "LauncherFrame.updatingLauncher"), OperationType.LAUNCHER_UPDATE, List.of(), progress, context -> {
                 Path installer = launcherUpdater.stage(candidate, context);
                 try {
                     context.phase(org.megamek.launcher.operation.OperationPhase.APPLY,
@@ -3612,7 +3791,8 @@ public final class LauncherFrame extends JFrame {
             }
             if (!explicit) {
                 setLauncherUpdateStatus(false,
-                        "Launcher update: " + SanitizedErrors.text(error.getMessage()));
+                        I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.launcherUpdateStatus",
+                                SanitizedErrors.text(error.getLocalizedMessage())));
                 recordErrorAsync("Automatic launcher update check", error, ignored -> {});
             }
         }, () -> {}, explicit, explicit);
@@ -3627,32 +3807,33 @@ public final class LauncherFrame extends JFrame {
 
     /** Copies that can't update in place link a newer release to its page instead. */
     private void checkLauncherRelease(boolean explicit) {
-        run("Checking launcher release", launcherUpdater::checkRelease, release -> curtain.whenUncovered(() -> {
+        run(I18n.getTextAt(BUNDLE, "LauncherFrame.checkingLauncherRelease"), launcherUpdater::checkRelease,
+                release -> curtain.whenUncovered(() -> {
             if (release == null) {
-                setLauncherUpdateStatus(explicit, "Launcher is up to date.");
+                setLauncherUpdateStatus(explicit, I18n.getTextAt(BUNDLE, "LauncherFrame.launcherUpToDate"));
                 return;
             }
-            setLauncherUpdateStatus(explicit, "Launcher " + release.version() + " is available.");
+            setLauncherUpdateStatus(explicit, I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.launcherAvailable",
+                    String.valueOf(release.version())));
             if (confirmLauncherDownload(this, guiScale, release)) {
-                openWebsite(release.page(), "launcher release page");
+                openWebsite(release.page(), I18n.getTextAt(BUNDLE, "LauncherFrame.launcherReleasePage"));
             }
         }), error -> {
             if (!explicit) {
                 setLauncherUpdateStatus(false,
-                        "Launcher update: " + SanitizedErrors.text(error.getMessage()));
+                        I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.launcherUpdateStatus",
+                                SanitizedErrors.text(error.getLocalizedMessage())));
                 recordErrorAsync("Automatic launcher update check", error, ignored -> {});
             }
         }, () -> {}, explicit, explicit);
     }
 
     static boolean confirmLauncherDownload(Window owner, GuiScale scale, LauncherSelfUpdate.Release release) {
-        return LauncherAlertDialog.showConfirm(owner, scale, "Update MegaMek Launcher",
-                "Version " + release.version() + " is available.\n\n"
-                        + "This copy of the launcher can't update itself. Download the new version "
-                        + "from its release page and install it the same way as this one. For the "
-                        + "portable archive, extract it to a new folder rather than over this one, "
-                        + "and keep any games or settings stored inside the old folder.",
-                "Open release page");
+        return LauncherAlertDialog.showConfirm(owner, scale,
+                I18n.getTextAt(BUNDLE, "LauncherFrame.updateMegaMekLauncher"),
+                I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.launcherDownloadPrompt",
+                        String.valueOf(release.version())),
+                I18n.getTextAt(BUNDLE, "LauncherFrame.openReleasePage"));
     }
 
     /**
@@ -3669,29 +3850,31 @@ public final class LauncherFrame extends JFrame {
 
     static boolean confirmLauncherUpdate(Window owner, GuiScale scale,
                                           LauncherSelfUpdate.Candidate candidate, String notice) {
-        return LauncherAlertDialog.showConfirm(owner, scale, "Update MegaMek Launcher",
+        return LauncherAlertDialog.showConfirm(owner, scale,
+                I18n.getTextAt(BUNDLE, "LauncherFrame.updateMegaMekLauncher"),
                 launcherUpdatePrompt(candidate.version(), notice,
-                        LauncherSelfUpdate.asksForAdministratorPassword()), "Update now");
+                        LauncherSelfUpdate.asksForAdministratorPassword()),
+                I18n.getTextAt(BUNDLE, "LauncherFrame.updateNow"));
     }
 
     static String launcherUpdatePrompt(String version, String notice, boolean asksForPassword) {
-        String message = "Version " + version + " is available.\n\n"
-                + "Close any running games before updating.";
+        String message = I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.launcherUpdatePrompt",
+                String.valueOf(version));
         if (asksForPassword) {
-            message += "\n\nYour system will ask for an administrator password, because the "
-                    + "launcher is installed as a system package.";
+            message += "\n\n" + I18n.getTextAt(BUNDLE, "LauncherFrame.launcherUpdateAdministratorPassword");
         }
         return notice == null ? message : notice + "\n\n" + message;
     }
 
     private void chooseDefaultJava() {
-        run("Finding Java runtimes", services::javaCandidates,
+        run(I18n.getTextAt(BUNDLE, "LauncherFrame.findingJavaRuntimes"), services::javaCandidates,
                 this::chooseDefaultJavaFromCandidates);
     }
 
     private void chooseDefaultJavaFromCandidates(List<Path> candidates) {
-        showJavaSelectionDialog("Change default Java", "defaultJavaCandidateCombo",
-                candidates, selected -> run("Validating default game Java",
+        showJavaSelectionDialog(I18n.getTextAt(BUNDLE, "LauncherFrame.changeDefaultJava"),
+                "defaultJavaCandidateCombo",
+                candidates, selected -> run(I18n.getTextAt(BUNDLE, "LauncherFrame.validatingDefaultJava"),
                         () -> {
                             services.selectDefaultJava(selected);
                             return null;
@@ -3706,11 +3889,11 @@ public final class LauncherFrame extends JFrame {
                                          Consumer<Path> selection) {
         StyledComboBox<Object> choices = new StyledComboBox<>(guiScale);
         candidates.forEach(choices::addItem);
-        choices.addItem("Browse for Java home or executable…");
+        choices.addItem(I18n.getTextAt(BUNDLE, "LauncherFrame.browseForJava"));
         choices.setName(comboName);
-        choices.getAccessibleContext().setAccessibleName("Java runtime");
+        choices.getAccessibleContext().setAccessibleName(I18n.getTextAt(BUNDLE, "LauncherFrame.javaRuntime"));
         choices.getAccessibleContext().setAccessibleDescription(
-                "Choose a detected Java runtime or browse for a Java home or executable.");
+                I18n.getTextAt(BUNDLE, "LauncherFrame.javaRuntimeDescription"));
 
         JDialog dialog = new JDialog(this, title, false);
         dialog.setName("javaSelectionDialog");
@@ -3720,15 +3903,16 @@ public final class LauncherFrame extends JFrame {
         body.setName("javaSelectionDialogContent");
         body.setBackground(FirstLaunchPanel.BACKGROUND);
         body.setBorder(guiScale.padding("xl", "xxl"));
-        JLabel heading = new JLabel("Choose Java 21 or newer");
+        JLabel heading = new JLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.chooseJava21"));
         heading.setForeground(FirstLaunchPanel.ACCENT);
         heading.setFont(guiScale.font(heading.getFont(), "headline"));
         body.add(heading, BorderLayout.NORTH);
         body.add(choices, BorderLayout.CENTER);
 
-        JButton cancel = homeButton("Cancel", "cancelJavaSelectionButton");
+        JButton cancel = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.cancel"), "cancelJavaSelectionButton");
         cancel.addActionListener(event -> dialog.dispose());
-        JButton use = homeButton("Use selected Java", "confirmJavaSelectionButton", true);
+        JButton use = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.useSelectedJava"),
+                "confirmJavaSelectionButton", true);
         use.addActionListener(event -> {
             Object choice = choices.getSelectedItem();
             dialog.dispose();
@@ -3737,7 +3921,7 @@ public final class LauncherFrame extends JFrame {
                 return;
             }
             JFileChooser chooser = new JFileChooser();
-            chooser.setDialogTitle("Choose Java home or java executable");
+            chooser.setDialogTitle(I18n.getTextAt(BUNDLE, "LauncherFrame.chooseJavaHome"));
             chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
             if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
                 selection.accept(chooser.getSelectedFile().toPath());
@@ -3755,15 +3939,15 @@ public final class LauncherFrame extends JFrame {
 
     void launchDirectly(InstallationRecord record, String productKey) {
         if (!gate.tryEnter()) {
-            LauncherAlertDialog.showMessage(this, guiScale, "Please wait",
-                    "Another operation is already running.");
+            LauncherAlertDialog.showMessage(this, guiScale, I18n.getTextAt(BUNDLE, "LauncherFrame.pleaseWait"),
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.anotherOperationRunning"));
             return;
         }
         InstallationRecord capturedRecord = record;
         String capturedProduct = productKey;
         int restoreState = getExtendedState() & ~JFrame.ICONIFIED;
         long launch = ++launchGeneration;
-        status.setText("Running " + displayProduct(capturedProduct) + "…");
+        status.setText(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.running", displayProduct(capturedProduct)));
         setActionsEnabled(false);
         // The window stays up behind the "Launching" card until the application reports that it
         // is on screen (or could not say so), then gets out of its way.
@@ -3802,20 +3986,21 @@ public final class LauncherFrame extends JFrame {
                 toFront();
                 if (current) curtain.reveal();
                 if (problem instanceof UninstallService.MissingInstallationException missing) {
-                    status.setText("Installation folder not found.");
+                    status.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.installationFolderNotFound"));
                     removeMissingInstallation(missing.record());
                     return;
                 }
                 if (problem != null) {
-                    showError("Launching " + displayProduct(capturedProduct) + " failed",
-                            problem);
+                    showError(LocalizedText.of(BUNDLE, "LauncherFrame.launchingFailed",
+                                    displayProduct(capturedProduct)), problem);
                 } else {
                     int code = exit == null ? -1 : exit;
-                    showError("Game exited with code " + code,
+                    showError(LocalizedText.of(BUNDLE, "LauncherFrame.gameExitedWithCode",
+                                    String.valueOf(code)),
                             new IOException("The selected program returned nonzero "
                                     + "exit code " + code));
                 }
-                status.setText("Launch failed — details shown");
+                status.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.launchFailedDetailsShown"));
             }
         };
         try {
@@ -3832,8 +4017,9 @@ public final class LauncherFrame extends JFrame {
             setExtendedState(restoreState);
             setVisible(true);
             toFront();
-            showError("Launching " + displayProduct(capturedProduct) + " failed", error);
-            status.setText("Launch failed — details shown");
+            showError(LocalizedText.of(BUNDLE, "LauncherFrame.launchingFailed",
+                    displayProduct(capturedProduct)), error);
+            status.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.launchFailedDetailsShown"));
         }
     }
 
@@ -3864,7 +4050,7 @@ public final class LauncherFrame extends JFrame {
         // Its completion owns the UI; attempting reload() here would show a
         // misleading "Please wait" dialog and clear the current page.
         if (gate.isBusy()) return;
-        status.setText(displayProduct(productKey) + " exited.");
+        status.setText(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.productExited", displayProduct(productKey)));
         // Reload while retaining ICONIFIED. No success dialog or foreground request.
         reload();
     }
@@ -3876,11 +4062,12 @@ public final class LauncherFrame extends JFrame {
             target = destination == null
                     ? services.normalInstallDestination(repository, channel) : destination;
         } catch (IOException error) {
-            showError("Preparing " + quickChoiceName(repository, channel) + " failed", error);
+            showError(LocalizedText.of(BUNDLE, "LauncherFrame.preparingFailed",
+                    quickChoiceName(repository, channel)), error);
             resumeFirstLaunchOptions();
             return;
         }
-        run("Checking " + quickChoiceName(repository, channel),
+        run(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.checkingChoice", quickChoiceName(repository, channel)),
                 () -> services.prepareNormalInstall(repository, channel, target),
                 this::showNormalInstallConfirmation,
                 error -> normalPlanFailure(repository, channel, target, error), () -> {
@@ -3899,7 +4086,7 @@ public final class LauncherFrame extends JFrame {
         QuickInstallOption.Key key = option.key();
         AtomicReference<Path> attemptedDestination = new AtomicReference<>(destination);
         setStableFirstLaunchStatus();
-        run("Preparing install",
+        run(I18n.getTextAt(BUNDLE, "LauncherFrame.preparingInstall"),
                 () -> {
                     Path target = destination == null
                             ? services.normalInstallDestination(
@@ -3920,21 +4107,24 @@ public final class LauncherFrame extends JFrame {
         QuickInstallOption.Key key = option.key();
         String detail = errorDetail(error);
         boolean javaProblem = detail.toLowerCase(java.util.Locale.ROOT).contains("java");
+        String openSettings = I18n.getTextAt(BUNDLE, "LauncherFrame.openSettings");
+        String retry = I18n.getTextAt(BUNDLE, "LauncherFrame.retry");
         String[] choices = javaProblem
-                ? new String[]{"Open Settings", "Retry", "Cancel"}
-                : new String[]{"Retry", CHANGE_LOCATION, "Cancel"};
+                ? new String[]{openSettings, retry, LauncherAlertDialog.CANCEL}
+                : new String[]{retry, CHANGE_LOCATION, LauncherAlertDialog.CANCEL};
         String answer = LauncherAlertDialog.show(this,
-                javaProblem ? "Java setup required" : "Could not prepare download",
-                (javaProblem
-                        ? "A compatible external Java 21 or newer could not be verified."
-                        : quickChoiceName(key.repository(), key.channel())
-                        + " could not be prepared.")
-                        + "\n\n" + detail
-                        + "\n\nNo package was downloaded and no destination was created.",
+                I18n.getTextAt(BUNDLE, javaProblem
+                        ? "LauncherFrame.javaSetupRequired" : "LauncherFrame.couldNotPrepareDownload"),
+                I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.planFailureMessage",
+                        javaProblem
+                                ? I18n.getTextAt(BUNDLE, "LauncherFrame.javaNotVerified")
+                                : I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.couldNotBePrepared",
+                                        quickChoiceName(key.repository(), key.channel())),
+                        detail),
                 guiScale, choices);
-        if (javaProblem && "Open Settings".equals(answer)) {
+        if (javaProblem && openSettings.equals(answer)) {
             navigateTo(Page.SETTINGS);
-        } else if ("Retry".equals(answer)) {
+        } else if (retry.equals(answer)) {
             prepareCapturedNormalInstall(option, target);
         } else if (CHANGE_LOCATION.equals(answer)) {
             Path changed = chooseLocationAfterFailure(this, target, key.repository(),
@@ -3953,20 +4143,24 @@ public final class LauncherFrame extends JFrame {
                                    Path target, Throwable error) {
         String detail = errorDetail(error);
         boolean javaProblem = detail.toLowerCase(java.util.Locale.ROOT).contains("java");
+        String openSettings = I18n.getTextAt(BUNDLE, "LauncherFrame.openSettings");
+        String retry = I18n.getTextAt(BUNDLE, "LauncherFrame.retry");
         String[] choices = javaProblem
-                ? new String[]{"Open Settings", "Retry", "Cancel"}
-                : new String[]{"Retry", CHANGE_LOCATION, "Cancel"};
+                ? new String[]{openSettings, retry, LauncherAlertDialog.CANCEL}
+                : new String[]{retry, CHANGE_LOCATION, LauncherAlertDialog.CANCEL};
         String answer = LauncherAlertDialog.show(this,
-                javaProblem ? "Java setup required" : "Could not prepare download",
-                (javaProblem
-                        ? "A compatible external Java 21 or newer could not be verified."
-                        : quickChoiceName(repository, channel) + " could not be checked.")
-                        + "\n\n" + detail
-                        + "\n\nNo package was downloaded and no destination was created.",
+                I18n.getTextAt(BUNDLE, javaProblem
+                        ? "LauncherFrame.javaSetupRequired" : "LauncherFrame.couldNotPrepareDownload"),
+                I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.planFailureMessage",
+                        javaProblem
+                                ? I18n.getTextAt(BUNDLE, "LauncherFrame.javaNotVerified")
+                                : I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.couldNotBeChecked",
+                                        quickChoiceName(repository, channel)),
+                        detail),
                 guiScale, choices);
-        if (javaProblem && "Open Settings".equals(answer)) {
+        if (javaProblem && openSettings.equals(answer)) {
             navigateTo(Page.SETTINGS);
-        } else if ("Retry".equals(answer)) {
+        } else if (retry.equals(answer)) {
             prepareNormalInstall(repository, channel, target);
         } else if (CHANGE_LOCATION.equals(answer)) {
             Path changed = chooseLocationAfterFailure(this, target, repository, channel, null);
@@ -3985,13 +4179,15 @@ public final class LauncherFrame extends JFrame {
                                   FollowChannel channel, String tag, String source,
                                   Path target, Throwable error, Runnable retry) {
         Window window = owner instanceof Window w ? w : SwingUtilities.getWindowAncestor(owner);
+        String retryLabel = I18n.getTextAt(BUNDLE, "LauncherFrame.retry");
         String answer = LauncherAlertDialog.show(window == null ? this : window,
-                "Could not prepare download",
-                displayProduct(repository.key()) + " " + tag + " could not be checked."
-                        + "\n\n" + errorDetail(error)
-                        + "\n\nNo package was downloaded and no destination was created.",
-                guiScale, "Retry", CHANGE_LOCATION, "Cancel");
-        if ("Retry".equals(answer)) {
+                I18n.getTextAt(BUNDLE, "LauncherFrame.couldNotPrepareDownload"),
+                I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.planFailureMessage",
+                        I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.releaseCouldNotBeChecked",
+                                displayProduct(repository.key()), tag),
+                        errorDetail(error)),
+                guiScale, retryLabel, CHANGE_LOCATION, LauncherAlertDialog.CANCEL);
+        if (retryLabel.equals(answer)) {
             retry.run();
         } else if (CHANGE_LOCATION.equals(answer)) {
             Path changed = chooseLocationAfterFailure(owner, target, repository, channel, tag);
@@ -4011,7 +4207,7 @@ public final class LauncherFrame extends JFrame {
                     target == null ? null : target.getParent(),
                     NormalInstallService.defaultFolderName(repository, channel));
         } catch (IOException error) {
-            showError("Preparing install location failed", error);
+            showError(LocalizedText.of(BUNDLE, "LauncherFrame.preparingInstallLocationFailed"), error);
             return null;
         }
     }
@@ -4035,7 +4231,8 @@ public final class LauncherFrame extends JFrame {
                         changed = normalInstallLocationPrompts.choose(source,
                                 plan.destination().getParent(), typed);
                     } catch (IOException error) {
-                        showError("Preparing install location failed", error);
+                        showError(LocalizedText.of(BUNDLE, "LauncherFrame.preparingInstallLocationFailed"),
+                                error);
                         return false;
                     }
                     if (changed == null) return false;
@@ -4044,7 +4241,8 @@ public final class LauncherFrame extends JFrame {
                     if (plan.capturedCurrentTarget()) {
                         QuickInstallOption captured = capturedOption(plan);
                         if (captured == null) {
-                            showError("Preparing changed install location failed",
+                            showError(LocalizedText.of(BUNDLE,
+                                            "LauncherFrame.preparingChangedInstallLocationFailed"),
                                     new IOException("The session install target is no longer "
                                             + "available; no new target was selected."));
                             resumeFirstLaunchOptions();
@@ -4083,8 +4281,8 @@ public final class LauncherFrame extends JFrame {
                                 confirmed = get();
                             } catch (InterruptedException interrupted) {
                                 Thread.currentThread().interrupt();
-                                source.showFolderProblem("Checking the install folder was "
-                                        + "interrupted; try again.");
+                                source.showFolderProblem(I18n.getTextAt(BUNDLE,
+                                        "LauncherFrame.installFolderCheckInterrupted"));
                                 return;
                             } catch (java.util.concurrent.ExecutionException failure) {
                                 source.showFolderProblem(errorDetail(failure.getCause()));
@@ -4122,13 +4320,14 @@ public final class LauncherFrame extends JFrame {
         String product = displayProduct(plan.repository().key());
         String release = VersionDisplay.programChannelVersion(
                 product, plan.channel().toString(), plan.version());
-        String operationDescription = "Installing " + release;
+        String operationDescription = I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.installingRelease", release);
         OperationProgressDialog progress = new OperationProgressDialog(this,
                 operationDescription, "normalInstallProgressLog", this::showOperationLogs);
         progress.append("Installing the confirmed official " + product + " "
                 + plan.channel() + " release; this copy will keep receiving "
                 + plan.channel() + " updates...\n");
-        JButton repair = button("Open Installations", "repairNormalInstallButton");
+        JButton repair = button(I18n.getTextAt(BUNDLE, "LauncherFrame.openInstallations"),
+                "repairNormalInstallButton");
         repair.setEnabled(false);
         progress.addActionButton(repair);
         progress.setVisible(true);
@@ -4150,7 +4349,8 @@ public final class LauncherFrame extends JFrame {
                     progress.append("\nINSTALL DID NOT COMPLETE: " + errorDetail(error) + "\n");
                     progress.setHeading(error instanceof
                             NormalInstallService.PublishedInstallationException
-                            ? "Copy retained — setup needs repair" : "Installation failed");
+                            ? I18n.getTextAt(BUNDLE, "LauncherFrame.copyRetainedNeedsRepair")
+                            : I18n.getTextAt(BUNDLE, "LauncherFrame.installationFailed"));
                     if (error instanceof NormalInstallService.PublishedInstallationException) {
                         repair.setEnabled(true);
                     }
@@ -4168,9 +4368,8 @@ public final class LauncherFrame extends JFrame {
 
     private String channelChoiceDescription() {
         return showExperimental
-                ? "Core is for playing. Experimental helps us test and may break things."
-                : "Core is for playing. Turn on Show Experimental releases in Settings to "
-                        + "also offer Experimental.";
+                ? I18n.getTextAt(BUNDLE, "LauncherFrame.channelChoiceWithExperimental")
+                : I18n.getTextAt(BUNDLE, "LauncherFrame.channelChoiceCoreOnly");
     }
 
     private final class ReleasePickerDialog {
@@ -4182,14 +4381,16 @@ public final class LauncherFrame extends JFrame {
         private final DefaultListModel<PickerReleaseChoice> model = new DefaultListModel<>();
         private final JList<PickerReleaseChoice> releases = new JList<>(model);
         private final JButton fetch = homeButton(
-                "Fetch releases", "fetchReleasesButton");
+                I18n.getTextAt(BUNDLE, "LauncherFrame.fetchReleases"), "fetchReleasesButton");
         private final JButton previous = homeButton(
-                "Previous page", "previousReleasePageButton");
-        private final JButton next = homeButton("Next page", "nextReleasePageButton");
+                I18n.getTextAt(BUNDLE, "LauncherFrame.previousPage"), "previousReleasePageButton");
+        private final JButton next = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.nextPage"),
+                "nextReleasePageButton");
         private final JButton install = homeButton(
-                "Install", "installReleaseButton", true);
-        private final JButton cancel = homeButton("Cancel", "cancelReleasePickerButton");
-        private final JLabel pageIndicator = new JLabel("Page —");
+                I18n.getTextAt(BUNDLE, "LauncherFrame.install"), "installReleaseButton", true);
+        private final JButton cancel = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.cancel"),
+                "cancelReleasePickerButton");
+        private final JLabel pageIndicator = new JLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.pageNone"));
         private final JLabel requestStatus = new JLabel(" ");
         private final JDialog dialog;
         private final DialogFooter footer;
@@ -4205,15 +4406,15 @@ public final class LauncherFrame extends JFrame {
             product.setSelectedItem(OfficialRepository.MEKHQ);
             product.setDisplayText(value ->
                     value == null ? "" : displayProduct(value.key()));
-            product.getAccessibleContext().setAccessibleName("Product");
+            product.getAccessibleContext().setAccessibleName(I18n.getTextAt(BUNDLE, "LauncherFrame.product"));
             product.getAccessibleContext().setAccessibleDescription(
-                    "Official product repository whose releases will be fetched.");
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.productDescription"));
             channel.setName("downloadChannelCombo");
             channel.setSelectedItem(FollowChannel.CORE);
             channel.setToolTipText(channelChoiceDescription());
-            channel.getAccessibleContext().setAccessibleName("Release type");
-            channel.getAccessibleContext().setAccessibleDescription(
-                    "Release type for the new installation. " + channelChoiceDescription());
+            channel.getAccessibleContext().setAccessibleName(I18n.getTextAt(BUNDLE, "LauncherFrame.releaseType"));
+            channel.getAccessibleContext().setAccessibleDescription(I18n.getFormattedTextAt(BUNDLE,
+                    "LauncherFrame.releaseTypeDescription", channelChoiceDescription()));
 
             releases.setName("releaseList");
             releases.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
@@ -4225,9 +4426,10 @@ public final class LauncherFrame extends JFrame {
             releases.setFixedCellHeight(guiScale.size("control.sm"));
             releases.setFont(guiScale.font(releases.getFont(), "body"));
             releases.setBorder(guiScale.padding("sm", "sm"));
-            releases.getAccessibleContext().setAccessibleName("Available official releases");
+            releases.getAccessibleContext().setAccessibleName(
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.availableReleases"));
             releases.getAccessibleContext().setAccessibleDescription(
-                    "Published releases of the selected release type, newest first.");
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.availableReleasesDescription"));
             releases.setCellRenderer((list, value, index, selected, focused) -> {
                 JLabel label = new JLabel(value == null ? "" : value.toString());
                 label.setOpaque(true);
@@ -4241,23 +4443,23 @@ public final class LauncherFrame extends JFrame {
                         : value != null && !value.assessment().eligible()
                         ? FirstLaunchPanel.MUTED : FirstLaunchPanel.TEXT);
                 if (value != null && !value.assessment().eligible()) {
-                    label.setToolTipText("Unavailable: "
-                            + SanitizedErrors.text(value.assessment().reason()));
+                    label.setToolTipText(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.unavailableTooltip",
+                            SanitizedErrors.text(value.assessment().reason())));
                     label.getAccessibleContext().setAccessibleDescription(
-                            "Unavailable. "
-                                    + SanitizedErrors.text(value.assessment().reason()));
+                            I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.unavailableDescription",
+                                    SanitizedErrors.text(value.assessment().reason())));
                 }
                 return label;
             });
 
             fetch.getAccessibleContext().setAccessibleDescription(
-                    "Fetch page one for the selected product and release type.");
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.fetchReleasesDescription"));
             previous.getAccessibleContext().setAccessibleDescription(
-                    "Fetch the previous page for the unchanged product and release type.");
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.previousPageDescription"));
             next.getAccessibleContext().setAccessibleDescription(
-                    "Fetch the next page for the unchanged product and release type.");
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.nextPageDescription"));
             install.getAccessibleContext().setAccessibleDescription(
-                    "Install the selected release after choosing a destination and confirming.");
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.installReleaseDescription"));
             previous.setEnabled(false);
             next.setEnabled(false);
             install.setEnabled(false);
@@ -4268,7 +4470,7 @@ public final class LauncherFrame extends JFrame {
             selectorCell.gridy = 0;
             selectorCell.insets = new java.awt.Insets(0, 0, 0, guiScale.space("md"));
             selectorCell.anchor = java.awt.GridBagConstraints.LINE_START;
-            JLabel productLabel = styledPickerLabel("Product:");
+            JLabel productLabel = styledPickerLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.productLabel"));
             productLabel.setLabelFor(product);
             selectorCell.gridx = 0;
             selectorCell.weightx = 0;
@@ -4278,7 +4480,7 @@ public final class LauncherFrame extends JFrame {
             selectorCell.weightx = 0.5;
             selectorCell.fill = java.awt.GridBagConstraints.HORIZONTAL;
             selectors.add(product, selectorCell);
-            JLabel channelLabel = styledPickerLabel("Release type:");
+            JLabel channelLabel = styledPickerLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.releaseTypeLabel"));
             channelLabel.setLabelFor(channel);
             selectorCell.gridx = 2;
             selectorCell.weightx = 0;
@@ -4297,7 +4499,7 @@ public final class LauncherFrame extends JFrame {
             JPanel heading = new JPanel();
             heading.setOpaque(false);
             heading.setLayout(new BoxLayout(heading, BoxLayout.Y_AXIS));
-            JLabel title = styledPickerLabel("Install another version");
+            JLabel title = styledPickerLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.installAnotherVersion"));
             title.setName("installAnotherVersionHeading");
             title.setForeground(FirstLaunchPanel.ACCENT);
             title.setFont(guiScale.font(title.getFont(), "headline"));
@@ -4336,11 +4538,12 @@ public final class LauncherFrame extends JFrame {
             pageIndicator.setName("releasePageIndicator");
             pageIndicator.setForeground(FirstLaunchPanel.TEXT);
             pageIndicator.setFont(guiScale.font(pageIndicator.getFont(), "label"));
-            pageIndicator.getAccessibleContext().setAccessibleName("Release page");
+            pageIndicator.getAccessibleContext().setAccessibleName(
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.releasePage"));
             paging.add(pageIndicator);
             paging.add(next);
             cancel.getAccessibleContext().setAccessibleDescription(
-                    "Close without installing anything.");
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.closeWithoutInstalling"));
             footer = new DialogFooter(guiScale).primary(install).cancel(cancel);
             JPanel resultActions = new JPanel(new BorderLayout(0, guiScale.space("xl")));
             resultActions.setOpaque(false);
@@ -4351,7 +4554,8 @@ public final class LauncherFrame extends JFrame {
             requestStatus.setName("releasePickerStatus");
             requestStatus.setForeground(FirstLaunchPanel.MUTED);
             requestStatus.setFont(guiScale.font(requestStatus.getFont(), "small"));
-            requestStatus.getAccessibleContext().setAccessibleName("Release picker status");
+            requestStatus.getAccessibleContext().setAccessibleName(
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.releasePickerStatus"));
             requestStatus.setPreferredSize(new Dimension(1,
                     requestStatus.getFontMetrics(requestStatus.getFont()).getHeight()));
             JPanel bottom = new JPanel(new BorderLayout(guiScale.space("md"),
@@ -4370,7 +4574,7 @@ public final class LauncherFrame extends JFrame {
             body.add(bottom, BorderLayout.SOUTH);
 
             dialog = new JDialog(LauncherFrame.this,
-                    "Install another version", false);
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.installAnotherVersion"), false);
             dialog.setName("releasePickerDialog");
             dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
             dialog.setContentPane(body);
@@ -4393,7 +4597,7 @@ public final class LauncherFrame extends JFrame {
                     Math.max(available.y, Math.min(placed.y,
                             available.y + available.height - placed.height)));
             dialog.getAccessibleContext().setAccessibleDescription(
-                    "Fetch official releases for one selected product and release type.");
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.releasePickerDescription"));
             cancel.addActionListener(event -> dialog.dispose());
             footer.install(dialog, dialog::dispose);
             for (JButton control : new JButton[]{fetch, previous, next}) {
@@ -4447,7 +4651,7 @@ public final class LauncherFrame extends JFrame {
             previous.setEnabled(false);
             next.setEnabled(false);
             install.setEnabled(false);
-            pageIndicator.setText("Page —");
+            pageIndicator.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.pageNone"));
             requestStatus.setText(" ");
         }
 
@@ -4467,12 +4671,12 @@ public final class LauncherFrame extends JFrame {
                 displayedPage = 0;
                 displayedMayHaveNext = false;
                 model.clear();
-                pageIndicator.setText("Page —");
+                pageIndicator.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.pageNone"));
                 install.setEnabled(false);
             }
             previous.setEnabled(false);
             next.setEnabled(false);
-            startTask("Fetching releases",
+            startTask(I18n.getTextAt(BUNDLE, "LauncherFrame.fetchingReleases"),
                     () -> services.installableReleases(
                             repository, selectedChannel, requestedPage), result -> {
                         if (product.getSelectedItem() != repository
@@ -4489,7 +4693,8 @@ public final class LauncherFrame extends JFrame {
                         loadedChannel = selectedChannel;
                         displayedPage = result.page();
                         displayedMayHaveNext = result.mayHaveNextPage();
-                        pageIndicator.setText("Page " + result.page());
+                        pageIndicator.setText(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.pageNumber",
+                                String.valueOf(result.page())));
                         requestStatus.setText(" ");
                         previous.setEnabled(result.page() > 1);
                         next.setEnabled(result.mayHaveNextPage());
@@ -4524,7 +4729,7 @@ public final class LauncherFrame extends JFrame {
             String tag = choice.release().tag();
             AtomicReference<Path> attempted = new AtomicReference<>();
             // Same confirmation as Home: the suggested folder can be changed there.
-            startTask("Revalidating exact install plan",
+            startTask(I18n.getTextAt(BUNDLE, "LauncherFrame.revalidatingInstallPlan"),
                     () -> {
                         Path target = suggestedExactDestination(repository, selectedChannel, tag);
                         attempted.set(target);
@@ -4555,15 +4760,15 @@ public final class LauncherFrame extends JFrame {
         private <T> void startTask(String description, Callable<T> operation,
                                    Consumer<T> success, Consumer<Throwable> failure) {
             if (!gate.tryEnter()) {
-                LauncherAlertDialog.showMessage(dialog, guiScale, "Please wait",
-                        "Another operation is already running.");
+                LauncherAlertDialog.showMessage(dialog, guiScale, I18n.getTextAt(BUNDLE, "LauncherFrame.pleaseWait"),
+                        I18n.getTextAt(BUNDLE, "LauncherFrame.anotherOperationRunning"));
                 return;
             }
             long request = ++generation;
-            status.setText(description + "…");
-            requestStatus.setText(description + "…");
-            if (description.equals("Fetching releases")) {
-                fetch.setText("Fetching…");
+            status.setText(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.runInProgress", description));
+            requestStatus.setText(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.runInProgress", description));
+            if (description.equals(I18n.getTextAt(BUNDLE, "LauncherFrame.fetchingReleases"))) {
+                fetch.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.fetching"));
             }
             setActionsEnabled(false);
             SwingWorker<T, Void> started = new SwingWorker<>() {
@@ -4577,33 +4782,34 @@ public final class LauncherFrame extends JFrame {
                     gate.leave();
                     if (worker == this) worker = null;
                     setActionsEnabled(true);
-                    fetch.setText("Fetch releases");
+                    fetch.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.fetchReleases"));
                     if (isCancelled() || !dialog.isDisplayable()
                             || request != generation) return;
                     try {
                         success.accept(get());
                     } catch (java.util.concurrent.ExecutionException error) {
-                        requestStatus.setText("Request failed; controls are available to retry.");
+                        requestStatus.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.requestFailedRetry"));
                         previous.setEnabled(displayedPage > 1);
                         next.setEnabled(displayedPage > 0 && displayedMayHaveNext);
                         if (failure == null) {
-                            showError(description + " failed", error.getCause());
+                            showError(LocalizedText.of(BUNDLE, "LauncherFrame.runFailed", description),
+                                    error.getCause());
                         } else {
                             updateInstallEnabled();
                             failure.accept(error.getCause());
                         }
                     } catch (InterruptedException error) {
                         Thread.currentThread().interrupt();
-                        requestStatus.setText(
-                                "Request interrupted; controls are available to retry.");
+                        requestStatus.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.requestInterruptedRetry"));
                         previous.setEnabled(displayedPage > 1);
                         next.setEnabled(displayedPage > 0 && displayedMayHaveNext);
-                        showError(description + " interrupted", error);
+                        showError(LocalizedText.of(BUNDLE, "LauncherFrame.runInterrupted", description),
+                                error);
                     } catch (RuntimeException error) {
-                        requestStatus.setText("Request failed; controls are available to retry.");
+                        requestStatus.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.requestFailedRetry"));
                         previous.setEnabled(displayedPage > 1);
                         next.setEnabled(displayedPage > 0 && displayedMayHaveNext);
-                        showError(description + " failed", error);
+                        showError(LocalizedText.of(BUNDLE, "LauncherFrame.runFailed", description), error);
                     }
                     updateInstallEnabled();
                 }
@@ -4615,27 +4821,26 @@ public final class LauncherFrame extends JFrame {
                 worker = null;
                 gate.leave();
                 setActionsEnabled(true);
-                fetch.setText("Fetch releases");
-                requestStatus.setText(
-                        "Request could not start; controls are available to retry.");
+                fetch.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.fetchReleases"));
+                requestStatus.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.requestCouldNotStartRetry"));
                 previous.setEnabled(displayedPage > 1);
                 next.setEnabled(displayedPage > 0 && displayedMayHaveNext);
-                showError(description + " failed", error);
+                showError(LocalizedText.of(BUNDLE, "LauncherFrame.runFailed", description), error);
             }
         }
     }
 
     private void openSelectedUpdate(InstallationRecord record, boolean apply) {
-        run("Loading selected installation",
+        run(I18n.getTextAt(BUNDLE, "LauncherFrame.loadingSelectedInstallation"),
                 () -> services.loadInstallation(record.id()), selected -> {
                     if (!selected.preferred().equals(record)) {
-                        showError("Opening selected installation failed",
+                        showError(LocalizedText.of(BUNDLE, "LauncherFrame.openingSelectedInstallationFailed"),
                                 new IOException("selected installation changed; choose it again"));
                         return;
                     }
                     if (selected.previewEligibility() == null
                             || !selected.previewEligibility().available()) {
-                        showError("Updates unavailable",
+                        showError(LocalizedText.of(BUNDLE, "LauncherFrame.updatesUnavailable"),
                                 new IOException(selected.previewEligibility() == null
                                         ? "No verified update information is available."
                                         : selected.previewEligibility().reason()));
@@ -4659,24 +4864,25 @@ public final class LauncherFrame extends JFrame {
         try {
             repository = OfficialRepository.parse(sourceReceipt.repository());
         } catch (IOException e) {
-            showError("Opening update preview failed", e);
+            showError(LocalizedText.of(BUNDLE, "LauncherFrame.openingUpdatePreviewFailed"), e);
             return;
         }
         DefaultListModel<ReleaseChoice> model = new DefaultListModel<>();
         JList<ReleaseChoice> releases = new JList<>(model);
         releases.setName("previewReleaseList");
-        JButton fetch = button("Fetch releases", "fetchPreviewReleasesButton");
-        JButton next = button("Next page", "nextPreviewReleasePageButton");
-        JButton inspect = homeButton(applyWorkflow ? "Update…" : "Download and preview…",
+        JButton fetch = button(I18n.getTextAt(BUNDLE, "LauncherFrame.fetchReleases"), "fetchPreviewReleasesButton");
+        JButton next = button(I18n.getTextAt(BUNDLE, "LauncherFrame.nextPage"), "nextPreviewReleasePageButton");
+        JButton inspect = homeButton(I18n.getTextAt(BUNDLE, applyWorkflow
+                        ? "LauncherFrame.updateEllipsis" : "LauncherFrame.downloadAndPreview"),
                 "runPreviewButton", true);
-        JButton cancel = homeButton("Cancel", "cancelPreviewReleasesButton");
+        JButton cancel = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.cancel"), "cancelPreviewReleasesButton");
         next.setEnabled(false);
         inspect.setEnabled(false);
-        JLabel pageLabel = new JLabel("No network request until Fetch releases is selected.");
+        JLabel pageLabel = new JLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.noNetworkRequestYet"));
         final int[] page = {0};
         final boolean[] more = {false};
         JPanel top = new JPanel();
-        top.add(new JLabel("Official source: " + repository.slug()));
+        top.add(new JLabel(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.officialSource", repository.slug())));
         top.add(fetch);
         JPanel bottom = new JPanel();
         bottom.add(pageLabel);
@@ -4686,7 +4892,7 @@ public final class LauncherFrame extends JFrame {
         body.add(LauncherTheme.scrollPane(releases), BorderLayout.CENTER);
         body.add(bottom, BorderLayout.SOUTH);
         DialogFooter footer = new DialogFooter(guiScale).primary(inspect).cancel(cancel);
-        JDialog dialog = dialog("Choose update", body, footer.panel(),
+        JDialog dialog = dialog(I18n.getTextAt(BUNDLE, "LauncherFrame.chooseUpdate"), body, footer.panel(),
                 new Dimension(guiScale.size("dialog.lg"), guiScale.size("dialog.sm")));
         cancel.addActionListener(event -> dialog.dispose());
         footer.install(dialog, dialog::dispose);
@@ -4694,7 +4900,8 @@ public final class LauncherFrame extends JFrame {
         DialogFooter.pressOnEnter(next);
         Consumer<Integer> load = requested -> {
             next.setEnabled(false);
-            run("Fetching official releases", () -> services.releases(repository, requested),
+            run(I18n.getTextAt(BUNDLE, "LauncherFrame.fetchingOfficialReleases"),
+                    () -> services.releases(repository, requested),
                     result -> {
                         if (!dialog.isDisplayable()) return;
                         model.clear();
@@ -4703,8 +4910,9 @@ public final class LauncherFrame extends JFrame {
                         page[0] = result.page();
                         more[0] = result.mayHaveNextPage();
                         next.setEnabled(more[0]);
-                        pageLabel.setText("Page " + page[0]
-                                + (more[0] ? " · more may exist" : " · last page"));
+                        pageLabel.setText(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.pageNumber",
+                                String.valueOf(page[0])) + " · " + I18n.getTextAt(BUNDLE,
+                                more[0] ? "LauncherFrame.moreMayExist" : "LauncherFrame.lastPage"));
                     }, error -> next.setEnabled(page[0] > 0 && more[0]));
         };
         fetch.addActionListener(event -> load.accept(1));
@@ -4732,17 +4940,13 @@ public final class LauncherFrame extends JFrame {
                 return;
             }
             boolean download = LauncherAlertDialog.showConfirm(dialog, guiScale,
-                    "Confirm read-only preview download",
-                    "Current verified source: "
-                            + (sourceCurrent == null ? sourceReceipt.tag() : sourceCurrent.tag())
-                            + " / " + (sourceCurrent == null ? sourceReceipt.assetName()
-                            : sourceCurrent.assetName())
-                            + "\nTarget: " + choice.release().tag() + " / " + asset.name()
-                            + "\nDownload: " + NumberFormat.getIntegerInstance().format(asset.size())
-                            + " bytes (a full release package; time depends on your connection)"
-                            + "\n\nDownload, verify, and inspect in external temporary storage?"
-                            + "\nThis step is READ-ONLY: no installed files or metadata will change.",
-                    "Download");
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.confirmPreviewDownload"),
+                    I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.confirmPreviewDownloadMessage",
+                            sourceCurrent == null ? sourceReceipt.tag() : sourceCurrent.tag(),
+                            sourceCurrent == null ? sourceReceipt.assetName() : sourceCurrent.assetName(),
+                            choice.release().tag(), asset.name(),
+                            NumberFormat.getIntegerInstance().format(asset.size())),
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.download"));
             if (!download) return;
             dialog.dispose();
             runUpdatePreview(sourceRecord, sourceReceipt, choice.release().tag(), false);
@@ -4754,12 +4958,13 @@ public final class LauncherFrame extends JFrame {
                                   org.megamek.launcher.update.OwnershipReceipt receipt,
                                   String tag, boolean applyWorkflow) {
         OperationProgressDialog progress = new OperationProgressDialog(this,
-                "Downloading update preview", "previewProgressLog", this::showOperationLogs);
+                I18n.getTextAt(BUNDLE, "LauncherFrame.downloadingUpdatePreview"), "previewProgressLog",
+                this::showOperationLogs);
         progress.append("Preparing read-only preview for " + tag + "...\n");
         progress.setVisible(true);
         PrintStream stream = new PrintStream(new LogOutput(progress.logArea()), true,
                 StandardCharsets.UTF_8);
-        runOperation("Building read-only update preview", OperationType.UPDATE_PREVIEW,
+        runOperation(I18n.getTextAt(BUNDLE, "LauncherFrame.buildingUpdatePreview"), OperationType.UPDATE_PREVIEW,
                 List.of(Path.of(record.canonicalRoot())), progress,
                 context -> services.previewUpdate(record, receipt, tag, stream, context),
                 result -> {
@@ -4767,7 +4972,7 @@ public final class LauncherFrame extends JFrame {
                     showPreviewResult(result);
                 }, error -> {
                     progress.append("\nPREVIEW FAILED: " + errorDetail(error) + "\n");
-                    progress.setHeading("Update preview failed");
+                    progress.setHeading(I18n.getTextAt(BUNDLE, "LauncherFrame.updatePreviewFailed"));
                 }, stream::close);
     }
 
@@ -4777,13 +4982,14 @@ public final class LauncherFrame extends JFrame {
             String assetName, long assetSize, String assetDigest,
             ChannelUpdateChecker.Result recommended) {
         OperationProgressDialog progress = new OperationProgressDialog(this,
-                "Preparing update", "applyUpdateProgressLog", this::showOperationLogs);
+                I18n.getTextAt(BUNDLE, "LauncherFrame.preparingUpdate"), "applyUpdateProgressLog",
+                this::showOperationLogs);
         progress.append("Downloading and verifying the exact consented package once for "
                 + tag + "...\n");
         progress.setVisible(true);
         PrintStream stream = new PrintStream(new LogOutput(progress.logArea()), true,
                 StandardCharsets.UTF_8);
-        runOperation("Preparing update", OperationType.UPDATE_APPLY,
+        runOperation(I18n.getTextAt(BUNDLE, "LauncherFrame.preparingUpdate"), OperationType.UPDATE_APPLY,
                 List.of(Path.of(record.canonicalRoot())), progress, context -> {
                 PreparedUpdate prepared = null;
                 try {
@@ -4800,8 +5006,8 @@ public final class LauncherFrame extends JFrame {
                         discardPrepared(discarded, context);
                     }
                     SwingUtilities.invokeLater(() ->
-                            progress.setHeadingIfCurrent("Preparing update",
-                                    "Applying verified update"));
+                            progress.setHeadingIfCurrent(I18n.getTextAt(BUNDLE, "LauncherFrame.preparingUpdate"),
+                                    I18n.getTextAt(BUNDLE, "LauncherFrame.applyingVerifiedUpdate")));
                     PreparedUpdate applying = prepared;
                     prepared = null; // applyPrepared now owns cleanup on every outcome
                     return services.applyPrepared(
@@ -4821,9 +5027,8 @@ public final class LauncherFrame extends JFrame {
             }, result -> {
                 if (result.cleanupWarning() != null) {
                     progress.append("\nCLEANUP WARNING: " + result.cleanupWarning() + "\n");
-                    progress.showWarning("Update complete — cleanup warning",
-                            "The update was applied, but temporary files could not be removed. "
-                                    + "Do not run Update again.");
+                    progress.showWarning(I18n.getTextAt(BUNDLE, "LauncherFrame.updateCompleteCleanupWarning"),
+                            I18n.getTextAt(BUNDLE, "LauncherFrame.updateCompleteCleanupWarningMessage"));
                 } else {
                     progress.dispose();
                 }
@@ -4834,7 +5039,7 @@ public final class LauncherFrame extends JFrame {
                             + "\nNo second package download was attempted. If application "
                             + "mutation began, use Check update recovery after closing every "
                             + "suite application.\n");
-                    progress.setHeading("Update failed — recovery may be required");
+                    progress.setHeading(I18n.getTextAt(BUNDLE, "LauncherFrame.updateFailedRecovery"));
                     reload();
             }, stream::close);
     }
@@ -4858,33 +5063,34 @@ public final class LauncherFrame extends JFrame {
     }
 
     private void repairInstallation(InstallationRecord record) {
-        run("Preparing repair", () -> services.fileCheckEligible(record), checkFiles -> {
+        run(I18n.getTextAt(BUNDLE, "LauncherFrame.preparingRepair"), () -> services.fileCheckEligible(record),
+                checkFiles -> {
             if (!isDisplayable()) return;
             Boolean resetSettings = LauncherAlertDialog.showConfirmWithOption(this, guiScale,
-                    "Repair",
-                    "Close MegaMek, MekHQ, and MegaMekLab before continuing."
-                            + "\n\nRepair clears the unit cache, which MegaMek rebuilds the "
-                            + "next time it starts, and re-reads the installation folder."
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.repair"),
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.repairPromptIntro")
                             + (checkFiles
-                            ? "\n\nIt also checks the game files. Nothing is downloaded unless "
-                                    + "files are missing or changed, and only after you agree."
+                            ? "\n\n" + I18n.getTextAt(BUNDLE, "LauncherFrame.repairPromptCheckFiles")
                             : "")
-                            + "\n\nYour saves, campaigns, and custom files will stay.",
-                    "Also reset settings to defaults (a backup is kept)", false, "Repair");
+                            + "\n\n" + I18n.getTextAt(BUNDLE, "LauncherFrame.repairPromptKeep"),
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.alsoResetSettings"), false,
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.repair"));
             if (resetSettings == null) return;
             OperationProgressDialog progress = new OperationProgressDialog(this,
-                    "Repairing installation", "repairProgressLog", this::showOperationLogs);
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.repairingInstallation"), "repairProgressLog",
+                    this::showOperationLogs);
             progress.setVisible(true);
-            runOperation("Repairing " + record.name(), OperationType.REPAIR,
+            runOperation(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.repairingNamed", record.name()),
+                    OperationType.REPAIR,
                     List.of(Path.of(record.canonicalRoot())), progress,
                     context -> services.quickRepair(record, resetSettings, context), result -> {
                         progress.dispose();
                         // A reload holds the operation gate, so prompt first; a download reloads
                         // when it finishes.
                         if (!showRepairResult(record, result)) reload();
-                    }, error -> progress.setHeading("Repair failed"), () -> {
+                    }, error -> progress.setHeading(I18n.getTextAt(BUNDLE, "LauncherFrame.repairFailed")), () -> {
                     });
-        }, error -> showError("Repair unavailable", error));
+        }, error -> showError(LocalizedText.of(BUNDLE, "LauncherFrame.repairUnavailable"), error));
     }
 
     /** Reports the offline repair and returns whether a download repair was started. */
@@ -4893,40 +5099,43 @@ public final class LauncherFrame extends JFrame {
         if (!isDisplayable()) return false;
         List<String> lines = new ArrayList<>();
         InstallationRepairService.Tidy tidy = result.tidy();
-        lines.add(tidy.clearedCaches().isEmpty() ? "There was no unit cache to clear."
-                : "Cleared the unit cache. MegaMek rebuilds it the next time it starts.");
+        lines.add(I18n.getTextAt(BUNDLE, tidy.clearedCaches().isEmpty()
+                ? "LauncherFrame.noUnitCache" : "LauncherFrame.clearedUnitCache"));
         if (tidy.rescanned()) {
-            lines.add("Updated the recorded version from " + tidy.previousBuild() + " to "
-                    + tidy.record().observedBuild() + ".");
+            lines.add(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.updatedRecordedVersion",
+                    String.valueOf(tidy.previousBuild()), String.valueOf(tidy.record().observedBuild())));
         }
         if (result.settingsReset() != null) {
             lines.add(result.settingsReset().moved().isEmpty()
-                    ? "No settings files were found, so there was nothing to reset."
-                    : "Settings were reset. Your previous settings were backed up here:\n"
-                            + result.settingsReset().backup());
+                    ? I18n.getTextAt(BUNDLE, "LauncherFrame.noSettingsToReset")
+                    : I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.settingsResetBackup",
+                            String.valueOf(result.settingsReset().backup())));
         } else if (result.settingsError() != null) {
-            lines.add("Settings were not reset: " + result.settingsError());
+            lines.add(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.settingsNotReset",
+                    String.valueOf(result.settingsError())));
         }
         LauncherServices.RepairCheck check = result.check();
         if (check != null && check.files().damaged() > 0) {
             InstallationRepairService.FileCheck files = check.files();
             long assetSize = check.source().current().assetSize();
-            String size = assetSize > 0 ? BinarySizeFormat.mebibytes(assetSize) : "an unknown size";
-            lines.add(describeDamage(files) + "\n\nDownload the release (" + size
-                    + ") to restore them? If you changed game files you want to keep, back them "
-                    + "up first.");
-            boolean download = LauncherAlertDialog.showConfirm(this, guiScale, "Restore game files",
-                    String.join("\n\n", lines), "Download and restore");
+            String size = assetSize > 0 ? BinarySizeFormat.mebibytes(assetSize)
+                    : I18n.getTextAt(BUNDLE, "LauncherFrame.unknownSize");
+            lines.add(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.restoreFilesPrompt",
+                    describeDamage(files), size));
+            boolean download = LauncherAlertDialog.showConfirm(this, guiScale,
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.restoreGameFiles"),
+                    String.join("\n\n", lines), I18n.getTextAt(BUNDLE, "LauncherFrame.downloadAndRestore"));
             if (download) downloadRepair(record, check.source());
             return download;
         }
         if (check != null) {
-            lines.add("All game files are intact.");
+            lines.add(I18n.getTextAt(BUNDLE, "LauncherFrame.allGameFilesIntact"));
         } else if (result.checkError() != null) {
-            lines.add("The game files could not be checked: " + result.checkError());
+            lines.add(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.gameFilesNotChecked",
+                    String.valueOf(result.checkError())));
         }
-        status.setText("Repair complete");
-        LauncherAlertDialog.showMessage(this, guiScale, "Repair complete",
+        status.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.repairComplete"));
+        LauncherAlertDialog.showMessage(this, guiScale, I18n.getTextAt(BUNDLE, "LauncherFrame.repairComplete"),
                 String.join("\n\n", lines));
         return false;
     }
@@ -4934,25 +5143,30 @@ public final class LauncherFrame extends JFrame {
     private static String describeDamage(InstallationRepairService.FileCheck files) {
         List<String> parts = new ArrayList<>();
         if (!files.missing().isEmpty()) {
-            parts.add(files.missing().size() + (files.missing().size() == 1
-                    ? " game file is missing" : " game files are missing"));
+            parts.add(I18n.getFormattedTextAt(BUNDLE, files.missing().size() == 1
+                    ? "LauncherFrame.gameFileMissing" : "LauncherFrame.gameFilesMissing",
+                    String.valueOf(files.missing().size())));
         }
         if (!files.modified().isEmpty()) {
-            parts.add(files.modified().size() + (files.modified().size() == 1
-                    ? " game file was changed" : " game files were changed"));
+            parts.add(I18n.getFormattedTextAt(BUNDLE, files.modified().size() == 1
+                    ? "LauncherFrame.gameFileChanged" : "LauncherFrame.gameFilesChanged",
+                    String.valueOf(files.modified().size())));
         }
-        return String.join(" and ", parts) + ".";
+        return I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.damageSentence",
+                String.join(I18n.getTextAt(BUNDLE, "LauncherFrame.damageJoiner"), parts));
     }
 
     private void downloadRepair(InstallationRecord record, RealUpdateService.Snapshot source) {
         OperationProgressDialog progress = new OperationProgressDialog(this,
-                "Repairing installation", "repairProgressLog", this::showOperationLogs);
+                I18n.getTextAt(BUNDLE, "LauncherFrame.repairingInstallation"), "repairProgressLog",
+                this::showOperationLogs);
         progress.useRepairProgress();
-        progress.startNonCancellable("Please keep the launcher open until repair finishes.");
+        progress.startNonCancellable(I18n.getTextAt(BUNDLE, "LauncherFrame.keepOpenUntilRepair"));
         progress.setVisible(true);
         PrintStream stream = new PrintStream(new LogOutput(progress.logArea()), true,
                 StandardCharsets.UTF_8);
-        runOperation("Repairing " + record.name(), OperationType.UPDATE_APPLY,
+        runOperation(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.repairingNamed", record.name()),
+                OperationType.UPDATE_APPLY,
                 List.of(source.root()), progress,
                 context -> {
                     // The backend owns the root gate, live-child check, transaction
@@ -4971,12 +5185,10 @@ public final class LauncherFrame extends JFrame {
                     progress.append(result.warning() + "\n");
                     progress.showRepairComplete(
                             result.missingRestored() + result.modifiedRestored() == 0
-                                    ? "Repair complete. No missing or changed "
-                                            + "installation files were found."
-                                    : "Repair complete. Your installation is ready to use.",
+                                    ? I18n.getTextAt(BUNDLE, "LauncherFrame.repairCompleteNothingFound")
+                                    : I18n.getTextAt(BUNDLE, "LauncherFrame.repairCompleteReady"),
                             result.extraLibJars().isEmpty() ? null
-                                    : "Some added files may still affect the game. "
-                                            + "View logs for details.");
+                                    : I18n.getTextAt(BUNDLE, "LauncherFrame.addedFilesMayAffectGame"));
                     page = Page.INSTALLATIONS;
                     reload();
                 }, error -> {
@@ -4984,74 +5196,76 @@ public final class LauncherFrame extends JFrame {
                             + "\nIf recovery is pending, close all suite games and "
                             + "use Recover interrupted update. Do not retry repair "
                             + "until recovery completes.\n");
-                    progress.setHeading("Repair failed — recovery may be required");
+                    progress.setHeading(I18n.getTextAt(BUNDLE, "LauncherFrame.repairFailedRecovery"));
                     reload();
                 }, stream::close);
     }
 
     private void recoverUpdate(InstallationRecord record) {
         boolean confirmed = LauncherAlertDialog.showConfirm(this, guiScale,
-                "Confirm update recovery",
-                "Close ALL MegaMek, MekHQ, and MegaMekLab applications, including ones started "
-                        + "outside this launcher.\n\nRecovery never kills a process and refuses a "
-                        + "verified live launcher-started child. It completes a fully applied "
-                        + "transaction or rolls back with verified backups; unexpected edits "
-                        + "remain untouched and block recovery.\n\nContinue?",
-                "Recover");
+                I18n.getTextAt(BUNDLE, "LauncherFrame.confirmUpdateRecovery"),
+                I18n.getTextAt(BUNDLE, "LauncherFrame.confirmUpdateRecoveryMessage"),
+                I18n.getTextAt(BUNDLE, "LauncherFrame.recover"));
         if (!confirmed) return;
         OperationProgressDialog progress = new OperationProgressDialog(this,
-                "Recovering update", "recoveryProgressLog", this::showOperationLogs);
+                I18n.getTextAt(BUNDLE, "LauncherFrame.recoveringUpdate"), "recoveryProgressLog",
+                this::showOperationLogs);
         progress.append("Recovery is non-cancellable once replay or cleanup begins.\n");
-        progress.startNonCancellable(
-                "Recovery is starting and must remain open until it finishes.");
+        progress.startNonCancellable(I18n.getTextAt(BUNDLE, "LauncherFrame.recoveryStarting"));
         progress.setVisible(true);
-        runOperation("Recovering update", OperationType.RECOVERY,
+        runOperation(I18n.getTextAt(BUNDLE, "LauncherFrame.recoveringUpdate"), OperationType.RECOVERY,
                 List.of(Path.of(record.canonicalRoot())), progress,
                 context -> services.recoverUpdate(
                         record, RealUpdateService.CONFIRM, context),
                 result -> {
                     progress.dispose();
-                    LauncherAlertDialog.showMessage(this, guiScale, "Recovery complete",
-                            result.outcome());
+                    LauncherAlertDialog.showMessage(this, guiScale,
+                            I18n.getTextAt(BUNDLE, "LauncherFrame.recoveryComplete"), result.outcome());
                     reload();
-                }, error -> progress.setHeading("Update recovery failed"), () -> {
+                }, error -> progress.setHeading(I18n.getTextAt(BUNDLE, "LauncherFrame.updateRecoveryFailed")),
+                () -> {
                 });
     }
 
     private void showPreviewResult(UpdatePreviewService.Preview result) {
         StringBuilder text = new StringBuilder();
-        text.append("READ-ONLY point-in-time preview; there is no Apply action.\n")
-                .append("Baseline: ").append(result.baseline().tag()).append(" / ")
-                .append(result.baseline().assetName()).append('\n')
-                .append("Target: ").append(result.targetRelease().tag()).append(" / ")
-                .append(result.targetAsset().name()).append('\n')
-                .append("Policy: ").append(result.baseline().ownershipPolicyVersion()).append('\n')
-                .append("Summary: ").append(result.counts()).append("\n\n")
-                .append("Protected paths:\n  ")
+        text.append(I18n.getTextAt(BUNDLE, "LauncherFrame.previewReadOnly")).append('\n')
+                .append(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.previewBaseline",
+                        result.baseline().tag(), result.baseline().assetName())).append('\n')
+                .append(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.previewTarget",
+                        result.targetRelease().tag(), result.targetAsset().name())).append('\n')
+                .append(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.previewPolicy",
+                        String.valueOf(result.baseline().ownershipPolicyVersion()))).append('\n')
+                .append(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.previewSummary",
+                        String.valueOf(result.counts()))).append("\n\n")
+                .append(I18n.getTextAt(BUNDLE, "LauncherFrame.previewProtectedPaths")).append("\n  ")
                 .append(String.join("\n  ", OwnershipPolicy.PROTECTED_PATHS))
-                .append("\n\nBaseline package paths excluded from ownership:\n  ")
+                .append("\n\n").append(I18n.getTextAt(BUNDLE, "LauncherFrame.previewBaselineExcluded"))
+                .append("\n  ")
                 .append(String.join("\n  ", result.baseline().excludedOfficialPaths()))
-                .append("\n\nTarget package paths excluded from ownership:\n  ")
+                .append("\n\n").append(I18n.getTextAt(BUNDLE, "LauncherFrame.previewTargetExcluded"))
+                .append("\n  ")
                 .append(String.join("\n  ", result.targetExcludedPaths()))
-                .append("\n\nDecisions:\n");
+                .append("\n\n").append(I18n.getTextAt(BUNDLE, "LauncherFrame.previewDecisions")).append('\n');
         result.decisions().forEach(decision -> text.append(decision.action()).append('\t')
                 .append(decision.path()).append("\t— ").append(decision.reason()).append('\n'));
         try {
             for (String jar : OwnershipPolicy.extraLibJars(
                     Path.of(result.record().canonicalRoot()),
                     result.currentState().officialManifest(), result.targetManifest())) {
-                text.append("WARNING: Preserved unowned lib JAR ").append(jar)
-                        .append(" may affect the game; Update will not remove it.\n");
+                text.append(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.previewExtraJar", jar))
+                        .append('\n');
             }
         } catch (IOException e) {
-            text.append("WARNING: Could not inspect extra lib JARs: ")
-                    .append(e.getMessage()).append('\n');
+            text.append(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.previewJarsUnreadable",
+                    String.valueOf(e.getMessage()))).append('\n');
         }
         JTextArea details = textArea(text.toString());
         details.setName("updatePreviewResults");
-        JButton close = homeButton("Close", "closeUpdatePreviewButton", true);
+        JButton close = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.close"), "closeUpdatePreviewButton", true);
         DialogFooter footer = new DialogFooter(guiScale).primary(close);
-        JDialog dialog = dialog("Read-only update preview", LauncherTheme.scrollPane(details),
+        JDialog dialog = dialog(I18n.getTextAt(BUNDLE, "LauncherFrame.readOnlyUpdatePreview"),
+                LauncherTheme.scrollPane(details),
                 footer.panel(), new Dimension(guiScale.size("dialog.lg"), guiScale.size("dialog.md")));
         close.addActionListener(event -> dialog.dispose());
         footer.install(dialog, dialog::dispose);
@@ -5071,15 +5285,17 @@ public final class LauncherFrame extends JFrame {
     void install(OfficialRepository repository, String tag, Path destination, String name,
                  FollowChannel channel) {
         OperationProgressDialog progress = new OperationProgressDialog(this,
-                "Downloading and installing", "installProgressLog", this::showOperationLogs);
+                I18n.getTextAt(BUNDLE, "LauncherFrame.downloadingAndInstalling"), "installProgressLog",
+                this::showOperationLogs);
         progress.append("Preparing exact release " + tag + "...\n");
-        JButton repair = button("Open Installations", "repairPublishedInstallButton");
+        JButton repair = button(I18n.getTextAt(BUNDLE, "LauncherFrame.openInstallations"),
+                "repairPublishedInstallButton");
         repair.setEnabled(false);
         progress.addActionButton(repair);
         progress.setVisible(true);
         PrintStream stream = new PrintStream(new LogOutput(progress.logArea()), true,
                 StandardCharsets.UTF_8);
-        runOperation("Downloading and installing", OperationType.FRESH_INSTALL,
+        runOperation(I18n.getTextAt(BUNDLE, "LauncherFrame.downloadingAndInstalling"), OperationType.FRESH_INSTALL,
                 List.of(destination), progress,
                 context -> services.install(repository, tag, destination, name, channel,
                         stream, context),
@@ -5088,8 +5304,8 @@ public final class LauncherFrame extends JFrame {
                         progress.append("\nInstalled and registered at "
                                 + result.destination() + "\n");
                         LauncherAlertDialog.showMessage(LauncherFrame.this, guiScale,
-                                "Install complete",
-                                "Installed and registered successfully.\nNothing was launched.");
+                                I18n.getTextAt(BUNDLE, "LauncherFrame.installComplete"),
+                                I18n.getTextAt(BUNDLE, "LauncherFrame.installCompleteMessage"));
                         reload();
                     }, error -> {
                         boolean published = Files.exists(destination,
@@ -5100,7 +5316,8 @@ public final class LauncherFrame extends JFrame {
                                 + "open Installations to register or repair the copy.\n"
                                 : "\nNothing was published.\n"));
                         progress.setHeading(published
-                                ? "Copy retained — setup needs repair" : "Installation failed");
+                                ? I18n.getTextAt(BUNDLE, "LauncherFrame.copyRetainedNeedsRepair")
+                                : I18n.getTextAt(BUNDLE, "LauncherFrame.installationFailed"));
                         repair.setEnabled(published);
                     }, stream::close);
         repair.addActionListener(event -> {
@@ -5127,8 +5344,8 @@ public final class LauncherFrame extends JFrame {
                                   boolean persistLog) {
         if (!gate.tryEnter()) {
             progress.dispose();
-            LauncherAlertDialog.showMessage(this, guiScale, "Please wait",
-                    "Another operation is already running.");
+            LauncherAlertDialog.showMessage(this, guiScale, I18n.getTextAt(BUNDLE, "LauncherFrame.pleaseWait"),
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.anotherOperationRunning"));
             return;
         }
         LauncherServices.LoggedOperation logged = persistLog ? services.beginOperation(
@@ -5202,11 +5419,11 @@ public final class LauncherFrame extends JFrame {
                     result = get();
                 } catch (java.util.concurrent.ExecutionException impossible) {
                     result = new OperationExecution<>(null, impossible.getCause(), false,
-                            "The operation worker failed before local diagnostics completed.");
+                            I18n.getTextAt(BUNDLE, "LauncherFrame.workerFailedBeforeDiagnostics"));
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
                     result = new OperationExecution<>(null, interrupted, false,
-                            "The launcher UI was interrupted while collecting the operation result.");
+                            I18n.getTextAt(BUNDLE, "LauncherFrame.uiInterruptedCollectingResult"));
                 }
                 if (result.loggingWarning() != null) {
                     progress.append("\n" + result.loggingWarning() + "\n");
@@ -5220,7 +5437,8 @@ public final class LauncherFrame extends JFrame {
                         resumeFirstLaunchOptions();
                     }
                     status.setText(type == OperationType.FRESH_INSTALL
-                            ? "Installation cancelled" : description + " cancelled");
+                            ? I18n.getTextAt(BUNDLE, "LauncherFrame.installationCancelled")
+                            : I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.operationCancelled", description));
                     return;
                 }
                 if (result.problem() != null) {
@@ -5239,8 +5457,7 @@ public final class LauncherFrame extends JFrame {
                 }
                 success.accept(result.value());
                 if (result.loggingWarning() != null) {
-                    status.setText(
-                            "Operation completed, but local diagnostics could not be saved.");
+                    status.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.completedDiagnosticsNotSaved"));
                 }
             }
         }.execute();
@@ -5270,11 +5487,11 @@ public final class LauncherFrame extends JFrame {
                          Consumer<Throwable> failure, Runnable completion,
                          boolean showAutomaticError, boolean updateStatus) {
         if (!gate.tryEnter()) {
-            LauncherAlertDialog.showMessage(this, guiScale, "Please wait",
-                    "Another operation is already running.");
+            LauncherAlertDialog.showMessage(this, guiScale, I18n.getTextAt(BUNDLE, "LauncherFrame.pleaseWait"),
+                    I18n.getTextAt(BUNDLE, "LauncherFrame.anotherOperationRunning"));
             return;
         }
-        if (updateStatus) status.setText(description + "…");
+        if (updateStatus) status.setText(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.runInProgress", description));
         setActionsEnabled(false);
         new SwingWorker<T, Void>() {
             @Override protected T doInBackground() throws Exception {
@@ -5301,17 +5518,19 @@ public final class LauncherFrame extends JFrame {
                     success.accept(value);
                 } else {
                     if (problem instanceof UninstallService.MissingInstallationException missing) {
-                        status.setText("Installation folder not found.");
+                        status.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.installationFolderNotFound"));
                         removeMissingInstallation(missing.record());
                         return;
                     }
                     failure.accept(problem);
                     if (showAutomaticError) {
-                        showError(description + (problem instanceof InterruptedException
-                                ? " interrupted" : " failed"), problem);
-                        if (updateStatus) status.setText("Operation failed — details shown");
+                        showError(LocalizedText.of(BUNDLE, problem instanceof InterruptedException
+                                ? "LauncherFrame.runInterrupted" : "LauncherFrame.runFailed", description), problem);
+                        if (updateStatus) {
+                            status.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.operationFailedDetailsShown"));
+                        }
                     } else if (updateStatus) {
-                        status.setText("Operation could not continue");
+                        status.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.operationCouldNotContinue"));
                     }
                 }
             }
@@ -5355,27 +5574,28 @@ public final class LauncherFrame extends JFrame {
         }
     }
 
-    private void showError(String title, Throwable error) {
+    /** Shows {@code title} in the player's language; the diagnostics record keeps it in English. */
+    private void showError(LocalizedText title, Throwable error) {
         showError(title, error, true);
     }
 
     void showOperationFailureDetails(String title, Throwable error) {
-        showError(title, error, false);
+        showError(LocalizedText.literal(title), error, false);
     }
 
-    private void showError(String title, Throwable error, boolean record) {
+    private void showError(LocalizedText title, Throwable error, boolean record) {
         if (error instanceof UninstallService.MissingInstallationException missing) {
             removeMissingInstallation(missing.record());
             return;
         }
         String details = SanitizedErrors.display(error);
-        String loggingStatus = record ? "Saving local diagnostics..."
-                : "Local operation diagnostics are available when recording succeeded.";
-        LauncherErrorDialog errorDialog = LauncherErrorDialog.show(this, title, details,
+        String loggingStatus = I18n.getTextAt(BUNDLE, record ? "LauncherFrame.savingLocalDiagnostics"
+                : "LauncherFrame.localDiagnosticsAvailable");
+        LauncherErrorDialog errorDialog = LauncherErrorDialog.show(this, title.text(), details,
                 loggingStatus, guiScale, () -> copySanitized(details), this::showOperationLogs,
                 this::showBugReport);
         if (record) {
-            recordErrorAsync(title, error, errorDialog::updateLoggingStatus);
+            recordErrorAsync(title.english(), error, errorDialog::updateLoggingStatus);
         }
     }
 
@@ -5391,18 +5611,18 @@ public final class LauncherFrame extends JFrame {
                 try {
                     result.accept(get());
                 } catch (java.util.concurrent.ExecutionException problem) {
-                    result.accept("Local diagnostics could not be saved: "
-                            + SanitizedErrors.display(problem.getCause()));
+                    result.accept(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.localDiagnosticsNotSaved",
+                            SanitizedErrors.display(problem.getCause())));
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
-                    result.accept("Local diagnostics save was interrupted.");
+                    result.accept(I18n.getTextAt(BUNDLE, "LauncherFrame.localDiagnosticsInterrupted"));
                 }
             }
         }.execute();
     }
 
     private void showOperationLogs() {
-        JTextArea area = textArea("Loading local operation logs...");
+        JTextArea area = textArea(I18n.getTextAt(BUNDLE, "LauncherFrame.loadingOperationLogs"));
         area.setName("operationLogViewer");
         area.setBackground(FirstLaunchPanel.PANEL);
         area.setForeground(FirstLaunchPanel.TEXT);
@@ -5415,22 +5635,22 @@ public final class LauncherFrame extends JFrame {
         scroll.setBorder(BorderFactory.createLineBorder(LauncherTheme.BORDER));
         scroll.getViewport().setBackground(FirstLaunchPanel.PANEL);
 
-        JDialog viewer = new JDialog(this, "Local operation logs", false);
+        JDialog viewer = new JDialog(this, I18n.getTextAt(BUNDLE, "LauncherFrame.localOperationLogs"), false);
         viewer.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         JPanel body = new JPanel(new BorderLayout(guiScale.space("md"),
                 guiScale.space("md")));
         body.setName("operationLogDialogContent");
         body.setBackground(FirstLaunchPanel.BACKGROUND);
         body.setBorder(guiScale.padding("xxl", "xxl"));
-        JLabel heading = new JLabel("Local operation logs");
+        JLabel heading = new JLabel(I18n.getTextAt(BUNDLE, "LauncherFrame.localOperationLogs"));
         heading.setForeground(FirstLaunchPanel.ACCENT);
         heading.setFont(guiScale.font(heading.getFont(), "headline"));
         body.add(heading, BorderLayout.NORTH);
         body.add(scroll, BorderLayout.CENTER);
 
-        JButton copy = homeButton("Copy sanitized log", "copyOperationLogButton");
+        JButton copy = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.copySanitizedLog"), "copyOperationLogButton");
         copy.addActionListener(event -> copySanitized(area.getText()));
-        JButton close = homeButton("Close", "closeOperationLogButton", true);
+        JButton close = homeButton(I18n.getTextAt(BUNDLE, "LauncherFrame.close"), "closeOperationLogButton", true);
         close.addActionListener(event -> viewer.dispose());
         DialogFooter footer = new DialogFooter(guiScale).tool(copy).primary(close);
         JPanel actions = footer.panel();
@@ -5453,12 +5673,12 @@ public final class LauncherFrame extends JFrame {
                 try {
                     area.setText(get());
                 } catch (java.util.concurrent.ExecutionException problem) {
-                    area.setText("Local logs could not be read safely.\n\n"
-                            + SanitizedErrors.display(problem.getCause())
-                            + "\n\nExpected location: " + services.operationLogLocation());
+                    area.setText(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.localLogsUnreadable",
+                            SanitizedErrors.display(problem.getCause()),
+                            String.valueOf(services.operationLogLocation())));
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
-                    area.setText("Reading local logs was interrupted.");
+                    area.setText(I18n.getTextAt(BUNDLE, "LauncherFrame.readingLogsInterrupted"));
                 }
                 area.setCaretPosition(0);
             }
@@ -5483,7 +5703,7 @@ public final class LauncherFrame extends JFrame {
         if (whatsNewDialog != null && whatsNewDialog.isDisplayable()) whatsNewDialog.dispose();
         whatsNewDialog = WhatsNewDialog.show(this, guiScale, null, version,
                 () -> services.whatsNew(installations),
-                link -> openWebsite(link, "the release notes"));
+                link -> openWebsite(link, I18n.getTextAt(BUNDLE, "LauncherFrame.theReleaseNotes")));
     }
 
     /**
@@ -5513,7 +5733,7 @@ public final class LauncherFrame extends JFrame {
         bugReportDialog = BugReportDialog.show(this, guiScale, new BugReportDialog.Actions(
                 this::saveBugReportArchive,
                 () -> openWebsite(BugReport.issueForm(services.bugReportEnvironment()),
-                        "the bug report form"),
+                        I18n.getTextAt(BUNDLE, "LauncherFrame.theBugReportForm")),
                 () -> openWebsite(java.net.URI.create(DISCORD_INVITE_URL), "Discord")));
     }
 
@@ -5521,17 +5741,20 @@ public final class LauncherFrame extends JFrame {
         BugReportDialog dialog = bugReportDialog;
         java.awt.Window owner = dialog != null && dialog.isDisplayable() ? dialog : this;
         JFileChooser chooser = new JFileChooser();
-        chooser.setDialogTitle("Save diagnostics ZIP");
+        chooser.setDialogTitle(I18n.getTextAt(BUNDLE, "LauncherFrame.saveDiagnosticsZip"));
         chooser.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
-                "ZIP archives", "zip"));
+                I18n.getTextAt(BUNDLE, "LauncherFrame.zipArchives"), "zip"));
         chooser.setSelectedFile(new java.io.File(BugReport.archiveFileName(java.time.Instant.now())));
         if (chooser.showSaveDialog(owner) != JFileChooser.APPROVE_OPTION) return;
         Path selected = chooser.getSelectedFile().toPath();
         Path target = selected.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".zip")
                 ? selected : selected.resolveSibling(selected.getFileName() + ".zip");
         if (Files.exists(target, LinkOption.NOFOLLOW_LINKS)
-                && !LauncherAlertDialog.showDangerConfirm(owner, guiScale, "Replace file?",
-                target.getFileName() + " already exists. Replace it?", "Replace")) {
+                && !LauncherAlertDialog.showDangerConfirm(owner, guiScale,
+                I18n.getTextAt(BUNDLE, "LauncherFrame.replaceFile"),
+                I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.replaceFileMessage",
+                        String.valueOf(target.getFileName())),
+                I18n.getTextAt(BUNDLE, "LauncherFrame.replace"))) {
             return;
         }
         if (dialog != null) dialog.archiveSaving(true);
@@ -5548,14 +5771,14 @@ public final class LauncherFrame extends JFrame {
                 dialog.archiveSaving(false);
                 try {
                     get();
-                    dialog.showArchiveStatus("Saved " + target.getFileName()
-                            + ". Attach it to the bug report form.", false);
+                    dialog.showArchiveStatus(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.savedArchive",
+                            String.valueOf(target.getFileName())), false);
                 } catch (java.util.concurrent.ExecutionException problem) {
-                    dialog.showArchiveStatus("The diagnostics ZIP could not be saved. "
-                            + SanitizedErrors.display(problem.getCause()), true);
+                    dialog.showArchiveStatus(I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.archiveNotSaved",
+                            SanitizedErrors.display(problem.getCause())), true);
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
-                    dialog.showArchiveStatus("Saving the diagnostics ZIP was interrupted.", true);
+                    dialog.showArchiveStatus(I18n.getTextAt(BUNDLE, "LauncherFrame.archiveSaveInterrupted"), true);
                 }
             }
         }.execute();
@@ -5608,7 +5831,7 @@ public final class LauncherFrame extends JFrame {
      * silently landing one level up.
      */
     private static JFileChooser installParentChooser(Path preferredParent) {
-        JFileChooser chooser = folders("Choose where to create the install folder",
+        JFileChooser chooser = folders(I18n.getTextAt(BUNDLE, "LauncherFrame.chooseInstallParent"),
                 preferredParent);
         if (preferredParent == null) return chooser;
         Path existing = chooser.getCurrentDirectory().toPath();
@@ -5635,7 +5858,7 @@ public final class LauncherFrame extends JFrame {
         JButton button = new FirstLaunchButton(text, name, primary, guiScale,
                 FirstLaunchButton.Size.SMALL);
         button.getAccessibleContext().setAccessibleDescription(
-                "Activate " + text + ".");
+                I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.activate", text));
         return button;
     }
 
@@ -5660,18 +5883,19 @@ public final class LauncherFrame extends JFrame {
 
     private static String quickChoiceName(OfficialRepository repository,
                                           FollowChannel channel) {
-        return "Latest " + displayProduct(repository.key()) + " " + channel;
+        return I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.latestChoice",
+                displayProduct(repository.key()), String.valueOf(channel));
     }
 
     static Path safeSubfolder(String value) {
         if (value == null || value.isBlank()) {
-            throw new IllegalArgumentException("Enter one new subfolder name.");
+            throw new IllegalArgumentException(I18n.getTextAt(BUNDLE, "LauncherFrame.enterSubfolderName"));
         }
         final Path path;
         try {
             path = Path.of(value);
         } catch (InvalidPathException e) {
-            throw new IllegalArgumentException("The subfolder name is not valid on this system.");
+            throw new IllegalArgumentException(I18n.getTextAt(BUNDLE, "LauncherFrame.subfolderNameInvalid"));
         }
         String upper = value.toUpperCase(java.util.Locale.ROOT);
         boolean windowsReserved = upper.matches("(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])"
@@ -5680,8 +5904,7 @@ public final class LauncherFrame extends JFrame {
                 || value.equals("..") || value.contains("/") || value.contains("\\")
                 || value.contains(":") || value.endsWith(".") || value.endsWith(" ")
                 || windowsReserved) {
-            throw new IllegalArgumentException("Use a plain name: no slashes, drive, '..', "
-                    + "reserved name, or trailing dot/space.");
+            throw new IllegalArgumentException(I18n.getTextAt(BUNDLE, "LauncherFrame.subfolderPlainName"));
         }
         return path;
     }
@@ -5730,7 +5953,7 @@ public final class LauncherFrame extends JFrame {
 
         @Override
         public Path chooseFolder(Component parent, Path preferredDirectory) {
-            JFileChooser chooser = folders("Choose an extracted MegaMek or MekHQ folder",
+            JFileChooser chooser = folders(I18n.getTextAt(BUNDLE, "LauncherFrame.chooseExtractedFolder"),
                     preferredDirectory);
             return chooser.showOpenDialog(parent) == JFileChooser.APPROVE_OPTION
                     ? chooser.getSelectedFile().toPath() : null;
@@ -5766,8 +5989,9 @@ public final class LauncherFrame extends JFrame {
                                  ReleaseCatalog.Assessment assessment) {
         @Override public String toString() {
             ReleaseCatalog.Asset asset = assessment.asset();
-            String size = asset == null ? "no supported asset"
-                    : NumberFormat.getIntegerInstance().format(asset.size()) + " bytes";
+            String size = asset == null ? I18n.getTextAt(BUNDLE, "LauncherFrame.noSupportedAsset")
+                    : I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.bytes",
+                            NumberFormat.getIntegerInstance().format(asset.size()));
             return release.tag() + " — " + release.title() + " — " + size + " — "
                     + assessment.reason();
         }
@@ -5783,7 +6007,7 @@ public final class LauncherFrame extends JFrame {
                     ? tag.substring(1) : tag;
             return assessment.eligible()
                     ? version + " — " + release.title()
-                    : version + " — unavailable for safe verification";
+                    : version + " — " + I18n.getTextAt(BUNDLE, "LauncherFrame.unavailableForVerification");
         }
     }
 
@@ -5817,7 +6041,7 @@ public final class LauncherFrame extends JFrame {
                             java.time.ZoneId.systemDefault(), java.util.Locale.getDefault()))
                     .orElse(label);
             if (!assessment.eligible()) {
-                return dated + " — Unavailable";
+                return dated + " — " + I18n.getTextAt(BUNDLE, "LauncherFrame.unavailable");
             }
             ReleaseCatalog.Asset asset = assessment.asset();
             return dated + " — "

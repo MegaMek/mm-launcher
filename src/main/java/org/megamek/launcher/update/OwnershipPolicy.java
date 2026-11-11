@@ -33,6 +33,7 @@
 
 package org.megamek.launcher.update;
 
+import org.megamek.launcher.internationalization.LocalizedText;
 import org.megamek.launcher.manifest.FileEntry;
 import org.megamek.launcher.manifest.Manifest;
 import org.megamek.launcher.manifest.ManifestException;
@@ -70,6 +71,7 @@ import java.util.Set;
  * current state keep the version they were built with, so older copies stay valid.</p>
  */
 public final class OwnershipPolicy {
+    private static final String BUNDLE = "org.megamek.launcher.services";
     public static final int LEGACY_VERSION = 1;
     public static final int VERSION = 2;
     public static final Set<Integer> SUPPORTED_VERSIONS = Set.of(LEGACY_VERSION, VERSION);
@@ -155,7 +157,8 @@ public final class OwnershipPolicy {
                 }
             }
             context.progress(phase, ++completed, paths.size(), ProgressUnit.FILES,
-                    "Inventoried " + completed + " of " + paths.size() + " package entries");
+                    LocalizedText.of(BUNDLE, "OwnershipPolicy.inventoried",
+                            String.valueOf(completed), String.valueOf(paths.size())));
         }
         return finish(repository, releaseId, managed, excluded, protectedFiles);
     }

@@ -44,6 +44,9 @@ import org.megamek.launcher.channel.SelectedChannelReleaseCatalog;
 import org.megamek.launcher.diagnostics.BugReport;
 import org.megamek.launcher.diagnostics.OperationLogStore;
 import org.megamek.launcher.diagnostics.SanitizedErrors;
+import org.megamek.launcher.internationalization.I18n;
+import org.megamek.launcher.internationalization.LocalizedIOException;
+import org.megamek.launcher.internationalization.LocalizedText;
 import org.megamek.launcher.launch.ApplicationLauncher;
 import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.launch.LaunchObserver;
@@ -101,6 +104,7 @@ import java.util.Map;
  * process tests can exercise it with fake transports/runners and disposable registries.
  */
 public class LauncherServices {
+    private static final String BUNDLE = "org.megamek.launcher.gui.dialogs";
     private final Path registry;
     private final RegistryStore store;
     private final InstallationInspector inspector;
@@ -233,14 +237,15 @@ public class LauncherServices {
             return new LauncherUpdateCheck(null, notice, true);
         }
         if (report != null && !report.installed() && !report.recovered()) {
-            throw new IOException(notice);
+            throw new LocalizedIOException(report.text());
         }
         try {
             return new LauncherUpdateCheck(lookup.check(), notice, false);
         } catch (IOException | InterruptedException error) {
             if (notice != null) {
-                throw new IOException(notice + "\nLauncher release lookup also failed: "
-                        + error.getMessage(), error);
+                throw new LocalizedIOException(LocalizedText.concat(report.text(),
+                        LocalizedText.literal("\nLauncher release lookup also failed: " + error.getMessage())),
+                        error);
             }
             throw error;
         }
@@ -253,7 +258,7 @@ public class LauncherServices {
         if (!recovered && report.state() != LauncherSelfUpdate.ReportState.INSTALLED) return report.message();
         LoggedOperation operation = beginOperation(
                 recovered ? OperationType.RECOVERY : OperationType.LAUNCHER_UPDATE, ignored -> {}, List.of());
-        operation.context().phase(OperationPhase.METADATA, report.message());
+        operation.context().phase(OperationPhase.METADATA, report.text());
         String warning = operation.finish(OperationOutcome.SUCCEEDED, recovered
                 ? "Stale launcher update report reconciled; previous installer completion result is unknown."
                 : "Launcher update confirmed successfully.", null);
@@ -396,6 +401,29 @@ public class LauncherServices {
         settings.writePlayIntro(playIntro);
     }
 
+    /** The saved language, or {@code null} for the system language; unreadable settings use the system language. */
+    String language() {
+        return savedLanguage(settings);
+    }
+
+    /** {@link #language()} for {@code registry}, read without constructing the services. */
+    static String savedLanguage(Path registry) {
+        return savedLanguage(new LauncherSettingsStore(registry.toAbsolutePath().normalize()));
+    }
+
+    private static String savedLanguage(LauncherSettingsStore settings) {
+        try {
+            return settings.read().language();
+        } catch (IOException | RuntimeException error) {
+            return null;
+        }
+    }
+
+    void saveLanguage(String language) throws IOException {
+        ensureRegistryParent();
+        settings.writeLanguage(language);
+    }
+
     public SettingsView settingsView() throws IOException, InterruptedException {
         LauncherSettingsStore.Settings current = settings.read();
         if (current.defaultJavaExecutable() == null) {
@@ -435,10 +463,11 @@ public class LauncherServices {
         }
         context.finish(OperationOutcome.FAILED, "Launcher error");
         try {
-            return "Saved local diagnostics to " + collector.persist(error);
+            return I18n.getFormattedTextAt(BUNDLE, "LauncherServices.diagnosticsSaved",
+                    String.valueOf(collector.persist(error)));
         } catch (IOException | RuntimeException loggingFailure) {
-            return "Local diagnostics could not be saved: "
-                    + SanitizedErrors.display(loggingFailure);
+            return I18n.getFormattedTextAt(BUNDLE, "LauncherServices.diagnosticsNotSaved",
+                    SanitizedErrors.display(loggingFailure));
         }
     }
 
@@ -625,18 +654,15 @@ public class LauncherServices {
                     || !current.observedBuild().equals(record.observedBuild())
                     || !current.products().equals(record.products())) {
                 return new HomeState(data, record, null,
-                        "The preferred copy no longer matches its registered build or program "
-                                + "layout. Use Manage installations to remove it, select another "
-                                + "copy, or recover an interrupted update.", eligibility, pending,
+                        I18n.getTextAt(BUNDLE, "LauncherServices.preferredCopyChanged"), eligibility, pending,
                         channel, Map.of(), Map.of());
             }
             return new HomeState(data, record, current, null, eligibility, pending, channel,
                     Map.of(), Map.of());
         } catch (IOException | RuntimeException e) {
             return new HomeState(data, record, null,
-                    "The preferred copy is unavailable: " + detail(e)
-                            + ". Use recovery if an update was interrupted, or Manage "
-                            + "installations.", eligibility, pending, channel, Map.of(), Map.of());
+                    I18n.getFormattedTextAt(BUNDLE, "LauncherServices.preferredCopyUnavailable", detail(e)),
+                    eligibility, pending, channel, Map.of(), Map.of());
         }
     }
 

@@ -34,6 +34,7 @@
 package org.megamek.launcher.gui;
 
 import org.megamek.launcher.design.swing.TokenPresentation;
+import org.megamek.launcher.internationalization.I18n;
 
 import javax.swing.AbstractAction;
 import javax.swing.Icon;
@@ -80,7 +81,8 @@ final class HomeLaunchSplitButton extends JPanel {
     private static final String CLOSE_POPUP_ACTION = "closeAlternateInstallations";
     /** The popup rows' horizontal padding, a design-token space name. */
     private static final String ROW_SIDE = "xl";
-    private static final String DEFAULT_TAG = "DEFAULT";
+    private static final String BUNDLE = "org.megamek.launcher.gui.home";
+    private static final String DEFAULT_TAG = I18n.getTextAt(BUNDLE, "HomeLaunchSplitButton.defaultTag");
 
     private final GuiScale scale;
     private final SegmentButton primaryButton;
@@ -127,24 +129,20 @@ final class HomeLaunchSplitButton extends JPanel {
         setLayout(new BorderLayout());
         setOpaque(false);
         setAlignmentX(Component.CENTER_ALIGNMENT);
-        getAccessibleContext().setAccessibleName("Launch " + productName);
+        getAccessibleContext().setAccessibleName(I18n.getFormattedTextAt(BUNDLE, "HomeLaunchSplitButton.launch",
+                productName));
         getAccessibleContext().setAccessibleDescription(hasOptions
-                ? "Launch preferred " + productName
-                + ", or choose another registered installation."
-                : "Launch preferred " + productName + ".");
+                ? I18n.getFormattedTextAt(BUNDLE, "HomeLaunchSplitButton.descriptionWithOptions", productName)
+                : I18n.getFormattedTextAt(BUNDLE, "HomeLaunchSplitButton.description", productName));
 
-        primaryButton = new SegmentButton("Launch " + productName,
+        primaryButton = new SegmentButton(I18n.getFormattedTextAt(BUNDLE, "HomeLaunchSplitButton.launch", productName),
                 "launch-" + productKey + "-button", false);
         ButtonDetail.setDetail(primaryButton,
                 VersionDisplay.channelVersion(preferredChannel, preferredVersion));
         primaryButton.getAccessibleContext().setAccessibleName(
                 VersionDisplay.launch(productName, preferredChannel, preferredVersion));
         primaryButton.getAccessibleContext().setAccessibleDescription(
-                "Launch " + productName + " from its preferred installation"
-                        + (preferredVersion == null || preferredVersion.isBlank()
-                        ? "" : ", version " + preferredVersion)
-                        + (preferredChannel == null || preferredChannel.isBlank()
-                        ? "." : ", " + preferredChannel + " release."));
+                primaryDescription(productName, preferredVersion, preferredChannel));
         primaryButton.addActionListener(event -> {
             if (!disposed && primaryButton.isEnabled()) primaryAction.run();
         });
@@ -152,13 +150,12 @@ final class HomeLaunchSplitButton extends JPanel {
         optionsButton = new SegmentButton("", "launch-" + productKey + "-options-button", true);
         optionsButton.setIcon(new DownArrowIcon(scale));
         optionsButton.setHorizontalAlignment(SwingConstants.CENTER);
-        optionsButton.setToolTipText("Choose which installed copy of " + productName
-                + " to launch.");
+        optionsButton.setToolTipText(I18n.getFormattedTextAt(BUNDLE, "HomeLaunchSplitButton.optionsTooltip",
+                productName));
         optionsButton.getAccessibleContext().setAccessibleName(
-                productName + " installations");
+                I18n.getFormattedTextAt(BUNDLE, "HomeLaunchSplitButton.installations", productName));
         optionsButton.getAccessibleContext().setAccessibleDescription(
-                "Choose which registered copy of " + productName
-                        + " to launch. This does not change the default installation.");
+                I18n.getFormattedTextAt(BUNDLE, "HomeLaunchSplitButton.optionsDescription", productName));
         optionsButton.addActionListener(event -> openPopup());
 
         popupMenu = new JPopupMenu();
@@ -166,18 +163,18 @@ final class HomeLaunchSplitButton extends JPanel {
         // A native window keeps the community links and other home content from painting over the open list
         popupMenu.setLightWeightPopupEnabled(false);
         popupMenu.getAccessibleContext().setAccessibleName(
-                productName + " installations");
+                I18n.getFormattedTextAt(BUNDLE, "HomeLaunchSplitButton.installations", productName));
         popupMenu.getAccessibleContext().setAccessibleDescription(
-                "Launch the default copy or another registered copy without changing the default.");
+                I18n.getTextAt(BUNDLE, "HomeLaunchSplitButton.popupDescription"));
         // The default copy leads the list, so it never reads as a menu holding just one choice
         defaultItem = new AlternativeItem(defaultLabel == null || defaultLabel.isBlank()
                 ? defaultRowLabel(productName, preferredChannel, preferredVersion)
                 : defaultLabel, true);
         defaultItem.setName("launch-" + productKey + "-default-item");
         defaultItem.getAccessibleContext().setAccessibleName(
-                defaultItem.getText() + " · Default");
+                I18n.getFormattedTextAt(BUNDLE, "HomeLaunchSplitButton.defaultItemName", defaultItem.getText()));
         defaultItem.getAccessibleContext().setAccessibleDescription(
-                "The default copy, also launched by the main button.");
+                I18n.getTextAt(BUNDLE, "HomeLaunchSplitButton.defaultItemDescription"));
         defaultItem.addActionListener(event -> {
             closePopup();
             if (!disposed && primaryButton.isEnabled()) primaryAction.run();
@@ -226,13 +223,27 @@ final class HomeLaunchSplitButton extends JPanel {
 
     /** A short caps frame over the rows; the rows themselves are values and stay sentence case. */
     private JLabel popupHeader() {
-        JLabel header = new JLabel("Installations");
+        JLabel header = new JLabel(I18n.getTextAt(BUNDLE, "HomeLaunchSplitButton.popupHeader"));
         header.setName("launch-popup-header");
         header.setFont(scale.font(header.getFont(), "caption"));
         header.setForeground(LauncherTheme.MUTED);
         header.setBorder(scale.padding("sm", ROW_SIDE, "xs", ROW_SIDE));
         TokenPresentation.role(header, "overline");
         return header;
+    }
+
+    private static String primaryDescription(String productName, String version, String channel) {
+        boolean hasVersion = version != null && !version.isBlank();
+        boolean hasChannel = channel != null && !channel.isBlank();
+        if (hasVersion && hasChannel) {
+            return I18n.getFormattedTextAt(BUNDLE, "HomeLaunchSplitButton.primaryDescriptionVersionChannel",
+                    productName, version, channel);
+        }
+        if (hasVersion) return I18n.getFormattedTextAt(BUNDLE, "HomeLaunchSplitButton.primaryDescriptionVersion",
+                productName, version);
+        if (hasChannel) return I18n.getFormattedTextAt(BUNDLE, "HomeLaunchSplitButton.primaryDescriptionChannel",
+                productName, channel);
+        return I18n.getFormattedTextAt(BUNDLE, "HomeLaunchSplitButton.primaryDescription", productName);
     }
 
     private static String defaultRowLabel(String productName, String channel, String version) {
@@ -244,7 +255,7 @@ final class HomeLaunchSplitButton extends JPanel {
         JMenuItem item = new AlternativeItem(label, false);
         item.getAccessibleContext().setAccessibleName(label);
         item.getAccessibleContext().setAccessibleDescription(
-                label + ". Launch this registered copy without changing the preference.");
+                I18n.getFormattedTextAt(BUNDLE, "HomeLaunchSplitButton.itemDescription", label));
         return item;
     }
 
@@ -328,7 +339,7 @@ final class HomeLaunchSplitButton extends JPanel {
                                          String detail, String description, Runnable open) {
         HomeLaunchSplitButton button = new HomeLaunchSplitButton(scale, key, productName,
                 open, List.of());
-        String caption = "Open " + productName;
+        String caption = I18n.getFormattedTextAt(BUNDLE, "HomeLaunchSplitButton.open", productName);
         button.setName("open-" + key + "-split-button");
         button.getAccessibleContext().setAccessibleName(caption);
         button.getAccessibleContext().setAccessibleDescription(description);

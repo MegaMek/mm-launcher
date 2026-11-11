@@ -208,6 +208,12 @@ and is saved off the event-dispatch thread; a failed save reports an error witho
 visible appearance. The intro option applies from the next opening and is saved off the
 event-dispatch thread in launcher settings (schema 7 and later; older schemas read as on). High
 contrast is not offered until the design tokens define it.
+Appearance ends with **Language**: **System language** (the default) or English, Deutsch, Русский
+and Español, each named in its own language, in the same order as MegaMek's language choices. The
+choice is saved off the event-dispatch thread in launcher settings (schema 8; older schemas read as
+the system language) and takes effect the next time the launcher opens, as the note under it
+says. A language without a translation for some text shows that text in English. See
+[localization](localization.md).
 Loading and error states keep the same layout; there is no global automatic-check control.
 **Releases** follows Appearance. It
 offers **Show Experimental releases** (off by default) with the warning that Experimental builds

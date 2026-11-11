@@ -33,6 +33,7 @@
 package org.megamek.launcher.gui;
 
 import org.megamek.launcher.design.swing.TokenTooltips;
+import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.launch.LaunchOptions;
 
 import javax.swing.BorderFactory;
@@ -69,6 +70,7 @@ import java.util.TreeSet;
  * Settings page and inside {@link LaunchOptionsDialog}.
  */
 final class LaunchOptionsForm extends JPanel implements Scrollable {
+    private static final String BUNDLE = "org.megamek.launcher.gui.dialogs";
     private final GuiScale scale;
     private final LaunchOptions inherited;
     private final Runnable onChange;
@@ -98,56 +100,57 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         setName("launchOptionsForm");
         setOpaque(false);
 
-        megamekHeap = heapRow("MegaMek memory", "megamekHeap",
+        megamekHeap = heapRow(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.megamekMemory"), "megamekHeap",
                 current.megamekHeapMb(), inherited.megamekHeapMb(), inheritLabel, null);
         // One hint for the whole memory group keeps Settings within the default window height.
-        mekhqHeap = heapRow("MekHQ memory", "mekhqHeap",
+        mekhqHeap = heapRow(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.mekhqMemory"), "mekhqHeap",
                 current.mekhqHeapMb(), inherited.mekhqHeapMb(), inheritLabel,
-                "4 GB suits most games. Big campaigns may need more.");
-        labHeap = heapRow("MegaMekLab memory", "labHeap",
+                I18n.getTextAt(BUNDLE, "LaunchOptionsForm.memoryHint"));
+        labHeap = heapRow(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.labMemory"), "labHeap",
                 current.labHeapMb(), inherited.labHeapMb(), inheritLabel, null);
 
         StyledComboBox<LaunchOptions.Renderer> rendererBox =
                 new StyledComboBox<>(LaunchOptions.Renderer.values(), scale);
         rendererBox.setName("launchOptionsRenderer");
-        rendererBox.getAccessibleContext().setAccessibleName("Graphics rendering");
+        rendererBox.getAccessibleContext().setAccessibleName(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.graphicsRendering"));
         rendererBox.setSelectedItem(current.renderer() != null ? current.renderer() : inherited.renderer());
         rendererBox.addActionListener(event -> this.onChange.run());
-        renderer = row("Graphics rendering", "renderer", rendererBox,
-                current.renderer() == null, inheritLabel + " (" + inherited.renderer().label() + ")",
+        renderer = row(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.graphicsRendering"), "renderer", rendererBox,
+                current.renderer() == null,
+                I18n.getFormattedTextAt(BUNDLE, "LaunchOptionsForm.inheritWithValue", inheritLabel, inherited.renderer().label()),
                 () -> rendererBox.setSelectedItem(inherited.renderer()),
-                "Try Disable Direct3D or OpenGL if maps flicker.");
+                I18n.getTextAt(BUNDLE, "LaunchOptionsForm.rendererHint"));
 
         argumentsField = textField(current.extraJvmArguments() != null
                 ? current.extraJvmArguments() : inherited.extraJvmArguments(), "launchOptionsJvmArguments");
-        argumentsField.getAccessibleContext().setAccessibleName("Extra Java arguments");
-        extraArguments = row("Extra Java arguments", "jvmArguments", argumentsField,
+        argumentsField.getAccessibleContext().setAccessibleName(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.extraJavaArguments"));
+        extraArguments = row(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.extraJavaArguments"), "jvmArguments", argumentsField,
                 current.extraJvmArguments() == null,
-                inheritLabel + " (" + describeText(inherited.extraJvmArguments()) + ")",
+                I18n.getFormattedTextAt(BUNDLE, "LaunchOptionsForm.inheritWithValue", inheritLabel, describeText(inherited.extraJvmArguments())),
                 () -> argumentsField.setText(inherited.extraJvmArguments()),
-                "Advanced. For example -Dsun.java2d.uiScale=1.5");
+                I18n.getTextAt(BUNDLE, "LaunchOptionsForm.extraJavaArgumentsHint"));
 
         userDirField = textField(current.userDirectory() != null
                 ? current.userDirectory() : inherited.userDirectory(), "launchOptionsUserDirectory");
-        userDirField.getAccessibleContext().setAccessibleName("User directory");
+        userDirField.getAccessibleContext().setAccessibleName(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.userDirectory"));
         JPanel userDirEditor = new JPanel(new BorderLayout(0, scale.space("sm")));
         userDirEditor.setOpaque(false);
         userDirEditor.add(userDirField, BorderLayout.CENTER);
         JPanel userDirButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
         userDirButtons.setOpaque(false);
-        JButton browse = smallButton("Browse…", "launchOptionsBrowseUserDirectory");
+        JButton browse = smallButton(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.browse"), "launchOptionsBrowseUserDirectory");
         browse.addActionListener(event -> chooseUserDirectory());
-        JButton clear = smallButton("Clear", "launchOptionsClearUserDirectory");
+        JButton clear = smallButton(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.clear"), "launchOptionsClearUserDirectory");
         clear.addActionListener(event -> userDirField.setText(""));
         userDirButtons.add(browse);
         userDirButtons.add(Box.createHorizontalStrut(scale.space("md")));
         userDirButtons.add(clear);
         userDirEditor.add(userDirButtons, BorderLayout.SOUTH);
-        userDirectory = row("User directory", "userDirectory", userDirEditor,
+        userDirectory = row(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.userDirectory"), "userDirectory", userDirEditor,
                 current.userDirectory() == null,
-                inheritLabel + " (" + describeText(inherited.userDirectory()) + ")",
+                I18n.getFormattedTextAt(BUNDLE, "LaunchOptionsForm.inheritWithValue", inheritLabel, describeText(inherited.userDirectory())),
                 () -> userDirField.setText(inherited.userDirectory()),
-                "Shared units and camos. Needs MegaMek 0.51.01 or later.");
+                I18n.getTextAt(BUNDLE, "LaunchOptionsForm.userDirectoryHint"));
         userDirectory.extraEditors = List.of(userDirField, browse, clear);
         userDirectory.refresh();
     }
@@ -323,13 +326,13 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
 
     private JButton smallButton(String text, String name) {
         JButton button = new FirstLaunchButton(text, name, false, scale, FirstLaunchButton.Size.SMALL);
-        button.getAccessibleContext().setAccessibleDescription("Activate " + text + ".");
+        button.getAccessibleContext().setAccessibleDescription(I18n.getFormattedTextAt(BUNDLE, "LaunchOptionsForm.activateDescription", text));
         return button;
     }
 
     private void chooseUserDirectory() {
         JFileChooser chooser = new JFileChooser();
-        chooser.setDialogTitle("Choose user directory");
+        chooser.setDialogTitle(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.chooseUserDirectory"));
         chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
         chooser.setAcceptAllFileFilterUsed(false);
         String existing = userDirField.getText().strip();
@@ -344,7 +347,7 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
     }
 
     static String describeText(String value) {
-        return value == null || value.isEmpty() ? "none" : value;
+        return value == null || value.isEmpty() ? I18n.getTextAt(BUNDLE, "LaunchOptionsForm.none") : value;
     }
 
     @Override public Dimension getPreferredScrollableViewportSize() { return getPreferredSize(); }
@@ -398,7 +401,10 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
 
         @Override
         public String toString() {
-            return megabytes % 1024 == 0 ? (megabytes / 1024) + " GB (" + megabytes + " MB)" : megabytes + " MB";
+            return megabytes % 1024 == 0
+                    ? I18n.getFormattedTextAt(BUNDLE, "LaunchOptionsForm.heapGigabytes",
+                            String.valueOf(megabytes / 1024), String.valueOf(megabytes))
+                    : I18n.getFormattedTextAt(BUNDLE, "LaunchOptionsForm.heapMegabytes", String.valueOf(megabytes));
         }
     }
 

@@ -33,6 +33,7 @@
 
 package org.megamek.launcher.update;
 
+import org.megamek.launcher.internationalization.LocalizedText;
 import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.channel.OfficialSuiteChannelCatalog;
 import org.megamek.launcher.diagnostics.SanitizedErrors;
@@ -56,6 +57,7 @@ import java.util.Optional;
  * Package bodies and guessed exact-tag endpoints are intentionally outside this step.
  */
 public final class AutomaticAdoptionResolver {
+    private static final String BUNDLE = "org.megamek.launcher.services";
     public static final int PAGE_SIZE = ReleaseCatalog.MAX_PAGE_SIZE;
     public static final int MAX_PAGES = 10;
     public static final int MAX_RELEASES = PAGE_SIZE * MAX_PAGES;
@@ -108,7 +110,7 @@ public final class AutomaticAdoptionResolver {
             for (int page = 1; page <= MAX_PAGES; page++) {
                 context.checkpoint();
                 context.progress(OperationPhase.METADATA, scanned, MAX_RELEASES,
-                        ProgressUnit.FILES, "Searching official release information");
+                        ProgressUnit.FILES, LocalizedText.of(BUNDLE, "AutomaticAdoptionResolver.searching"));
                 ReleaseCatalog.Page result = catalog.list(repository, page, PAGE_SIZE);
                 pages++;
                 for (ReleaseCatalog.Release release : result.releases()) {

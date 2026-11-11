@@ -736,6 +736,9 @@ tasks.test {
     }).withPropertyName("launcherWorkflows")
         .withPathSensitivity(PathSensitivity.RELATIVE)
     systemProperty("java.awt.headless", "true")
+    // Tests read the English text; pin it so a translated system language can't change them.
+    systemProperty("user.language", "en")
+    systemProperty("user.country", "US")
     useJUnitPlatform {
         excludeTags("archive", "native-gui")
     }
@@ -747,6 +750,9 @@ tasks.register<Test>("nativeGuiTest") {
     testClassesDirs = sourceSets["test"].output.classesDirs
     classpath = sourceSets["test"].runtimeClasspath
     systemProperty("java.awt.headless", "false")
+    // Tests read the English text; pin it so a translated system language can't change them.
+    systemProperty("user.language", "en")
+    systemProperty("user.country", "US")
     useJUnitPlatform {
         includeTags("native-gui")
         excludeTags("archive")

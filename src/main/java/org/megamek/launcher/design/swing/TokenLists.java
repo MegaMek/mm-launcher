@@ -55,6 +55,7 @@ import javax.swing.UIManager;
 import com.formdev.flatlaf.ui.FlatUIUtils;
 import com.formdev.flatlaf.util.UIScale;
 import org.megamek.launcher.design.DesignTokens;
+import org.megamek.launcher.internationalization.I18n;
 
 /**
  * The design system's lists and trees for Swing (design system, Lists and trees). The MegaMek look and
@@ -63,6 +64,7 @@ import org.megamek.launcher.design.DesignTokens;
  * edge, so a selected row never relies on color alone. This adds an empty-state text and a two-line row.
  */
 public final class TokenLists {
+    private static final String BUNDLE = "org.megamek.launcher.design.host.messages";
     /** Client property holding the text a list shows while it has no items; set through {@link #emptyText}. */
     static final String EMPTY_TEXT = "MegaMek.list.emptyText";
     /** Client property freezing the hover wash on a row index, for the design gallery. */
@@ -208,7 +210,8 @@ public final class TokenLists {
             detailText = value == null ? "" : Objects.toString(detail.apply((E) value), "");
             enabled = list.isEnabled();
             super.getListCellRendererComponent(list, titleText, index, isSelected, cellHasFocus);
-            getAccessibleContext().setAccessibleName(detailText.isEmpty() ? titleText : titleText + ", " + detailText);
+            getAccessibleContext().setAccessibleName(detailText.isEmpty() ? titleText
+                  : I18n.getFormattedTextAt(BUNDLE, "TokenLists.accessibleName", titleText, detailText));
             return this;
         }
 

@@ -106,7 +106,7 @@ public final class SanitizedErrors {
         if (error == null || depth >= MAX_CHAIN || !seen.add(error)) return;
         if (!result.isEmpty()) result.append('\n');
         result.append(prefix).append(error.getClass().getSimpleName()).append(": ")
-                .append(message(error));
+                .append(message(error, error.getLocalizedMessage()));
         for (Throwable suppressed : error.getSuppressed()) {
             appendDisplay(result, suppressed, "Suppressed: ", seen, depth + 1);
         }
@@ -118,7 +118,7 @@ public final class SanitizedErrors {
         if (error == null || depth >= MAX_CHAIN || !seen.add(error)) return;
         if (!result.isEmpty()) result.append('\n');
         result.append(prefix).append(error.getClass().getName()).append(": ")
-                .append(message(error)).append('\n');
+                .append(message(error, error.getMessage())).append('\n');
         StackTraceElement[] frames = error.getStackTrace();
         for (int index = 0; index < Math.min(frames.length, MAX_FRAMES); index++) {
             result.append("  at ").append(frames[index]).append('\n');
@@ -133,11 +133,12 @@ public final class SanitizedErrors {
         appendPersistent(result, error.getCause(), "Caused by: ", seen, depth + 1);
     }
 
-    private static String message(Throwable error) {
+    /** Displayed errors pass the localized message; persisted ones pass the English one. */
+    private static String message(Throwable error, String message) {
         if (hasJsonProcessingCause(error, identitySet())) {
             return "[configuration source content omitted; type and stack retained]";
         }
-        return text(error.getMessage());
+        return text(message);
     }
 
     private static boolean hasJsonProcessingCause(Throwable error, Set<Throwable> seen) {

@@ -36,6 +36,7 @@ package org.megamek.launcher.release;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 import org.apache.commons.compress.compressors.gzip.GzipCompressorInputStream;
+import org.megamek.launcher.internationalization.LocalizedText;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationPhase;
 import org.megamek.launcher.operation.OperationType;
@@ -55,6 +56,7 @@ import java.util.Set;
 import java.util.regex.Pattern;
 
 public final class SafeTarExtractor {
+    private static final String BUNDLE = "org.megamek.launcher.services";
     public static final int MAX_ENTRIES = 100_000;
     public static final long MAX_FILE_SIZE = 2L * 1024 * 1024 * 1024;
     public static final long MAX_EXPANDED_SIZE = 6L * 1024 * 1024 * 1024;
@@ -145,7 +147,8 @@ public final class SafeTarExtractor {
                     }
                 }
                 context.progress(phase, entries, -1, ProgressUnit.FILES,
-                        "Extracted " + entries + " archive entries");
+                        LocalizedText.of(BUNDLE, "SafeTarExtractor.extractedEntries",
+                        String.valueOf(entries)));
             }
         }
         if (root == null) throw new IOException("archive is empty");

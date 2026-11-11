@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
+
+  This file is part of MegaMek Launcher.
+
+  MegaMek Launcher is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License (GPL),
+  version 3 or (at your option) any later version,
+  as published by the Free Software Foundation.
+
+  MegaMek Launcher is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty
+  of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+  See the GNU General Public License for more details.
+
+  A copy of the GPL should have been included with this project;
+  if not, see <https://www.gnu.org/licenses/>.
+
+  NOTICE: The MegaMek organization is a non-profit group of volunteers
+  creating free software for the BattleTech community.
+
+  MechWarrior, BattleMech, `Mech and AeroTech are registered trademarks
+  of The Topps Company, Inc. All Rights Reserved.
+
+  Catalyst Game Labs and the Catalyst Game Labs logo are trademarks of
+  InMediaRes Productions, LLC.
+
+  MechWarrior Copyright Microsoft Corporation. MegaMek was created under
+  Microsoft's "Game Content Usage Rules"
+  <https://www.xbox.com/en-US/developers/rules> and it is not endorsed by or
+  affiliated with Microsoft.
+-->
+
+<!-- English (base) strings for the custom installer UI in ui.wxf, referenced there
+     as !(loc.Id). jpackage passes every *.wxl in its resource directory to light.exe
+     with -loc, alongside its own MsiInstallerStrings_*.wxl, so these Ids must not
+     reuse jpackage's string Ids.
+
+     To add a translation: copy this file to MegaMekLauncher_<culture>.wxl (for
+     example MegaMekLauncher_de-de.wxl), set Culture (and Codepage, e.g. 1251 for
+     ru-ru) on WixLocalization, and translate only the element text. Keep every Id,
+     the "&" accelerator in button labels, and bracketed [Property] references.
+     Missing strings fall back to en-us. Note that jpackage builds one MSI whose
+     language is the first culture by file name, so a new culture also needs a
+     build change (per-language MSI or language transform) before it ships. -->
+<WixLocalization Culture="en-us" Codepage="1252"
+                 xmlns="http://schemas.microsoft.com/wix/2006/localization">
+  <!-- Shared buttons -->
+  <String Id="MmlUiButtonAbort">Abort</String>
+  <String Id="MmlUiButtonCancel">Cancel</String>
+  <String Id="MmlUiButtonIgnore">Ignore</String>
+  <String Id="MmlUiButtonNo">No</String>
+  <String Id="MmlUiButtonOk">OK</String>
+  <String Id="MmlUiButtonRetry">Retry</String>
+  <String Id="MmlUiButtonYes">Yes</String>
+  <String Id="MmlUiButtonCancelSetup">Cancel setup</String>
+  <String Id="MmlUiButtonChange">&amp;Change...</String>
+  <String Id="MmlUiButtonInstall">Install</String>
+  <String Id="MmlUiButtonFinish">Finish</String>
+  <String Id="MmlUiButtonClose">Close</String>
+
+  <!-- Window title of the welcome, error, cancelled and failed dialogs -->
+  <String Id="MmlUiSetupTitle">MegaMek Launcher Setup</String>
+
+  <!-- Files in use -->
+  <String Id="MmlUiFilesInUseTitle">Files in Use</String>
+  <String Id="MmlUiFilesInUseMessage">Close these applications to continue installing MegaMek Launcher:</String>
+
+  <!-- Welcome -->
+  <String Id="MmlUiWelcomeDetail">Install MegaMek Launcher for this user in:</String>
+  <String Id="MmlUiWelcomeGamesHint">Games can be installed anywhere from the launcher later.</String>
+  <String Id="MmlUiWelcomeDesktopShortcut">Create a desktop shortcut</String>
+
+  <!-- Progress: used as both the window title and the heading -->
+  <String Id="MmlUiProgressTitle">Installing MegaMek Launcher</String>
+  <String Id="MmlUiProgressStatus">Setting up MegaMek Launcher...</String>
+  <String Id="MmlUiProgressBar">Progress</String>
+
+  <!-- Finished -->
+  <String Id="MmlUiExitTitle">MegaMek Launcher Setup Complete</String>
+  <String Id="MmlUiExitInstalled">MegaMek Launcher is installed.</String>
+  <String Id="MmlUiExitLaunch">Launch MegaMek Launcher</String>
+
+  <!-- Failed or cancelled -->
+  <String Id="MmlUiFatalErrorMessage">Setup could not finish. No launcher was started.</String>
+  <String Id="MmlUiUserExitMessage">Setup was cancelled. No launcher was started.</String>
+</WixLocalization>

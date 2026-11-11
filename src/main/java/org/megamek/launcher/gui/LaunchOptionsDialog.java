@@ -32,6 +32,7 @@
  */
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.launch.LaunchOptions;
 
 import javax.swing.BorderFactory;
@@ -54,6 +55,7 @@ import java.util.function.Consumer;
 
 /** Edits one installation's {@link LaunchOptions} overrides in a {@link LaunchOptionsForm}. */
 final class LaunchOptionsDialog {
+    private static final String BUNDLE = "org.megamek.launcher.gui.dialogs";
     private final JDialog dialog;
     private final LaunchOptionsForm form;
     private final JLabel message = new JLabel(" ");
@@ -76,10 +78,10 @@ final class LaunchOptionsDialog {
         headingLabel.setForeground(FirstLaunchPanel.ACCENT);
         headingLabel.setFont(scale.font(headingLabel.getFont(), "headline"));
         // Resetting edits the fields and still needs Save, so it sits with the form rather than the footer.
-        JButton restore = new LauncherLink("Reset all to launcher defaults",
+        JButton restore = new LauncherLink(I18n.getTextAt(BUNDLE, "LaunchOptionsDialog.resetAll"),
                 "restoreLaunchOptionsDefaultsButton", scale);
         restore.getAccessibleContext().setAccessibleDescription(
-                "Set every option to follow the launcher default. Save to keep the change.");
+                I18n.getTextAt(BUNDLE, "LaunchOptionsDialog.resetAllDescription"));
         JPanel headingRow = new JPanel(new BorderLayout(scale.space("lg"), 0));
         headingRow.setOpaque(false);
         headingRow.setAlignmentX(JPanel.LEFT_ALIGNMENT);
@@ -109,10 +111,10 @@ final class LaunchOptionsDialog {
         message.setName("launchOptionsMessage");
         message.setForeground(LauncherTheme.WARNING);
         south.add(message, BorderLayout.NORTH);
-        JButton cancel = new FirstLaunchButton("Cancel", "cancelLaunchOptionsButton", false, scale,
+        JButton cancel = new FirstLaunchButton(I18n.getTextAt(BUNDLE, "LaunchOptionsDialog.cancel"), "cancelLaunchOptionsButton", false, scale,
                 FirstLaunchButton.Size.SMALL);
         cancel.addActionListener(event -> dialog.dispose());
-        JButton save = new FirstLaunchButton("Save", "saveLaunchOptionsButton", true, scale,
+        JButton save = new FirstLaunchButton(I18n.getTextAt(BUNDLE, "LaunchOptionsDialog.save"), "saveLaunchOptionsButton", true, scale,
                 FirstLaunchButton.Size.SMALL);
         save.addActionListener(event -> {
             LaunchOptions options = collect();
@@ -122,9 +124,9 @@ final class LaunchOptionsDialog {
         });
         DialogFooter footer = new DialogFooter(scale);
         if (onCopyCommands != null) {
-            JButton copy = new LauncherLink("Copy launch commands", "copyLaunchCommandsButton", scale);
+            JButton copy = new LauncherLink(I18n.getTextAt(BUNDLE, "LaunchOptionsDialog.copyCommands"), "copyLaunchCommandsButton", scale);
             copy.getAccessibleContext().setAccessibleDescription(
-                    "Copy the commands that start each application with the options shown, for troubleshooting");
+                    I18n.getTextAt(BUNDLE, "LaunchOptionsDialog.copyCommandsDescription"));
             copy.addActionListener(event -> {
                 LaunchOptions options = collect();
                 if (options != null) onCopyCommands.accept(options);

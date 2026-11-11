@@ -36,6 +36,10 @@ package org.megamek.launcher.operation;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * One progress report. {@code detail} is English, for operation logs; {@code displayDetail} is the same text in the
+ * player's language, for the progress dialog.
+ */
 public record OperationProgress(
         UUID operationId,
         Instant timestamp,
@@ -47,7 +51,8 @@ public record OperationProgress(
         String detail,
         OperationOutcome outcome,
         boolean cancellationAllowed,
-        String cancellationReason) {
+        String cancellationReason,
+        String displayDetail) {
 
     public boolean determinate() {
         return total > 0 && completed >= 0 && completed <= total;
