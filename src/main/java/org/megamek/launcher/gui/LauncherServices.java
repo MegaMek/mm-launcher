@@ -554,6 +554,7 @@ public class LauncherServices {
     public HomeState loadHome() throws IOException {
         if (Files.exists(registry, LinkOption.NOFOLLOW_LINKS)) {
             uninstalls.recoverCommitted();
+            finishRelocations();
         }
         RegistryData data = readRegistry();
         if (data.defaultInstallationId() == null) {
@@ -880,23 +881,13 @@ public class LauncherServices {
     public InstallationRecord relocate(InstallationRecord missing, Path folder,
                                        OperationContext context)
             throws IOException, InterruptedException {
-        LaunchOptions overrides = null;
-        try {
-            LaunchOptions existing = launchOptions.read().installation(missing.id());
-            if (!existing.inheritsEverything()) overrides = existing;
-        } catch (IOException ignored) {
-            // Unreadable options stay with the launcher-wide defaults.
-        }
         InstallationRecord moved = relocations.relocate(missing, folder, context);
-        if (overrides != null) {
-            try {
-                launchOptions.writeInstallation(moved.id(), overrides);
-            } catch (IOException ignored) {
-                // The copy still launches with the launcher-wide options.
-            }
-        }
-        forgetLaunchOptions(missing);
+        finishRelocations();
         return moved;
+    }
+
+    private void finishRelocations() {
+        relocations.finishCommitted(launchOptions::rekeyInstallation);
     }
 
     public UninstallService.Plan planUninstall(InstallationRecord record,

@@ -359,7 +359,7 @@ public class ReceiptStore {
         }
     }
 
-    private static void ensureMetadataDirectory(Path directory) throws IOException {
+    static void ensureMetadataDirectory(Path directory) throws IOException {
         Path parent = directory.getParent();
         requireRealPath(parent, true);
         try {

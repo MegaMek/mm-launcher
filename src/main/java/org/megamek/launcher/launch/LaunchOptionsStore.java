@@ -164,6 +164,25 @@ public final class LaunchOptionsStore {
         });
     }
 
+    /**
+     * Moves an installation's overrides to a new id in one write, so the number of entries never
+     * grows and the source entry stays put if the write fails.
+     */
+    public Document rekeyInstallation(String fromId, String toId) throws IOException {
+        if (!INSTALLATION_ID.matcher(fromId).matches()
+                || !INSTALLATION_ID.matcher(toId).matches()) {
+            throw new IOException("invalid installation id");
+        }
+        Document current = read();
+        if (!current.installations().containsKey(fromId)) return current;
+        return update(latest -> {
+            Map<String, LaunchOptions> next = new TreeMap<>(latest.installations());
+            LaunchOptions moved = next.remove(fromId);
+            if (moved != null) next.put(toId, moved);
+            return new Document(latest.global(), next);
+        });
+    }
+
     private static void validated(LaunchOptions options) throws IOException {
         try {
             options.validate();

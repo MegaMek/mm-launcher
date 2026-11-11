@@ -11,6 +11,7 @@ import org.megamek.launcher.channel.FollowChannel;
 import org.megamek.launcher.launch.ApplicationLauncher;
 import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.launch.LaunchOptions;
+import org.megamek.launcher.launch.LaunchOptionsStore;
 import org.megamek.launcher.launch.RootCoordinator;
 import org.megamek.launcher.onboarding.InstallationInspector;
 import org.megamek.launcher.operation.OperationContext;
@@ -20,6 +21,7 @@ import org.megamek.launcher.registry.RegistryData;
 import org.megamek.launcher.registry.RegistryStore;
 import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.update.ImportedCopyAdoptionService.Availability;
+import org.megamek.launcher.update.InstallationRelocationService;
 import org.megamek.launcher.update.OwnershipPolicy;
 import org.megamek.launcher.update.ReceiptStore;
 
@@ -181,6 +183,71 @@ class RenamedInstallationFolderTest {
                 () -> services.relocate(installed, renamed, CONTEXT));
         assertTrue(error.getMessage().contains("interrupted update"), error.getMessage());
         assertUnchanged(services, installed);
+    }
+
+    @Test
+    void refusesAFolderInsideTheLauncherMetadata() throws Exception {
+        LauncherServices services = services();
+        Path original = suite(temp.resolve("games").resolve("MegaMek"), "1.0.0");
+        InstallationRecord installed = managed(services, original);
+        Path hidden = metadata(services).resolve("relocated-game");
+        Files.move(original, hidden);
+
+        IOException error = assertThrows(IOException.class,
+                () -> services.relocate(installed, hidden, CONTEXT));
+        assertTrue(error.getMessage().contains("launcher's own data"), error.getMessage());
+        assertEquals(java.util.List.of(installed), services.readRegistry().installations());
+        try (Stream<Path> files = Files.list(metadata(services))) {
+            assertTrue(files.map(file -> file.getFileName().toString())
+                    .filter(name -> !name.equals("relocated-game"))
+                    .allMatch(name -> name.startsWith(installed.id())));
+        }
+    }
+
+    @Test
+    void launchOptionsMoveEvenWhenEveryOverrideSlotIsTaken() throws Exception {
+        LauncherServices services = services();
+        Path original = suite(temp.resolve("games").resolve("MegaMek"), "1.0.0");
+        InstallationRecord installed = managed(services, original);
+        LaunchOptionsStore store = new LaunchOptionsStore(services.registry());
+        for (int i = 1; i < 256; i++) {
+            store.writeInstallation(java.util.UUID.randomUUID().toString(), OPTIONS);
+        }
+        services.saveInstallationLaunchOptions(installed, OPTIONS);
+        assertEquals(256, store.read().installations().size());
+        Path renamed = original.resolveSibling("Renamed");
+        Files.move(original, renamed);
+
+        InstallationRecord located = services.relocate(installed, renamed, CONTEXT);
+
+        assertEquals(OPTIONS, services.launchOptions().installation(located.id()));
+        assertTrue(services.launchOptions().installation(installed.id()).inheritsEverything());
+        assertEquals(256, store.read().installations().size());
+    }
+
+    @Test
+    void launchOptionsMoveOnTheNextStartAfterAnInterruptedLocate() throws Exception {
+        LauncherServices services = services();
+        Path original = suite(temp.resolve("games").resolve("MegaMek"), "1.0.0");
+        InstallationRecord installed = managed(services, original);
+        services.saveInstallationLaunchOptions(installed, OPTIONS);
+        Path renamed = original.resolveSibling("Renamed");
+        Files.move(original, renamed);
+
+        // The launcher stops right after the registry commit, before anything else runs.
+        InstallationRecord located = new InstallationRelocationService(services.registry(),
+                new RegistryStore(), new RootCoordinator(temp.resolve("coordination")),
+                new InstallationInspector()).relocate(installed, renamed, CONTEXT);
+        assertEquals(OPTIONS, services.launchOptions().installation(installed.id()));
+        Path marker = metadata(services).resolve(installed.id() + ".relocated-to."
+                + located.id());
+        assertTrue(Files.isRegularFile(marker));
+
+        services.loadHome();
+
+        assertEquals(OPTIONS, services.launchOptions().installation(located.id()));
+        assertTrue(services.launchOptions().installation(installed.id()).inheritsEverything());
+        assertFalse(Files.exists(marker));
     }
 
     private void assertUnchanged(LauncherServices services, InstallationRecord installed)

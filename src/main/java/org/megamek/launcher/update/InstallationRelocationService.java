@@ -48,14 +48,18 @@ import org.megamek.launcher.registry.RegistryStore;
 import org.megamek.launcher.sandbox.OverrideEntry;
 
 import java.io.IOException;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -67,9 +71,17 @@ import java.util.stream.Collectors;
  * <p>The copy gets a new installation id. Its launcher metadata is first published create-new
  * under that id, then one atomic registry mutation swaps the records; that write is the only
  * commit point. A failure before it leaves at most unreferenced new-id metadata, which is removed
- * when possible, and the leftover old-id metadata after it is never read again.
+ * when possible, and the leftover old-id metadata after it is never read again. A
+ * {@code <old-id>.relocated-to.<new-id>} marker, published just before the commit, lets
+ * {@link #finishCommitted} move launch options to the new id even if the launcher stops right
+ * after the commit.
  */
 public final class InstallationRelocationService {
+    private static final String RELOCATED_TO = ".relocated-to.";
+    private static final String UUID_PATTERN =
+            "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+    private static final Pattern MARKER = Pattern.compile("(" + UUID_PATTERN + ")"
+            + Pattern.quote(RELOCATED_TO) + "(" + UUID_PATTERN + ")");
     private final Path registry;
     private final RegistryStore registries;
     private final RootCoordinator coordinator;
@@ -137,6 +149,11 @@ public final class InstallationRelocationService {
                             + "\", which is already in the launcher.");
                 }
             }
+            Path metadata = receipts.metadataDirectory(registry);
+            if (newRoot.startsWith(metadata) || metadata.startsWith(newRoot)) {
+                throw new IOException("That folder overlaps the launcher's own data folder. "
+                        + "Choose the folder this installation was renamed or moved to.");
+            }
             InstallationRecord moved = new InstallationRecord(UUID.randomUUID().toString(),
                     missing.name(), inspection.canonicalRoot(), missing.observedBuild(),
                     missing.products(), missing.pin(), missing.updateEligible(),
@@ -144,6 +161,8 @@ public final class InstallationRelocationService {
             List<Runnable> rollback = new ArrayList<>();
             try {
                 publishMetadata(data, missing, moved, newRoot, context, rollback);
+                Path marker = writeMarker(missing.id(), moved.id());
+                rollback.add(() -> quietly(() -> Files.deleteIfExists(marker)));
                 if (!InstallationDirectory.missing(oldRoot)) {
                     throw new IOException("The installation folder exists again; nothing to "
                             + "locate.");
@@ -231,7 +250,8 @@ public final class InstallationRelocationService {
             if (UninstallService.regenerableCache(entry.path())) continue;
             Path file;
             try {
-                file = RealUpdateFiles.resolve(root, entry.path(), true);
+                file = RealUpdateFiles.resolve(root,
+                        localSpelling(entry.path(), latest.caseOverrides()), true);
             } catch (ManifestException error) {
                 throw new IOException("That folder's files are not usable: "
                         + error.getMessage(), error);
@@ -256,6 +276,87 @@ public final class InstallationRelocationService {
                         + "installation had, so it can't be the same copy.");
             }
         }
+    }
+
+    /**
+     * Maps an official path onto the capitalization recorded for this copy, so a folder kept
+     * under its earlier spelling (for example {@code Docs/} for official {@code docs/}) is found.
+     */
+    static String localSpelling(String path, List<CaseOverride> cases) {
+        String folded = CurrentStateStore.key(path);
+        CaseOverride match = null;
+        for (CaseOverride item : cases) {
+            if ((folded.equals(item.foldedPrefix()) || folded.startsWith(item.foldedPrefix() + "/"))
+                    && (match == null
+                    || item.foldedPrefix().length() > match.foldedPrefix().length())) {
+                match = item;
+            }
+        }
+        if (match == null) return path;
+        int segments = match.localPrefix().split("/").length;
+        String[] parts = path.split("/", -1);
+        if (parts.length < segments) return path;
+        StringBuilder local = new StringBuilder(match.localPrefix());
+        for (int i = segments; i < parts.length; i++) local.append('/').append(parts[i]);
+        return local.toString();
+    }
+
+    /**
+     * Finishes relocations whose registry commit happened: hands each old/new id pair to
+     * {@code finisher} (which moves anything keyed by the old id, such as launch options) and then
+     * drops the old id's leftover metadata. A pair whose finisher fails is retried next time, so
+     * nothing keyed by the old id is lost if the launcher stops right after the commit.
+     */
+    public void finishCommitted(Finisher finisher) {
+        Path directory = receipts.metadataDirectory(registry);
+        if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) return;
+        RegistryData data;
+        try {
+            if (!Files.exists(registry, LinkOption.NOFOLLOW_LINKS)) return;
+            data = registries.read(registry);
+        } catch (IOException unreadable) {
+            return;
+        }
+        Set<String> registered = data.installations().stream().map(InstallationRecord::id)
+                .collect(Collectors.toSet());
+        List<Path> markers = new ArrayList<>();
+        try (var stream = Files.newDirectoryStream(directory, "*" + RELOCATED_TO + "*")) {
+            stream.forEach(markers::add);
+        } catch (IOException unreadable) {
+            return;
+        }
+        for (Path marker : markers) {
+            Matcher name = MARKER.matcher(marker.getFileName().toString());
+            if (!name.matches() || !Files.isRegularFile(marker, LinkOption.NOFOLLOW_LINKS)) {
+                continue;
+            }
+            String oldId = name.group(1);
+            String newId = name.group(2);
+            if (registered.contains(oldId)) {
+                // Not committed (yet); a relocation may still be running.
+                continue;
+            }
+            if (registered.contains(newId)) {
+                try {
+                    finisher.finish(oldId, newId);
+                } catch (IOException retryLater) {
+                    continue;
+                }
+                forgetMetadata(oldId);
+            }
+            quietly(() -> Files.deleteIfExists(marker));
+        }
+    }
+
+    private Path writeMarker(String oldId, String newId) throws IOException {
+        Path directory = receipts.metadataDirectory(registry);
+        ReceiptStore.ensureMetadataDirectory(directory);
+        Path marker = directory.resolve(oldId + RELOCATED_TO + newId);
+        try (FileChannel channel = FileChannel.open(marker, StandardOpenOption.CREATE_NEW,
+                StandardOpenOption.WRITE)) {
+            channel.force(true);
+        }
+        return marker;
     }
 
     private void forgetMetadata(String id) {
@@ -305,5 +406,11 @@ public final class InstallationRelocationService {
     @FunctionalInterface
     private interface IoAction {
         void run() throws IOException;
+    }
+
+    /** Moves whatever is keyed by a relocated installation's old id to its new id. */
+    @FunctionalInterface
+    public interface Finisher {
+        void finish(String oldId, String newId) throws IOException;
     }
 }
