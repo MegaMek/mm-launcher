@@ -23,9 +23,10 @@ result, ending with **Close**. Full-page surfaces such as the
 Settings page and installation cards are not dialogs: their command bars stay right-aligned with
 the main action last.
 
-Every dialog's title bar reads **MegaMek Launcher**. Its specific title appears once, as the heading
-inside the dialog, and is also the dialog's accessible name. A progress dialog shows the operation's
-name as a small line above the current step.
+Every dialog's title bar names what the dialog is for (for example **Change default Java** or
+**Rename installation**), never just **MegaMek Launcher**. That title is also the dialog's accessible
+name. A progress dialog's title bar follows the operation's name, which also shows as a small line
+above the current step.
 
 ## Managed application and settings model
 

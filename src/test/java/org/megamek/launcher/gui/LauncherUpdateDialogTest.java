@@ -62,7 +62,7 @@ class LauncherUpdateDialogTest {
             assertEquals(0, SwingTestSupport.countButtonText(dialog, "Yes"));
             SwingTestSupport.onEdt(() -> {
                 assertEquals(FirstLaunchPanel.BACKGROUND, dialog.getContentPane().getBackground());
-                assertEquals(LauncherTheme.DIALOG_TITLE, dialog.getTitle());
+                assertEquals("Update MegaMek Launcher", dialog.getTitle());
                 JLabel body = SwingTestSupport.find(dialog, "launcherAlertMessage", JLabel.class);
                 String expected = "Version 0.1.1 is available.\n\nClose any running games before updating.";
                 if (notice != null) expected = notice + "\n\n" + expected;

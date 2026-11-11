@@ -106,7 +106,6 @@ final class NormalInstallConfirmationDialog extends JDialog {
         setName("normalInstallConfirmationDialog");
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         getAccessibleContext().setAccessibleName(getTitle());
-        LauncherTheme.useLauncherTitle(this);
         getAccessibleContext().setAccessibleDescription(
                 I18n.getTextAt(BUNDLE, "NormalInstallConfirmationDialog.description"));
 
