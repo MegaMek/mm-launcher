@@ -33,10 +33,13 @@
 
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.internationalization.I18n;
+
 import java.util.Locale;
 
 /** Small shared formatter for user-facing binary download sizes. */
 final class BinarySizeFormat {
+    private static final String BUNDLE = "org.megamek.launcher.gui.home";
     private static final long KIB = 1L << 10;
     private static final long MIB = 1L << 20;
     private static final long GIB = 1L << 30;
@@ -46,17 +49,25 @@ final class BinarySizeFormat {
 
     static String humanReadable(long bytes) {
         requireNonNegative(bytes);
-        if (bytes >= GIB) return String.format(Locale.ROOT, "%.1f GB", (double) bytes / GIB);
-        if (bytes >= MIB) return String.format(Locale.ROOT, "%.1f MB", (double) bytes / MIB);
-        if (bytes >= KIB) return String.format(Locale.ROOT, "%.1f KB", (double) bytes / KIB);
-        return bytes + (bytes == 1 ? " byte" : " bytes");
+        if (bytes >= GIB) return I18n.getFormattedTextAt(BUNDLE, "BinarySizeFormat.gigabytes",
+                oneDecimal((double) bytes / GIB));
+        if (bytes >= MIB) return I18n.getFormattedTextAt(BUNDLE, "BinarySizeFormat.megabytes",
+                oneDecimal((double) bytes / MIB));
+        if (bytes >= KIB) return I18n.getFormattedTextAt(BUNDLE, "BinarySizeFormat.kilobytes",
+                oneDecimal((double) bytes / KIB));
+        return bytes == 1 ? I18n.getFormattedTextAt(BUNDLE, "BinarySizeFormat.byte", String.valueOf(bytes))
+                : I18n.getFormattedTextAt(BUNDLE, "BinarySizeFormat.bytes", String.valueOf(bytes));
     }
 
     static String mebibytes(long bytes) {
         requireNonNegative(bytes);
         double mebibytes = (double) bytes / MIB;
-        if (bytes > 0 && mebibytes < 0.05d) return "< 0.1 MB";
-        return String.format(Locale.ROOT, "%.1f MB", mebibytes);
+        if (bytes > 0 && mebibytes < 0.05d) return I18n.getTextAt(BUNDLE, "BinarySizeFormat.underTenthMegabyte");
+        return I18n.getFormattedTextAt(BUNDLE, "BinarySizeFormat.megabytes", oneDecimal(mebibytes));
+    }
+
+    private static String oneDecimal(double value) {
+        return String.format(Locale.ROOT, "%.1f", value);
     }
 
     private static void requireNonNegative(long bytes) {

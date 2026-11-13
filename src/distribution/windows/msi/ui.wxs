@@ -107,106 +107,106 @@
       <!-- Windows Installer invokes these two dialogs outside the wizard flow. -->
       <!-- Native error-dialog style lets Windows Installer supply the message,
            select and position its response buttons, and use system error sounds. -->
-      <Dialog Id="LauncherError" Width="370" Height="270" Title="MegaMek Launcher Setup"
+      <Dialog Id="LauncherError" Width="370" Height="270" Title="!(loc.MmlUiSetupTitle)"
               ErrorDialog="yes">
         <Control Id="ErrorText" Type="Text" X="20" Y="55" Width="330" Height="130"
                  TabSkip="no" NoPrefix="yes" Text="[ErrorText]"/>
         <Control Id="A" Type="PushButton" X="150" Y="243" Width="70" Height="18"
-                 TabSkip="yes" Text="Abort">
+                 TabSkip="yes" Text="!(loc.MmlUiButtonAbort)">
           <Publish Event="EndDialog" Value="ErrorAbort"/>
         </Control>
         <Control Id="C" Type="PushButton" X="150" Y="243" Width="70" Height="18"
-                 TabSkip="yes" Text="Cancel">
+                 TabSkip="yes" Text="!(loc.MmlUiButtonCancel)">
           <Publish Event="EndDialog" Value="ErrorCancel"/>
         </Control>
         <Control Id="I" Type="PushButton" X="150" Y="243" Width="70" Height="18"
-                 TabSkip="yes" Text="Ignore">
+                 TabSkip="yes" Text="!(loc.MmlUiButtonIgnore)">
           <Publish Event="EndDialog" Value="ErrorIgnore"/>
         </Control>
         <Control Id="N" Type="PushButton" X="150" Y="243" Width="70" Height="18"
-                 TabSkip="yes" Text="No">
+                 TabSkip="yes" Text="!(loc.MmlUiButtonNo)">
           <Publish Event="EndDialog" Value="ErrorNo"/>
         </Control>
         <Control Id="O" Type="PushButton" X="150" Y="243" Width="70" Height="18"
-                 TabSkip="yes" Text="OK">
+                 TabSkip="yes" Text="!(loc.MmlUiButtonOk)">
           <Publish Event="EndDialog" Value="ErrorOk"/>
         </Control>
         <Control Id="R" Type="PushButton" X="150" Y="243" Width="70" Height="18"
-                 TabSkip="yes" Text="Retry">
+                 TabSkip="yes" Text="!(loc.MmlUiButtonRetry)">
           <Publish Event="EndDialog" Value="ErrorRetry"/>
         </Control>
         <Control Id="Y" Type="PushButton" X="150" Y="243" Width="70" Height="18"
-                 TabSkip="yes" Text="Yes">
+                 TabSkip="yes" Text="!(loc.MmlUiButtonYes)">
           <Publish Event="EndDialog" Value="ErrorYes"/>
         </Control>
       </Dialog>
-      <Dialog Id="FilesInUse" Width="370" Height="270" Title="Files in Use"
+      <Dialog Id="FilesInUse" Width="370" Height="270" Title="!(loc.MmlUiFilesInUseTitle)"
               KeepModeless="yes">
         <Control Id="Message" Type="Text" X="20" Y="32" Width="330" Height="38"
-                 Text="Close these applications to continue installing MegaMek Launcher:"/>
+                 Text="!(loc.MmlUiFilesInUseMessage)"/>
         <Control Id="Processes" Type="ListBox" X="20" Y="77" Width="330" Height="116"
                  Property="FileInUseProcess"/>
         <Control Id="Retry" Type="PushButton" X="134" Y="243" Width="64" Height="18"
-                 Default="yes" Text="Retry">
+                 Default="yes" Text="!(loc.MmlUiButtonRetry)">
           <Publish Event="EndDialog" Value="Retry"/>
         </Control>
         <Control Id="Ignore" Type="PushButton" X="205" Y="243" Width="64" Height="18"
-                 Text="Ignore">
+                 Text="!(loc.MmlUiButtonIgnore)">
           <Publish Event="EndDialog" Value="Ignore"/>
         </Control>
         <Control Id="Cancel" Type="PushButton" X="276" Y="243" Width="84" Height="18"
-                 Cancel="yes" Text="Cancel setup">
+                 Cancel="yes" Text="!(loc.MmlUiButtonCancelSetup)">
           <Publish Event="EndDialog" Value="Exit"/>
         </Control>
       </Dialog>
-      <Dialog Id="LauncherWelcome" Width="370" Height="270" Title="MegaMek Launcher Setup">
+      <Dialog Id="LauncherWelcome" Width="370" Height="270" Title="!(loc.MmlUiSetupTitle)">
         <!-- Artwork occupies only the left strip; the controls sit directly on
              the native light dialog surface, not on a baked image panel. -->
         <Control Id="Art" Type="Bitmap" X="0" Y="0" Width="180" Height="234"
                  Text="WizardDialogArt"/>
         <Control Id="Detail" Type="Text" X="190" Y="46" Width="165" Height="130"
-                 Text="Install MegaMek Launcher for this user in:&#10;&#10;[INSTALLDIR]"/>
+                 Text="!(loc.MmlUiWelcomeDetail)&#10;&#10;[INSTALLDIR]"/>
         <Control Id="DesktopShortcut" Type="CheckBox" X="190" Y="180" Width="165" Height="20"
                  Property="LAUNCHER_DESKTOP_SHORTCUT" CheckBoxValue="1"
-                 Text="Create a desktop shortcut"/>
+                 Text="!(loc.MmlUiWelcomeDesktopShortcut)"/>
         <Control Id="Install" Type="PushButton" X="228" Y="243" Width="66" Height="18"
-                 Default="yes" Text="Install">
+                 Default="yes" Text="!(loc.MmlUiButtonInstall)">
           <Publish Event="EndDialog" Value="Return"/>
         </Control>
         <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="18"
-                 Cancel="yes" Text="Cancel">
+                 Cancel="yes" Text="!(loc.MmlUiButtonCancel)">
           <Publish Event="EndDialog" Value="Exit"/>
         </Control>
       </Dialog>
       <!-- A Show action before ExecuteAction MUST be modeless: a modal dialog
            without EndDialog blocks the UI sequence and never installs files. -->
       <Dialog Id="LauncherProgress" Width="370" Height="270" Modeless="yes"
-              Title="Installing MegaMek Launcher">
+              Title="!(loc.MmlUiProgressTitle)">
         <Control Id="Banner" Type="Bitmap" X="0" Y="0" Width="370" Height="44"
                  Text="WizardBannerArt"/>
         <Control Id="Title" Type="Text" X="15" Y="56" Width="335" Height="24" TabSkip="no"
-                 Text="Installing MegaMek Launcher"/>
+                 Text="!(loc.MmlUiProgressTitle)"/>
         <!-- The MSI has no ActionText table. Subscribing to the Windows
              Installer fallback messages can display raw tokens such as
              "Files [9]" on localized systems. Keep the label static; the
              independent progress-bar subscription still reports progress. -->
         <Control Id="StatusText" Type="Text" X="15" Y="97" Width="335" Height="22"
-                 Text="Setting up MegaMek Launcher..."/>
+                 Text="!(loc.MmlUiProgressStatus)"/>
         <Control Id="ProgressBar" Type="ProgressBar" X="15" Y="126" Width="335" Height="15"
-                 ProgressBlocks="yes" Text="Progress">
+                 ProgressBlocks="yes" Text="!(loc.MmlUiProgressBar)">
           <Subscribe Event="SetProgress" Attribute="Progress"/>
         </Control>
       </Dialog>
-      <Dialog Id="Exit" Width="370" Height="270" Title="MegaMek Launcher Setup Complete">
+      <Dialog Id="Exit" Width="370" Height="270" Title="!(loc.MmlUiExitTitle)">
         <Control Id="Art" Type="Bitmap" X="0" Y="0" Width="180" Height="234"
                  Text="WizardDialogArt"/>
         <Control Id="Title" Type="Text" X="190" Y="46" Width="165" Height="65"
-                 Text="MegaMek Launcher is installed."/>
+                 Text="!(loc.MmlUiExitInstalled)"/>
         <Control Id="Launch" Type="CheckBox" X="190" Y="148" Width="165" Height="20"
                  Property="LAUNCH_AFTER_INSTALL" CheckBoxValue="1"
-                 Text="Launch MegaMek Launcher"/>
+                 Text="!(loc.MmlUiExitLaunch)"/>
         <Control Id="Finish" Type="PushButton" X="296" Y="243" Width="64" Height="18"
-                 Default="yes" Text="Finish">
+                 Default="yes" Text="!(loc.MmlUiButtonFinish)">
           <Publish Event="DoAction" Value="SetLauncherTarget" Order="1"
                    Condition="LAUNCH_AFTER_INSTALL = 1 AND UILevel = 5 AND NOT REMOVE"/>
           <Publish Event="DoAction" Value="LaunchMegaMekLauncher" Order="2"
@@ -214,19 +214,19 @@
           <Publish Event="EndDialog" Value="Return" Order="3"/>
         </Control>
       </Dialog>
-      <Dialog Id="FatalError" Width="370" Height="270" Title="MegaMek Launcher Setup">
+      <Dialog Id="FatalError" Width="370" Height="270" Title="!(loc.MmlUiSetupTitle)">
         <Control Id="Message" Type="Text" X="20" Y="50" Width="330" Height="90"
-                 Text="Setup could not finish. No launcher was started."/>
+                 Text="!(loc.MmlUiFatalErrorMessage)"/>
         <Control Id="Close" Type="PushButton" X="296" Y="243" Width="64" Height="18"
-                 Default="yes" Text="Close">
+                 Default="yes" Text="!(loc.MmlUiButtonClose)">
           <Publish Event="EndDialog" Value="Return"/>
         </Control>
       </Dialog>
-      <Dialog Id="UserExit" Width="370" Height="270" Title="MegaMek Launcher Setup">
+      <Dialog Id="UserExit" Width="370" Height="270" Title="!(loc.MmlUiSetupTitle)">
         <Control Id="Message" Type="Text" X="20" Y="50" Width="330" Height="90"
-                 Text="Setup was cancelled. No launcher was started."/>
+                 Text="!(loc.MmlUiUserExitMessage)"/>
         <Control Id="Close" Type="PushButton" X="296" Y="243" Width="64" Height="18"
-                 Default="yes" Text="Close">
+                 Default="yes" Text="!(loc.MmlUiButtonClose)">
           <Publish Event="EndDialog" Value="Return"/>
         </Control>
       </Dialog>

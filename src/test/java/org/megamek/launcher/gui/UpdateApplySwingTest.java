@@ -203,6 +203,8 @@ class UpdateApplySwingTest {
                     fixture.services.currentHome().defaultInstallationId());
             assertNotNull(waitFor(() -> find(frame, "installationCards")),
                     "clean success returns to the current Installations page");
+            assertNull(showingDialog(frame, WhatsNewDialog.TITLE),
+                    "What's new only opens when the player asks for it");
         } finally {
             fixture.services.releaseApply.countDown();
             dispose(frame);
@@ -367,14 +369,18 @@ class UpdateApplySwingTest {
                 OperationProgressDialog dialog = new OperationProgressDialog(frame,
                         "Preparing update", "applyUpdateProgressLog", () -> {});
                 dialog.setVisible(true);
+                assertEquals("Preparing update", dialog.getTitle());
                 dialog.setHeadingIfCurrent("Preparing update", "Applying verified update");
                 assertEquals("Applying verified update", dialog.getAccessibleContext().getAccessibleName());
+                assertEquals("Applying verified update", dialog.getTitle());
                 dialog.setHeading("Update failed — recovery may be required");
                 dialog.setHeadingIfCurrent("Preparing update", "Applying verified update");
                 assertEquals("Update failed — recovery may be required", dialog.getAccessibleContext().getAccessibleName());
+                assertEquals("Update failed — recovery may be required", dialog.getTitle());
                 dialog.showFailure(new IOException("simulated apply failure"));
                 dialog.setHeadingIfCurrent("Preparing update", "Applying verified update");
                 assertEquals("Update failed — recovery may be required", dialog.getAccessibleContext().getAccessibleName());
+                assertEquals("Update failed — recovery may be required", dialog.getTitle());
                 dialog.dispose();
                 return null;
             });
@@ -453,6 +459,8 @@ class UpdateApplySwingTest {
             assertNull(showingDialog(frame, "Update complete"));
             waitForReloadedCards(frame, cardsBeforeUpdate);
             assertNotNull(find(frame, "installationCards"));
+            assertNull(showingDialog(frame, WhatsNewDialog.TITLE),
+                    "the cleanup warning is not covered by What's new");
             click(warning, "Close");
         } finally {
             dispose(frame);

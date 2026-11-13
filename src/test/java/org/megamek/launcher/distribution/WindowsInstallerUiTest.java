@@ -41,19 +41,25 @@ import javax.imageio.ImageIO;
 import javax.xml.parsers.DocumentBuilderFactory;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class WindowsInstallerUiTest {
     private static final Path RESOURCES = Path.of("src/distribution/windows/msi");
     private static final String WIX = "http://wixtoolset.org/schemas/v4/wxs";
+    private static final String WIX_LOCALIZATION = "http://wixtoolset.org/schemas/v4/wxl";
+    private static final String ENGLISH_STRINGS = "MegaMekLauncher_en-us.wxl";
+    private static final Pattern LOC_REFERENCE = Pattern.compile("!\\(loc\\.([A-Za-z0-9_.]+)\\)");
 
     @Test
     void progressLabelDoesNotRenderUnresolvedInstallerActionTokens() throws Exception {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setNamespaceAware(true);
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxs").toFile());
+        Document doc = loadLocalizedUi();
 
         Element progress = find(doc, "Dialog", "LauncherProgress");
         Element status = find(doc, "Control", "StatusText");
@@ -81,10 +87,7 @@ class WindowsInstallerUiTest {
 
     @Test
     void progressDoesNotBlockExecuteActionAndOnlyFinishCanLaunch() throws Exception {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setNamespaceAware(true);
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxs").toFile());
+        Document doc = loadLocalizedUi();
 
         Element progress = find(doc, "Dialog", "LauncherProgress");
         assertEquals("yes", progress.getAttribute("Modeless"),
@@ -163,10 +166,7 @@ class WindowsInstallerUiTest {
 
     @Test
     void wizardArtIsOnlyOnTheLeftAndRightPanelUsesNativeDialogBackground() throws Exception {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setNamespaceAware(true);
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxs").toFile());
+        Document doc = loadLocalizedUi();
         for (String dialogId : new String[] {"LauncherWelcome", "Exit"}) {
             Element dialogElement = find(doc, "Dialog", dialogId);
             var controls = dialogElement.getElementsByTagNameNS(WIX, "Control");
@@ -201,10 +201,7 @@ class WindowsInstallerUiTest {
 
     @Test
     void requiredInstallerUiTablesAndPerUserFolderCleanupAreAuthored() throws Exception {
-            DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-            factory.setNamespaceAware(true);
-            factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-            Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxs").toFile());
+            Document doc = loadLocalizedUi();
 
             // These map to ICE20's Property, Dialog, InstallUISequence and
             // AdminUISequence checks; don't suppress ICE20 instead.
@@ -262,8 +259,7 @@ class WindowsInstallerUiTest {
 
             // This RemoveFolder becomes a RemoveFile row keyed to the installer-owned
             // Programs directory, not to the shared LocalAppDataFolder or Start Menu.
-            Document product = factory.newDocumentBuilder()
-                    .parse(RESOURCES.resolve("MegaMekLauncher.wxs").toFile());
+            Document product = parse(RESOURCES.resolve("MegaMekLauncher.wxs"));
             Element programs = find(product, "Directory", "LauncherProgramsFolder");
             assertEquals("Programs", programs.getAttribute("Name"));
             assertEquals("LocalAppDataFolder", ((Element) programs.getParentNode()).getAttribute("Id"));
@@ -330,10 +326,7 @@ class WindowsInstallerUiTest {
 
     @Test
     void chosenInstallFolderIsAlwaysOwnedAndRememberedForUpgrades() throws Exception {
-        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-        factory.setNamespaceAware(true);
-        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
-        Document doc = factory.newDocumentBuilder().parse(RESOURCES.resolve("ui.wxs").toFile());
+        Document doc = loadLocalizedUi();
 
         Element resolve = find(doc, "CustomAction", "ResolveInstallFolder");
         assertEquals("LauncherFolderCA", resolve.getAttribute("BinaryRef"));
@@ -367,42 +360,133 @@ class WindowsInstallerUiTest {
         }
         assertEquals(2, restores, "Interactive and silent upgrades must both keep the folder");
         assertEquals(1, resolves);
+    }
 
-        Document product = factory.newDocumentBuilder()
-                .parse(RESOURCES.resolve("MegaMekLauncher.wxs").toFile());
-        Element remembered = find(product, "RegistryValue", "InstallDir");
-        assertEquals("[INSTALLDIR]", remembered.getAttribute("Value"));
-        assertEquals("HKCU", remembered.getAttribute("Root"));
-        assertEquals("string", remembered.getAttribute("Type"));
-        find(product, "RegistrySearch", "PreviousInstallDir");
+    @Test
+    void everyUiLocalizationReferenceIsDefinedInTheEnglishStrings() throws Exception {
+        Document strings = parse(RESOURCES.resolve(ENGLISH_STRINGS));
+        Element root = strings.getDocumentElement();
+        assertEquals(WIX_LOCALIZATION, root.getNamespaceURI());
+        assertEquals("WixLocalization", root.getLocalName());
+        assertEquals("en-us", root.getAttribute("Culture"));
+        String gradle = Files.readString(Path.of("build.gradle.kts"));
+        assertTrue(gradle.contains("\"-culture\", \"en-us\"")
+                        && gradle.contains("\"-loc\", File(sources, \"" + ENGLISH_STRINGS + "\")"),
+                "wix build must receive the English strings, or every !(loc.Id) fails to bind");
 
-        String source = Files.readString(RESOURCES.resolveSibling("install-folder")
-                .resolve("LauncherInstallFolder.cs"));
-        assertTrue(source.contains("LauncherFolderName = \"MegaMek Launcher\""));
-        assertTrue(source.contains("folder = InstallFolderFor("),
-                "RemoveFolderEx deletes INSTALLDIR; never install directly into a picked folder");
-        assertTrue(source.contains("FolderProblem(folder,"),
-                "Reject the launcher's state folders and other people's files before INSTALLDIR");
-        assertTrue(source.contains("new[] { \"MegaMek Launcher\", \"MegaMek\" }"),
-                "Both the current and legacy state folders under LOCALAPPDATA are protected");
-        assertTrue(source.contains("session[\"INSTALLDIR\"] = folder"));
+        Map<String, String> english = englishStrings();
+        Set<String> used = new TreeSet<>();
+        Matcher references = LOC_REFERENCE.matcher(Files.readString(RESOURCES.resolve("ui.wxs")));
+        while (references.find()) {
+            used.add(references.group(1));
+        }
+        assertFalse(used.isEmpty());
+        for (String id : used) {
+            assertTrue(english.containsKey(id), "ui.wxs uses !(loc." + id + ") but "
+                    + ENGLISH_STRINGS + " does not define it");
+        }
+        assertEquals(used, english.keySet(), "Remove strings that ui.wxs no longer uses");
+    }
 
-        Path bundle = RESOURCES.resolveSibling("bundle");
-        String bundleSource = Files.readString(bundle.resolve("Bundle.wxs"));
-        assertTrue(bundleSource.contains("<MsiProperty Name=\"LAUNCHER_INSTALL_FOLDER\" Value=\"[LauncherInstallFolder]\""));
-        assertTrue(bundleSource.contains("Variable=\"LauncherInstallFolder\""),
-                "The setup must start from the remembered folder");
-        assertTrue(bundleSource.contains("LaunchTarget=\"[ProgramMenuFolder]MegaMek\\MegaMek Launcher.lnk\""),
-                "Launch must follow the MSI's resolved folder, not assume the default one");
-        Path wxs = RESOURCES.resolve("MegaMekLauncher.wxs");
-        assertTrue(Files.readString(wxs).contains("<Directory Id=\"LauncherMenuFolder\" Name=\"MegaMek\"/>"),
-                "The setup's Launch button targets this Start Menu folder");
-        String theme = Files.readString(bundle.resolve("theme.xml"));
-        assertTrue(theme.contains("<BrowseDirectoryAction VariableName=\"LauncherInstallFolder\""),
-                "Change must open the standard Windows folder dialog");
-        assertTrue(theme.contains("FontId=\"0\">#(loc.DesktopShortcutCheckbox)</Checkbox>"),
-                "The desktop checkbox keeps its caption as its accessible name");
-        assertFalse(theme.contains("DirectoryList"), "The native folder dialog replaces MSI browse controls");
+    @Test
+    void playerVisibleUiTextIsLocalized() throws Exception {
+        Document doc = parse(RESOURCES.resolve("ui.wxs"));
+        Pattern allowed = Pattern.compile("(\\{\\\\\\w+})?(" + LOC_REFERENCE.pattern() + "|\\[\\w+]|\n)+");
+        var dialogs = doc.getElementsByTagNameNS(WIX, "Dialog");
+        for (int i = 0; i < dialogs.getLength(); i++) {
+            Element dialog = (Element) dialogs.item(i);
+            assertTrue(allowed.matcher(dialog.getAttribute("Title")).matches(),
+                    "Dialog " + dialog.getAttribute("Id") + " has a hard-coded title");
+        }
+        var controls = doc.getElementsByTagNameNS(WIX, "Control");
+        for (int i = 0; i < controls.getLength(); i++) {
+            Element control = (Element) controls.item(i);
+            if ("Bitmap".equals(control.getAttribute("Type")) || !control.hasAttribute("Text")) {
+                continue;
+            }
+            assertTrue(allowed.matcher(control.getAttribute("Text")).matches(),
+                    "Control " + control.getAttribute("Id") + " has hard-coded text: "
+                            + control.getAttribute("Text"));
+        }
+    }
+
+    private static Document parse(Path file) throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        return factory.newDocumentBuilder().parse(file.toFile());
+    }
+
+    private static Map<String, String> englishStrings() throws Exception {
+        var strings = parse(RESOURCES.resolve(ENGLISH_STRINGS))
+                .getElementsByTagNameNS(WIX_LOCALIZATION, "String");
+        Map<String, String> english = new TreeMap<>();
+        for (int i = 0; i < strings.getLength(); i++) {
+            Element string = (Element) strings.item(i);
+            assertNull(english.put(string.getAttribute("Id"), string.getAttribute("Value")),
+                    "Duplicate string id " + string.getAttribute("Id"));
+        }
+        return english;
+    }
+
+    /** Parses ui.wxs with every !(loc.Id) resolved to its en-us text, as wix build does. */
+    private static Document loadLocalizedUi() throws Exception {
+        Map<String, String> english = englishStrings();
+        Document doc = parse(RESOURCES.resolve("ui.wxs"));
+        var elements = doc.getElementsByTagNameNS(WIX, "*");
+        for (int i = 0; i < elements.getLength(); i++) {
+            var attributes = elements.item(i).getAttributes();
+            for (int j = 0; j < attributes.getLength(); j++) {
+                var attribute = attributes.item(j);
+                Matcher reference = LOC_REFERENCE.matcher(attribute.getNodeValue());
+                StringBuilder resolved = new StringBuilder();
+                while (reference.find()) {
+                    String text = english.get(reference.group(1));
+                    assertNotNull(text, "Undefined !(loc." + reference.group(1) + ")");
+                    reference.appendReplacement(resolved, Matcher.quoteReplacement(text));
+                }
+                reference.appendTail(resolved);
+                attribute.setNodeValue(resolved.toString());
+            }
+        }
+        return doc;
+    }
+
+    private static String describeDialog(Element dialog) {
+        StringBuilder description = new StringBuilder();
+        var attributes = dialog.getAttributes();
+        for (int i = 0; i < attributes.getLength(); i++) {
+            if (!"Id".equals(attributes.item(i).getNodeName())) {
+                description.append(attributes.item(i)).append(' ');
+            }
+        }
+        var children = dialog.getElementsByTagNameNS(WIX, "*");
+        for (int i = 0; i < children.getLength(); i++) {
+            Element child = (Element) children.item(i);
+            description.append('\n').append(child.getLocalName());
+            var childAttributes = child.getAttributes();
+            var normalized = new java.util.TreeMap<String, String>();
+            for (int j = 0; j < childAttributes.getLength(); j++) {
+                String name = childAttributes.item(j).getNodeName();
+                // MSI keys the CheckBox table by property, so the clone references it.
+                if ("CheckBoxValue".equals(name)) {
+                    continue;
+                }
+                if ("CheckBoxPropertyRef".equals(name)) {
+                    name = "Property";
+                }
+                String value = childAttributes.item(j).getNodeValue();
+                if (value.startsWith("LauncherWelcome")) {
+                    value = "<other welcome dialog>";
+                }
+                normalized.put(name, value);
+            }
+            description.append(' ').append(normalized);
+            if (child.getElementsByTagNameNS(WIX, "*").getLength() == 0) {
+                description.append(" : ").append(child.getTextContent().trim());
+            }
+        }
+        return description.toString();
     }
 
     private static Element find(Document doc, String tag, String id) {

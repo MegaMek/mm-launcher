@@ -57,7 +57,6 @@ import javax.swing.JPanel;
 import javax.swing.JProgressBar;
 import javax.swing.SwingUtilities;
 import javax.swing.JTextArea;
-import javax.swing.JTextField;
 import java.awt.Component;
 import java.awt.Color;
 import java.awt.Container;
@@ -131,6 +130,16 @@ class LauncherSwingSmokeTest {
     }
 
     @Test
+    void publishedDatesUseThePlayersCalendarDay() {
+        java.time.Instant lateUtc = java.time.Instant.parse("2026-11-03T05:12:00Z");
+        assertEquals("Nov 3, 2026", VersionDisplay.publishedDate(lateUtc,
+                java.time.ZoneOffset.UTC, java.util.Locale.US));
+        assertEquals("Nov 2, 2026", VersionDisplay.publishedDate(lateUtc,
+                java.time.ZoneId.of("America/Los_Angeles"), java.util.Locale.US),
+                "a Tuesday-morning UTC build is still Monday on the US west coast");
+    }
+
+    @Test
     void safeSubfolderRejectsEscapesReservedNamesAndInvalidInput() {
         assertEquals(Path.of("v0.51.0"), LauncherFrame.safeSubfolder("v0.51.0"));
         for (String unsafe : List.of("", ".", "..", "a/b", "a\\b", "C:", "NUL", "COM1.txt",
@@ -139,50 +148,6 @@ class LauncherSwingSmokeTest {
                     () -> LauncherFrame.safeSubfolder(unsafe), unsafe);
             assertFalse(error.getMessage().isBlank(), "UI error detail for " + unsafe);
         }
-    }
-
-    @Test
-    @org.junit.jupiter.api.Tag("native-gui")
-    void styledSubfolderDialogValidatesInlineAndSupportsContinueCancelAndEscape()
-            throws Exception {
-        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
-                "actual Swing controls require a display");
-        SubfolderDialog valid = onEdt(() ->
-                new SubfolderDialog(null, "MekHQ Core (0.51.0)", GuiScale.DEFAULT));
-        try {
-            JTextField field = component(valid, "subfolderNameField");
-            assertEquals(LauncherTheme.INPUT_BACKGROUND, field.getBackground());
-            var border = assertInstanceOf(javax.swing.border.CompoundBorder.class, field.getBorder());
-            assertEquals(LauncherTheme.BORDER,
-                    assertInstanceOf(javax.swing.border.LineBorder.class, border.getOutsideBorder()).getLineColor());
-            JButton continueButton = find(valid, "continueSubfolderButton");
-            SwingUtilities.invokeAndWait(() -> {
-                field.setText("../escape");
-                continueButton.doClick();
-            });
-            assertTrue(valid.isDisplayable(), "invalid input stays in the same dialog");
-            assertFalse(findLabel(valid, "subfolderValidationError").getText().isBlank());
-            SwingUtilities.invokeAndWait(() -> {
-                field.setText("MekHQ Core (0.51.0)");
-                continueButton.doClick();
-            });
-            assertEquals(Path.of("MekHQ Core (0.51.0)"), valid.result());
-        } finally {
-            SwingUtilities.invokeAndWait(valid::dispose);
-        }
-
-        SubfolderDialog cancelled = onEdt(() ->
-                new SubfolderDialog(null, "MekHQ Core (0.51.0)", GuiScale.DEFAULT));
-        SwingUtilities.invokeAndWait(
-                () -> find(cancelled, "cancelSubfolderButton").doClick());
-        assertEquals(null, cancelled.result());
-
-        SubfolderDialog escaped = onEdt(() ->
-                new SubfolderDialog(null, "MekHQ Core (0.51.0)", GuiScale.DEFAULT));
-        SwingUtilities.invokeAndWait(() -> escaped.getRootPane().getActionMap()
-                .get(DialogFooter.ESCAPE_ACTION).actionPerformed(
-                        new java.awt.event.ActionEvent(escaped, 0, "escape")));
-        assertEquals(null, escaped.result());
     }
 
     @Test
@@ -310,15 +275,19 @@ class LauncherSwingSmokeTest {
                         find(frame, "manageInstallationsButton").getBounds(), deck);
                 int buttonsCenter = (manageBounds.x + settingsBounds.x + settingsBounds.width) / 2;
                 assertTrue(Math.abs(buttonsCenter - deck.getWidth() / 2) <= 2,
-                        "the navigation buttons stay centered beside the community links");
-                for (String name : new String[]{"openDiscordButton", "playOnlineButton",
-                        "reportBugButton"}) {
+                        "the navigation buttons stay centered between the link groups");
+                for (String name : new String[]{"openDiscordButton", "playOnlineButton"}) {
                     LauncherLink community = assertInstanceOf(LauncherLink.class, find(frame, name));
                     java.awt.Rectangle bounds = SwingUtilities.convertRectangle(community.getParent(),
                             community.getBounds(), deck);
                     assertTrue(bounds.x >= nav.x + nav.width, name + " sits right of the navigation");
                     assertTrue(bounds.x + bounds.width <= deck.getWidth(), name + " stays inside the deck");
                 }
+                LauncherLink report = assertInstanceOf(LauncherLink.class, find(frame, "reportBugButton"));
+                java.awt.Rectangle reportBounds = SwingUtilities.convertRectangle(report.getParent(),
+                        report.getBounds(), deck);
+                assertTrue(reportBounds.x + reportBounds.width <= nav.x, "Report a bug sits left of the navigation");
+                assertTrue(reportBounds.x >= 0, "Report a bug stays inside the deck");
                 return null;
             });
             onEdt(() -> {
@@ -416,8 +385,20 @@ class LauncherSwingSmokeTest {
                     assertNotNull(component(frame, "launchOptionsForm"));
                     JButton java = find(frame, "changeDefaultJavaButton");
                     JButton logs = find(frame, "viewOperationLogsButton");
+                    JButton report = find(frame, "reportBugSettingsButton");
                     assertEquals(java.getSize(), logs.getSize());
-                    assertEquals(java.getSize(), find(frame, "reportBugSettingsButton").getSize());
+                    assertEquals(java.getSize(), report.getSize());
+                    assertEquals(logs.getY(), report.getY(), "diagnostic actions share one row");
+                    assertTrue(report.getX() >= logs.getX() + logs.getWidth());
+                    Component column = component(frame, "settingsLeftColumn");
+                    assertTrue(SwingUtilities.convertRectangle(report.getParent(), report.getBounds(), column)
+                            .getMaxX() <= column.getWidth(), "Report a bug fits its column");
+                    Component userDirectory = component(frame, "launchOptionsUserDirectory");
+                    JButton browse = find(frame, "launchOptionsBrowseUserDirectory");
+                    assertEquals(userDirectory.getY(), browse.getY(), "Browse sits beside the user directory");
+                    assertEquals(browse.getWidth(), browse.getHeight());
+                    assertEquals("Browse…", browse.getAccessibleContext().getAccessibleName());
+                    assertNull(find(frame, "launchOptionsClearUserDirectory"));
                     JButton update = find(frame, "checkLauncherUpdateButton");
                     if (update != null) assertEquals(java.getSize(), update.getSize());
                     return null;

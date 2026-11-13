@@ -37,6 +37,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.megamek.launcher.launch.ApplicationLauncher;
 import org.megamek.launcher.launch.JavaRuntime;
+import org.megamek.launcher.launch.LaunchOptions;
 import org.megamek.launcher.launch.ProcessRunner;
 import org.megamek.launcher.launch.RootCoordinator;
 import org.megamek.launcher.onboarding.InstallationInspector;
@@ -330,6 +331,8 @@ class LauncherServicesTest {
         assertThrows(UninstallService.MissingInstallationException.class,
                 () -> services.selectPreferred("megamek", deleted));
         assertThrows(UninstallService.MissingInstallationException.class,
+                () -> services.selectPreferredForAll(deleted));
+        assertThrows(UninstallService.MissingInstallationException.class,
                 () -> services.planPreferencesReset(deleted));
         assertThrows(UninstallService.MissingInstallationException.class,
                 () -> services.adoptionSuggestion(deleted));
@@ -445,6 +448,26 @@ class LauncherServicesTest {
                 () -> services.launch(record, "megamek"))
                 .getMessage().contains("no longer registered"),
                 "a removed captured record cannot fall back to another copy");
+    }
+
+    @Test
+    void previewCanUseUnsavedOverridesWithoutSavingThem() throws Exception {
+        Path registry = temp.resolve("unsaved-options.json");
+        LauncherServices services = services(registry, new RecordingRunner());
+        InstallationRecord record = services.register("Options", suite("unsaved-options"));
+        services.saveInstallationLaunchOptions(record,
+                new LaunchOptions(3000, null, null, null, null, null));
+
+        assertTrue(services.preview(record, "megamek").contains("-Xmx3000m"));
+        List<String> unsaved = services.preview(record, "megamek",
+                new LaunchOptions(5000, null, null, null, null, null));
+        assertTrue(unsaved.contains("-Xmx5000m"), unsaved.toString());
+        assertFalse(unsaved.contains("-Xmx3000m"));
+        assertTrue(services.preview(record, "megamek", LaunchOptions.INHERIT)
+                .stream().noneMatch(argument -> argument.equals("-Xmx3000m")),
+                "inheriting everything drops the saved override");
+        assertEquals(3000, services.launchOptions().installation(record.id()).megamekHeapMb(),
+                "previewing never saves");
     }
 
     @Test

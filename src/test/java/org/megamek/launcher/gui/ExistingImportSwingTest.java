@@ -211,7 +211,7 @@ class ExistingImportSwingTest {
             JLabel heading = (JLabel) find(dialog, "adoptionResultHeading");
             JLabel message = (JLabel) find(dialog, "adoptionResultMessage");
             assertEquals("Updates can't be enabled", dialog.getAccessibleContext().getAccessibleName());
-            assertEquals(LauncherTheme.DIALOG_TITLE, dialog.getTitle(), "the heading is not repeated");
+            assertEquals("Updates can't be enabled", dialog.getTitle());
             assertEquals("Updates can't be enabled", heading.getText());
             assertEquals(FirstLaunchPanel.ACCENT, heading.getForeground());
             assertEquals(java.awt.Font.PLAIN, message.getFont().getStyle());

@@ -145,9 +145,14 @@ class HomeLaunchSplitButtonTest {
             invokeKeyBinding(split.primaryButton(), KeyStroke.getKeyStroke(
                     KeyEvent.VK_DOWN, InputEvent.ALT_DOWN_MASK));
             assertTrue(split.popupMenu().isVisible());
-            assertEquals("Other installations",
+            assertEquals("Installations",
                     ((javax.swing.JLabel) split.popupMenu().getComponent(0)).getAccessibleContext()
                             .getAccessibleName());
+            assertSame(split.defaultItem(), split.popupMenu().getComponent(1),
+                    "the default copy leads the list, so it never holds a single choice");
+            assertEquals("MegaMek · Core · 1.0.0", split.defaultItem().getText());
+            assertEquals("MegaMek · Core · 1.0.0 · Default",
+                    split.defaultItem().getAccessibleContext().getAccessibleName());
             assertFalse(split.popupMenu().isLightWeightPopupEnabled(),
                     "home content cannot paint over the alternatives");
             assertTrue(split.popupMenu().getWidth() >= split.getWidth(),
@@ -198,9 +203,12 @@ class HomeLaunchSplitButtonTest {
             JMenuItem available = split.menuItems().get(1);
             assertFalse(split.primaryButton().isEnabled());
             assertTrue(split.optionsButton().isEnabled());
+            assertFalse(split.defaultItem().isEnabled(),
+                    "a missing default copy is listed but cannot be launched");
             assertFalse(missing.isEnabled());
             assertTrue(available.isEnabled());
             split.primaryButton().doClick();
+            split.defaultItem().doClick();
             missing.doClick();
             assertEquals(null, launched.get());
             available.doClick();
@@ -214,6 +222,11 @@ class HomeLaunchSplitButtonTest {
             assertFalse(missing.isEnabled());
             assertTrue(available.isEnabled());
             split.setPrimaryAvailable(true);
+            assertTrue(split.defaultItem().isEnabled());
+            split.defaultItem().doClick();
+            assertEquals("preferred", launched.get(),
+                    "the default row launches the same copy as the main segment");
+            launched.set(null);
             split.primaryButton().doClick();
             assertEquals("preferred", launched.get());
             split.disposePopup();

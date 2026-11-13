@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
+
+  This file is part of MegaMek Launcher.
+
+  MegaMek Launcher is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License (GPL),
+  version 3 or (at your option) any later version,
+  as published by the Free Software Foundation.
+
+  MegaMek Launcher is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty
+  of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+  See the GNU General Public License for more details.
+
+  A copy of the GPL should have been included with this project;
+  if not, see <https://www.gnu.org/licenses/>.
+
+  NOTICE: The MegaMek organization is a non-profit group of volunteers
+  creating free software for the BattleTech community.
+
+  MechWarrior, BattleMech, `Mech and AeroTech are registered trademarks
+  of The Topps Company, Inc. All Rights Reserved.
+
+  Catalyst Game Labs and the Catalyst Game Labs logo are trademarks of
+  InMediaRes Productions, LLC.
+
+  MechWarrior Copyright Microsoft Corporation. MegaMek was created under
+  Microsoft's "Game Content Usage Rules"
+  <https://www.xbox.com/en-US/developers/rules> and it is not endorsed by or
+  affiliated with Microsoft.
+-->
+
+<!-- English (base) strings for the MSI's own dialogs in ui.wxs, referenced there as
+     !(loc.Id) and passed to "wix build" with -loc. The setup .exe shows its own
+     screens from ../bundle/theme.wxl; these dialogs appear when the MSI runs on its own.
+
+     To add a translation: copy this file to MegaMekLauncher_<culture>.wxl (for
+     example MegaMekLauncher_de-de.wxl), set Culture (and Codepage, e.g. 1251 for
+     ru-ru) on WixLocalization, and translate only each Value. Keep every Id
+     and bracketed [Property] reference. Shipping it also needs a build change, since
+     the build makes one English MSI (one MSI per language or a language transform). -->
+<WixLocalization Culture="en-us" Codepage="1252"
+                 xmlns="http://wixtoolset.org/schemas/v4/wxl">
+  <!-- Shared buttons -->
+  <String Id="MmlUiButtonAbort" Value="Abort"/>
+  <String Id="MmlUiButtonCancel" Value="Cancel"/>
+  <String Id="MmlUiButtonIgnore" Value="Ignore"/>
+  <String Id="MmlUiButtonNo" Value="No"/>
+  <String Id="MmlUiButtonOk" Value="OK"/>
+  <String Id="MmlUiButtonRetry" Value="Retry"/>
+  <String Id="MmlUiButtonYes" Value="Yes"/>
+  <String Id="MmlUiButtonCancelSetup" Value="Cancel setup"/>
+  <String Id="MmlUiButtonInstall" Value="Install"/>
+  <String Id="MmlUiButtonFinish" Value="Finish"/>
+  <String Id="MmlUiButtonClose" Value="Close"/>
+
+  <!-- Window title of the welcome, error, cancelled and failed dialogs -->
+  <String Id="MmlUiSetupTitle" Value="MegaMek Launcher Setup"/>
+
+  <!-- Files in use -->
+  <String Id="MmlUiFilesInUseTitle" Value="Files in Use"/>
+  <String Id="MmlUiFilesInUseMessage" Value="Close these applications to continue installing MegaMek Launcher:"/>
+
+  <!-- Welcome -->
+  <String Id="MmlUiWelcomeDetail" Value="Install MegaMek Launcher for this user in:"/>
+  <String Id="MmlUiWelcomeDesktopShortcut" Value="Create a desktop shortcut"/>
+
+  <!-- Progress: used as both the window title and the heading -->
+  <String Id="MmlUiProgressTitle" Value="Installing MegaMek Launcher"/>
+  <String Id="MmlUiProgressStatus" Value="Setting up MegaMek Launcher..."/>
+  <String Id="MmlUiProgressBar" Value="Progress"/>
+
+  <!-- Finished -->
+  <String Id="MmlUiExitTitle" Value="MegaMek Launcher Setup Complete"/>
+  <String Id="MmlUiExitInstalled" Value="MegaMek Launcher is installed."/>
+  <String Id="MmlUiExitLaunch" Value="Launch MegaMek Launcher"/>
+
+  <!-- Failed or cancelled -->
+  <String Id="MmlUiFatalErrorMessage" Value="Setup could not finish. No launcher was started."/>
+  <String Id="MmlUiUserExitMessage" Value="Setup was cancelled. No launcher was started."/>
+</WixLocalization>

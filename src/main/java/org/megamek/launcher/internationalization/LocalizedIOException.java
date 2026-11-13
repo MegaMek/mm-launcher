@@ -31,29 +31,30 @@
  * affiliated with Microsoft.
  */
 
-package org.megamek.launcher.design.host;
+package org.megamek.launcher.internationalization;
 
-import java.text.MessageFormat;
-import java.util.MissingResourceException;
-import java.util.ResourceBundle;
+import java.io.IOException;
+import java.util.Objects;
 
-/** The few strings the design system's own controls show, such as Close and Help. */
-public final class Messages {
-    private static final ResourceBundle BUNDLE =
-            ResourceBundle.getBundle("org.megamek.launcher.design.host.messages");
+/**
+ * An {@link IOException} whose message the player reads in their language. {@link #getMessage()} stays English for
+ * logs and diagnostics; {@link #getLocalizedMessage()} is the translated text the GUI shows.
+ */
+public class LocalizedIOException extends IOException {
+    private final transient LocalizedText text;
 
-    private Messages() {
+    public LocalizedIOException(LocalizedText text) {
+        super(Objects.requireNonNull(text).english());
+        this.text = text;
     }
 
-    public static String getString(String key) {
-        try {
-            return BUNDLE.getString(key);
-        } catch (MissingResourceException missing) {
-            return '!' + key + '!';
-        }
+    public LocalizedIOException(LocalizedText text, Throwable cause) {
+        super(Objects.requireNonNull(text).english(), cause);
+        this.text = text;
     }
 
-    public static String getString(String key, Object... args) {
-        return MessageFormat.format(getString(key), args);
+    @Override
+    public String getLocalizedMessage() {
+        return text == null ? getMessage() : text.text();
     }
 }

@@ -39,6 +39,8 @@ import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.megamek.launcher.internationalization.LocalizedText;
+
 public final class OperationContext {
     private final UUID id;
     private final Instant startedAt;
@@ -118,8 +120,19 @@ public final class OperationContext {
         progress(phase, -1, -1, ProgressUnit.NONE, detail);
     }
 
+    public void phase(OperationPhase phase, LocalizedText detail)
+            throws OperationCancelledException {
+        progress(phase, -1, -1, ProgressUnit.NONE, detail);
+    }
+
     public void progress(OperationPhase phase, long completed, long total, ProgressUnit unit,
                          String detail) throws OperationCancelledException {
+        progress(phase, completed, total, unit, LocalizedText.literal(detail));
+    }
+
+    /** Reports progress; the log gets the detail in English and the progress dialog in the player's language. */
+    public void progress(OperationPhase phase, long completed, long total, ProgressUnit unit,
+                         LocalizedText detail) throws OperationCancelledException {
         checkpoint();
         OperationProgress prior = latest.get();
         if (prior != null && phase.ordinal() < prior.phase().ordinal()) {
@@ -141,6 +154,10 @@ public final class OperationContext {
     }
 
     public void cleanupPhase(String detail) {
+        cleanupPhase(LocalizedText.literal(detail));
+    }
+
+    public void cleanupPhase(LocalizedText detail) {
         OperationProgress prior = latest.get();
         if (prior != null && prior.phase().ordinal() > OperationPhase.CLEANUP.ordinal()) return;
         state.compareAndSet(State.CANCELLABLE, State.CLEANING);
@@ -214,7 +231,7 @@ public final class OperationContext {
         }
         long completed = outcome == OperationOutcome.SUCCEEDED ? 1 : -1;
         long total = outcome == OperationOutcome.SUCCEEDED ? 1 : -1;
-        emit(OperationPhase.FINAL, completed, total, ProgressUnit.NONE, detail, outcome);
+        emit(OperationPhase.FINAL, completed, total, ProgressUnit.NONE, LocalizedText.literal(detail), outcome);
     }
 
     public boolean cancellationRequested() {
@@ -258,12 +275,18 @@ public final class OperationContext {
         OperationProgress prior = latest.get();
         if (prior != null) {
             emit(prior.phase(), prior.completed(), prior.total(), prior.unit(), prior.detail(),
-                    prior.outcome());
+                    prior.displayDetail(), prior.outcome());
         }
     }
 
     private void emit(OperationPhase phase, long completed, long total, ProgressUnit unit,
-                      String detail, OperationOutcome outcome) {
+                      LocalizedText detail, OperationOutcome outcome) {
+        emit(phase, completed, total, unit, detail == null ? null : detail.english(),
+                detail == null ? null : detail.text(), outcome);
+    }
+
+    private void emit(OperationPhase phase, long completed, long total, ProgressUnit unit,
+                      String detail, String displayDetail, OperationOutcome outcome) {
         State current = state.get();
         boolean allowed = cancellationSupported && current == State.CANCELLABLE;
         String reason = allowed ? null : switch (current) {
@@ -276,7 +299,8 @@ public final class OperationContext {
         };
         OperationProgress event = new OperationProgress(id, Instant.now(), type, phase,
                 completed, total, Objects.requireNonNull(unit),
-                detail == null ? "" : detail, outcome, allowed, reason);
+                detail == null ? "" : detail, outcome, allowed, reason,
+                displayDetail == null ? "" : displayDetail);
         latest.set(event);
         listener.onProgress(event);
     }

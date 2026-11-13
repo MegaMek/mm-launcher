@@ -33,27 +33,38 @@
 
 package org.megamek.launcher.operation;
 
+import org.megamek.launcher.internationalization.I18n;
+
 public enum OperationPhase {
-    METADATA("Reading metadata"),
-    DOWNLOAD("Downloading package"),
-    VERIFY("Verifying package"),
-    EXTRACT("Extracting application files"),
-    PLAN("Planning changes"),
-    AWAIT_CONSENT("Awaiting confirmation"),
-    PREPARE_INSTALL("Preparing installation"),
-    APPLY("Applying update"),
-    UNINSTALL("Removing official files"),
-    RECOVER("Recovering update"),
-    CLEANUP("Cleaning temporary files"),
-    FINAL("Finished");
+    METADATA,
+    DOWNLOAD,
+    VERIFY,
+    EXTRACT,
+    PLAN,
+    AWAIT_CONSENT,
+    PREPARE_INSTALL,
+    APPLY,
+    UNINSTALL,
+    RECOVER,
+    CLEANUP,
+    FINAL;
 
-    private final String displayName;
-
-    OperationPhase(String displayName) {
-        this.displayName = displayName;
-    }
+    private static final String BUNDLE = "org.megamek.launcher.services";
 
     public String displayName() {
-        return displayName;
+        return switch (this) {
+            case METADATA -> I18n.getTextAt(BUNDLE, "OperationPhase.metadata");
+            case DOWNLOAD -> I18n.getTextAt(BUNDLE, "OperationPhase.download");
+            case VERIFY -> I18n.getTextAt(BUNDLE, "OperationPhase.verify");
+            case EXTRACT -> I18n.getTextAt(BUNDLE, "OperationPhase.extract");
+            case PLAN -> I18n.getTextAt(BUNDLE, "OperationPhase.plan");
+            case AWAIT_CONSENT -> I18n.getTextAt(BUNDLE, "OperationPhase.awaitConsent");
+            case PREPARE_INSTALL -> I18n.getTextAt(BUNDLE, "OperationPhase.prepareInstall");
+            case APPLY -> I18n.getTextAt(BUNDLE, "OperationPhase.apply");
+            case UNINSTALL -> I18n.getTextAt(BUNDLE, "OperationPhase.uninstall");
+            case RECOVER -> I18n.getTextAt(BUNDLE, "OperationPhase.recover");
+            case CLEANUP -> I18n.getTextAt(BUNDLE, "OperationPhase.cleanup");
+            case FINAL -> I18n.getTextAt(BUNDLE, "OperationPhase.finalPhase");
+        };
     }
 }

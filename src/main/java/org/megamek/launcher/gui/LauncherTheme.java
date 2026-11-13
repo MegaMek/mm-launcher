@@ -35,7 +35,6 @@ package org.megamek.launcher.gui;
 
 import org.megamek.launcher.design.DesignTokens;
 
-import javax.accessibility.AccessibleContext;
 import javax.swing.BorderFactory;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
@@ -48,7 +47,6 @@ import java.awt.BasicStroke;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Container;
-import java.awt.Dialog;
 import java.awt.Font;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
@@ -95,20 +93,6 @@ final class LauncherTheme {
     static final int LARGE_CONTROL_HEIGHT = tokenSize("control.lg");
 
     private LauncherTheme() {
-    }
-
-    /** What every launcher dialog shows in its window title bar. */
-    static final String DIALOG_TITLE = "MegaMek Launcher";
-
-    /**
-     * Puts {@link #DIALOG_TITLE} in {@code dialog}'s title bar, so its specific title appears only once,
-     * as the heading inside it. The specific title stays the dialog's accessible name.
-     */
-    static void useLauncherTitle(Dialog dialog) {
-        AccessibleContext context = dialog.getAccessibleContext();
-        // An unset accessible name falls back to the title; pin it before the title changes.
-        context.setAccessibleName(context.getAccessibleName());
-        dialog.setTitle(DIALOG_TITLE);
     }
 
     private static int tokenSize(String key) {

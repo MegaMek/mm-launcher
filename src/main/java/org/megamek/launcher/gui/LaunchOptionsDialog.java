@@ -32,6 +32,7 @@
  */
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.launch.LaunchOptions;
 
 import javax.swing.BorderFactory;
@@ -43,27 +44,30 @@ import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
 import javax.swing.JScrollPane;
+import javax.swing.LayoutFocusTraversalPolicy;
 import javax.swing.WindowConstants;
 import java.awt.BorderLayout;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.Insets;
 import java.awt.Rectangle;
 import java.awt.Toolkit;
+import java.awt.Window;
 import java.util.Objects;
 import java.util.function.Consumer;
 
 /** Edits one installation's {@link LaunchOptions} overrides in a {@link LaunchOptionsForm}. */
 final class LaunchOptionsDialog {
+    private static final String BUNDLE = "org.megamek.launcher.gui.dialogs";
     private final JDialog dialog;
     private final LaunchOptionsForm form;
     private final JLabel message = new JLabel(" ");
 
     LaunchOptionsDialog(JFrame owner, GuiScale scale, String title, String heading, String explanation,
                         LaunchOptions inherited, LaunchOptions current, String inheritLabel,
-                        Consumer<LaunchOptions> onSave) {
+                        Consumer<LaunchOptions> onSave, Consumer<LaunchOptions> onCopyCommands) {
         Objects.requireNonNull(scale, "scale");
         dialog = new JDialog(owner, title, false);
-        LauncherTheme.useLauncherTitle(dialog);
         dialog.setName("launchOptionsDialog");
         dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
 
@@ -76,14 +80,26 @@ final class LaunchOptionsDialog {
         JLabel headingLabel = new JLabel(heading);
         headingLabel.setForeground(FirstLaunchPanel.ACCENT);
         headingLabel.setFont(scale.font(headingLabel.getFont(), "headline"));
-        top.add(headingLabel);
+        // Resetting edits the fields and still needs Save, so it sits with the form rather than the footer.
+        JButton restore = new LauncherLink(I18n.getTextAt(BUNDLE, "LaunchOptionsDialog.resetAll"),
+                "restoreLaunchOptionsDefaultsButton", scale);
+        restore.getAccessibleContext().setAccessibleDescription(
+                I18n.getTextAt(BUNDLE, "LaunchOptionsDialog.resetAllDescription"));
+        JPanel headingRow = new JPanel(new BorderLayout(scale.space("lg"), 0));
+        headingRow.setOpaque(false);
+        headingRow.setAlignmentX(JPanel.LEFT_ALIGNMENT);
+        headingRow.add(headingLabel, BorderLayout.CENTER);
+        headingRow.add(restore, BorderLayout.EAST);
+        top.add(headingRow);
         top.add(Box.createVerticalStrut(scale.space("xs")));
         JLabel explanationLabel = new JLabel(explanation);
         explanationLabel.setForeground(FirstLaunchPanel.MUTED);
+        explanationLabel.setAlignmentX(JLabel.LEFT_ALIGNMENT);
         top.add(explanationLabel);
         body.add(top, BorderLayout.NORTH);
 
         form = new LaunchOptionsForm(scale, inherited, current, inheritLabel, () -> message.setText(" "));
+        restore.addActionListener(event -> form.restoreDefaults());
         form.setBorder(BorderFactory.createEmptyBorder(scale.space("md"), 0, 0, 0));
         JScrollPane scroll = LauncherTheme.scrollPane(form, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
                 JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
@@ -98,29 +114,44 @@ final class LaunchOptionsDialog {
         message.setName("launchOptionsMessage");
         message.setForeground(LauncherTheme.WARNING);
         south.add(message, BorderLayout.NORTH);
-        JButton cancel = new FirstLaunchButton("Cancel", "cancelLaunchOptionsButton", false, scale,
+        JButton cancel = new FirstLaunchButton(I18n.getTextAt(BUNDLE, "LaunchOptionsDialog.cancel"), "cancelLaunchOptionsButton", false, scale,
                 FirstLaunchButton.Size.SMALL);
         cancel.addActionListener(event -> dialog.dispose());
-        JButton save = new FirstLaunchButton("Save", "saveLaunchOptionsButton", true, scale,
+        JButton save = new FirstLaunchButton(I18n.getTextAt(BUNDLE, "LaunchOptionsDialog.save"), "saveLaunchOptionsButton", true, scale,
                 FirstLaunchButton.Size.SMALL);
         save.addActionListener(event -> {
-            LaunchOptions options;
-            try {
-                options = form.collect();
-            } catch (IllegalArgumentException invalid) {
-                message.setText(invalid.getMessage());
-                return;
-            }
+            LaunchOptions options = collect();
+            if (options == null) return;
             dialog.dispose();
             onSave.accept(options);
         });
-        DialogFooter footer = new DialogFooter(scale).primary(save).cancel(cancel);
+        DialogFooter footer = new DialogFooter(scale);
+        if (onCopyCommands != null) {
+            JButton copy = new LauncherLink(I18n.getTextAt(BUNDLE, "LaunchOptionsDialog.copyCommands"), "copyLaunchCommandsButton", scale);
+            copy.getAccessibleContext().setAccessibleDescription(
+                    I18n.getTextAt(BUNDLE, "LaunchOptionsDialog.copyCommandsDescription"));
+            copy.addActionListener(event -> {
+                LaunchOptions options = collect();
+                if (options != null) onCopyCommands.accept(options);
+            });
+            footer.tool(copy);
+        }
+        footer.primary(save).cancel(cancel);
         JPanel actions = footer.panel();
         actions.setName("launchOptionsActions");
         south.add(actions, BorderLayout.CENTER);
         body.add(south, BorderLayout.SOUTH);
 
         dialog.setContentPane(body);
+        // Start on the first option rather than the reset link above the form. This lives in the policy
+        // because a windowOpened focus request can lose to the window's own activation focus.
+        dialog.setFocusTraversalPolicy(new LayoutFocusTraversalPolicy() {
+            @Override
+            public Component getInitialComponent(Window window) {
+                Component first = getComponentAfter(dialog, restore);
+                return first != null ? first : super.getInitialComponent(window);
+            }
+        });
         footer.install(dialog, dialog::dispose);
         dialog.pack();
         Rectangle usable = (owner != null ? owner.getGraphicsConfiguration()
@@ -132,6 +163,22 @@ final class LaunchOptionsDialog {
                 Math.min(Math.max(scale.size("dialog.sm"), dialog.getHeight()), maxHeight));
         dialog.setMinimumSize(new Dimension(scale.size("dialog.md"), scale.size("dialog.sm")));
         dialog.setLocationRelativeTo(owner);
+    }
+
+    private LaunchOptions collect() {
+        try {
+            return form.collect();
+        } catch (IllegalArgumentException invalid) {
+            message.setForeground(LauncherTheme.WARNING);
+            message.setText(invalid.getMessage());
+            return null;
+        }
+    }
+
+    /** Shows a confirmation under the form until the next edit. */
+    void note(String text) {
+        message.setForeground(FirstLaunchPanel.MUTED);
+        message.setText(text);
     }
 
     JDialog dialog() {

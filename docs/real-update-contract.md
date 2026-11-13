@@ -2,8 +2,9 @@
 
 ## Exact-current-release repair
 
-The Installations **More → Repair installation…** action is separate from Update and never
-chooses a newer release. The GUI captures valid local managed provenance, displays the selected
+The Installations **More → Repair…** action is separate from Update and never chooses a newer
+release. It first hashes the official manifest offline (`InstallationRepairService`, skipping
+regenerable caches) and offers this download only when files are missing or changed. The GUI captures valid local managed provenance, displays the selected
 package size (or unknown size) in a plain-language confirmation, and requires consent before
 any package download or mutation. It rechecks the captured registry record, receipt and current
 state before invoking `RealUpdateService.repair` with `REPAIR_CONFIRM`. Imported/adopted copies,
@@ -132,7 +133,12 @@ any application mutation and are available for rollback until commit. Backups ne
 after a successful commit. Unowned extra ordinary JARs below `lib/` are never removed, and
 preview/CLI warn they may affect the game. Other unknown runtime files, linked/special runtime
 paths, runtime `SKIP`/case conflicts and unowned target collisions refuse the **whole Apply before
-application mutation**. User saves, preferences, campaigns and modified non-runtime data retain
+application mutation**. Regenerable caches (`UninstallService.REGENERABLE_CACHES`, currently
+`data/mekfiles/units.cache`) are never kept as user edits: a shipped cache that the application
+rebuilt is replaced or removed like modified runtime, and after commit (including a recovered
+commit) a cache the target does not ship is deleted best-effort. The previous version built it,
+and MegaMek only rescans unit files newer than its cache, so stale derived values would survive.
+User saves, preferences, campaigns and modified non-runtime data retain
 their existing preservation policy. After mutations, `InstallationInspector` must report exactly
 the verified target build/product layout before metadata can commit.
 

@@ -183,6 +183,13 @@ public final class OfficialSuiteChannelCatalog implements ChannelCatalog {
 
     record History(Target current, List<Target> entries, boolean mayHaveNextPage) {}
 
+    /** The channel of every published suite record, by release tag. */
+    public Map<String, FollowChannel> channelsByTag() throws IOException, InterruptedException {
+        Map<String, FollowChannel> channels = new HashMap<>();
+        for (Located located : records()) channels.put(located.record().tag(), located.record().channel());
+        return Map.copyOf(channels);
+    }
+
     public static boolean isSource(String source) {
         if (source == null || !source.startsWith(ASSET_SOURCE)) return false;
         String id = source.substring(ASSET_SOURCE.length());

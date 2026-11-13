@@ -120,6 +120,70 @@ public final class ReleaseCatalog {
     }
 
     /**
+     * Lists the release notes on one page of the repository's releases, newest first. Notes are
+     * display-only: they never take part in choosing, verifying or installing a release.
+     */
+    public List<Notes> notes(OfficialRepository repository, int page, int perPage)
+            throws IOException, InterruptedException {
+        if (repository == null) throw new IOException("official repository is required");
+        return notes(repository.slug(), page, perPage);
+    }
+
+    /**
+     * As {@link #notes(OfficialRepository, int, int)} for one of the {@link #NOTES_REPOSITORIES},
+     * which also covers the launcher's own releases.
+     */
+    public List<Notes> notes(String slug, int page, int perPage)
+            throws IOException, InterruptedException {
+        requireNotesRepository(slug);
+        if (page < 1 || page > 1000 || perPage < 1 || perPage > MAX_PAGE_SIZE) {
+            throw new IOException("page must be 1-1000 and per-page must be 1-" + MAX_PAGE_SIZE);
+        }
+        JsonNode root = requestJson(API.resolve("/repos/" + slug
+                + "/releases?per_page=" + perPage + "&page=" + page));
+        if (!root.isArray()) throw new IOException("GitHub release response must be an array");
+        List<Notes> notes = new ArrayList<>();
+        for (JsonNode node : root) notes.add(parseNotes(node));
+        return List.copyOf(notes);
+    }
+
+    /** The release notes of one exact tag; see {@link #notes(OfficialRepository, int, int)}. */
+    public Notes notes(OfficialRepository repository, String tag)
+            throws IOException, InterruptedException {
+        if (repository == null) throw new IOException("official repository is required");
+        return notes(repository.slug(), tag);
+    }
+
+    /** The release notes of one exact tag; see {@link #notes(String, int, int)}. */
+    public Notes notes(String slug, String tag) throws IOException, InterruptedException {
+        requireNotesRepository(slug);
+        requireTag(tag);
+        String encoded = URLEncoder.encode(tag, StandardCharsets.UTF_8).replace("+", "%20");
+        Notes notes = parseNotes(requestJson(API.resolve("/repos/" + slug + "/releases/tags/" + encoded)));
+        if (!tag.equals(notes.tag())) {
+            throw new IOException("GitHub returned a different tag than requested");
+        }
+        return notes;
+    }
+
+    /** The repositories whose release notes may be read: the suite and the launcher itself. */
+    public static final List<String> NOTES_REPOSITORIES = List.of(OfficialRepository.MEGAMEK.slug(),
+            OfficialRepository.LAB.slug(), OfficialRepository.MEKHQ.slug(), ReleaseNotes.LAUNCHER_SLUG);
+
+    private static void requireNotesRepository(String slug) throws IOException {
+        if (!NOTES_REPOSITORIES.contains(slug)) throw new IOException("unsupported release notes repository");
+    }
+
+    private static Notes parseNotes(JsonNode node) throws IOException {
+        if (!node.isObject()) throw new IOException("release entry must be an object");
+        String tag = requiredText(node, "tag_name");
+        requireTag(tag);
+        JsonNode body = node.get("body");
+        return new Notes(tag, requiredBoolean(node, "draft"), requiredBoolean(node, "prerelease"),
+                body != null && body.isTextual() ? body.textValue() : "");
+    }
+
+    /**
      * Returns the one fixed official API location used to revalidate an exact historical choice.
      * This is metadata identity only; package URLs remain separately constrained and verified.
      */
@@ -238,7 +302,19 @@ public final class ReleaseCatalog {
             assets.add(asset);
         }
         return new Release(tag, title, draft, prerelease, notesUri, List.copyOf(assets),
-                optionalId(node));
+                optionalId(node), optionalInstant(node, "published_at"));
+    }
+
+    /** A missing or malformed timestamp only hides the date; it never rejects the release. */
+    private static java.util.Optional<java.time.Instant> optionalInstant(JsonNode node,
+                                                                        String field) {
+        JsonNode value = node.get(field);
+        if (value == null || !value.isTextual()) return java.util.Optional.empty();
+        try {
+            return java.util.Optional.of(java.time.Instant.parse(value.textValue()));
+        } catch (java.time.format.DateTimeParseException malformed) {
+            return java.util.Optional.empty();
+        }
     }
 
     static void validateInitialAssetUri(OfficialRepository repository, String tag, Asset asset)
@@ -354,7 +430,7 @@ public final class ReleaseCatalog {
         List<Asset> assets = new ArrayList<>(release.assets());
         assets.set(index, replacement);
         return new Release(release.tag(), release.title(), release.draft(), release.prerelease(),
-                release.notesUrl(), List.copyOf(assets), release.id());
+                release.notesUrl(), List.copyOf(assets), release.id(), release.published());
     }
 
     public record Asset(String name, long size,
@@ -383,12 +459,28 @@ public final class ReleaseCatalog {
         }
     }
     public record Assessment(boolean eligible, Asset asset, String reason) {}
+    /**
+     * {@code published} is display-only: GitHub's publish time when present and well formed.
+     * It never takes part in quote or identity checks.
+     */
     public record Release(String tag, String title, boolean draft, boolean prerelease,
-                          URI notesUrl, List<Asset> assets, java.util.OptionalLong id) {
+                          URI notesUrl, List<Asset> assets, java.util.OptionalLong id,
+                          java.util.Optional<java.time.Instant> published) {
+        public Release {
+            published = published == null ? java.util.Optional.empty() : published;
+        }
+
+        public Release(String tag, String title, boolean draft, boolean prerelease,
+                       URI notesUrl, List<Asset> assets, java.util.OptionalLong id) {
+            this(tag, title, draft, prerelease, notesUrl, assets, id, java.util.Optional.empty());
+        }
+
         public Release(String tag, String title, boolean draft, boolean prerelease,
                        URI notesUrl, List<Asset> assets) {
             this(tag, title, draft, prerelease, notesUrl, assets, java.util.OptionalLong.empty());
         }
     }
     public record Page(int page, int perPage, List<Release> releases, boolean mayHaveNextPage) {}
+    /** A release's Markdown notes as published on GitHub; {@code body} is empty when it has none. */
+    public record Notes(String tag, boolean draft, boolean prerelease, String body) {}
 }

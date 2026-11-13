@@ -64,7 +64,7 @@ import javax.swing.SwingConstants;
 import javax.swing.SwingUtilities;
 
 import com.formdev.flatlaf.ui.FlatUIUtils;
-import org.megamek.launcher.design.host.Messages;
+import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.design.ColorMath;
 import org.megamek.launcher.design.DesignTokens;
 import org.megamek.launcher.design.host.FontHandler;
@@ -80,6 +80,7 @@ import org.megamek.launcher.design.host.UIUtil;
  * Badges, the counts and dots on buttons, are {@link TokenBadge}.
  */
 public final class TokenChips {
+    private static final String BUNDLE = "org.megamek.launcher.design.host.messages";
     /** Client property freezing a filter or tag chip in {@link #FROZEN_HOVER} or {@link #FROZEN_FOCUS}. */
     static final String FROZEN_STATE = "MegaMek.chip.frozenState";
     static final String FROZEN_HOVER = "hover";
@@ -122,7 +123,7 @@ public final class TokenChips {
 
         /** The tone's name for screen readers, or null for NEUTRAL. */
         String spokenName() {
-            return nameKey == null ? null : Messages.getString(nameKey);
+            return nameKey == null ? null : I18n.getTextAt(BUNDLE, nameKey);
         }
     }
 
@@ -503,7 +504,7 @@ public final class TokenChips {
             addMouseMotionListener(mouse);
             repaintOnFocus(this);
             // Registers the chip so that the ✕ alone shows its tooltip.
-            setToolTipText(Messages.getString("TokenChips.remove", text));
+            setToolTipText(I18n.getFormattedTextAt(BUNDLE, "TokenChips.remove", text));
         }
 
         public String text() {
@@ -637,7 +638,7 @@ public final class TokenChips {
             @Override
             public String getAccessibleName() {
                 String name = super.getAccessibleName();
-                return name != null ? name : Messages.getString("TokenChips.remove", text);
+                return name != null ? name : I18n.getFormattedTextAt(BUNDLE, "TokenChips.remove", text);
             }
 
             @Override
@@ -657,7 +658,7 @@ public final class TokenChips {
 
             @Override
             public String getAccessibleActionDescription(int index) {
-                return index == 0 ? Messages.getString("TokenChips.remove", text) : null;
+                return index == 0 ? I18n.getFormattedTextAt(BUNDLE, "TokenChips.remove", text) : null;
             }
 
             @Override

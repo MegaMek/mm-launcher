@@ -44,6 +44,9 @@ import org.megamek.launcher.channel.SelectedChannelReleaseCatalog;
 import org.megamek.launcher.diagnostics.BugReport;
 import org.megamek.launcher.diagnostics.OperationLogStore;
 import org.megamek.launcher.diagnostics.SanitizedErrors;
+import org.megamek.launcher.internationalization.I18n;
+import org.megamek.launcher.internationalization.LocalizedIOException;
+import org.megamek.launcher.internationalization.LocalizedText;
 import org.megamek.launcher.launch.ApplicationLauncher;
 import org.megamek.launcher.launch.JavaRuntime;
 import org.megamek.launcher.launch.LaunchObserver;
@@ -69,15 +72,18 @@ import org.megamek.launcher.release.FreshInstaller;
 import org.megamek.launcher.release.JavaReleaseTransport;
 import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
+import org.megamek.launcher.release.ReleaseNotes;
 import org.megamek.launcher.release.ReleaseTransport;
 import org.megamek.launcher.update.UpdatePreviewService;
 import org.megamek.launcher.update.OwnershipReceipt;
 import org.megamek.launcher.update.CurrentUpdateState;
 import org.megamek.launcher.update.ImportedCopyAdoptionService;
+import org.megamek.launcher.update.InstallationRepairService;
 import org.megamek.launcher.update.PreparedAdoption;
 import org.megamek.launcher.update.PreparedUpdate;
 import org.megamek.launcher.update.PreparedUpdateService;
 import org.megamek.launcher.update.RealUpdateService;
+import org.megamek.launcher.update.InstallationRelocationService;
 import org.megamek.launcher.update.UninstallService;
 import org.megamek.launcher.update.LauncherSelfUpdate;
 
@@ -98,6 +104,7 @@ import java.util.Map;
  * process tests can exercise it with fake transports/runners and disposable registries.
  */
 public class LauncherServices {
+    private static final String BUNDLE = "org.megamek.launcher.gui.dialogs";
     private final Path registry;
     private final RegistryStore store;
     private final InstallationInspector inspector;
@@ -113,6 +120,7 @@ public class LauncherServices {
     private final LauncherSettingsStore settings;
     private final LaunchOptionsStore launchOptions;
     private final UninstallService uninstalls;
+    private final InstallationRelocationService relocations;
     private final OpenLocationService locations;
 
     public LauncherServices(Path registry) {
@@ -168,6 +176,8 @@ public class LauncherServices {
         this.adoptions = new ImportedCopyAdoptionService(this.registry, transport,
                 updateCoordinator);
         this.uninstalls = new UninstallService(this.registry, updateCoordinator);
+        this.relocations = new InstallationRelocationService(this.registry, store,
+                updateCoordinator, inspector);
         this.locations = new OpenLocationService(this.registry);
     }
 
@@ -227,14 +237,15 @@ public class LauncherServices {
             return new LauncherUpdateCheck(null, notice, true);
         }
         if (report != null && !report.installed() && !report.recovered()) {
-            throw new IOException(notice);
+            throw new LocalizedIOException(report.text());
         }
         try {
             return new LauncherUpdateCheck(lookup.check(), notice, false);
         } catch (IOException | InterruptedException error) {
             if (notice != null) {
-                throw new IOException(notice + "\nLauncher release lookup also failed: "
-                        + error.getMessage(), error);
+                throw new LocalizedIOException(LocalizedText.concat(report.text(),
+                        LocalizedText.literal("\nLauncher release lookup also failed: " + error.getMessage())),
+                        error);
             }
             throw error;
         }
@@ -247,7 +258,7 @@ public class LauncherServices {
         if (!recovered && report.state() != LauncherSelfUpdate.ReportState.INSTALLED) return report.message();
         LoggedOperation operation = beginOperation(
                 recovered ? OperationType.RECOVERY : OperationType.LAUNCHER_UPDATE, ignored -> {}, List.of());
-        operation.context().phase(OperationPhase.METADATA, report.message());
+        operation.context().phase(OperationPhase.METADATA, report.text());
         String warning = operation.finish(OperationOutcome.SUCCEEDED, recovered
                 ? "Stale launcher update report reconciled; previous installer completion result is unknown."
                 : "Launcher update confirmed successfully.", null);
@@ -341,6 +352,13 @@ public class LauncherServices {
         return result;
     }
 
+    /** Points a reviewed install plan at another new folder; local checks only. */
+    public NormalInstallService.Plan retargetNormalInstall(NormalInstallService.Plan plan,
+                                                           Path destination)
+            throws IOException {
+        return normalInstalls.retarget(plan, destination);
+    }
+
     /** The saved appearance; unreadable settings fall back to the default look. */
     LauncherAppearance appearance() {
         try {
@@ -383,6 +401,29 @@ public class LauncherServices {
         settings.writePlayIntro(playIntro);
     }
 
+    /** The saved language, or {@code null} for the system language; unreadable settings use the system language. */
+    String language() {
+        return savedLanguage(settings);
+    }
+
+    /** {@link #language()} for {@code registry}, read without constructing the services. */
+    static String savedLanguage(Path registry) {
+        return savedLanguage(new LauncherSettingsStore(registry.toAbsolutePath().normalize()));
+    }
+
+    private static String savedLanguage(LauncherSettingsStore settings) {
+        try {
+            return settings.read().language();
+        } catch (IOException | RuntimeException error) {
+            return null;
+        }
+    }
+
+    void saveLanguage(String language) throws IOException {
+        ensureRegistryParent();
+        settings.writeLanguage(language);
+    }
+
     public SettingsView settingsView() throws IOException, InterruptedException {
         LauncherSettingsStore.Settings current = settings.read();
         if (current.defaultJavaExecutable() == null) {
@@ -422,10 +463,11 @@ public class LauncherServices {
         }
         context.finish(OperationOutcome.FAILED, "Launcher error");
         try {
-            return "Saved local diagnostics to " + collector.persist(error);
+            return I18n.getFormattedTextAt(BUNDLE, "LauncherServices.diagnosticsSaved",
+                    String.valueOf(collector.persist(error)));
         } catch (IOException | RuntimeException loggingFailure) {
-            return "Local diagnostics could not be saved: "
-                    + SanitizedErrors.display(loggingFailure);
+            return I18n.getFormattedTextAt(BUNDLE, "LauncherServices.diagnosticsNotSaved",
+                    SanitizedErrors.display(loggingFailure));
         }
     }
 
@@ -458,9 +500,90 @@ public class LauncherServices {
                 .reset(plan);
     }
 
+    /** Clears regenerable caches and rescans a copy the launcher does not own. Offline. */
+    public InstallationRepairService.Tidy tidyInstallation(InstallationRecord record)
+            throws IOException {
+        requireNoPendingUninstall(record);
+        return new InstallationRepairService(registry, store, inspector, updateCoordinator)
+                .tidy(record);
+    }
+
+    /**
+     * The offline file check of a launcher-installed copy, or {@code null} when the copy has
+     * no exact-release provenance to check against.
+     */
+    public RepairCheck checkInstallationFiles(InstallationRecord record, OperationContext context)
+            throws IOException, InterruptedException {
+        if (!fileCheckEligible(record)) return null;
+        RealUpdateService.Snapshot source = repairSource(record);
+        return new RepairCheck(source, InstallationRepairService.checkFiles(source, context));
+    }
+
+    /** Whether Repair can check this copy's files against the release it was installed from. */
+    public boolean fileCheckEligible(InstallationRecord record) throws IOException {
+        org.megamek.launcher.update.ReceiptStore receipts =
+                new org.megamek.launcher.update.ReceiptStore();
+        return Files.exists(receipts.receiptPath(registry, record.id()), LinkOption.NOFOLLOW_LINKS)
+                && !Files.exists(receipts.metadataDirectory(registry)
+                        .resolve(record.id() + ".adoption.json"), LinkOption.NOFOLLOW_LINKS);
+    }
+
+    public record RepairCheck(RealUpdateService.Snapshot source,
+                              InstallationRepairService.FileCheck files) {
+    }
+
+    /**
+     * @param settingsReset the settings backup when settings were reset, otherwise {@code null}
+     * @param settingsError why settings could not be reset, otherwise {@code null}
+     * @param check         the file check, or {@code null} when the copy was not checked
+     * @param checkError    why the game files could not be checked, otherwise {@code null}
+     */
+    public record QuickRepairResult(InstallationRepairService.Tidy tidy,
+                                    PreferencesResetService.Result settingsReset,
+                                    String settingsError, RepairCheck check, String checkError) {
+    }
+
+    /**
+     * The offline Repair: clear caches and rescan, optionally reset settings, then check the
+     * game files. Downloading replacements is a separate, consented step.
+     *
+     * <p>Cancellation is only honoured before the first change. After that the repair runs to
+     * the end, and a failed file check is reported alongside the completed steps, so the player
+     * always learns what changed and where any settings backup went.</p>
+     */
+    public QuickRepairResult quickRepair(InstallationRecord record, boolean resetSettings,
+                                    OperationContext context)
+            throws IOException, InterruptedException {
+        context.checkpoint();
+        context.enterFinalization("Repair has started changing the installation; "
+                + "it will finish and report what changed.");
+        context.phase(OperationPhase.METADATA, "Clearing caches and checking the installation folder");
+        InstallationRepairService.Tidy tidy = tidyInstallation(record);
+        PreferencesResetService.Result settings = null;
+        String settingsError = null;
+        if (resetSettings) {
+            context.phase(OperationPhase.METADATA, "Resetting settings");
+            try {
+                settings = resetPreferences(planPreferencesReset(tidy.record()));
+            } catch (IOException | RuntimeException error) {
+                settingsError = detail(error);
+            }
+        }
+        context.phase(OperationPhase.PLAN, "Checking game files");
+        RepairCheck check = null;
+        String checkError = null;
+        try {
+            check = checkInstallationFiles(tidy.record(), context);
+        } catch (IOException | RuntimeException error) {
+            checkError = detail(error);
+        }
+        return new QuickRepairResult(tidy, settings, settingsError, check, checkError);
+    }
+
     public HomeState loadHome() throws IOException {
         if (Files.exists(registry, LinkOption.NOFOLLOW_LINKS)) {
             uninstalls.recoverCommitted();
+            finishRelocations();
         }
         RegistryData data = readRegistry();
         if (data.defaultInstallationId() == null) {
@@ -531,18 +654,15 @@ public class LauncherServices {
                     || !current.observedBuild().equals(record.observedBuild())
                     || !current.products().equals(record.products())) {
                 return new HomeState(data, record, null,
-                        "The preferred copy no longer matches its registered build or program "
-                                + "layout. Use Manage installations to remove it, select another "
-                                + "copy, or recover an interrupted update.", eligibility, pending,
+                        I18n.getTextAt(BUNDLE, "LauncherServices.preferredCopyChanged"), eligibility, pending,
                         channel, Map.of(), Map.of());
             }
             return new HomeState(data, record, current, null, eligibility, pending, channel,
                     Map.of(), Map.of());
         } catch (IOException | RuntimeException e) {
             return new HomeState(data, record, null,
-                    "The preferred copy is unavailable: " + detail(e)
-                            + ". Use recovery if an update was interrupted, or Manage "
-                            + "installations.", eligibility, pending, channel, Map.of(), Map.of());
+                    I18n.getFormattedTextAt(BUNDLE, "LauncherServices.preferredCopyUnavailable", detail(e)),
+                    eligibility, pending, channel, Map.of(), Map.of());
         }
     }
 
@@ -655,16 +775,29 @@ public class LauncherServices {
         store.selectPreferred(registry, productKey, record);
     }
 
+    public void selectPreferredForAll(InstallationRecord record) throws IOException {
+        UninstallService.requirePresent(record);
+        store.selectPreferredForAll(registry, record);
+    }
+
     public List<Path> javaCandidates() {
         return javaRuntime.candidates();
     }
 
     public List<String> preview(InstallationRecord record, String product)
             throws IOException, InterruptedException {
+        return preview(record, product, null);
+    }
+
+    /** The launch command with {@code overrides} in place of the saved ones, or the saved ones when null. */
+    public List<String> preview(InstallationRecord record, String product, LaunchOptions overrides)
+            throws IOException, InterruptedException {
         InstallationRecord current = requireCurrentLaunchRecord(record);
         JavaRuntime.CurrentJava java = configuredGameJava(current);
-        return applicationLauncher.command(current, product, java,
-                launchOptions.read().effective(current.id()));
+        LaunchOptionsStore.Document document = launchOptions.read();
+        LaunchOptions effective = overrides == null ? document.effective(current.id())
+                : overrides.over(document.global().over(LaunchOptions.builtIn()));
+        return applicationLauncher.command(current, product, java, effective);
     }
 
     public int launch(InstallationRecord record, String product)
@@ -767,6 +900,28 @@ public class LauncherServices {
         }
     }
 
+    /**
+     * Re-attaches a missing installation to the folder it was renamed or moved to, keeping its
+     * release type, update history, selections and launch options. Returns the new record.
+     */
+    public InstallationRecord relocate(InstallationRecord missing, Path folder,
+                                       OperationContext context)
+            throws IOException, InterruptedException {
+        InstallationRecord moved = relocations.relocate(missing, folder, context);
+        finishRelocations();
+        return moved;
+    }
+
+    private void finishRelocations() {
+        relocations.finishCommitted((oldId, newId) -> {
+            if (newId != null) {
+                launchOptions.rekeyInstallation(oldId, newId);
+            } else if (!launchOptions.read().installation(oldId).inheritsEverything()) {
+                launchOptions.writeInstallation(oldId, LaunchOptions.INHERIT);
+            }
+        });
+    }
+
     public UninstallService.Plan planUninstall(InstallationRecord record,
                                                OperationContext context)
             throws IOException, InterruptedException,
@@ -804,6 +959,70 @@ public class LauncherServices {
     public ReleaseCatalog.Page releases(OfficialRepository repository, int page)
             throws IOException, InterruptedException {
         return new ReleaseCatalog(transport).list(repository, page, 10);
+    }
+
+    /**
+     * What changed in each application, from the version its installation ran before its last
+     * update through the launcher (or, when unknown, its version's own notes) to the version it runs,
+     * followed by the launcher's own changes since the launcher version that ran before this one.
+     */
+    public ReleaseNotes.WhatsNew whatsNew(Map<OfficialRepository, InstallationRecord> installations)
+            throws InterruptedException {
+        Map<OfficialRepository, String> since = new java.util.EnumMap<>(OfficialRepository.class);
+        Map<OfficialRepository, String> versions = new java.util.EnumMap<>(OfficialRepository.class);
+        org.megamek.launcher.update.PreviousBuildStore previous = new org.megamek.launcher.update.PreviousBuildStore();
+        installations.forEach((repository, record) -> {
+            versions.put(repository, record.observedBuild());
+            since.put(repository, previous.read(registry, record));
+        });
+        ReleaseCatalog catalog = new ReleaseCatalog(transport);
+        ReleaseNotes.WhatsNew suite = ReleaseNotes.load(catalog, suiteChannels(), since, versions);
+        String launcher = launcherVersion();
+        if (launcher.isBlank()) return suite;
+        List<ReleaseNotes.Application> applications = new java.util.ArrayList<>(suite.applications());
+        applications.add(ReleaseNotes.launcher(catalog, rememberLauncherVersion(), launcher));
+        return new ReleaseNotes.WhatsNew(suite.version(), suite.since(), applications);
+    }
+
+    /**
+     * Records the running launcher version and returns the one that ran before it, or null when
+     * unknown; called at startup so an update is noticed even before the notes are opened.
+     */
+    public String rememberLauncherVersion() {
+        return new org.megamek.launcher.update.LauncherVersionStore().remember(registry, launcherVersion());
+    }
+
+    /**
+     * The running launcher's version: the packaged one, or else the build's version metadata, which
+     * a launcher run from a development build also has. Empty when neither is known.
+     */
+    static String launcherVersion() {
+        String packaged = LauncherSelfUpdate.currentVersion();
+        if (!packaged.isBlank()) return packaged;
+        try (var input = LauncherServices.class.getResourceAsStream("/org/megamek/launcher/version.properties")) {
+            if (input == null) return "";
+            java.util.Properties properties = new java.util.Properties();
+            properties.load(input);
+            return properties.getProperty("version", "").replaceFirst("-.*$", "").strip();
+        } catch (IOException unreadable) {
+            return "";
+        }
+    }
+
+    /**
+     * Which channel each release belongs to, from the suite records; without them skipped
+     * releases cannot be told apart, so only the target's own notes are shown.
+     */
+    private ReleaseNotes.Channels suiteChannels() throws InterruptedException {
+        try {
+            Map<String, FollowChannel> channels = new OfficialSuiteChannelCatalog(transport).channelsByTag();
+            return tag -> {
+                FollowChannel channel = channels.get(tag);
+                return channel == null ? null : channel.cliName();
+            };
+        } catch (IOException unavailable) {
+            return tag -> null;
+        }
     }
 
     /**

@@ -23,9 +23,10 @@ result, ending with **Close**. Full-page surfaces such as the
 Settings page and installation cards are not dialogs: their command bars stay right-aligned with
 the main action last.
 
-Every dialog's title bar reads **MegaMek Launcher**. Its specific title appears once, as the heading
-inside the dialog, and is also the dialog's accessible name. A progress dialog shows the operation's
-name as a small line above the current step.
+Every dialog's title bar names what the dialog is for (for example **Change default Java** or
+**Rename installation**), never just **MegaMek Launcher**. That title is also the dialog's accessible
+name. A progress dialog's title bar follows the operation's name, which also shows as a small line
+above the current step.
 
 ## Managed application and settings model
 
@@ -36,6 +37,10 @@ preferred `InstallationRecord`, displays **Program Channel (Version)**, and uses
 static reinspection, Java, coordinator, and launch validation without a GUI preview or confirmation.
 Alternate rows are deterministic,
 launch-only exact-record actions and never mutate a preference or fall back at click time.
+The alternates list opens with the default copy, tagged **Default** and launching exactly what the
+primary segment launches, so the list always shows at least two copies. Hover and press highlight
+only the segment under the pointer, and a visible divider separates the arrow from the launch
+segment.
 Missing preferred folders show **Not found** on the launch button's detail line (accessible name
 **Program (Version) · Not found**) instead of a recovery banner. Their primary launch segment is disabled, but usable alternate installations remain
 available; known blocked alternatives are disabled. Genuine recovery/unavailable messages remain
@@ -65,7 +70,11 @@ action changes only the registry label, not the installation folder or applicati
 must be unique. Imported records show
 **Imported copy · Launch only** and omit a channel rather than inferring one.
 Top-level actions are **Install another version** and **Import existing installation**. Exact actions include **Use as preferred for …**, Check/Retry, Update, update recovery,
-**Open location**, and **Remove from launcher…** when applicable. Managed/adopted cards also place
+**Open location**, and **Remove from launcher…** when applicable. A copy with more than one
+application offers **Use as preferred for all applications** first (one atomic write that leaves
+applications the copy lacks untouched) and keeps the per-application choices in a
+**Use as preferred for** submenu; a single-application copy keeps one direct
+**Use as preferred for …** action. Managed/adopted cards also place
 **Uninstall…** at the destructive bottom; imported cards do not. A pending uninstall exposes only
 **Recover uninstall** instead of a new remove/uninstall action while its folder exists.
 The uninstall confirmation offers a ticked-by-default **Also delete log files (logs and
@@ -76,22 +85,39 @@ the latest state; a very short stage may finish between refreshes rather than be
 Planning and removal retain one root/process lease;
 immediate per-file verification, modified/custom-file retention, and recovery protection remain.
 When the folder is positively confirmed missing, the card shows **Folder not found**, retains
-its recorded applications/version and preferred markers, and replaces **More…** with **Remove…**.
+its recorded applications/version and preferred markers, and replaces **More…** with **Locate…**.
 It does not describe the copy as an incomplete managed setup or offer update/recovery controls.
-**Remove…** opens a styled
-**Installation not found** dialog with **Cancel** and **Remove from launcher**. The dialog
-is offered only after a fresh worker-thread folder check on every **More…** or **Remove…** click, not from cached
+**Locate…** opens a styled
+**Installation not found** dialog with **Locate folder…**, **Remove from launcher**, and
+**Cancel**. The dialog
+is offered only after a fresh worker-thread folder check on every **More…** or **Locate…** click, not from cached
 card status; a folder restored since rendering opens the ordinary menu instead. Cancellation
-keeps the registration; confirmation removes that exact registration and its owned metadata,
+keeps the registration. **Locate folder…** asks for the folder the copy was renamed or moved to
+and re-attaches the registration there only when that folder holds the same build and
+applications, is not registered or overlapping, has no interrupted update, and, for a managed
+copy, still has every official file with official hashes for its official jars. The copy keeps
+its name, release type, update history, preferred/default selections, and launch options under a
+new installation id; refused folders change nothing. **Remove from launcher** removes that exact registration and its owned metadata,
 including validated interrupted-uninstall cleanup. It never reinstalls or recreates deleted
 application files. A folder deleted after rendering also routes an affected launch or operation
 to this dialog, including when containing directories were deleted or moved.
 Unavailable filesystems, access errors, and unsafe paths are not treated as
 deleted folders. There is no standalone GUI Preview action. Update is primary only when known available.
-**Reset preferences…** appears in the More menu for ordinary registered copies, including
-imports. The confirmation explains the program scope, asks users to close the suite, and says
-that saves, campaigns, and custom files stay. It omits the file list and backup path; the
-success dialog identifies the retained backup location. The root coordinator blocks tracked
+**Repair…** appears in the More menu for every registered copy, including imports, and replaces
+the former Reset preferences and Repair installation items. It is disabled while the copy is
+missing or has pending update recovery. Its confirmation asks users to close the suite, says it
+clears the unit cache and re-reads the folder (and, for a launcher-installed copy, checks the
+game files without downloading anything), and says that saves stay. An unchecked
+**Also reset settings to defaults (a backup is kept)** option adds the settings reset below.
+The offline step deletes only the regenerable caches shared with uninstall, then, for a copy the
+launcher did not install, re-inspects the folder and refreshes the recorded build and products
+when they changed. A stale selection is rejected. Cancelling is only honoured before the first
+change; once caches are cleared the repair runs to the end so the result dialog can list what was
+done. If the file check itself fails, that dialog still reports the completed steps (including any
+settings backup) and says the game files could not be checked.
+
+The optional settings reset keeps its program scope, and the result identifies the retained
+backup location; a reset failure is reported without undoing the rest. The root coordinator blocks tracked
 running games and pending updates. Users must close externally started suite apps as well.
 Official receipt source determines package scope;
 without a receipt, an unambiguous inspected product inventory is required. MekHQ resets MM,
@@ -101,8 +127,9 @@ files (including saves and custom files) alone and never touches OS-global Java 
 No matching files means no reset and no backup created. On a partial move failure, already
 moved files are rolled back where safe; errors identify the backup for manual recovery.
 
-**Repair installation…** appears in More only for a healthy exact-release managed copy without
-pending recovery; imported and adopted copies cannot use it. The pre-download consent identifies
+When the offline check finds missing or changed game files on a healthy exact-release managed
+copy (imported and adopted copies skip the check), a separate **Restore game files** dialog lists
+them and offers **Download and restore**; nothing is downloaded without that consent. It identifies
 the download size if known, asks users to close all suite apps, and explains in plain language
 that missing or changed game files will be replaced, saves and settings stay, and users should
 back up changed game files they want to keep. It does not display the installation name, folder,
@@ -181,6 +208,12 @@ and is saved off the event-dispatch thread; a failed save reports an error witho
 visible appearance. The intro option applies from the next opening and is saved off the
 event-dispatch thread in launcher settings (schema 7 and later; older schemas read as on). High
 contrast is not offered until the design tokens define it.
+Appearance ends with **Language**: **System language** (the default) or English, Deutsch, Русский
+and Español, each named in its own language, in the same order as MegaMek's language choices. The
+choice is saved off the event-dispatch thread in launcher settings (schema 8; older schemas read as
+the system language) and takes effect the next time the launcher opens, as the note under it
+says. A language without a translation for some text shows that text in English. See
+[localization](localization.md).
 Loading and error states keep the same layout; there is no global automatic-check control.
 **Releases** follows Appearance. It
 offers **Show Experimental releases** (off by default) with the warning that Experimental builds
@@ -218,7 +251,8 @@ The launcher's own window always draws without Direct3D on Windows (unless `-Dsu
 explicitly), because some drivers drop its partial repaints and leave the window black through the
 intro; the renderer option above only affects the games.
 **Launch options…** in an installation's More menu opens a dialog that edits overrides where each field can
-inherit the launcher-wide value. **Copy launch commands** in the same menu copies the commands used to start each application with the saved options, for troubleshooting. Values are stored
+inherit the launcher-wide value; **Reset all to launcher defaults** (a link beside the heading) sets every field back to inheriting, which
+takes effect when saved. A **Copy launch commands** link in the dialog footer copies the commands used to start each application with the options as currently shown (including unsaved edits, which it does not save), for troubleshooting. Values are stored
 next to the registry in `<registry>.launch-options.json`, separate from launcher settings, and an
 unreadable file is reported and never overwritten. Imported installations adopt their existing
 `-Xmx` from the application's `.l4j.ini` as an override. Java arguments must be options starting

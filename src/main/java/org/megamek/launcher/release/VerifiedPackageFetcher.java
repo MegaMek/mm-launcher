@@ -33,6 +33,7 @@
 
 package org.megamek.launcher.release;
 
+import org.megamek.launcher.internationalization.LocalizedText;
 import org.megamek.launcher.operation.OperationContext;
 import org.megamek.launcher.operation.OperationPhase;
 import org.megamek.launcher.operation.OperationType;
@@ -64,6 +65,7 @@ import java.util.UUID;
  * directory and removes only that directory when closed.
  */
 public final class VerifiedPackageFetcher {
+    private static final String BUNDLE = "org.megamek.launcher.services";
     private static final int MAX_REDIRECTS = 5;
     private static final Duration OVERALL_TIMEOUT = Duration.ofHours(2);
     private final ReleaseTransport transport;
@@ -181,7 +183,7 @@ public final class VerifiedPackageFetcher {
                            OperationContext context)
             throws IOException, InterruptedException {
         try (OperationContext.WorkerRegistration ignored = context.activate()) {
-            context.phase(OperationPhase.METADATA, "Resolving exact release metadata");
+            context.phase(OperationPhase.METADATA, LocalizedText.of(BUNDLE, "VerifiedPackageFetcher.resolvingMetadata"));
             ReleaseCatalog.Release release = catalog.exact(repository, tag);
             ReleaseCatalog.Asset selected = catalog.selectInstallAsset(repository, release);
             ReleaseCatalog.Asset asset = resolveExpectedAsset(release, selected, expected);
@@ -191,14 +193,14 @@ public final class VerifiedPackageFetcher {
                 Path archive = staging.resolve("package.tar.gz");
                 PackageDigest.Sha256 resolvedDigest =
                         download(repository, release.tag(), asset, archive, progress, context);
-                context.phase(OperationPhase.EXTRACT, "Opening verified package archive");
+                context.phase(OperationPhase.EXTRACT, LocalizedText.of(BUNDLE, "VerifiedPackageFetcher.openingArchive"));
                 Path extracted = extractor.extract(archive, staging.resolve("expanded"), context,
                         OperationPhase.EXTRACT);
                 requireSuiteProductVersion(repository, release.tag(), extracted, expected);
                 return new Workspace(staging, archive, extracted, release, asset,
                         resolvedDigest, FileIdentity.read(archive));
             } catch (IOException | InterruptedException | RuntimeException e) {
-                context.cleanupPhase("Removing the operation-owned package workspace");
+                context.cleanupPhase(LocalizedText.of(BUNDLE, "VerifiedPackageFetcher.removingWorkspace"));
                 try {
                     context.cleanupPreservingCancellation(() -> deleteOwnedTree(staging));
                 } catch (Exception cleanup) {
@@ -233,7 +235,7 @@ public final class VerifiedPackageFetcher {
             throws IOException, InterruptedException {
         Objects.requireNonNull(workspace, "workspace");
         context.phase(OperationPhase.PREPARE_INSTALL,
-                "Refreshing metadata for the retained package");
+                LocalizedText.of(BUNDLE, "VerifiedPackageFetcher.refreshingMetadata"));
         ReleaseCatalog.Release freshRelease = catalog.exact(repository, tag);
         ReleaseCatalog.Asset freshAsset = resolveExpectedAsset(freshRelease,
                 catalog.selectInstallAsset(repository, freshRelease), expected);
@@ -244,12 +246,12 @@ public final class VerifiedPackageFetcher {
                     + "attempt (the retained package was not applied)");
         }
         context.phase(OperationPhase.PREPARE_INSTALL,
-                "Re-verifying retained package size and SHA-256");
+                LocalizedText.of(BUNDLE, "VerifiedPackageFetcher.reverifyingPackage"));
         workspace.verifyArchive(expected, context);
         progress.printf("REUSING already-downloaded %,d byte package; no second package download%n",
                 freshAsset.size());
         context.phase(OperationPhase.PREPARE_INSTALL,
-                "Extracting retained package for final validation");
+                LocalizedText.of(BUNDLE, "VerifiedPackageFetcher.extractingRetained"));
         Path extracted = extractor.extract(workspace.archive, workspace.staging.resolve("apply-expanded"),
                 context, OperationPhase.PREPARE_INSTALL);
         requireSuiteProductVersion(repository, tag, extracted, expected);
@@ -277,7 +279,7 @@ public final class VerifiedPackageFetcher {
         ReleaseTransport.Response response = null;
         Throwable failure = null;
         try {
-            context.phase(OperationPhase.DOWNLOAD, "Connecting to the verified package source");
+            context.phase(OperationPhase.DOWNLOAD, LocalizedText.of(BUNDLE, "VerifiedPackageFetcher.connecting"));
             response = openDownload(asset.url(), context);
             requireContentLength(response, asset);
             MessageDigest digest = sha256();
@@ -306,8 +308,9 @@ public final class VerifiedPackageFetcher {
                     file.write(buffer, 0, read);
                     count += read;
                     context.progress(OperationPhase.DOWNLOAD, count, asset.size(),
-                            ProgressUnit.BYTES, "Downloaded " + count + " of "
-                                    + asset.size() + " bytes");
+                            ProgressUnit.BYTES, LocalizedText.of(BUNDLE,
+                        "VerifiedPackageFetcher.downloaded", String.valueOf(count),
+                        String.valueOf(asset.size())));
                 }
             }
             if (count != asset.size()) {
@@ -317,7 +320,7 @@ public final class VerifiedPackageFetcher {
             String actual = HexFormat.of().formatHex(digest.digest());
             PackageDigest.Sha256 resolved = verifyDigest(asset, actual);
             context.progress(OperationPhase.VERIFY, count, count, ProgressUnit.BYTES,
-                    "Package size and SHA-256 verified");
+                    LocalizedText.of(BUNDLE, "VerifiedPackageFetcher.packageVerified"));
             progress.printf("VERIFIED %,d bytes SHA-256 %s%n", count, actual);
             return resolved;
         } catch (IOException | InterruptedException | RuntimeException error) {
@@ -487,8 +490,9 @@ public final class VerifiedPackageFetcher {
                     }
                     count += read;
                     context.progress(OperationPhase.PREPARE_INSTALL, count, asset.size(),
-                            ProgressUnit.BYTES, "Re-verified " + count + " of "
-                                    + asset.size() + " retained bytes");
+                            ProgressUnit.BYTES, LocalizedText.of(BUNDLE,
+                        "VerifiedPackageFetcher.reverified", String.valueOf(count),
+                        String.valueOf(asset.size())));
                 }
             }
             FileIdentity after = FileIdentity.read(archive);

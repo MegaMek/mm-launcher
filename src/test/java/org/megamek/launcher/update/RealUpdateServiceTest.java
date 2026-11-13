@@ -99,6 +99,7 @@ import java.util.jar.Manifest;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -955,6 +956,10 @@ class RealUpdateServiceTest {
         assertEquals("my-data", Files.readString(fixture.root.resolve("data/keep.txt")));
         assertEquals("save", Files.readString(fixture.root.resolve("saves/game.sav")));
         assertFalse(Files.exists(fixture.root.resolve(RootCoordinator.UPDATE_NAMESPACE)));
+        RegistryStore store = new RegistryStore();
+        assertEquals("1.0.0", new PreviousBuildStore().read(fixture.registry,
+                        store.resolve(store.read(fixture.registry), fixture.id)),
+                "every update, from the GUI or the command line, tells What's new where it started");
     }
 
     @Test
@@ -1492,6 +1497,9 @@ class RealUpdateServiceTest {
                     "lib/runtime.txt", bytes("runtime-2"),
                     "docs/change.txt", bytes("new"))));
             RegistryStore store = new RegistryStore();
+            Path cache = fixture.root.resolve("data/mekfiles/units.cache");
+            Files.createDirectories(cache.getParent());
+            Files.writeString(cache, "built by v1");
             Path java = fakeJava("recovery-jdk-" + failurePoint.toLowerCase(Locale.ROOT));
             InstallationRecord before = store.resolve(store.read(fixture.registry), fixture.id);
             RealUpdateService failing = service(transport("v2", archive), point -> {
@@ -1511,12 +1519,19 @@ class RealUpdateServiceTest {
                 assertTrue(first.outcome().contains("rolled back"));
                 assertEquals("old", Files.readString(fixture.root.resolve("docs/change.txt")));
                 assertEquals("v1", recovery.snapshot(fixture.registry, fixture.id).current().tag());
+                assertEquals("built by v1", Files.readString(cache));
+                assertNull(new PreviousBuildStore().read(fixture.registry, recovered),
+                        "a rolled-back update leaves nothing for What's new to start from");
             } else {
                 assertTrue(first.outcome().contains("completed"));
                 assertEquals("new", Files.readString(fixture.root.resolve("docs/change.txt")));
+                assertFalse(Files.exists(cache), "a recovered commit clears the stale cache");
                 assertEquals("v2", recovery.snapshot(fixture.registry, fixture.id).current().tag());
                 assertEquals("2.0.0", new RegistryStore().resolve(
                         new RegistryStore().read(fixture.registry), fixture.id).observedBuild());
+                assertEquals(before.observedBuild(), new PreviousBuildStore().read(fixture.registry,
+                                store.resolve(store.read(fixture.registry), fixture.id)),
+                        "a recovered update still tells What's new where it started");
             }
             assertFalse(Files.exists(fixture.root.resolve(RootCoordinator.UPDATE_NAMESPACE)));
             assertEquals("no pending transaction", recovery.recover(fixture.registry, fixture.id,
@@ -1533,6 +1548,9 @@ class RealUpdateServiceTest {
         byte[] archive = archive("MegaMek-v2", packageFiles(2, Map.of(
                 "lib/runtime.txt", bytes("runtime-2"),
                 "docs/change.txt", bytes("new"))));
+        Path cache = fixture.root.resolve("data/mekfiles/units.cache");
+        Files.createDirectories(cache.getParent());
+        Files.writeString(cache, "built by v1");
         RealUpdateService interrupted = service(transport("v2", archive), point -> {
             if (point.equals("AFTER_PENDING_DELETE")) {
                 throw new IOException("simulated cleanup interruption");
@@ -1551,6 +1569,7 @@ class RealUpdateServiceTest {
         }
         assertFalse(Files.exists(namespace.resolve("pending.json")));
         assertEquals("new", Files.readString(fixture.root.resolve("docs/change.txt")));
+        assertFalse(Files.exists(cache), "the stale cache is cleared before commit cleanup");
         assertEquals("v2", interrupted.snapshot(fixture.registry, fixture.id).current().tag());
         assertEquals("2.0.0", new RegistryStore().resolve(
                 new RegistryStore().read(fixture.registry), fixture.id).observedBuild());
@@ -1853,6 +1872,159 @@ class RealUpdateServiceTest {
                     fixture.registry, new RegistryStore().read(fixture.registry), current.record())
                     .preference().channel());
         }
+    }
+
+    @Test
+    void offlineFileCheckFindsDamageWithoutDownloadingAndSkipsRegenerableCaches()
+            throws Exception {
+        Map<String, byte[]> files = packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime"),
+                "data/mekfiles/units.cache", bytes("shipped cache")));
+        Fixture fixture = install("offline-check", "v1", files);
+        RealUpdateService service = service(new PackageTransport(), point -> {});
+        RealUpdateService.Snapshot snapshot = service.snapshot(fixture.registry, fixture.id);
+        assertTrue(snapshot.current().officialManifest().files().stream()
+                .anyMatch(entry -> entry.path().equals("data/mekfiles/units.cache")));
+        assertEquals(0, InstallationRepairService.checkFiles(snapshot).damaged());
+
+        Files.writeString(fixture.root.resolve("lib/runtime.txt"), "edited");
+        Files.delete(fixture.root.resolve("data/default.txt"));
+        Files.writeString(fixture.root.resolve("data/mekfiles/units.cache"), "rebuilt by MegaMek");
+        InstallationRepairService.FileCheck check = InstallationRepairService.checkFiles(snapshot);
+        assertEquals(List.of("data/default.txt"), check.missing());
+        assertEquals(List.of("lib/runtime.txt"), check.modified());
+        Files.delete(fixture.root.resolve("data/mekfiles/units.cache"));
+        assertEquals(2, InstallationRepairService.checkFiles(snapshot).damaged(),
+                "a cleared cache is not damage");
+        assertEquals("edited", Files.readString(fixture.root.resolve("lib/runtime.txt")));
+    }
+
+    @Test
+    void updateDeletesAnUnshippedUnitCacheBuiltByThePreviousVersion() throws Exception {
+        Fixture fixture = install("cache-unshipped", "v1", packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime1"), "data/units.txt", bytes("official1"))));
+        Files.createDirectories(fixture.root.resolve("data/mekfiles"));
+        Files.writeString(fixture.root.resolve("data/mekfiles/units.cache"), "built by v1");
+        Files.writeString(fixture.root.resolve("data/units.txt"), "custom");
+        RealUpdateService.ApplyResult updated = apply(fixture, "v2", packageFiles(2, Map.of(
+                "lib/runtime.txt", bytes("runtime2"), "data/units.txt", bytes("official2"))),
+                point -> {});
+        assertFalse(Files.exists(fixture.root.resolve("data/mekfiles/units.cache")));
+        assertEquals("custom", Files.readString(fixture.root.resolve("data/units.txt")));
+        assertEquals("v2", updated.state().tag());
+    }
+
+    @Test
+    void updateReplacesAShippedUnitCacheTheApplicationRebuilt() throws Exception {
+        Fixture fixture = install("cache-shipped", "v1", packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime1"),
+                "data/mekfiles/units.cache", bytes("shipped v1"))));
+        Files.writeString(fixture.root.resolve("data/mekfiles/units.cache"), "rebuilt by v1");
+        RealUpdateService.ApplyResult updated = apply(fixture, "v2", packageFiles(2, Map.of(
+                "lib/runtime.txt", bytes("runtime2"),
+                "data/mekfiles/units.cache", bytes("shipped v2"))), point -> {});
+        assertEquals("shipped v2",
+                Files.readString(fixture.root.resolve("data/mekfiles/units.cache")));
+        assertEquals(0, updated.skippedDecisions());
+        assertTrue(updated.state().overrides().isEmpty());
+    }
+
+    @Test
+    void updateReplacesARebuiltUnitCacheTheNewVersionStartsShipping() throws Exception {
+        Fixture fixture = install("cache-newly-shipped", "v1", packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime1"))));
+        Files.createDirectories(fixture.root.resolve("data/mekfiles"));
+        Files.writeString(fixture.root.resolve("data/mekfiles/units.cache"), "built by v1");
+        RealUpdateService.ApplyResult updated = apply(fixture, "v2", packageFiles(2, Map.of(
+                "lib/runtime.txt", bytes("runtime2"),
+                "data/mekfiles/units.cache", bytes("shipped v2"))), point -> {});
+        assertEquals("shipped v2",
+                Files.readString(fixture.root.resolve("data/mekfiles/units.cache")));
+        assertTrue(updated.state().overrides().isEmpty());
+    }
+
+    @Test
+    void updateRemovesARebuiltUnitCacheTheNewVersionStopsShipping() throws Exception {
+        Fixture fixture = install("cache-no-longer-shipped", "v1", packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime1"),
+                "data/mekfiles/units.cache", bytes("shipped v1"))));
+        Files.writeString(fixture.root.resolve("data/mekfiles/units.cache"), "rebuilt by v1");
+        RealUpdateService.ApplyResult updated = apply(fixture, "v2", packageFiles(2, Map.of(
+                "lib/runtime.txt", bytes("runtime2"))), point -> {});
+        assertFalse(Files.exists(fixture.root.resolve("data/mekfiles/units.cache")));
+        assertTrue(updated.state().overrides().isEmpty());
+    }
+
+    @Test
+    void interruptedCacheReplacementRollsBackToTheRebuiltCache() throws Exception {
+        Fixture fixture = install("cache-rollback", "v1", packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime1"),
+                "data/mekfiles/units.cache", bytes("shipped v1"))));
+        Files.writeString(fixture.root.resolve("data/mekfiles/units.cache"), "rebuilt by v1");
+        byte[] archive = archive("MegaMek-v2", packageFiles(2, Map.of(
+                "lib/runtime.txt", bytes("runtime2"),
+                "data/mekfiles/units.cache", bytes("shipped v2"))));
+        RealUpdateService failing = service(transport("v2", archive), point -> {
+            if (point.equals("APP_MUTATION:data/mekfiles/units.cache")) {
+                throw new IOException("stop");
+            }
+        });
+        assertThrows(IOException.class, () -> failing.apply(
+                failing.snapshot(fixture.registry, fixture.id), "v2", archive.length,
+                "sha256:" + sha(archive), RealUpdateService.CONFIRM, quiet()));
+        service(new PackageTransport(), point -> {}).recover(
+                fixture.registry, fixture.id, RealUpdateService.CONFIRM);
+        assertEquals("rebuilt by v1",
+                Files.readString(fixture.root.resolve("data/mekfiles/units.cache")));
+        assertFalse(Files.exists(fixture.root.resolve(RootCoordinator.UPDATE_NAMESPACE)));
+    }
+
+    @Test
+    void tidyClearsCachesButKeepsTheRecordOfALauncherInstalledCopy() throws Exception {
+        Map<String, byte[]> files = packageFiles(1, Map.of(
+                "lib/runtime.txt", bytes("runtime"),
+                "data/mekfiles/units.cache", bytes("cache")));
+        Fixture fixture = install("tidy-owned", "v1", files);
+        RegistryStore store = new RegistryStore();
+        InstallationRecord before = store.resolve(store.read(fixture.registry), fixture.id);
+        Files.write(fixture.root.resolve("MegaMek.jar"), jar(2, 0));
+        InstallationRepairService.Tidy tidy = repairService(fixture.registry, "tidy-owned")
+                .tidy(before);
+        assertEquals(List.of("data/mekfiles/units.cache"), tidy.clearedCaches());
+        assertFalse(Files.exists(fixture.root.resolve("data/mekfiles/units.cache")));
+        assertFalse(tidy.rescanned(), "the receipt, not the folder, records an owned build");
+        assertEquals(before, tidy.record());
+        assertEquals(before, store.resolve(store.read(fixture.registry), fixture.id));
+    }
+
+    @Test
+    void tidyRescansAnImportedCopyAndRejectsAStaleSelection() throws Exception {
+        Path area = Files.createDirectory(temp.resolve("tidy-imported"));
+        Path registry = area.resolve("registry.json");
+        Path root = area.resolve("installed");
+        materialize(root, packageFiles(1, Map.of("lib/runtime.txt", bytes("runtime"))));
+        RegistryStore store = new RegistryStore();
+        InstallationRecord before = store.register(registry, "Imported", root, null);
+        Files.write(root.resolve("MegaMek.jar"), jar(2, 0));
+        InstallationRepairService repair = repairService(registry, "tidy-imported");
+
+        InstallationRepairService.Tidy tidy = repair.tidy(before);
+        assertTrue(tidy.clearedCaches().isEmpty());
+        assertTrue(tidy.rescanned());
+        assertEquals(before.observedBuild(), tidy.previousBuild());
+        assertEquals(new InstallationInspector().inspect(root).observedBuild(),
+                tidy.record().observedBuild());
+        assertEquals(tidy.record(), store.resolve(store.read(registry), before.id()));
+        assertEquals(before.name(), tidy.record().name());
+
+        IOException stale = assertThrows(IOException.class, () -> repair.tidy(before));
+        assertTrue(stale.getMessage().contains("changed"));
+        assertFalse(repair.tidy(tidy.record()).rescanned());
+    }
+
+    private InstallationRepairService repairService(Path registry, String name) {
+        return new InstallationRepairService(registry, new RegistryStore(),
+                new InstallationInspector(), new RootCoordinator(temp.resolve(name + "-locks")));
     }
 
     private Fixture install(String name, String tag, Map<String, byte[]> files) throws Exception {

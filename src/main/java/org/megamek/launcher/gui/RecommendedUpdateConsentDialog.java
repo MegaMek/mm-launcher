@@ -33,6 +33,8 @@
 
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.internationalization.I18n;
+
 import javax.swing.BorderFactory;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -57,6 +59,7 @@ import java.util.Objects;
 
 /** Styled consent for the complete captured recommended-update operation. */
 final class RecommendedUpdateConsentDialog extends JDialog {
+    private static final String BUNDLE = "org.megamek.launcher.gui.dialogs";
 
     private final GuiScale scale;
     private final JButton update;
@@ -64,7 +67,7 @@ final class RecommendedUpdateConsentDialog extends JDialog {
 
     RecommendedUpdateConsentDialog(Frame owner, String application, String currentVersion,
                                    String newVersion, long downloadBytes, GuiScale scale) {
-        super(owner, "Update application", true);
+        super(owner, I18n.getTextAt(BUNDLE, "RecommendedUpdateConsentDialog.title"), true);
         this.scale = Objects.requireNonNull(scale, "scale");
         Objects.requireNonNull(application, "application");
         Objects.requireNonNull(currentVersion, "currentVersion");
@@ -73,9 +76,8 @@ final class RecommendedUpdateConsentDialog extends JDialog {
         setName("recommendedUpdateConsentDialog");
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         getAccessibleContext().setAccessibleName(getTitle());
-        LauncherTheme.useLauncherTitle(this);
         getAccessibleContext().setAccessibleDescription(
-                "Confirm downloading and installing the displayed update.");
+                I18n.getTextAt(BUNDLE, "RecommendedUpdateConsentDialog.description"));
 
         Font base = UIManager.getFont("Label.font");
         if (base == null) base = new Font(Font.DIALOG, Font.PLAIN, 12);
@@ -89,19 +91,19 @@ final class RecommendedUpdateConsentDialog extends JDialog {
                         scale.size("border"), 0, 0, 0, LauncherTheme.BORDER),
                 scale.padding("xl", "xl")));
 
-        JLabel heading = label("Update " + application + "?", "recommendedUpdateHeading",
+        JLabel heading = label(I18n.getFormattedTextAt(BUNDLE, "RecommendedUpdateConsentDialog.heading", application), "recommendedUpdateHeading",
                 scale.font(base, "headline"), FirstLaunchPanel.TEXT);
-        JLabel current = label("Current version: " + displayVersion(currentVersion),
+        JLabel current = label(I18n.getFormattedTextAt(BUNDLE, "RecommendedUpdateConsentDialog.currentVersion", displayVersion(currentVersion)),
                 "recommendedUpdateCurrentVersion",
                 scale.font(base, "body"), FirstLaunchPanel.TEXT);
-        JLabel target = label("New version: " + displayVersion(newVersion),
+        JLabel target = label(I18n.getFormattedTextAt(BUNDLE, "RecommendedUpdateConsentDialog.newVersion", displayVersion(newVersion)),
                 "recommendedUpdateNewVersion",
                 scale.font(base, "body"), FirstLaunchPanel.TEXT);
-        JLabel size = label("Download size: " + BinarySizeFormat.mebibytes(downloadBytes),
+        JLabel size = label(I18n.getFormattedTextAt(BUNDLE, "RecommendedUpdateConsentDialog.downloadSize", BinarySizeFormat.mebibytes(downloadBytes)),
                 "recommendedUpdateDownloadSize",
                 scale.font(base, "body"), FirstLaunchPanel.TEXT);
         JLabel closeApplications = label(
-                "Close MegaMek, MekHQ, and MegaMekLab before updating.",
+                I18n.getTextAt(BUNDLE, "RecommendedUpdateConsentDialog.closeApplications"),
                 "recommendedUpdateCloseApplications",
                 scale.font(base, "body"), FirstLaunchPanel.TEXT);
 
@@ -115,13 +117,13 @@ final class RecommendedUpdateConsentDialog extends JDialog {
         summary.add(Box.createVerticalStrut(scale.space("lg")));
         summary.add(closeApplications);
 
-        JButton cancel = button("Cancel", "cancelRecommendedUpdateButton", false);
-        update = button("Update", "updateRecommendedUpdateButton", true);
+        JButton cancel = button(I18n.getTextAt(BUNDLE, "RecommendedUpdateConsentDialog.cancel"), "cancelRecommendedUpdateButton", false);
+        update = button(I18n.getTextAt(BUNDLE, "RecommendedUpdateConsentDialog.update"), "updateRecommendedUpdateButton", true);
         update.setMnemonic(KeyEvent.VK_U);
         cancel.getAccessibleContext().setAccessibleDescription(
-                "Close without downloading or applying the update.");
+                I18n.getTextAt(BUNDLE, "RecommendedUpdateConsentDialog.cancelDescription"));
         update.getAccessibleContext().setAccessibleDescription(
-                "Download and install the displayed update.");
+                I18n.getTextAt(BUNDLE, "RecommendedUpdateConsentDialog.updateDescription"));
 
         DialogFooter footer = new DialogFooter(scale).primary(update).cancel(cancel);
         JPanel actions = footer.panel();

@@ -48,7 +48,7 @@ import javax.swing.RootPaneContainer;
 import javax.swing.SwingUtilities;
 import javax.swing.WindowConstants;
 
-import org.megamek.launcher.design.host.Messages;
+import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.design.swing.TokenDialogPane.Status;
 import org.megamek.launcher.design.host.UIUtil;
 
@@ -64,6 +64,7 @@ import org.megamek.launcher.design.host.UIUtil;
  * on the event dispatch thread.
  */
 public final class TokenDialogs {
+    private static final String BUNDLE = "org.megamek.launcher.design.host.messages";
     private static int openCards;
 
     private TokenDialogs() {
@@ -164,14 +165,14 @@ public final class TokenDialogs {
     /** Shows a message with an Okay button. */
     public static void message(Component owner, Status status, String title, String text) {
         TokenDialogPane pane = new TokenDialogPane(title).status(status).message(text);
-        pane.primary(Messages.getString("Okay"));
+        pane.primary(I18n.getTextAt(BUNDLE, "Okay"));
         show(owner, pane);
     }
 
     /** Asks to confirm {@code action}, the label of its button, and gives whether it was confirmed. */
     public static boolean confirm(Component owner, String title, String text, String action) {
         TokenDialogPane pane = new TokenDialogPane(title).status(Status.QUESTION).message(text);
-        pane.cancel(Messages.getString("Cancel"));
+        pane.cancel(I18n.getTextAt(BUNDLE, "Cancel"));
         JButton confirm = pane.primary(action);
         return show(owner, pane) == confirm;
     }
@@ -182,7 +183,7 @@ public final class TokenDialogs {
      */
     public static boolean confirmDanger(Component owner, String title, String text, String action) {
         TokenDialogPane pane = new TokenDialogPane(title).status(Status.WARNING).message(text);
-        pane.cancel(Messages.getString("Cancel"));
+        pane.cancel(I18n.getTextAt(BUNDLE, "Cancel"));
         JButton confirm = pane.danger(action);
         return show(owner, pane) == confirm;
     }

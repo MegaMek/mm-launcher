@@ -84,7 +84,7 @@ class LauncherSettingsStoreTest {
         assertEquals(java.toString(), saved.defaultJavaExecutable());
         assertEquals(21, saved.defaultJavaFeature());
         assertEquals(saved, store.read());
-        assertTrue(json.contains("\"schemaVersion\" : 7"));
+        assertTrue(json.contains("\"schemaVersion\" : 8"));
         assertTrue(json.contains("\"showExperimental\" : false"));
         assertFalse(json.contains("checkInstalledVersionsOnOpen"));
         assertFalse(json.contains("checkNewInstallsOnOpen"));
@@ -306,7 +306,7 @@ class LauncherSettingsStoreTest {
         assertFalse(read.showExperimental());
         store.writeShowExperimental(true);
         String json = Files.readString(store.path());
-        assertTrue(json.contains("\"schemaVersion\" : 7"));
+        assertTrue(json.contains("\"schemaVersion\" : 8"));
         assertTrue(json.contains("\"showExperimental\" : true"));
         assertEquals(LauncherAppearance.DEFAULT.withTheme(LauncherAppearance.Theme.LIGHT),
                 store.read().appearance().launcherAppearance());
@@ -370,7 +370,7 @@ class LauncherSettingsStoreTest {
         assertEquals(previous, Files.readString(store.path()), "reading never rewrites");
         store.writeInstallParent(temp.toAbsolutePath().normalize());
         String json = Files.readString(store.path());
-        assertTrue(json.contains("\"schemaVersion\" : 7"), json);
+        assertTrue(json.contains("\"schemaVersion\" : 8"), json);
         assertTrue(json.contains("\"installParent\""), json);
         assertTrue(store.read().showExperimental());
     }
@@ -471,7 +471,7 @@ class LauncherSettingsStoreTest {
         assertEquals(previous, Files.readString(store.path()), "reading never rewrites");
         store.writePlayIntro(false);
         String json = Files.readString(store.path());
-        assertTrue(json.contains("\"schemaVersion\" : 7"), json);
+        assertTrue(json.contains("\"schemaVersion\" : 8"), json);
         assertTrue(json.contains("\"playIntro\" : false"), json);
         assertTrue(store.read().showExperimental());
     }
@@ -490,6 +490,75 @@ class LauncherSettingsStoreTest {
                       "appearance" : { "theme" : "light" },
                       "showExperimental" : false,
                       "installParent" : null
+                    }
+                    """.formatted(header);
+            Files.writeString(store.path(), malformed);
+
+            assertThrows(IOException.class, store::read, header);
+            assertEquals(malformed, Files.readString(store.path()));
+        }
+    }
+
+    @Test
+    void schemaSevenReadsAsTheSystemLanguageAndIsRewrittenOnTheNextChange() throws Exception {
+        LauncherSettingsStore store =
+                new LauncherSettingsStore(temp.resolve("registry.json"));
+        String previous = """
+                {
+                  "schemaVersion" : 7,
+                  "defaultJavaExecutable" : null,
+                  "defaultJavaFeature" : null,
+                  "appearance" : { "theme" : "light" },
+                  "showExperimental" : true,
+                  "installParent" : null,
+                  "playIntro" : false
+                }
+                """;
+        Files.writeString(store.path(), previous);
+
+        LauncherSettingsStore.Settings read = store.read();
+
+        assertEquals(LauncherSettingsStore.SCHEMA, read.schemaVersion());
+        assertNull(read.language());
+        assertFalse(read.playIntro());
+        assertEquals(previous, Files.readString(store.path()), "reading never rewrites");
+        store.writeLanguage("de");
+        String json = Files.readString(store.path());
+        assertTrue(json.contains("\"schemaVersion\" : 8"), json);
+        assertTrue(json.contains("\"language\" : \"de\""), json);
+        assertFalse(store.read().playIntro());
+    }
+
+    @Test
+    void languageRoundTripsAndOtherWritesKeepIt() throws Exception {
+        LauncherSettingsStore store =
+                new LauncherSettingsStore(temp.resolve("registry.json"));
+        assertNull(store.read().language());
+
+        assertEquals("es", store.writeLanguage("es").language());
+        assertEquals("es", store.writePlayIntro(false).language(), "other writes keep it");
+        assertEquals("es", store.read().language());
+        assertNull(store.writeLanguage(null).language());
+        assertNull(store.read().language());
+    }
+
+    @Test
+    void unknownOrMistypedLanguageIsRejectedWithoutRewrite() throws Exception {
+        LauncherSettingsStore store =
+                new LauncherSettingsStore(temp.resolve("registry.json"));
+        assertThrows(IOException.class, () -> store.writeLanguage("fr"));
+        for (String header : List.of("\"schemaVersion\" : 8, \"language\" : \"fr\"",
+                "\"schemaVersion\" : 8, \"language\" : 3", "\"schemaVersion\" : 8",
+                "\"schemaVersion\" : 7, \"language\" : \"de\"")) {
+            String malformed = """
+                    {
+                      %s,
+                      "defaultJavaExecutable" : null,
+                      "defaultJavaFeature" : null,
+                      "appearance" : { "theme" : "light" },
+                      "showExperimental" : false,
+                      "installParent" : null,
+                      "playIntro" : true
                     }
                     """.formatted(header);
             Files.writeString(store.path(), malformed);

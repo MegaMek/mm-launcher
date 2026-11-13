@@ -33,10 +33,11 @@
 package org.megamek.launcher.gui;
 
 import org.megamek.launcher.design.swing.TokenTooltips;
+import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.launch.LaunchOptions;
 
 import javax.swing.BorderFactory;
-import javax.swing.Box;
+import javax.swing.Icon;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComponent;
@@ -52,10 +53,14 @@ import java.awt.BorderLayout;
 import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
+import java.awt.Graphics;
+import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
 import java.awt.Insets;
 import java.awt.Rectangle;
+import java.awt.RenderingHints;
+import java.awt.geom.Path2D;
 import java.io.File;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -69,6 +74,7 @@ import java.util.TreeSet;
  * Settings page and inside {@link LaunchOptionsDialog}.
  */
 final class LaunchOptionsForm extends JPanel implements Scrollable {
+    private static final String BUNDLE = "org.megamek.launcher.gui.dialogs";
     private final GuiScale scale;
     private final LaunchOptions inherited;
     private final Runnable onChange;
@@ -98,58 +104,59 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         setName("launchOptionsForm");
         setOpaque(false);
 
-        megamekHeap = heapRow("MegaMek memory", "megamekHeap",
+        megamekHeap = heapRow(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.megamekMemory"), "megamekHeap",
                 current.megamekHeapMb(), inherited.megamekHeapMb(), inheritLabel, null);
         // One hint for the whole memory group keeps Settings within the default window height.
-        mekhqHeap = heapRow("MekHQ memory", "mekhqHeap",
+        mekhqHeap = heapRow(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.mekhqMemory"), "mekhqHeap",
                 current.mekhqHeapMb(), inherited.mekhqHeapMb(), inheritLabel,
-                "4 GB suits most games. Big campaigns may need more.");
-        labHeap = heapRow("MegaMekLab memory", "labHeap",
+                I18n.getTextAt(BUNDLE, "LaunchOptionsForm.memoryHint"));
+        labHeap = heapRow(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.labMemory"), "labHeap",
                 current.labHeapMb(), inherited.labHeapMb(), inheritLabel, null);
 
         StyledComboBox<LaunchOptions.Renderer> rendererBox =
                 new StyledComboBox<>(LaunchOptions.Renderer.values(), scale);
         rendererBox.setName("launchOptionsRenderer");
-        rendererBox.getAccessibleContext().setAccessibleName("Graphics rendering");
+        rendererBox.getAccessibleContext().setAccessibleName(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.graphicsRendering"));
         rendererBox.setSelectedItem(current.renderer() != null ? current.renderer() : inherited.renderer());
         rendererBox.addActionListener(event -> this.onChange.run());
-        renderer = row("Graphics rendering", "renderer", rendererBox,
-                current.renderer() == null, inheritLabel + " (" + inherited.renderer().label() + ")",
+        renderer = row(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.graphicsRendering"), "renderer", rendererBox,
+                current.renderer() == null,
+                I18n.getFormattedTextAt(BUNDLE, "LaunchOptionsForm.inheritWithValue", inheritLabel, inherited.renderer().label()),
                 () -> rendererBox.setSelectedItem(inherited.renderer()),
-                "Try Disable Direct3D or OpenGL if maps flicker.");
+                I18n.getTextAt(BUNDLE, "LaunchOptionsForm.rendererHint"));
 
         argumentsField = textField(current.extraJvmArguments() != null
                 ? current.extraJvmArguments() : inherited.extraJvmArguments(), "launchOptionsJvmArguments");
-        argumentsField.getAccessibleContext().setAccessibleName("Extra Java arguments");
-        extraArguments = row("Extra Java arguments", "jvmArguments", argumentsField,
+        argumentsField.getAccessibleContext().setAccessibleName(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.extraJavaArguments"));
+        extraArguments = row(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.extraJavaArguments"), "jvmArguments", argumentsField,
                 current.extraJvmArguments() == null,
-                inheritLabel + " (" + describeText(inherited.extraJvmArguments()) + ")",
+                I18n.getFormattedTextAt(BUNDLE, "LaunchOptionsForm.inheritWithValue", inheritLabel, describeText(inherited.extraJvmArguments())),
                 () -> argumentsField.setText(inherited.extraJvmArguments()),
-                "Advanced. For example -Dsun.java2d.uiScale=1.5");
+                I18n.getTextAt(BUNDLE, "LaunchOptionsForm.extraJavaArgumentsHint"));
 
         userDirField = textField(current.userDirectory() != null
                 ? current.userDirectory() : inherited.userDirectory(), "launchOptionsUserDirectory");
-        userDirField.getAccessibleContext().setAccessibleName("User directory");
-        JPanel userDirEditor = new JPanel(new BorderLayout(0, scale.space("sm")));
+        userDirField.getAccessibleContext().setAccessibleName(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.userDirectory"));
+        JPanel userDirEditor = new JPanel(new BorderLayout(scale.space("sm"), 0));
         userDirEditor.setOpaque(false);
         userDirEditor.add(userDirField, BorderLayout.CENTER);
-        JPanel userDirButtons = new JPanel(new FlowLayout(FlowLayout.LEFT, 0, 0));
-        userDirButtons.setOpaque(false);
-        JButton browse = smallButton("Browse…", "launchOptionsBrowseUserDirectory");
+        JButton browse = folderButton(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.browse"), "launchOptionsBrowseUserDirectory",
+                userDirField.getPreferredSize().height);
         browse.addActionListener(event -> chooseUserDirectory());
-        JButton clear = smallButton("Clear", "launchOptionsClearUserDirectory");
-        clear.addActionListener(event -> userDirField.setText(""));
-        userDirButtons.add(browse);
-        userDirButtons.add(Box.createHorizontalStrut(scale.space("md")));
-        userDirButtons.add(clear);
-        userDirEditor.add(userDirButtons, BorderLayout.SOUTH);
-        userDirectory = row("User directory", "userDirectory", userDirEditor,
+        userDirEditor.add(browse, BorderLayout.EAST);
+        userDirectory = row(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.userDirectory"), "userDirectory", userDirEditor,
                 current.userDirectory() == null,
-                inheritLabel + " (" + describeText(inherited.userDirectory()) + ")",
+                I18n.getFormattedTextAt(BUNDLE, "LaunchOptionsForm.inheritWithValue", inheritLabel, describeText(inherited.userDirectory())),
                 () -> userDirField.setText(inherited.userDirectory()),
-                "Shared units and camos. Needs MegaMek 0.51.01 or later.");
-        userDirectory.extraEditors = List.of(userDirField, browse, clear);
+                I18n.getTextAt(BUNDLE, "LaunchOptionsForm.userDirectoryHint"));
+        userDirectory.extraEditors = List.of(userDirField, browse);
         userDirectory.refresh();
+    }
+
+    /** Sets every option to follow the inherited layer; nothing is saved until collected. */
+    void restoreDefaults() {
+        for (Row row : rows) row.restoreDefault.run();
+        onChange.run();
     }
 
     /** This layer's values as entered, without validation. */
@@ -273,6 +280,11 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         }
 
         Row row = new Row(inherit, editor);
+        row.restoreDefault = () -> {
+            inherit.setSelected(true);
+            resetToInherited.run();
+            row.refresh();
+        };
         inherit.addActionListener(event -> {
             if (inherit.isSelected()) resetToInherited.run();
             row.refresh();
@@ -310,15 +322,63 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         return field;
     }
 
-    private JButton smallButton(String text, String name) {
-        JButton button = new FirstLaunchButton(text, name, false, scale, FirstLaunchButton.Size.SMALL);
-        button.getAccessibleContext().setAccessibleDescription("Activate " + text + ".");
+    /** A square, icon-only button as tall as the field beside it; the label lives in its tooltip. */
+    private JButton folderButton(String label, String name, int side) {
+        JButton button = new FirstLaunchButton("", name, false, scale, FirstLaunchButton.Size.COMPACT);
+        button.setIcon(new FolderIcon(scale));
+        button.setBorder(BorderFactory.createEmptyBorder());
+        Dimension size = new Dimension(side, side);
+        button.setPreferredSize(size);
+        button.setMinimumSize(size);
+        button.setToolTipText(label);
+        button.getAccessibleContext().setAccessibleName(label);
+        button.getAccessibleContext().setAccessibleDescription(I18n.getFormattedTextAt(BUNDLE, "LaunchOptionsForm.activateDescription", label));
         return button;
+    }
+
+    private static final class FolderIcon implements Icon {
+        private final int width;
+        private final int height;
+
+        private FolderIcon(GuiScale scale) {
+            width = scale.size("icon.sm");
+            height = width * 3 / 4;
+        }
+
+        @Override public int getIconWidth() {
+            return width;
+        }
+
+        @Override public int getIconHeight() {
+            return height;
+        }
+
+        @Override
+        public void paintIcon(Component component, Graphics graphics, int x, int y) {
+            Graphics2D canvas = (Graphics2D) graphics.create();
+            try {
+                canvas.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                canvas.setColor(LauncherTheme.buttonText(false, component.isEnabled()));
+                int tab = Math.max(2, height / 4);
+                Path2D folder = new Path2D.Float();
+                folder.moveTo(x, y + tab);
+                folder.lineTo(x, y);
+                folder.lineTo(x + width * 0.4f, y);
+                folder.lineTo(x + width * 0.5f, y + tab);
+                folder.lineTo(x + width, y + tab);
+                folder.lineTo(x + width, y + height);
+                folder.lineTo(x, y + height);
+                folder.closePath();
+                canvas.fill(folder);
+            } finally {
+                canvas.dispose();
+            }
+        }
     }
 
     private void chooseUserDirectory() {
         JFileChooser chooser = new JFileChooser();
-        chooser.setDialogTitle("Choose user directory");
+        chooser.setDialogTitle(I18n.getTextAt(BUNDLE, "LaunchOptionsForm.chooseUserDirectory"));
         chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
         chooser.setAcceptAllFileFilterUsed(false);
         String existing = userDirField.getText().strip();
@@ -333,7 +393,7 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
     }
 
     static String describeText(String value) {
-        return value == null || value.isEmpty() ? "none" : value;
+        return value == null || value.isEmpty() ? I18n.getTextAt(BUNDLE, "LaunchOptionsForm.none") : value;
     }
 
     @Override public Dimension getPreferredScrollableViewportSize() { return getPreferredSize(); }
@@ -387,7 +447,10 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
 
         @Override
         public String toString() {
-            return megabytes % 1024 == 0 ? (megabytes / 1024) + " GB (" + megabytes + " MB)" : megabytes + " MB";
+            return megabytes % 1024 == 0
+                    ? I18n.getFormattedTextAt(BUNDLE, "LaunchOptionsForm.heapGigabytes",
+                            String.valueOf(megabytes / 1024), String.valueOf(megabytes))
+                    : I18n.getFormattedTextAt(BUNDLE, "LaunchOptionsForm.heapMegabytes", String.valueOf(megabytes));
         }
     }
 
@@ -395,6 +458,7 @@ final class LaunchOptionsForm extends JPanel implements Scrollable {
         final JCheckBox inherit;
         JComponent editor;
         List<? extends Component> extraEditors = List.of();
+        Runnable restoreDefault = () -> {};
 
         Row(JCheckBox inherit, JComponent editor) {
             this.inherit = inherit;

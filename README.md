@@ -367,7 +367,8 @@ Home has no visible global “Main” block, per-copy update buttons, or a secon
 for update status. Its single **Installations** button gains a known count badge such as
 **2 updates** (announced as **Installations (2 updates)**) when checked installations have updates; unknown and launch-only
 copies never create a false count. Update, retry, recovery, channel, location, removal, and explicit
-**Use as preferred for …** actions live on map-style installation cards. A managed card shows its
+**Use as preferred for …** actions live on map-style installation cards (a suite copy offers
+**Use as preferred for all applications** plus a per-application submenu). A managed card shows its
 read-only **Channel: Core/Experimental** identity and directly shows
 **Check for updates when the launcher opens**. This per-card checkbox is the sole automatic-check
 setting and saves immediately without changing the fixed channel. An imported card says
@@ -711,9 +712,11 @@ with stages labelled **Checking installation files** and **Removing official fil
 Progress refreshes show the latest state and may skip a stage that has already finished.
 Every targeted file is still verified immediately before its move to recovery.
 
-If a user manually deletes an installation folder, **More…** offers a styled
+If a user manually deletes an installation folder, its card's **Locate…** offers a styled
 **Installation not found** confirmation to remove its launcher registration, including a
-validated interrupted-uninstall record. This does not recreate the folder or touch other
+validated interrupted-uninstall record. If the folder was only renamed or moved, **Locate
+folder…** in the same dialog points the installation at its new folder and keeps its updates and
+settings; the launcher checks that the folder holds the same copy first. This does not recreate the folder or touch other
 installations. Inaccessible locations and unavailable drives are not mistaken for deleted
 folders. Reinstalling the launcher intentionally preserves the per-user registry and settings;
 use this registration-removal flow rather than reinstalling to clear a missing game copy.

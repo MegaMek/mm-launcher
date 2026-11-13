@@ -33,6 +33,8 @@
 
 package org.megamek.launcher.gui;
 
+import org.megamek.launcher.internationalization.I18n;
+
 import javax.swing.AbstractAction;
 import javax.swing.Box;
 import javax.swing.BoxLayout;
@@ -65,7 +67,8 @@ import java.util.Objects;
  * browser side by side while writing the report.</p>
  */
 final class BugReportDialog extends JDialog {
-    static final String TITLE = "Report a bug";
+    private static final String BUNDLE = "org.megamek.launcher.gui.dialogs";
+    static final String TITLE = I18n.getTextAt(BUNDLE, "BugReportDialog.title");
     private static final String DISMISS_ACTION = "dismissBugReport";
 
     /** Callbacks for the dialog's actions; the launcher frame owns choosers, workers and browsing. */
@@ -90,7 +93,6 @@ final class BugReportDialog extends JDialog {
         setName("bugReportDialog");
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         getAccessibleContext().setAccessibleName(TITLE);
-        LauncherTheme.useLauncherTitle(this);
         content = content(scale, actions, this::dispose);
         setContentPane(content.panel());
         getRootPane().setDefaultButton(content.openIssueForm());
@@ -130,7 +132,7 @@ final class BugReportDialog extends JDialog {
     void archiveSaving(boolean saving) {
         if (!isDisplayable()) return;
         content.saveArchive().setEnabled(!saving);
-        if (saving) showArchiveStatus("Saving diagnostics…", false);
+        if (saving) showArchiveStatus(I18n.getTextAt(BUNDLE, "BugReportDialog.savingDiagnostics"), false);
     }
 
     void showArchiveStatus(String message, boolean problem) {
@@ -156,22 +158,20 @@ final class BugReportDialog extends JDialog {
         heading.setFont(scale.font(base, "headline"));
         heading.setAlignmentX(Component.LEFT_ALIGNMENT);
 
-        JLabel intro = wrapped("Thanks for helping us fix the launcher. For problems inside "
-                        + "MegaMek, MegaMekLab or MekHQ, use Help, then Report a Bug, in that "
-                        + "program instead.", "bugReportIntro", scale.font(base, "body"),
+        JLabel intro = wrapped(I18n.getTextAt(BUNDLE, "BugReportDialog.intro"), "bugReportIntro", scale.font(base, "body"),
                 FirstLaunchPanel.TEXT, scale.size("dialog.md") - scale.space("xxl") * 2);
 
-        JButton save = new FirstLaunchButton("Save diagnostics ZIP…", "saveBugReportArchiveButton",
+        JButton save = new FirstLaunchButton(I18n.getTextAt(BUNDLE, "BugReportDialog.saveDiagnostics"), "saveBugReportArchiveButton",
                 false, scale, FirstLaunchButton.Size.SMALL);
         save.getAccessibleContext().setAccessibleDescription(
-                "Saves the launcher's sanitized logs and system details as one ZIP file");
+                I18n.getTextAt(BUNDLE, "BugReportDialog.saveDiagnosticsDescription"));
         save.addActionListener(event -> actions.saveArchive().run());
         // Enabled only by archiveSaving, so the frame's busy handling must not snapshot or restore it.
         save.putClientProperty(OperationProgressDialog.OPERATION_CONTROL, Boolean.TRUE);
-        JButton open = new FirstLaunchButton("Open bug report form", "openBugReportFormButton",
+        JButton open = new FirstLaunchButton(I18n.getTextAt(BUNDLE, "BugReportDialog.openForm"), "openBugReportFormButton",
                 true, scale, FirstLaunchButton.Size.SMALL);
         open.getAccessibleContext().setAccessibleDescription(
-                "Opens the launcher's GitHub bug report form in your browser");
+                I18n.getTextAt(BUNDLE, "BugReportDialog.openFormDescription"));
         open.addActionListener(event -> actions.openIssueForm().run());
         Dimension shared = new Dimension(
                 Math.max(save.getPreferredSize().width, open.getPreferredSize().width),
@@ -190,13 +190,11 @@ final class BugReportDialog extends JDialog {
         status.setVisible(false);
 
         JPanel saveStep = step(scale, base, textWidth, "bugReportSaveStep",
-                "1. Save the diagnostics",
-                "One ZIP with the launcher's sanitized logs and system details. Review it before "
-                        + "sharing; it can contain local folder names.", save, status);
+                I18n.getTextAt(BUNDLE, "BugReportDialog.saveStepTitle"),
+                I18n.getTextAt(BUNDLE, "BugReportDialog.saveStepExplanation"), save, status);
         JPanel formStep = step(scale, base, textWidth, "bugReportFormStep",
-                "2. Describe the problem on GitHub",
-                "Opens the bug form with your launcher version, system and Java already filled "
-                        + "in. Attach the ZIP there.", open, null);
+                I18n.getTextAt(BUNDLE, "BugReportDialog.formStepTitle"),
+                I18n.getTextAt(BUNDLE, "BugReportDialog.formStepExplanation"), open, null);
 
         JPanel fields = new JPanel();
         fields.setName("bugReportFields");
@@ -210,11 +208,11 @@ final class BugReportDialog extends JDialog {
         fields.add(Box.createVerticalStrut(scale.space("lg")));
         fields.add(formStep);
 
-        JButton discord = new LauncherLink("Ask on Discord", "bugReportDiscordButton", scale);
+        JButton discord = new LauncherLink(I18n.getTextAt(BUNDLE, "BugReportDialog.askOnDiscord"), "bugReportDiscordButton", scale);
         discord.getAccessibleContext().setAccessibleDescription(
-                "Opens the MegaMek community Discord invitation in your browser");
+                I18n.getTextAt(BUNDLE, "BugReportDialog.askOnDiscordDescription"));
         discord.addActionListener(event -> actions.openDiscord().run());
-        JButton closeButton = new FirstLaunchButton("Close", "closeBugReportButton", false, scale,
+        JButton closeButton = new FirstLaunchButton(I18n.getTextAt(BUNDLE, "BugReportDialog.close"), "closeBugReportButton", false, scale,
                 FirstLaunchButton.Size.SMALL);
         closeButton.addActionListener(event -> close.run());
 

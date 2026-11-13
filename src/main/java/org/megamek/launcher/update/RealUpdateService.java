@@ -37,6 +37,8 @@ import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import org.megamek.launcher.internationalization.I18n;
+import org.megamek.launcher.internationalization.LocalizedText;
 import org.megamek.launcher.channel.ChannelPreferenceStore;
 import org.megamek.launcher.channel.ChannelUpdateChecker;
 import org.megamek.launcher.launch.RootCoordinator;
@@ -60,6 +62,7 @@ import org.megamek.launcher.release.OfficialRepository;
 import org.megamek.launcher.release.ReleaseCatalog;
 import org.megamek.launcher.release.ReleaseTransport;
 import org.megamek.launcher.release.VerifiedPackageFetcher;
+import org.megamek.launcher.release.VersionIdentity;
 import org.megamek.launcher.sandbox.OverrideEntry;
 
 import java.io.IOException;
@@ -94,6 +97,7 @@ import java.util.regex.Pattern;
  * calls or impersonates the disposable {@code SandboxUpdater}.
  */
 public final class RealUpdateService {
+    private static final String BUNDLE = "org.megamek.launcher.services";
     public static final String CONFIRM = RootCoordinator.CLOSE_ALL_CONFIRMATION;
     /** Repair is a distinct, explicit authorization, not Update consent. */
     public static final String REPAIR_CONFIRM = "RESTORE-EXACT-OFFICIAL-RELEASE";
@@ -111,6 +115,7 @@ public final class RealUpdateService {
     private final ChannelPreferenceStore channelPreferences;
     private final RootCoordinator coordinator;
     private final FailureHook failureHook;
+    private final PreviousBuildStore previousBuilds = new PreviousBuildStore();
     private final ObjectMapper mapper = JsonMapper.builder()
             .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION).build()
             .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
@@ -178,7 +183,7 @@ public final class RealUpdateService {
         // Repair cannot be abandoned after a journal is started. Unlike Apply, this entire
         // operation is non-cancellable, including acquisition and preflight.
         context.enterFinalization("Repair must run through completion or retain recovery state.");
-        context.phase(OperationPhase.METADATA, "Checking exact release provenance");
+        context.phase(OperationPhase.METADATA, LocalizedText.of(BUNDLE, "RealUpdateService.checkingProvenance"));
         Snapshot expected = snapshot(registry, id);
         try (RootCoordinator.Lease gate = coordinator.acquire(expected.root(), true)) {
             gate.requireNoPendingUpdate();
@@ -207,7 +212,7 @@ public final class RealUpdateService {
                 if (!source.assetSha256().equals(workspace.resolvedDigest().hex())) {
                     throw new IOException("repair archive digest differs from persisted provenance");
                 }
-                context.phase(OperationPhase.PLAN, "Checking official installation files");
+                context.phase(OperationPhase.PLAN, LocalizedText.of(BUNDLE, "RealUpdateService.checkingOfficialFiles"));
                 Inspection targetInspection = new InstallationInspector().inspect(
                         workspace.extracted());
                 if (targetInspection.products().stream().noneMatch(
@@ -236,15 +241,14 @@ public final class RealUpdateService {
                 }
                 List<String> extraJars = OwnershipPolicy.extraLibJars(current.root(),
                         source.officialManifest(), target.manifest());
-                context.phase(OperationPhase.PREPARE_INSTALL, "Checking repair destinations");
+                context.phase(OperationPhase.PREPARE_INSTALL, LocalizedText.of(BUNDLE, "RealUpdateService.checkingRepairDestinations"));
                 preflight(current.root(), decisions, context);
-                context.phase(OperationPhase.APPLY, "Restoring official installation files");
+                context.phase(OperationPhase.APPLY, LocalizedText.of(BUNDLE, "RealUpdateService.restoringOfficialFiles"));
                 ApplyResult result = transactRepair(current, workspace.extracted(),
                         targetInspection, decisions);
-                context.cleanupPhase("Finishing repair and removing temporary package files");
+                context.cleanupPhase(LocalizedText.of(BUNDLE, "RealUpdateService.finishingRepair"));
                 return new RepairResult(result.record(), missing, modified, extraJars,
-                        "Rollback copies are temporary and are deleted after successful repair; "
-                                + "make a separate backup of local edits before repair.");
+                        I18n.getTextAt(BUNDLE, "RealUpdateService.repairBackupWarning"));
             }
         }
     }
@@ -323,7 +327,7 @@ public final class RealUpdateService {
         try (OperationContext.WorkerRegistration operationRegistration = context.activate()) {
             Objects.requireNonNull(expected, "expected snapshot");
             context.phase(OperationPhase.METADATA,
-                    "Validating current update source and authorization");
+                    LocalizedText.of(BUNDLE, "RealUpdateService.validatingSource"));
             validateAuthorization(expected.current().tag(), targetTag, expectedSize, expectedDigest,
                     confirmation);
             try (RootCoordinator.Lease gate = coordinator.acquire(expected.root(), true)) {
@@ -346,7 +350,7 @@ public final class RealUpdateService {
                                              expectedAssetName, expectedSize, expectedDigest),
                                      context)) {
                     context.phase(OperationPhase.PLAN,
-                            "Inspecting package contents and planning local changes");
+                            LocalizedText.of(BUNDLE, "RealUpdateService.inspectingPackage"));
                     Inspection targetInspection = new InstallationInspector().inspect(
                             workspace.extracted());
                     if (targetInspection.products().stream().noneMatch(
@@ -361,7 +365,7 @@ public final class RealUpdateService {
                             .validatePreviewPair(current.current().officialManifest(),
                                     target.manifest());
                     context.phase(OperationPhase.PLAN,
-                            "Comparing local managed files with the verified target");
+                            LocalizedText.of(BUNDLE, "RealUpdateService.comparingTarget"));
                     List<Decision> decisions = new UpdatePlanner().planPreview(
                             current.current().officialManifest(), target.manifest(), current.root(),
                             pair, trustedHashes(current.current()),
@@ -370,7 +374,7 @@ public final class RealUpdateService {
                             decisions, context);
                     preflight(current.root(), decisions, context);
                     context.phase(OperationPhase.APPLY,
-                            "Entering verified update transaction");
+                            LocalizedText.of(BUNDLE, "RealUpdateService.enteringTransaction"));
                     context.enterFinalization("The update transaction and recovery journal have "
                             + "begun; cancellation can no longer be performed safely.");
                     return transact(current, workspace.extracted(), workspace.release(),
@@ -404,12 +408,12 @@ public final class RealUpdateService {
             } catch (IOException | InterruptedException | ManifestException | RuntimeException
                      | Error failure) {
                 context.cleanupPhase(
-                        "Discarding temporary package data; recovery data is retained");
+                        LocalizedText.of(BUNDLE, "RealUpdateService.discardingPackageData"));
                 IOException cleanup = prepared.finishClaim();
                 if (cleanup != null) failure.addSuppressed(cleanup);
                 throw failure;
             }
-            context.cleanupPhase("Removing temporary package data");
+            context.cleanupPhase(LocalizedText.of(BUNDLE, "RealUpdateService.removingPackageData"));
             IOException cleanup = prepared.finishClaim();
             if (cleanup == null) return result;
             return new ApplyResult(result.record(), result.state(), result.decisions(),
@@ -423,7 +427,7 @@ public final class RealUpdateService {
                                              OperationContext context)
             throws IOException, InterruptedException, ManifestException {
         context.phase(OperationPhase.PREPARE_INSTALL,
-                "Revalidating the retained package and selected installation");
+                LocalizedText.of(BUNDLE, "RealUpdateService.revalidatingRetained"));
         Snapshot expected = prepared.source();
         UpdatePreviewService.Preview preview = prepared.capturedPreview();
         try (RootCoordinator.Lease gate = coordinator.acquire(expected.root(), true)) {
@@ -487,7 +491,7 @@ public final class RealUpdateService {
                         + "update attempt");
             }
             context.phase(OperationPhase.PREPARE_INSTALL,
-                    "Replanning local managed files before finalization");
+                    LocalizedText.of(BUNDLE, "RealUpdateService.replanning"));
             List<Decision> decisions = new UpdatePlanner().planPreview(
                     current.current().officialManifest(), prepared.target().manifest(),
                     current.root(), pair, trustedHashes(current.current()),
@@ -496,7 +500,7 @@ public final class RealUpdateService {
             validatePristineRuntime(current.root(), current.current(),
                     prepared.target().manifest(), decisions, context);
             preflight(current.root(), decisions, context);
-            context.phase(OperationPhase.APPLY, "Entering verified update transaction");
+            context.phase(OperationPhase.APPLY, LocalizedText.of(BUNDLE, "RealUpdateService.enteringTransaction"));
             context.enterFinalization("The update transaction and recovery journal have begun; "
                     + "cancellation can no longer be performed safely.");
             return transact(current, extracted, preview.targetRelease(), preview.targetAsset(),
@@ -530,7 +534,7 @@ public final class RealUpdateService {
         if (!CONFIRM.equals(confirmation)) {
             throw new IOException("recovery confirmation must be exactly " + CONFIRM);
         }
-        context.phase(OperationPhase.RECOVER, "Starting verified update recovery");
+        context.phase(OperationPhase.RECOVER, LocalizedText.of(BUNDLE, "RealUpdateService.startingRecovery"));
         context.enterFinalization("Recovery replay and cleanup have begun; cancellation is disabled.");
         Path registryPath = registry.toAbsolutePath().normalize();
         RegistryData data = registries.read(registryPath);
@@ -559,6 +563,9 @@ public final class RealUpdateService {
                             Inspection installed = inspectTarget(root, journal);
                             registries.refreshAfterUpdate(registryPath, journal.expectedRecord(),
                                     installed.observedBuild(), installed.products());
+                            rememberPreviousBuild(registryPath, record.id(),
+                                    journal.expectedRecord().observedBuild(),
+                                    installed.observedBuild());
                             validateNamespaceEntries(namespace, transaction, pendingFile, false);
                             deleteValidatedTransaction(transaction, journal);
                             Path transactions = namespace.resolve("transactions");
@@ -609,6 +616,9 @@ public final class RealUpdateService {
                 }
                 InstallationRecord refreshed = registries.refreshAfterUpdate(registryPath,
                         journal.expectedRecord(), installed.observedBuild(), installed.products());
+                rememberPreviousBuild(registryPath, record.id(),
+                        journal.expectedRecord().observedBuild(), installed.observedBuild());
+                clearStaleCaches(root, journal.nextState().officialManifest());
                 writeJournal(journalFile, withPhase(journal, "COMMITTED"));
                 cleanupCommitted(namespace, transaction, pendingFile, journal);
                 return new RecoveryResult("completed verified post-mutation commit", refreshed);
@@ -631,6 +641,23 @@ public final class RealUpdateService {
 
     public boolean hasPending(Path root) throws IOException {
         return coordinator.pending(root);
+    }
+
+    /**
+     * Remembers the build an update started from, where What's new starts. A repair keeps the
+     * build, and with it what is already remembered. Failing to remember only makes What's new
+     * show the installed release's own notes, so it never fails the update.
+     */
+    private void rememberPreviousBuild(Path registry, String id, String previous, String current) {
+        if (previous == null || current == null
+                || VersionIdentity.fromExact(previous).equals(VersionIdentity.fromExact(current))) {
+            return;
+        }
+        try {
+            previousBuilds.write(registry, id, previous, current);
+        } catch (IOException | RuntimeException ignored) {
+            // Best effort, see above.
+        }
     }
 
     private ApplyResult transact(Snapshot snapshot, Path extracted,
@@ -716,6 +743,12 @@ public final class RealUpdateService {
         InstallationRecord refreshed = registries.refreshAfterUpdate(snapshot.registry(),
                 snapshot.record(), installed.observedBuild(), installed.products());
         failureHook.hit("AFTER_REGISTRY_COMMIT");
+        // Before COMMITTED as well, so recovery replays it after an interruption.
+        if (!repair) {
+            rememberPreviousBuild(snapshot.registry(), snapshot.record().id(),
+                    snapshot.record().observedBuild(), installed.observedBuild());
+            clearStaleCaches(snapshot.root(), target.manifest());
+        }
         writeJournal(journalFile, withPhase(journal, "COMMITTED"));
         cleanupCommitted(namespace, transaction, pendingFile, journal);
         long skipped = decisions.stream().filter(item -> item.action() == Action.SKIP).count();
@@ -967,27 +1000,32 @@ public final class RealUpdateService {
             }
             FileEntry oldEntry = before.get(operationKey);
             FileEntry newEntry = after.get(operationKey);
+            // A regenerable cache rebuilt by the application is replaced, never kept as an edit,
+            // including when the target is the first release to ship it.
+            boolean cache = !repair && UninstallService.regenerableCache(operation.path());
+            boolean untrackedCache = cache && oldEntry == null && newEntry != null
+                    && "REPLACE".equals(operation.action());
             if (repair && (oldEntry == null || newEntry == null
                     || !oldEntry.path().equals(operation.path())
                     || !newEntry.path().equals(operation.path())
                     || !Set.of("ADD", "REPLACE").contains(operation.action()))) {
                 throw new IOException("repair journal operation is not an exact official path");
             }
-            if (oldEntry == null && !"ADD".equals(operation.action())
+            if (oldEntry == null && !"ADD".equals(operation.action()) && !untrackedCache
                     || newEntry == null && !"REMOVE".equals(operation.action())
                     || newEntry != null && "REMOVE".equals(operation.action())
                     || newEntry != null && operation.afterHash() == null
                     || newEntry != null && !newEntry.sha256().equals(operation.afterHash())
                     || operation.beforeHash() == null && !"ADD".equals(operation.action())
                     || operation.beforeHash() != null && "ADD".equals(operation.action())
-                    || oldEntry == null && operation.beforeHash() != null
+                    || oldEntry == null && operation.beforeHash() != null && !untrackedCache
                     || operation.beforeHash() != null
                     && !operation.beforeHash().matches("[0-9a-f]{64}")
                     || operation.beforeHash() != null && oldEntry != null
                     && !operation.beforeHash().equals(oldEntry.sha256())
                     && !trusted.getOrDefault(operationKey, Set.of())
                     .contains(operation.beforeHash())
-                    && !OwnershipPolicy.runtimePath(operation.path()) && !repair) {
+                    && !OwnershipPolicy.runtimePath(operation.path()) && !cache && !repair) {
                 throw new IOException("journal operation hashes do not match managed manifests");
             }
             String expectedBackup = operation.beforeHash() == null ? null
@@ -1304,6 +1342,25 @@ public final class RealUpdateService {
         if (Files.exists(transactions, LinkOption.NOFOLLOW_LINKS)
                 && RealUpdateFiles.emptyDirectory(transactions)) Files.delete(transactions);
         if (RealUpdateFiles.emptyDirectory(namespace)) Files.delete(namespace);
+    }
+
+    /**
+     * Deletes regenerable caches the new version did not ship. They were built by the previous
+     * version, and MegaMek only rescans unit files newer than its cache, so values derived by
+     * the old code would otherwise survive the update. Best effort: the update is already
+     * committed, and the application rebuilds a missing cache on its next start.
+     */
+    private static void clearStaleCaches(Path root, Manifest target) {
+        Map<String, FileEntry> shipped = index(target);
+        for (String cache : UninstallService.REGENERABLE_CACHES) {
+            if (shipped.containsKey(key(cache))) continue;
+            try {
+                Path file = RealUpdateFiles.resolve(root, cache, true);
+                if (Files.isRegularFile(file, LinkOption.NOFOLLOW_LINKS)) Files.delete(file);
+            } catch (IOException | ManifestException ignored) {
+                // A cache that cannot be removed now is cleared by Repair.
+            }
+        }
     }
 
     private void cleanupCommitted(Path namespace, Path transaction, Path pending,

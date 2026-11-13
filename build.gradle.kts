@@ -362,6 +362,8 @@ abstract class WindowsInstallerMsi : DefaultTask() {
                 "-bindpath", "Resources=${sources.absolutePath}",
                 "-intermediatefolder", intermediate.absolutePath,
                 "-pdbtype", "none",
+                "-culture", "en-us",
+                "-loc", File(sources, "MegaMekLauncher_en-us.wxl").absolutePath,
                 "-o", installer.absolutePath,
                 File(sources, "MegaMekLauncher.wxs").absolutePath,
                 File(sources, "ui.wxs").absolutePath
@@ -800,7 +802,7 @@ plugins {
 }
 
 group = "org.megamek.launcher"
-version = "0.14.35"
+version = "0.14.39"
 
 repositories {
     mavenCentral()
@@ -897,6 +899,9 @@ tasks.test {
     }).withPropertyName("launcherWorkflows")
         .withPathSensitivity(PathSensitivity.RELATIVE)
     systemProperty("java.awt.headless", "true")
+    // Tests read the English text; pin it so a translated system language can't change them.
+    systemProperty("user.language", "en")
+    systemProperty("user.country", "US")
     useJUnitPlatform {
         excludeTags("archive", "native-gui")
     }
@@ -908,6 +913,9 @@ tasks.register<Test>("nativeGuiTest") {
     testClassesDirs = sourceSets["test"].output.classesDirs
     classpath = sourceSets["test"].runtimeClasspath
     systemProperty("java.awt.headless", "false")
+    // Tests read the English text; pin it so a translated system language can't change them.
+    systemProperty("user.language", "en")
+    systemProperty("user.country", "US")
     useJUnitPlatform {
         includeTags("native-gui")
         excludeTags("archive")

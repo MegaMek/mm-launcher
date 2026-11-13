@@ -93,6 +93,34 @@ public class ReceiptStore {
 
     public OwnershipReceipt read(Path registry, RegistryData data, InstallationRecord record)
             throws IOException {
+        OwnershipReceipt receipt = readFile(registry, data, record);
+        try {
+            validate(receipt, record);
+            return receipt;
+        } catch (IOException | RuntimeException | ManifestException e) {
+            throw new IOException("ownership receipt is invalid: " + detail(e), e);
+        }
+    }
+
+    /**
+     * Reads the receipt of a registered installation whose folder is missing. Only its binding to
+     * {@code missing} is checked here; the caller must fully {@link #validate} the rebound
+     * receipt against the folder it moved to before publishing it.
+     */
+    OwnershipReceipt readForRelocation(Path registry, RegistryData data,
+                                       InstallationRecord missing) throws IOException {
+        OwnershipReceipt receipt = readFile(registry, data, missing);
+        if (receipt.schemaVersion() != SCHEMA_VERSION
+                || !missing.id().equals(receipt.installationId())
+                || !missing.canonicalRoot().equals(receipt.canonicalRoot())
+                || !missing.registeredAt().equals(receipt.registeredAt())) {
+            throw new IOException("ownership receipt does not match the missing installation");
+        }
+        return receipt;
+    }
+
+    private OwnershipReceipt readFile(Path registry, RegistryData data, InstallationRecord record)
+            throws IOException {
         Path directory = metadataDirectory(registry);
         validateMetadataPlacement(directory, data);
         if (!Files.isDirectory(directory, LinkOption.NOFOLLOW_LINKS)) {
@@ -111,15 +139,10 @@ public class ReceiptStore {
         if (size <= 0 || size > MAX_RECEIPT_BYTES) {
             throw new IOException("ownership receipt size is invalid");
         }
-        try {
-            OwnershipReceipt receipt;
-            try (InputStream input = new LimitedInputStream(Files.newInputStream(file),
-                    MAX_RECEIPT_BYTES)) {
-                receipt = LegacyProvenanceJson.read(mapper, input, OwnershipReceipt.class);
-            }
-            validate(receipt, record);
-            return receipt;
-        } catch (IOException | RuntimeException | ManifestException e) {
+        try (InputStream input = new LimitedInputStream(Files.newInputStream(file),
+                MAX_RECEIPT_BYTES)) {
+            return LegacyProvenanceJson.read(mapper, input, OwnershipReceipt.class);
+        } catch (IOException | RuntimeException e) {
             throw new IOException("ownership receipt is invalid: " + detail(e), e);
         }
     }
@@ -138,6 +161,12 @@ public class ReceiptStore {
                 record.id(), record.canonicalRoot(), record.registeredAt(), repository.key(), tag,
                 assetName, assetSize, digest, build.manifest(), build.excludedPaths(),
                 ProtectedPackageFile.merge(List.of(), build.protectedFiles()));
+        return publish(registry, data, record, receipt);
+    }
+
+    /** Validates {@code receipt} against {@code record} and publishes it create-new. */
+    OwnershipReceipt publish(Path registry, RegistryData data, InstallationRecord record,
+                             OwnershipReceipt receipt) throws IOException {
         try {
             validate(receipt, record);
         } catch (ManifestException e) {
@@ -330,7 +359,7 @@ public class ReceiptStore {
         }
     }
 
-    private static void ensureMetadataDirectory(Path directory) throws IOException {
+    static void ensureMetadataDirectory(Path directory) throws IOException {
         Path parent = directory.getParent();
         requireRealPath(parent, true);
         try {

@@ -57,7 +57,7 @@ import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
 import javax.swing.UIManager;
 
-import org.megamek.launcher.design.host.Messages;
+import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.design.swing.TokenButtons.Kind;
 import org.megamek.launcher.design.swing.TokenButtons.Size;
 import org.megamek.launcher.design.swing.TokenDialogPane.MessageText;
@@ -76,14 +76,15 @@ import org.megamek.launcher.design.host.UIUtil;
  * replaces Cancel with Close, and Retry when the task can run again; the error stays until the user closes it.
  */
 public class TokenStatusCard extends JPanel {
+    private static final String BUNDLE = "org.megamek.launcher.design.host.messages";
     private final String title;
     private final JLabel heading = new JLabel();
     private final JPanel tools = new JPanel(new FlowLayout(FlowLayout.TRAILING, 0, 0));
     private final JProgressBar bar = new JProgressBar(0, 1000);
     private final MessageText error = new MessageText("", "small");
-    private final JButton cancel = TokenButtons.button(Kind.SECONDARY, Messages.getString("Cancel"), Size.COMPACT);
-    private final JButton close = TokenButtons.button(Kind.SECONDARY, Messages.getString("Close"), Size.COMPACT);
-    private final JButton retry = TokenButtons.button(Kind.SECONDARY, Messages.getString("TokenStatusCard.retry"),
+    private final JButton cancel = TokenButtons.button(Kind.SECONDARY, I18n.getTextAt(BUNDLE, "Cancel"), Size.COMPACT);
+    private final JButton close = TokenButtons.button(Kind.SECONDARY, I18n.getTextAt(BUNDLE, "Close"), Size.COMPACT);
+    private final JButton retry = TokenButtons.button(Kind.SECONDARY, I18n.getTextAt(BUNDLE, "TokenStatusCard.retry"),
           Size.COMPACT);
     private Width width = Width.SMALL;
     private String step = "";
