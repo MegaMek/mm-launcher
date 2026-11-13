@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
+  SPDX-License-Identifier: GPL-3.0-or-later
+
+  The shipped Windows installer: a themed setup .exe (WiX Burn bundle) that
+  wraps the launcher MSI in a window styled like the launcher. The MSI stays the unit that installs files;
+  the bundle only provides the UI and its own Apps & features entry (the MSI's
+  entry is hidden because chained MsiPackages default to Visible="no").
+
+  Defines: LauncherVersion, LauncherIcon, LauncherMsi (the built .msi).
+  BundleUpgradeCode MUST NEVER CHANGE once shipped.
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:bal="http://wixtoolset.org/schemas/v4/wxs/bal"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Bundle Name="MegaMek Launcher" Manufacturer="MegaMek" Version="$(LauncherVersion)"
+          UpgradeCode="{CA672DAF-9AA9-4BD1-BCCA-B43CB4C6F133}"
+          IconSourceFile="$(LauncherIcon)" DisableModify="button"
+          HelpUrl="https://megamek.org" AboutUrl="https://megamek.org">
+    <!-- Theme="none" means no stock payload group: the BA reads its theme
+         from the thm.xml/thm.wxl payloads and needs a WixStdbaInformation row.
+         Launch goes through the always-installed Start Menu shortcut, which the
+         MSI points at the folder it actually resolved (custom picks included). -->
+    <BootstrapperApplication>
+      <bal:WixStandardBootstrapperApplication Theme="none"
+          SuppressOptionsUI="yes" SuppressRepair="yes" ShowVersion="yes"
+          LaunchTarget="[ProgramMenuFolder]MegaMek\MegaMek Launcher.lnk"/>
+      <Payload Name="thm.xml" SourceFile="theme.xml"/>
+      <Payload Name="thm.wxl" SourceFile="theme.wxl"/>
+      <Payload Name="side.png" SourceFile="art\side.png"/>
+      <Payload Name="rule.png" SourceFile="art\rule.png"/>
+      <Payload Name="progress.png" SourceFile="art\progress.png"/>
+      <Payload Name="primary.png" SourceFile="art\primary.png"/>
+      <Payload Name="primary-hover.png" SourceFile="art\primary-hover.png"/>
+      <Payload Name="primary-pressed.png" SourceFile="art\primary-pressed.png"/>
+      <Payload Name="primary-focus.png" SourceFile="art\primary-focus.png"/>
+      <Payload Name="secondary.png" SourceFile="art\secondary.png"/>
+      <Payload Name="secondary-hover.png" SourceFile="art\secondary-hover.png"/>
+      <Payload Name="secondary-pressed.png" SourceFile="art\secondary-pressed.png"/>
+      <Payload Name="secondary-focus.png" SourceFile="art\secondary-focus.png"/>
+    </BootstrapperApplication>
+    <BundleCustomDataRef Id="WixStdbaInformation">
+      <BundleElement>
+        <BundleAttribute Id="LicenseUrl" Value="https://www.gnu.org/licenses/gpl-3.0.html"/>
+      </BundleElement>
+    </BundleCustomDataRef>
+
+    <!-- The theme's checkbox is bound to the variable of the same name. It
+         starts from the opt-out the MSI stores, so silent self-updates keep it. -->
+    <Variable Name="DesktopShortcutCheckbox" Type="numeric" Value="1"/>
+    <util:RegistrySearch Id="PreviousDesktopOptOut" Variable="PreviousDesktopOptOut"
+        Root="HKCU" Key="Software\MegaMek\MegaMek Launcher\Installer"
+        Value="DesktopShortcutOptOut" Result="value"/>
+    <SetVariable Id="SeedDesktopShortcutCheckbox" Variable="DesktopShortcutCheckbox" Value="0"
+        Type="numeric" After="PreviousDesktopOptOut" Condition="PreviousDesktopOptOut = &quot;1&quot;"/>
+
+    <!-- The install page's CHANGE... button browses into this variable. It
+         starts from the folder the MSI recorded, so upgrades (including the
+         launcher's silent self-update) stay there. The MSI's folder check always
+         installs into a "MegaMek Launcher" folder inside the user's pick.
+         ("InstallFolder" is reserved by WixStdBA.) -->
+    <util:RegistrySearch Id="PreviousInstallFolder" Variable="LauncherInstallFolder"
+        Root="HKCU" Key="Software\MegaMek\MegaMek Launcher\Installer"
+        Value="InstallDir" Result="value"/>
+    <SetVariable Id="DefaultInstallFolder" Variable="LauncherInstallFolder" Type="string"
+        Value="[LocalAppDataFolder]Programs\MegaMek Launcher\" After="PreviousInstallFolder"
+        Condition="NOT LauncherInstallFolder"/>
+
+    <Chain>
+      <MsiPackage Id="LauncherMsi" SourceFile="$(LauncherMsi)">
+        <!-- The bundle owns the choice; stops the MSI restoring the old opt-out. -->
+        <MsiProperty Name="LAUNCHER_DESKTOP_CHOSEN" Value="1"/>
+        <!-- MSI treats any non-empty value as true, so an opt-out clears it. -->
+        <MsiProperty Name="LAUNCHER_DESKTOP_SHORTCUT" Value="" Condition="NOT DesktopShortcutCheckbox"/>
+        <MsiProperty Name="LAUNCHER_INSTALL_FOLDER" Value="[LauncherInstallFolder]"/>
+      </MsiPackage>
+    </Chain>
+  </Bundle>
+</Wix>

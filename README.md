@@ -5,23 +5,24 @@
 The official source repository is [MegaMek/mm-launcher](https://github.com/MegaMek/mm-launcher).
 The `Launcher native installers` workflow builds on pushes to `main`, pull requests,
 and manual dispatch. PR branch pushes run once through the pull-request event rather
-than also starting a duplicate push matrix. Ordinary CI produces **only** five unsigned native installer/checksum
-pairs: Windows x64 `.msi`, Linux x64 `.deb` and `.rpm`, and macOS `.pkg` on both
+than also starting a duplicate push matrix. Ordinary CI produces **only** six unsigned native installer/checksum
+pairs: Windows x64 setup `.exe` (plus the `.msi` it chains, published only so launchers up to
+0.14.32 can still self-update), Linux x64 `.deb` and `.rpm`, and macOS `.pkg` on both
 Intel and Apple Silicon, plus a Java-bundled Linux x64 portable `tar.gz` and its checksum for
 distributions without `apt-get` or `dnf` (for example Arch-based ones). It does not build or upload
 the other portable archives,
 install packages on CI runners, create a release, sign, or notarize. The separate
 manual `Publish launcher release` workflow reuses these same builds and tests before publication,
-with independent, disabled-by-default Windows MSI and Apple signing/notarization modes.
+with independent, disabled-by-default Windows and Apple signing/notarization modes.
 Only an official release call can opt the reusable Mac packaging jobs into Apple credentials. Each
 installer contains a host-native Java 21 image with all JDK modules and `bin/java`
 for games launched by the application; no external Java is required.
 Run `./gradlew test buildDebInstaller buildRpmInstaller buildPortableArchive verifyPortableArchive` on Linux,
 `./gradlew test buildPkgInstaller` on macOS, or
 `.\gradlew.bat test buildWindowsInstaller` on Windows. Windows packaging requires
-WiX 3.14 in `.tools/wix314` (including its `sdk` folder, used to build the installer's
-folder-picker custom action with the .NET Framework 4 `csc.exe`); CI verifies the
-downloaded binaries.
+a .NET 8+ runtime and WiX 7 in `.tools/wix7`: run `scripts/install_wix.ps1` once to
+install the pinned, SHA-256-verified version (CI runs the same script). The build
+accepts the WiX Open Source Maintenance Fee EULA on the project's behalf.
 The former archive tasks remain available for development but are not CI outputs.
 
 After a release updates `main`, the native-installer workflow still appears, but its
@@ -62,24 +63,27 @@ or `xvfb-run -a ./gradlew nativeGuiTest` on Linux. The independent
 platforms, but does not block release publication. Do not make its jobs required branch
 checks. It must execute tests, not report an all-skipped run as success.
 
-The Windows MSI is an additional per-user installation (bundled Java,
-user-chosen install folder, persistent upgrade UUID). Installed Apps, Start Menu, the
-desktop shortcut, and executable are named **MegaMek Launcher**; the icon on
+The Windows installer is a setup `.exe`: a WiX 7 Burn bundle with a theme in the
+launcher's look (dark panels, game-style buttons, first-launch artwork) that chains a
+per-user MSI (bundled Java, user-chosen install folder, persistent upgrade UUID). The bundle
+owns the single Installed Apps entry; the chained MSI's entry is hidden. Installed Apps,
+Start Menu, the desktop shortcut, and executable are named **MegaMek Launcher**; the icon on
 the installed application and installer is derived from MegaMek.png. The macOS
-app bundle uses an ICNS derivative of that same source. The
-interactive WiX wizard uses composed crops of the launcher first-launch artwork,
-shows the costed per-user binary path on Welcome, advances through a modeless
-installation progress dialog with a steady status label and live progress bar,
-and offers a checked **Launch MegaMek Launcher** option on its completion screen. This
-launch is an interactive finish-button action only: `msiexec /qn` self-upgrades
-never launch the app. It does not change the `.msi` file association. Welcome's
-**Change…** opens the standard Windows folder dialog; setup always installs into a
-`MegaMek Launcher` folder inside the chosen folder (it must be new or empty, and never the
-launcher's own settings folder) and remembers it for upgrades
-and self-updates. `mm-launcher` remains the compatible internal CLI
-and Linux script name.
-Version 0.14.5 is a newer MSI for upgrading existing 0.14.4 (or earlier) installations;
-rebuilding the same version does not allow a same-version MSI reinstall. The upgrade
+app bundle uses an ICNS derivative of that same source. The setup window offers a
+**Create a desktop shortcut** option (seeded from a previous opt-out) and **Launch** on
+its completion page; silent `/passive` self-updates never launch the app from setup.
+The install page shows the install folder; **Change...** opens the standard Windows folder
+dialog. Setup always installs into a `MegaMek Launcher` folder inside the chosen folder (it must
+be new or empty, and never the launcher's own settings folder) and remembers it for upgrades and
+self-updates. A WiX 7 DTF custom action (`src/distribution/windows/install-folder`) checks the
+folder before anything changes; a rejected folder is explained and setup ends without touching the
+existing installation, so the user runs setup again to choose another folder (the stock Burn UI
+cannot re-plan after a failed apply). Theme sources and art live in
+`src/distribution/windows/bundle` (`python src/distribution/windows/bundle/generate_art.py`
+regenerates the art). The chained MSI keeps its own WiX wizard for direct MSI use.
+`mm-launcher` remains the compatible internal CLI and Linux script name.
+Upgrades replace the older bundle and MSI (including the earlier jpackage-built MSI);
+rebuilding the same version does not allow a same-version reinstall. The upgrade
 keeps the fixed upgrade UUID and install location and leaves user data intact.
 
 The Linux installers use the stable `megamek-launcher` package identity under
@@ -98,10 +102,9 @@ GitHub latest stable release for a newer numeric version. One themed
 and installation. Its text states the available version and asks users to close running games.
 A cancellable progress dialog shows download and verification;
 cancellation stops being available when installer handoff begins. It requires an exact release
-installer asset with a published SHA-256. On Windows it checks the staged MSI's upgrade code,
-product name and product version using Windows Installer, then exits before
-the per-user upgrade begins with visible Windows Installer progress (`/passive`,
-no extra wizard and no forced computer restart). After successful completion,
+installer asset with a published SHA-256. On Windows it checks the staged setup `.exe`'s product
+name, company and version resource, then exits before the per-user upgrade begins with the
+setup's themed progress window (`/passive`, no prompts and no forced computer restart). After successful completion,
 the helper records its result before reopening the launcher; the next launch confirms
 the installed version and quietly saves clean success in local diagnostics, without a
 success popup. On Windows a failed update rolls back to the previous launcher, which the
@@ -161,9 +164,9 @@ or pull requests. Major/minor version changes remain explicit source changes.
 
 The workflow calls the ordinary native-installer CI at the captured candidate commit and
 waits for all four platforms' builds, package inspections, required headless tests, and release tooling
-tests to pass. A read-only release-assets job stages this run's five installers, the Linux portable
-archive and their six checksum
-files, optionally signs and verifies the Windows MSI, validates any enabled Apple notarization
+tests to pass. A read-only release-assets job stages this run's six installers, the Linux portable
+archive and their seven checksum
+files, validates any enabled Apple notarization
 records from the Mac packaging jobs, and retains one immutable final asset
 set. The write-enabled publication job downloads that exact artifact ID, checks the filenames and
 hashes, creates `v<version>` at the tested commit, and uploads the complete asset set. GitHub must
@@ -193,6 +196,10 @@ passed to builds or publication. See
 [release bot setup](docs/archive-distribution-contract.md#release-bot-setup).
 
 Windows signing is **off** when `LAUNCHER_SIGNING_ENABLED` is unset or `false`.
+**Signing the setup `.exe` is not implemented yet:** the SignPath flow below was built for
+the former single-MSI asset, and a Burn bundle needs MSI, engine and bundle signing passes.
+Until that exists, enabling `LAUNCHER_SIGNING_ENABLED` (and the test-signing workflow) fails at
+planning with an explicit error, and Windows releases ship unsigned.
 Enabling it requires the approved SignPath organization/project/policy/artifact configuration,
 submitter token, and signing certificate SHA-256. Invalid flags or incomplete enabled
 configuration fail before candidate creation. Once enabled, signing, trusted Authenticode,
@@ -255,7 +262,7 @@ If publication succeeded but finalization failed, resume only finalization after
 using the same candidate and artifacts; do not publish or increment again. An already-synchronized
 candidate is confirmed without another write. If `main` has advanced independently, an owner
 must review a manual version synchronization that preserves that newer work.
-Full Windows self-update still requires an older installed MSI and a newer published
+Full Windows self-update still requires an older installed launcher and a newer published
 version. Publishing the same version as the installed launcher does not trigger an upgrade.
 See [the distribution contract](docs/archive-distribution-contract.md) for validation commands.
 

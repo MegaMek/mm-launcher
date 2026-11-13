@@ -78,9 +78,9 @@ body:
     attributes:
       label: "How the launcher is installed"
       description: >
-        Windows installer (.msi), macOS installer (.pkg), Linux package (.deb or .rpm), or portable
+        Windows installer (.exe), macOS installer (.pkg), Linux package (.deb or .rpm), or portable
         archive.
-      placeholder: "Example: Windows installer (.msi)"
+      placeholder: "Example: Windows installer (.exe)"
     validations:
       required: true
 

@@ -67,8 +67,8 @@ A new language also needs its tag added to `I18n.LOCALE_CHOICES`, matching MegaM
 
 ## Windows installer
 
-The Windows installer's text lives in `src/distribution/windows/msi/MegaMekLauncher_en-us.wxl`, which
-`ui.wxf` reads through `!(loc.…)` ids. jpackage passes every `.wxl` in that folder to WiX but builds a
-single-language MSI from the first culture by file name. Adding another `.wxl` would therefore switch
-the whole installer to that language, so shipping a translated installer needs a build change first
-(for example one MSI per language). Only English is written today.
+The Windows installer's own MSI dialogs read their text from
+`src/distribution/windows/msi/MegaMekLauncher_en-us.wxl` through `!(loc.…)` ids in `ui.wxs`, and the
+setup `.exe` reads its screens from `src/distribution/windows/bundle/theme.wxl`. The build passes only
+the English files to WiX and makes one English installer, so shipping a translated installer needs a
+build change first (for example one MSI per language). Only English is written today.

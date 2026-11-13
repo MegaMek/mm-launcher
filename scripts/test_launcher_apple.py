@@ -38,6 +38,10 @@ ENV = {
 
 class AppleReleaseTest(unittest.TestCase):
     def setUp(self):
+        # Exercise the dormant SignPath flow as if bundle signing were implemented.
+        flag = patch.object(release, "WINDOWS_BUNDLE_SIGNING_IMPLEMENTED", True)
+        flag.start()
+        self.addCleanup(flag.stop)
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
@@ -532,7 +536,7 @@ class AppleReleaseTest(unittest.TestCase):
     @patch("builtins.print")
     def test_windows_and_apple_signing_can_be_enabled_independently_or_together(self, output):
         records = [self.complete(platform) for platform in release.APPLE_PLATFORMS]
-        msi = self.assets / f"MegaMek-Launcher-{VERSION}-windows-x64.msi"
+        msi = self.assets / f"MegaMek-Launcher-{VERSION}-windows-x64.exe"
         original = release.digest(msi)
         msi.write_bytes(msi.read_bytes() + b"\nsigned MSI")
         msi.with_name(msi.name + ".sha256").write_text(f"{release.digest(msi)}  {msi.name}\n")
