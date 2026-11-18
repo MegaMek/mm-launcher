@@ -44,9 +44,9 @@ class LauncherUpdateDialogTest {
         JFrame owner = owner();
         CompletableFuture<Boolean> answer = new CompletableFuture<>();
         LauncherSelfUpdate.Candidate candidate = new LauncherSelfUpdate.Candidate("v0.1.1", "0.1.1",
-                "MegaMek-Launcher-0.1.1-windows-x64.msi",
+                "MegaMek-Launcher-0.1.1-windows-x64.exe",
                 URI.create("https://github.com/MegaMek/mm-launcher/releases/download/v0.1.1/"
-                        + "MegaMek-Launcher-0.1.1-windows-x64.msi"), 42, "a".repeat(64));
+                        + "MegaMek-Launcher-0.1.1-windows-x64.exe"), 42, "a".repeat(64));
         SwingUtilities.invokeLater(() -> {
             try {
                 answer.complete(LauncherFrame.confirmLauncherUpdate(owner, GuiScale.DEFAULT, candidate, notice));
@@ -103,7 +103,7 @@ class LauncherUpdateDialogTest {
             });
             OperationContext context = new OperationContext(OperationType.LAUNCHER_UPDATE, progress::onProgress);
             SwingTestSupport.onEdt(() -> { progress.bind(context); return null; });
-            context.progress(OperationPhase.DOWNLOAD, 10_000_000, 20_000_000, ProgressUnit.BYTES, "downloading MSI");
+            context.progress(OperationPhase.DOWNLOAD, 10_000_000, 20_000_000, ProgressUnit.BYTES, "downloading setup");
             SwingTestSupport.awaitCondition("launcher download byte progress", () ->
                     SwingTestSupport.onEdt(() -> "50%".equals(SwingTestSupport.find(progress,
                             "operationProgressBar", JProgressBar.class).getString())));

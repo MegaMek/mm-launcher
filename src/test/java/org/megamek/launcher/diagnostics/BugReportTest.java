@@ -61,7 +61,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BugReportTest {
     private static final Path TEMPLATE = Path.of(".github", "ISSUE_TEMPLATE", "bug_report.yml");
     private static final BugReport.Environment FIXTURE = new BugReport.Environment(
-            "0.14.24", "Windows installer (.msi)", "Windows 11 (10.0.26200) amd64",
+            "0.14.24", "Windows installer (.exe)", "Windows 11 (10.0.26200) amd64",
             "Eclipse Adoptium 21.0.8");
 
     @TempDir Path temp;
@@ -72,7 +72,7 @@ class BugReportTest {
         assertTrue(form.toString().startsWith(BugReport.ISSUE_FORM_URL + "?template=bug_report.yml&"));
         Map<String, String> query = query(form);
         assertEquals("0.14.24", query.get(BugReport.FIELD_VERSION));
-        assertEquals("Windows installer (.msi)", query.get(BugReport.FIELD_INSTALL_TYPE));
+        assertEquals("Windows installer (.exe)", query.get(BugReport.FIELD_INSTALL_TYPE));
         assertEquals("Windows 11 (10.0.26200) amd64", query.get(BugReport.FIELD_OPERATING_SYSTEM));
         assertEquals("Eclipse Adoptium 21.0.8", query.get(BugReport.FIELD_JAVA_VERSION));
         assertFalse(query.containsKey("labels"),
@@ -106,7 +106,7 @@ class BugReportTest {
 
     @Test
     void installTypeDescribesHowTheLauncherWasDistributed() {
-        assertEquals("Windows installer (.msi)", BugReport.installType("Windows 11", true, true));
+        assertEquals("Windows installer (.exe)", BugReport.installType("Windows 11", true, true));
         assertEquals("macOS installer (.pkg)", BugReport.installType("Mac OS X", true, true));
         assertEquals("Linux package (.deb or .rpm)", BugReport.installType("Linux", true, true));
         assertEquals("Portable archive", BugReport.installType("Windows 11", false, true));
@@ -131,7 +131,7 @@ class BugReportTest {
         Map<String, String> entries = unzip(target);
         assertEquals(Set.of("system-info.txt", "operation-logs.txt"), entries.keySet());
         assertTrue(entries.get("system-info.txt").contains("Launcher version: 0.14.24"));
-        assertTrue(entries.get("system-info.txt").contains("Installed as: Windows installer (.msi)"));
+        assertTrue(entries.get("system-info.txt").contains("Installed as: Windows installer (.exe)"));
         String logs = entries.get("operation-logs.txt");
         assertFalse(logs.contains(home), "the home directory is shortened");
         assertTrue(logs.contains("~"));

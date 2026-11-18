@@ -76,7 +76,7 @@ class LauncherServicesTest {
     @TempDir Path temp;
 
     private static LauncherSelfUpdate.Candidate launcherCandidate() {
-        String name = "MegaMek-Launcher-0.14.12-windows-x64.msi";
+        String name = "MegaMek-Launcher-0.14.12-windows-x64.exe";
         return new LauncherSelfUpdate.Candidate("v0.14.12", "0.14.12", name,
                 URI.create("https://github.com/MegaMek/mm-launcher/releases/download/v0.14.12/" + name),
                 100, "a".repeat(64));

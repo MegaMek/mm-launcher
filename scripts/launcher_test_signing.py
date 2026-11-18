@@ -53,7 +53,7 @@ def verify(directory, version, commit, certificate_sha256, tsa_certificates):
     pin = release.certificate_digest(certificate_sha256)
     release.numeric_version(version)
     release.require_sha(commit)
-    name = f"MegaMek-Launcher-{version}-windows-x64.msi"
+    name = f"MegaMek-Launcher-{version}-windows-x64.exe"
     expected = {name, name + ".sha256", "test-certificate.cer", "test-signing-inspection.json"}
     if directory.is_symlink() or not directory.is_dir() or {file.name for file in directory.iterdir()} != expected:
         raise release.ReleaseError("Test signing must retain exactly the inspected MSI, checksum, certificate and record")

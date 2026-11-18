@@ -104,7 +104,7 @@ public final class BugReport {
      */
     static String installType(String osName, boolean nativeInstall, boolean packaged) {
         if (nativeInstall) {
-            if (osName.startsWith("Windows")) return "Windows installer (.msi)";
+            if (osName.startsWith("Windows")) return "Windows installer (.exe)";
             if (osName.startsWith("Mac")) return "macOS installer (.pkg)";
             return "Linux package (.deb or .rpm)";
         }

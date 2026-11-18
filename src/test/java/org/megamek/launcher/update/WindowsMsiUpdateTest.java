@@ -269,7 +269,7 @@ class WindowsMsiUpdateTest {
     private static byte[] release(String digest, String url) {
         return ("""
                 {"tag_name":"0.1.1","draft":false,"prerelease":false,"assets":[
-                {"name":"MegaMek-Launcher-0.1.1-windows-x64.msi","size":42,
+                {"name":"MegaMek-Launcher-0.1.1-windows-x64.exe","size":42,
                 "digest":"%s","browser_download_url":"%s"}]}
                 """.formatted(digest, url)).getBytes(StandardCharsets.UTF_8);
     }
@@ -277,13 +277,13 @@ class WindowsMsiUpdateTest {
     @Test void requiresOfficialMsiAndPublishedChecksum() throws IOException {
         LauncherSelfUpdate updater = new LauncherSelfUpdate();
         String official = "https://github.com/MegaMek/mm-launcher/releases/download/"
-                + "0.1.1/MegaMek-Launcher-0.1.1-windows-x64.msi";
+                + "0.1.1/MegaMek-Launcher-0.1.1-windows-x64.exe";
         String digest = "sha256:" + "a".repeat(64);
         assertNull(updater.parseCandidate(release(digest, official), "0.1.1"));
         assertEquals("0.1.1", updater.parseCandidate(release(digest, official), "0.1.0").version());
         assertThrows(IOException.class, () -> updater.parseCandidate(release("", official), "0.1.0"));
         assertThrows(IOException.class, () -> updater.parseCandidate(
-                release(digest, "https://example.org/update.msi"), "0.1.0"));
+                release(digest, "https://example.org/update.exe"), "0.1.0"));
     }
 
     @Test void comparesAllThreeNumericMsiComponents() throws IOException {
@@ -296,14 +296,17 @@ class WindowsMsiUpdateTest {
     }
 
     @Test void handoffQuotesSpacedMsiPathWithoutBackslashesAndWaitsForExit() {
+        Path setup = Path.of("C:\\Users\\Example User\\AppData\\Local\\Temp\\mm-launcher-setup-test",
+                "MegaMek-Launcher-0.1.1-windows-x64.exe");
         String script = LauncherSelfUpdate.handoffScript(
-                Path.of("C:\\Users\\Example User\\AppData\\Local\\Temp\\mm-launcher-msi-test",
-                        "MegaMek-Launcher-0.1.1-windows-x64.msi"),
-                "0.1.1", "a".repeat(64), Path.of("C:\\Users\\Example User\\result.txt"), 12345);
-        assertTrue(script.contains("('\"'+$msi+'\"')"));
+                setup, "0.1.1", "a".repeat(64), Path.of("C:\\Users\\Example User\\result.txt"), 12345);
+        // Path joins with the host separator, so derive the expected text from it.
+        assertTrue(script.contains("-FilePath '" + setup + "'"),
+                "the staged setup .exe itself runs the update");
+        assertFalse(script.contains("msiexec"));
         assertFalse(script.contains("'\\\"'"));
         assertTrue(script.contains("while(Get-Process -Id 12345"));
-        assertTrue(script.indexOf("while(Get-Process") < script.indexOf("Starting Windows Installer"));
+        assertTrue(script.indexOf("while(Get-Process") < script.indexOf("Starting launcher setup"));
         assertTrue(script.contains("[IO.Directory]::Delete($dir)"));
         assertTrue(script.contains("'handoff failed: '"));
         assertTrue(script.contains("'installed:0.1.1'"));
@@ -338,14 +341,14 @@ class WindowsMsiUpdateTest {
 
     @Test void cannotDiscardAnUnownedPath() {
         assertThrows(IOException.class, () -> new LauncherSelfUpdate().discard(
-                Path.of("C:\\Users\\Example User\\unrelated.msi")));
+                Path.of("C:\\Users\\Example User\\unrelated.exe")));
     }
 
-    @Test void powershellArgumentListPreservesSpacedMsiPath() throws Exception {
+    @Test void powershellArgumentListPreservesSpacedLogPath() throws Exception {
         org.junit.jupiter.api.Assumptions.assumeTrue(System.getProperty("os.name", "").startsWith("Windows"));
-        String path = "C:\\Users\\Example User\\Temp\\MegaMek Launcher 0.1.1.msi";
-        String script = "$msi='" + path + "'; $arguments=" + LauncherSelfUpdate.installerArguments("$msi")
-                + "; [Console]::Out.Write($arguments[1])";
+        String path = "C:\\Users\\Example User\\Temp\\msi-update-installer.log";
+        String script = "$installerLog='" + path + "'; $arguments=" + LauncherSelfUpdate.installerArguments()
+                + "; [Console]::Out.Write($arguments[3])";
         String encoded = Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_16LE));
         Process process = new ProcessBuilder("powershell.exe", "-NoProfile", "-NonInteractive",
                 "-EncodedCommand", encoded).start();

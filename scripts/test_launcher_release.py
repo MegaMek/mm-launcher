@@ -292,6 +292,20 @@ class LauncherReleaseTest(unittest.TestCase):
         self.assertTrue(all(method == "GET" for method, _, _ in github.calls))
         return result
 
+    def test_windows_signing_is_deferred_until_the_setup_exe_can_be_signed(self):
+        self.assertFalse(release.WINDOWS_BUNDLE_SIGNING_IMPLEMENTED)
+        self.assertIn("windows-x64.exe", release.INSTALLERS)
+        self.assertIn("windows-x64.msi", release.INSTALLERS)
+        environment = {
+            "LAUNCHER_SIGNING_ENABLED": "true",
+            "SIGNPATH_ORGANIZATION_ID": "12345678-1234-1234-1234-123456789abc",
+            "SIGNPATH_PROJECT_SLUG": "launcher", "SIGNPATH_SIGNING_POLICY_SLUG": "release",
+            "SIGNPATH_ARTIFACT_CONFIGURATION_SLUG": "windows",
+            "SIGNPATH_CERTIFICATE_SHA256": "a" * 64, "SIGNPATH_API_TOKEN": "token",
+        }
+        with self.assertRaisesRegex(release.ReleaseError, "unset LAUNCHER_SIGNING_ENABLED"):
+            release.signing_configuration(environment)
+
     def test_release_finalization_push_reuses_builds_before_the_workflow_finishes(self):
         github, environment = self.ci_fixture()
         reused, reason = self.ci_plan(github, environment)
@@ -406,7 +420,7 @@ class LauncherReleaseTest(unittest.TestCase):
             elif failure == "msi-limit":
                 asset["size"] = release.INSTALLER_LIMIT + 1
             elif failure == "url":
-                asset["browser_download_url"] = "https://unofficial.invalid/file.msi"
+                asset["browser_download_url"] = "https://unofficial.invalid/file.exe"
             else:
                 asset["id"] = True
             with self.subTest(failure=failure), self.assertRaises(release.ReleaseError):
@@ -884,7 +898,7 @@ class LauncherReleaseTest(unittest.TestCase):
         self.assertNotEqual(COMMIT, github.reference["object"]["sha"])
         self.assertEqual("v0.14.6", github.release["tag_name"])
         self.assertFalse(github.release["draft"])
-        self.assertEqual(12, len(github.release["assets"]))
+        self.assertEqual(2 * len(release.INSTALLERS), len(github.release["assets"]))
         self.assertTrue(all(asset["name"].startswith("MegaMek-Launcher-0.14.6-")
                             for asset in github.release["assets"]))
         output.assert_called_once_with(
@@ -928,23 +942,23 @@ class LauncherReleaseTest(unittest.TestCase):
         self.assertEqual(release.MAX_PAGES, len(pages))
         self.assertTrue(pages[-1].endswith(f"page={release.MAX_PAGES}"))
 
-    def test_exact_five_installer_and_checksum_pairs_are_verified(self):
+    def test_exact_installer_and_checksum_pairs_are_verified(self):
         assets = self.assets()
-        self.assertEqual(12, len(assets))
+        self.assertEqual(2 * len(release.INSTALLERS), len(assets))
         for asset in assets:
             self.assertEqual(asset.path.stat().st_size, asset.size)
             self.assertEqual(hashlib.sha256(asset.path.read_bytes()).hexdigest(), asset.sha256)
         extra = self.directory / "unexpected.zip"
         extra.write_bytes(b"wrong artifact")
-        with self.assertRaisesRegex(release.ReleaseError, "exactly 6"):
+        with self.assertRaisesRegex(release.ReleaseError, "exactly 7"):
             self.assets()
         extra.unlink()
         assets[0].path.unlink()
-        with self.assertRaisesRegex(release.ReleaseError, "exactly 6"):
+        with self.assertRaisesRegex(release.ReleaseError, "exactly 7"):
             self.assets()
 
     def test_wrong_checksum_and_empty_installer_fail_before_publication(self):
-        file = self.directory / f"MegaMek-Launcher-{VERSION}-windows-x64.msi"
+        file = self.directory / f"MegaMek-Launcher-{VERSION}-windows-x64.exe"
         file.write_bytes(b"changed")
         with self.assertRaisesRegex(release.ReleaseError, "Checksum mismatch"):
             self.assets()
@@ -954,7 +968,7 @@ class LauncherReleaseTest(unittest.TestCase):
 
     def test_msi_limit_matches_the_updater_and_rejects_one_extra_byte(self):
         self.assertEqual(300 * 1024 * 1024, release.INSTALLER_LIMIT)
-        file = self.directory / f"MegaMek-Launcher-{VERSION}-windows-x64.msi"
+        file = self.directory / f"MegaMek-Launcher-{VERSION}-windows-x64.exe"
         with file.open("wb") as output:
             output.truncate(release.INSTALLER_LIMIT + 1)
         with self.assertRaisesRegex(release.ReleaseError, "300 MiB"):
@@ -966,7 +980,7 @@ class LauncherReleaseTest(unittest.TestCase):
         self.assertEqual(release.INSTALLER_LIMIT, self.assets()[0].size)
 
     def test_links_are_not_installer_inputs(self):
-        file = self.directory / f"MegaMek-Launcher-{VERSION}-windows-x64.msi"
+        file = self.directory / f"MegaMek-Launcher-{VERSION}-windows-x64.exe"
         target = self.root / "target"
         target.write_bytes(file.read_bytes())
         file.unlink()
@@ -979,7 +993,7 @@ class LauncherReleaseTest(unittest.TestCase):
 
     def test_native_installer_limits_match_the_shared_updater(self):
         for suffix in release.INSTALLERS:
-            if suffix.endswith(".msi"):
+            if suffix.endswith(".exe"):
                 continue
             with self.subTest(suffix=suffix):
                 file = self.directory / f"MegaMek-Launcher-{VERSION}-{suffix}"
@@ -1007,13 +1021,13 @@ class LauncherReleaseTest(unittest.TestCase):
         self.assertEqual(COMMIT, writes[0][2]["sha"])
         self.assertTrue(writes[1][2]["draft"], "upload staging is not a draft-review step")
         self.assertEqual(COMMIT, writes[1][2]["target_commitish"])
-        self.assertEqual(12, sum("/assets?name=" in endpoint for _, endpoint, _ in writes))
+        self.assertEqual(2 * len(release.INSTALLERS), sum("/assets?name=" in endpoint for _, endpoint, _ in writes))
         self.assertEqual(("PATCH", f"{release.API}/releases/37",
                           {"draft": False, "prerelease": False, "make_latest": "true"}), writes[-1])
         self.assertFalse(github.release["draft"])
         self.assertFalse(github.release["prerelease"])
         self.assertEqual(f"{release.API}/releases/latest", github.calls[-1][1])
-        self.assertEqual(12, len(github.release["assets"]))
+        self.assertEqual(2 * len(release.INSTALLERS), len(github.release["assets"]))
         output.assert_called_once_with(
             f"Published https://github.com/{release.REPOSITORY}/releases/tag/v{VERSION}")
 
@@ -1033,18 +1047,18 @@ class LauncherReleaseTest(unittest.TestCase):
         github.draft_tag = "v" + VERSION
         release.publish(github, VERSION, COMMIT, self.assets())
         self.assertFalse(github.release["draft"])
-        self.assertEqual(12, len(github.release["assets"]))
+        self.assertEqual(2 * len(release.INSTALLERS), len(github.release["assets"]))
         self.assertEqual(1, sum(method == "PATCH" for method, _, _ in github.calls))
 
     def test_draft_upload_urls_must_match_the_same_release_and_asset(self):
-        name = f"MegaMek-Launcher-{VERSION}-windows-x64.msi"
+        name = f"MegaMek-Launcher-{VERSION}-windows-x64.exe"
         prefix = f"https://github.com/{release.REPOSITORY}/releases/download/"
         urls = (
             f"https://example.org/{name}",
             f"https://github.com/Someone/mm-launcher/releases/download/untagged-abc/{name}",
             prefix + f"untagged-abc/{name}",
             prefix + f"v0.14.6/{name}",
-            prefix + f"untagged-abe406fdea29a73d5316/wrong.msi",
+            prefix + f"untagged-abe406fdea29a73d5316/wrong.exe",
             prefix + f"untagged-abe406fdea29a73d5316/{name}?download=1",
             prefix + f"untagged-abe406fdea29a73d5316/{name}#fragment",
             prefix + f"untagged-abe406fdea29a73d5316/../{name}",
@@ -1068,7 +1082,7 @@ class LauncherReleaseTest(unittest.TestCase):
         self.assert_no_publication(github)
 
     def test_published_and_latest_assets_require_final_versioned_urls(self):
-        name = f"MegaMek-Launcher-{VERSION}-windows-x64.msi"
+        name = f"MegaMek-Launcher-{VERSION}-windows-x64.exe"
         temporary_url = (f"https://github.com/{release.REPOSITORY}/releases/download/"
                          f"untagged-abe406fdea29a73d5316/{name}")
         for phase in ("mutate_published", "mutate_latest"):
@@ -1085,7 +1099,7 @@ class LauncherReleaseTest(unittest.TestCase):
     def test_staged_metadata_drift_and_missing_digest_prevent_publication(self):
         for field, value in (("digest", None), ("digest", "sha256:" + "b" * 64),
                              ("state", "new"), ("size", 1), ("id", 999),
-                             ("browser_download_url", "https://example.org/installer.msi"),
+                             ("browser_download_url", "https://example.org/installer.exe"),
                              ("browser_download_url", [])):
             with self.subTest(field=field):
                 github = FakeGitHub()

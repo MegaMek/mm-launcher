@@ -21,13 +21,13 @@ def prepare_assets(source, destination, signing_input, version, mode):
     release.validate_files(destination, version)
     if mode == "signpath":
         signing_input.mkdir()
-        name = f"MegaMek-Launcher-{version}-windows-x64.msi"
+        name = f"MegaMek-Launcher-{version}-windows-x64.exe"
         shutil.copyfile(destination / name, signing_input / name)
 
 
 def accept_signed_msi(destination, signed_directory, verification, version, commit, certificate_sha256):
     assets = release.validate_files(destination, version)
-    name = f"MegaMek-Launcher-{version}-windows-x64.msi"
+    name = f"MegaMek-Launcher-{version}-windows-x64.exe"
     if signed_directory.is_symlink() or not signed_directory.is_dir():
         raise release.ReleaseError("Signed output must be a real directory")
     files = list(signed_directory.iterdir())

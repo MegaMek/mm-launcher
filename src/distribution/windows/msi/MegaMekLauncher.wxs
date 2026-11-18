@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
+
+  This file is part of MegaMek Launcher.
+
+  MegaMek Launcher is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License (GPL),
+  version 3 or (at your option) any later version,
+  as published by the Free Software Foundation.
+
+  MegaMek Launcher is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty
+  of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+  See the GNU General Public License for more details.
+
+  A copy of the GPL should have been included with this project;
+  if not, see <https://www.gnu.org/licenses/>.
+
+  NOTICE: The MegaMek organization is a non-profit group of volunteers
+  creating free software for the BattleTech community.
+
+  MechWarrior, BattleMech, `Mech and AeroTech are registered trademarks
+  of The Topps Company, Inc. All Rights Reserved.
+
+  Catalyst Game Labs and the Catalyst Game Labs logo are trademarks of
+  InMediaRes Productions, LLC.
+
+  MechWarrior Copyright Microsoft Corporation. MegaMek was created under
+  Microsoft's "Game Content Usage Rules"
+  <https://www.xbox.com/en-US/developers/rules> and it is not endorsed by or
+  affiliated with Microsoft.
+-->
+
+<!-- Per-user MSI for the jpackage app image (WiX v7). build.gradle.kts
+     WindowsInstallerMsi supplies the defines and the AppImage/Resources bind
+     paths. LauncherUpgradeCode (windowsInstallerUpgradeCode) MUST NEVER CHANGE:
+     it ties every release to the same installed product so silent
+     self-updates replace it in place. -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:util="http://wixtoolset.org/schemas/v4/wxs/util">
+  <Package Name="MegaMek Launcher" Manufacturer="MegaMek" Version="$(LauncherVersion)"
+           UpgradeCode="$(LauncherUpgradeCode)" ProductCode="$(LauncherProductCode)"
+           Scope="perUser" Language="1033" InstallerVersion="200" Compressed="yes">
+    <SummaryInformation Description="MegaMek Launcher graphical desktop launcher"
+                        Manufacturer="MegaMek"/>
+    <MediaTemplate EmbedCab="yes"/>
+
+    <!-- Same upgrade policy as the former jpackage MSI: any other version is
+         removed, older (upgrade) or newer (downgrade). Removal runs inside the
+         install transaction, so a failed upgrade rolls back to the previous
+         launcher instead of leaving none. -->
+    <Upgrade Id="$(LauncherUpgradeCode)">
+      <UpgradeVersion Property="LAUNCHER_OLDER_FOUND" Maximum="$(LauncherVersion)"
+                      IncludeMaximum="no" MigrateFeatures="yes"/>
+      <UpgradeVersion Property="LAUNCHER_NEWER_FOUND" Minimum="$(LauncherVersion)"
+                      IncludeMinimum="no" MigrateFeatures="yes"/>
+    </Upgrade>
+    <InstallExecuteSequence>
+      <RemoveExistingProducts After="InstallInitialize"/>
+    </InstallExecuteSequence>
+
+    <Icon Id="LauncherIcon" SourceFile="$(LauncherIcon)"/>
+    <Property Id="ARPPRODUCTICON" Value="LauncherIcon"/>
+    <Property Id="ARPCOMMENTS" Value="MegaMek Launcher graphical desktop launcher"/>
+    <Property Id="ARPCONTACT" Value="MegaMek"/>
+    <SetProperty Id="ARPINSTALLLOCATION" Value="[INSTALLDIR]" After="CostFinalize"
+                 Sequence="execute" Condition="NOT Installed"/>
+
+    <!-- Installer-owned files live in %LOCALAPPDATA%\Programs\MegaMek Launcher,
+         away from %LOCALAPPDATA%\MegaMek Launcher (the mutable registry and its
+         sidecars), which MSI removal must never own. -->
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="LauncherProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLDIR" Name="MegaMek Launcher"/>
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="LauncherMenuFolder" Name="MegaMek"/>
+    </StandardDirectory>
+
+    <Feature Id="Launcher" Title="MegaMek Launcher" Level="1" AllowAbsent="no">
+      <ComponentGroupRef Id="LauncherFiles"/>
+      <ComponentGroupRef Id="LauncherShortcuts"/>
+      <ComponentGroupRef Id="LauncherInstallerState"/>
+    </Feature>
+    <UIRef Id="LauncherUI"/>
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="LauncherFiles" Directory="INSTALLDIR">
+      <Component Id="LauncherExecutable">
+        <File Id="LauncherExe" Name="MegaMek Launcher.exe"
+              Source="!(bindpath.AppImage)MegaMek Launcher.exe" KeyPath="yes"/>
+      </Component>
+      <!-- Harvests the rest of the jpackage app image (app\ and the bundled
+           runtime\ with bin\java.exe for launched games). -->
+      <Files Include="!(bindpath.AppImage)**">
+        <Exclude Files="!(bindpath.AppImage)MegaMek Launcher.exe"/>
+      </Files>
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <!-- Start Menu\Programs\MegaMek\MegaMek Launcher is always installed; the
+         desktop shortcut follows the Welcome checkbox (LAUNCHER_DESKTOP_SHORTCUT). -->
+    <ComponentGroup Id="LauncherShortcuts">
+      <Component Id="StartMenuShortcut" Directory="LauncherMenuFolder">
+        <Shortcut Id="StartMenuLauncher" Name="MegaMek Launcher" Target="[#LauncherExe]"
+                  WorkingDirectory="INSTALLDIR"/>
+        <RemoveFolder Id="RemoveLauncherMenuFolder" On="uninstall"/>
+        <RegistryValue Root="HKCU" Key="Software\MegaMek\MegaMek Launcher\Installer"
+                       Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes"/>
+      </Component>
+      <Component Id="DesktopShortcut" Directory="DesktopFolder"
+                 Condition="LAUNCHER_DESKTOP_SHORTCUT">
+        <Shortcut Id="DesktopLauncher" Name="MegaMek Launcher" Target="[#LauncherExe]"
+                  WorkingDirectory="INSTALLDIR"/>
+        <RegistryValue Root="HKCU" Key="Software\MegaMek\MegaMek Launcher\Installer"
+                       Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes"/>
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+
+  <Fragment>
+    <!-- Like the jpackage MSI, uninstall removes everything under INSTALLDIR,
+         including files the runtime created there after installation. The
+         path is persisted at install time because RemoveFolderEx resolves it
+         from a property during uninstall. Upgrades also use it to stay in the
+         chosen folder (ui.wxs). -->
+    <Property Id="LAUNCHER_PREVIOUS_INSTALLDIR">
+      <RegistrySearch Id="PreviousInstallDir" Root="HKCU"
+                      Key="Software\MegaMek\MegaMek Launcher\Installer"
+                      Name="InstallDir" Type="raw"/>
+    </Property>
+    <ComponentGroup Id="LauncherInstallerState">
+      <Component Id="InstallDirCleanup" Directory="INSTALLDIR">
+        <RegistryValue Root="HKCU" Key="Software\MegaMek\MegaMek Launcher\Installer"
+                       Name="InstallDir" Type="string" Value="[INSTALLDIR]" KeyPath="yes"/>
+        <util:RemoveFolderEx On="uninstall" Property="LAUNCHER_PREVIOUS_INSTALLDIR"/>
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

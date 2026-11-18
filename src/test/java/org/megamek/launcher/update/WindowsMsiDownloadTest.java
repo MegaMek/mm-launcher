@@ -32,7 +32,7 @@ class WindowsMsiDownloadTest {
     private final byte[] content = "synthetic MSI fixture".getBytes(java.nio.charset.StandardCharsets.UTF_8);
 
     private LauncherSelfUpdate.Candidate candidate() throws Exception {
-        String name = "MegaMek-Launcher-0.1.1-windows-x64.msi";
+        String name = "MegaMek-Launcher-0.1.1-windows-x64.exe";
         return new LauncherSelfUpdate.Candidate("v0.1.1", "0.1.1", name,
                 URI.create("https://github.com/MegaMek/mm-launcher/releases/download/v0.1.1/" + name),
                 content.length, HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(content)));

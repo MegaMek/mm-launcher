@@ -121,11 +121,12 @@ class WorkflowStructureTest {
         }
         assertEquals(List.of("windows-x64", "linux-x64", "macos-intel", "macos-apple-silicon"), ids);
         assertEquals(List.of("windows-2025", "ubuntu-24.04", "macos-15-intel", "macos-15"), runners);
-        assertEquals(List.of("msi", "deb,rpm", "pkg", "pkg"), extensions);
+        assertEquals(List.of("exe,msi", "deb,rpm", "pkg", "pkg"), extensions);
         assertEquals(List.of(
                 "actions/checkout@v4",
                 "actions/setup-java@v4",
                 "gradle/actions/setup-gradle@v4",
+                "actions/setup-dotnet@v4",
                 "actions/upload-artifact@v4",
                 "actions/upload-artifact@v4",
                 "actions/upload-artifact@v4"
@@ -133,14 +134,26 @@ class WorkflowStructureTest {
         assertEquals("temurin", installers.path("steps").get(1).path("with").path("distribution").asText());
         assertEquals("21", installers.path("steps").get(1).path("with").path("java-version").asText());
 
-        JsonNode wix = step(installers, "Install verified WiX 3.14 binaries");
+        boolean dotnet = false;
+        for (JsonNode stage : installers.path("steps")) {
+            if (stage.path("uses").asText().startsWith("actions/setup-dotnet@")) {
+                assertEquals("runner.os == 'Windows'", stage.path("if").asText());
+                assertEquals("8.0.x", stage.path("with").path("dotnet-version").asText(),
+                        "WiX 7 is a framework-dependent .NET 8 tool");
+                dotnet = true;
+            }
+        }
+        assertTrue(dotnet, "the Windows runner needs a .NET runtime for WiX 7");
+        JsonNode wix = step(installers, "Install verified WiX 7 toolset");
         assertEquals("runner.os == 'Windows'", wix.path("if").asText());
-        String wixStep = wix.path("run").asText();
-        assertTrue(wixStep.contains("wix3141rtm/wix314-binaries.zip"));
-        assertTrue(wixStep.contains("6ac824e1642d6f7277d0ed7ea09411a508f6116ba6fae0aa5f2c7daa2ff43d31"));
-        assertTrue(wixStep.indexOf("Get-FileHash") < wixStep.indexOf("Expand-Archive"));
-        assertTrue(wixStep.indexOf("throw \"WiX archive SHA-256 mismatch")
-                < wixStep.indexOf("Expand-Archive"));
+        assertEquals("./scripts/install_wix.ps1", wix.path("run").asText().trim());
+        String wixScript = Files.readString(Path.of("scripts", "install_wix.ps1"), StandardCharsets.UTF_8);
+        assertTrue(wixScript.contains("$wixVersion = '7.0.1'"));
+        assertTrue(wixScript.contains("25209a1f73b20106621f11abe5e1a4e87c1d9f5c596795d246de7bb64446df17"));
+        assertTrue(wixScript.contains("e654f578e0a7d433819fe4cc343f9e37cb14f600fa061a6480857ba51334a075"));
+        assertTrue(wixScript.indexOf("Get-FileHash") < wixScript.indexOf("ExtractToFile"));
+        assertTrue(wixScript.indexOf("throw \"WiX package SHA-256 mismatch")
+                < wixScript.indexOf("ExtractToFile"));
         JsonNode linuxTools = step(installers, "Install Linux packaging tools");
         assertEquals("runner.os == 'Linux'", linuxTools.path("if").asText());
         assertTrue(linuxTools.path("run").asText().contains("sudo apt-get install -y rpm fakeroot"));
@@ -163,7 +176,11 @@ class WorkflowStructureTest {
         assertTrue(inspection.contains("$matchesForType.Count -ne 1"));
         assertTrue(inspection.contains("ReadAllText(\"$($file.FullName).sha256\")"));
         assertTrue(inspection.contains("if ($line -cne \"$actual  $($file.Name)\")"));
-        assertTrue(inspection.contains("OpenDatabase($file.FullName, 0)"), "MSI inspection must be read-only");
+        assertTrue(inspection.contains("burn extract -acceptEula wix7 $file.FullName"),
+                "the chained MSI is extracted from the setup bundle, never installed");
+        assertTrue(inspection.contains("OpenDatabase($payloads[0].FullName, 0)"), "MSI inspection must be read-only");
+        assertTrue(inspection.contains(".VersionInfo"), "the setup .exe version resource must match the release");
+        assertFalse(inspection.contains("Start-Process"), "verification must not execute the setup .exe");
         assertTrue(inspection.contains("pkgutil --expand-full"));
         assertTrue(inspection.contains("$file.Length -gt 300MB"));
         assertTrue(inspection.contains("SelectNodes('//pkg-ref[@version]')"));
@@ -191,7 +208,7 @@ class WorkflowStructureTest {
                 "failed-job retries may replace same-run CI artifacts, never published release assets");
         String paths = upload.path("with").path("path").asText();
         List<String> expectedPaths = new ArrayList<>();
-        for (String extension : List.of("msi", "deb", "rpm", "pkg")) {
+        for (String extension : List.of("exe", "msi", "deb", "rpm", "pkg")) {
             String base = "build/distributions/MegaMek-Launcher-*-${{ matrix.id }}." + extension;
             expectedPaths.add(base);
             expectedPaths.add(base + ".sha256");
