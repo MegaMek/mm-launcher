@@ -10,7 +10,9 @@ pairs: Windows x64 `.msi`, Linux x64 `.deb` and `.rpm`, and macOS `.pkg` on both
 Intel and Apple Silicon, plus a Java-bundled Linux x64 portable `tar.gz` and its checksum for
 distributions without `apt-get` or `dnf` (for example Arch-based ones). It does not build or upload
 the other portable archives,
-install packages on CI runners, create a release, sign, or notarize. The separate
+install packages on CI runners, create a release, sign, or notarize. A separate advisory job also
+builds an experimental Flatpak bundle as its own CI artifact, never a release asset (see
+[Experimental Flatpak](#experimental-flatpak)). The separate
 manual `Publish launcher release` workflow reuses these same builds and tests before publication,
 with independent, disabled-by-default Windows MSI and Apple signing/notarization modes.
 Only an official release call can opt the reusable Mac packaging jobs into Apple credentials. Each
@@ -262,7 +264,10 @@ See [the distribution contract](docs/archive-distribution-contract.md) for valid
 The desktop default registry is `%LOCALAPPDATA%\MegaMek Launcher\launcher-registry.json`
 on Windows, `~/Library/Application Support/MegaMek Launcher/launcher-registry.json`
 on macOS, and `$XDG_STATE_HOME/MegaMek Launcher/launcher-registry.json` on Linux
-(fallback `~/.megamek-launcher/launcher-registry.json`). On first default GUI
+(fallback `~/.megamek-launcher/launcher-registry.json`). Links in these platform
+base folders (`user.home`, `XDG_STATE_HOME`, `XDG_DATA_HOME`, `LOCALAPPDATA`) are
+resolved once, so Fedora Atomic systems such as Bazzite, where `/home` links to
+`/var/home`, work; every launcher folder below them still rejects links. On first default GUI
 launch, a valid schema-3 registry from the previous `MegaMek` location is
 copied along with its launcher settings, receipt/metadata directory, and logs
 to a new directory via atomic rename. The old state remains intact as a
@@ -325,6 +330,40 @@ used by installer CI. `--version` and
 
 See the [archive distribution contract](docs/archive-distribution-contract.md) for layouts,
 program-files/user-data separation, native runner coverage, and release limitations.
+
+## Experimental Flatpak
+
+The [`flatpak/`](flatpak) templates repackage the Java-bundled Linux x64 portable archive as a
+Flatpak. On Linux x64, `./gradlew buildFlatpakBundle` stages them under
+`build/packaging/flatpak/manifest` with the launcher version, archive name and source commit date filled
+in, runs `flatpak-builder`, and writes `MegaMek-Launcher-<version>-linux-x64.flatpak` and its
+`.sha256` file to `build/distributions/`. It is not part of `build` and installs nothing. It needs
+`flatpak`, `flatpak-builder` and the manifest's runtime and SDK:
+
+```bash
+flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+flatpak install --user flathub org.freedesktop.Platform//24.08 org.freedesktop.Sdk//24.08
+./gradlew buildFlatpakBundle
+flatpak install --user build/distributions/MegaMek-Launcher-<version>-linux-x64.flatpak
+flatpak run org.megamek.launcher
+```
+
+The bundle names Flathub as its runtime repository, so installing it elsewhere fetches the
+runtime. A bundle installed this way does not receive `flatpak update`; install a newer bundle.
+
+The **Launcher build checks** workflow's advisory `Flatpak bundle (advisory) - linux-x64` job builds
+the bundle on every installer run and uploads it as the `MegaMek-Launcher-linux-x64-flatpak`
+artifact. The job uses `continue-on-error`, so Flatpak or Flathub failures never fail installer CI
+or a release candidate. Its artifact name deliberately does not match the release workflow's
+`MegaMek-Launcher-*-installers` download, so it is never a release asset.
+
+Inside the sandbox the launcher is notify-only, like portable copies: users update with
+`flatpak update`. Flatpak redirects `XDG_DATA_HOME` and `XDG_STATE_HOME` to
+`~/.var/app/org.megamek.launcher/`, so game installations and the registry are separate from
+`.deb`/`.rpm` installs, and the folder chooser sees only paths the manifest grants. Games run in
+the same sandbox with the same permissions, and the native packages' per-game desktop entries are
+not installed. Flathub would require a from-source build (OpenJDK 21 SDK extension and offline
+Gradle dependencies) instead of this repackaged archive.
 
 ## Per-application Home and installation management
 

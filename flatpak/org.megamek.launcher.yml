@@ -1,0 +1,94 @@
+# Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
+#
+# This file is part of MegaMek Launcher.
+#
+# MegaMek Launcher is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License (GPL),
+# version 3 or (at your option) any later version,
+# as published by the Free Software Foundation.
+#
+# MegaMek Launcher is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty
+# of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+# See the GNU General Public License for more details.
+#
+# A copy of the GPL should have been included with this project;
+# if not, see <https://www.gnu.org/licenses/>.
+#
+# NOTICE: The MegaMek organization is a non-profit group of volunteers
+# creating free software for the BattleTech community.
+#
+# MechWarrior, BattleMech, `Mech and AeroTech are registered trademarks
+# of The Topps Company, Inc. All Rights Reserved.
+#
+# Catalyst Game Labs and the Catalyst Game Labs logo are trademarks of
+# InMediaRes Productions, LLC.
+#
+# MechWarrior Copyright Microsoft Corporation. MegaMek was created under
+# Microsoft's "Game Content Usage Rules"
+# <https://www.xbox.com/en-US/developers/rules> and it is not endorsed by or
+# affiliated with Microsoft.
+
+# Experimental Flatpak that repackages the Java-bundled Linux x64 portable archive.
+# The archive's own runtime/bin/java runs the launcher and the games it starts, so
+# no Java SDK extension is needed.
+#
+# This is a template: ./gradlew buildFlatpakBundle stages it under
+# build/packaging/flatpak/manifest with the @...@ tokens filled in, next to the
+# archive, desktop entry, metainfo and icon, then builds the bundle.
+#
+# Inside the sandbox the launcher is not at /opt/megamek-launcher, so native
+# self-update is unavailable and the launcher only notifies about new releases;
+# users update with `flatpak update`.
+
+id: org.megamek.launcher
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: mm-launcher
+
+finish-args:
+  # Release checks and game downloads.
+  - --share=network
+  # Java 21 AWT/Swing is X11-only; Wayland sessions use XWayland.
+  - --share=ipc
+  - --socket=x11
+  - --device=dri
+  # Game sound effects.
+  - --socket=pulseaudio
+  # LaunchSignals and RootCoordinator write under user.home, which Flatpak does
+  # not redirect; keep ~/.mm-launcher in the sandbox's writable app folder.
+  - --persist=.mm-launcher
+  # The Swing folder chooser does not use the file chooser portal. Uncomment to
+  # let players choose installation folders outside the sandbox.
+  # - --filesystem=home
+
+modules:
+  - name: mm-launcher
+    buildsystem: simple
+    # Keep the bundled Temurin runtime byte-identical to the portable archive.
+    build-options:
+      no-debuginfo: true
+    sources:
+      - type: archive
+        path: "@PORTABLE_ARCHIVE@"
+        dest: payload
+      # The archive's mm-launcher script locates its sibling runtime and payload
+      # from its own path, so it cannot be symlinked into /app/bin.
+      - type: script
+        dest-filename: mm-launcher-wrapper
+        commands:
+          - exec /app/lib/mm-launcher/mm-launcher "$@"
+      - type: file
+        path: org.megamek.launcher.png
+      - type: file
+        path: org.megamek.launcher.desktop
+      - type: file
+        path: org.megamek.launcher.metainfo.xml
+    build-commands:
+      - mkdir -p /app/lib/mm-launcher
+      - cp -a payload/. /app/lib/mm-launcher/
+      - install -Dm755 mm-launcher-wrapper /app/bin/mm-launcher
+      - install -Dm644 org.megamek.launcher.png -t /app/share/icons/hicolor/256x256/apps
+      - install -Dm644 org.megamek.launcher.desktop -t /app/share/applications
+      - install -Dm644 org.megamek.launcher.metainfo.xml -t /app/share/metainfo

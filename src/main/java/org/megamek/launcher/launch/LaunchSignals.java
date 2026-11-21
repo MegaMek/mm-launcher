@@ -33,6 +33,8 @@
 
 package org.megamek.launcher.launch;
 
+import org.megamek.launcher.update.StrictPathSafety;
+
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -73,7 +75,8 @@ public final class LaunchSignals {
 
     public LaunchSignals() {
         this(Path.of(System.getProperty("mm.launcher.signals.dir",
-                Path.of(System.getProperty("user.home"), ".mm-launcher", "launch-signals")
+                StrictPathSafety.canonicalPlatformBase(Path.of(System.getProperty("user.home")))
+                        .resolve(".mm-launcher").resolve("launch-signals")
                         .toString())));
     }
 

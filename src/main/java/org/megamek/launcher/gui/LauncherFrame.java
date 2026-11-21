@@ -75,6 +75,7 @@ import org.megamek.launcher.update.UpdatePreviewService;
 import org.megamek.launcher.update.RealUpdateService;
 import org.megamek.launcher.update.UninstallService;
 import org.megamek.launcher.update.LauncherSelfUpdate;
+import org.megamek.launcher.update.StrictPathSafety;
 
 import javax.swing.BorderFactory;
 import javax.swing.Box;
@@ -3929,8 +3930,9 @@ public final class LauncherFrame extends JFrame {
             JFileChooser chooser = new JFileChooser();
             chooser.setDialogTitle(I18n.getTextAt(BUNDLE, "LauncherFrame.chooseJavaHome"));
             chooser.setFileSelectionMode(JFileChooser.FILES_AND_DIRECTORIES);
+            startAtCanonicalHome(chooser, null);
             if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
-                selection.accept(chooser.getSelectedFile().toPath());
+                selection.accept(chosenPath(chooser));
             }
         });
         DialogFooter footer = new DialogFooter(guiScale).primary(use).cancel(cancel);
@@ -5822,13 +5824,36 @@ public final class LauncherFrame extends JFrame {
         chooser.setDialogTitle(title);
         chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
         chooser.setAcceptAllFileFilterUsed(false);
-        Path current = preferredDirectory;
+        Path current = preferredDirectory == null ? null : canonicalHomePath(preferredDirectory);
         while (current != null && (!Files.isDirectory(current, LinkOption.NOFOLLOW_LINKS)
                 || Files.isSymbolicLink(current))) {
             current = current.getParent();
         }
-        if (current != null) chooser.setCurrentDirectory(current.toFile());
+        startAtCanonicalHome(chooser, current);
         return chooser;
+    }
+
+    /**
+     * Swing choosers start at, and return paths under, the lexical {@code user.home}. Where the
+     * home folder sits behind a system link (Fedora Atomic's /home -> var/home), those paths
+     * would fail the strict no-link checks, so choosers use the resolved home instead.
+     */
+    private static void startAtCanonicalHome(JFileChooser chooser, Path preferred) {
+        Path start = preferred;
+        if (start == null) {
+            String home = System.getProperty("user.home");
+            if (home == null || home.isBlank()) return;
+            start = canonicalHomePath(Path.of(home));
+        }
+        chooser.setCurrentDirectory(start.toFile());
+    }
+
+    private static Path canonicalHomePath(Path path) {
+        return StrictPathSafety.underCanonicalHome(path, System.getProperty("user.home"));
+    }
+
+    private static Path chosenPath(JFileChooser chooser) {
+        return canonicalHomePath(chooser.getSelectedFile().toPath());
     }
 
     /**
@@ -5946,8 +5971,7 @@ public final class LauncherFrame extends JFrame {
                 throws IOException {
             JFileChooser chooser = installParentChooser(suggestedParent);
             if (chooser.showOpenDialog(parent) != JFileChooser.APPROVE_OPTION) return null;
-            return NormalInstallService.availableFolder(
-                    chooser.getSelectedFile().toPath(), folderName);
+            return NormalInstallService.availableFolder(chosenPath(chooser), folderName);
         }
     }
 
@@ -5962,7 +5986,7 @@ public final class LauncherFrame extends JFrame {
             JFileChooser chooser = folders(I18n.getTextAt(BUNDLE, "LauncherFrame.chooseExtractedFolder"),
                     preferredDirectory);
             return chooser.showOpenDialog(parent) == JFileChooser.APPROVE_OPTION
-                    ? chooser.getSelectedFile().toPath() : null;
+                    ? chosenPath(chooser) : null;
         }
     }
 

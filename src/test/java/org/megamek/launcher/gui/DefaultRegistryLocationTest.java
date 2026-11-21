@@ -1,0 +1,86 @@
+/*
+ * Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
+ *
+ * This file is part of MegaMek Launcher.
+ *
+ * MegaMek Launcher is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License (GPL),
+ * version 3 or (at your option) any later version,
+ * as published by the Free Software Foundation.
+ *
+ * MegaMek Launcher is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty
+ * of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details.
+ *
+ * A copy of the GPL should have been included with this project;
+ * if not, see <https://www.gnu.org/licenses/>.
+ *
+ * NOTICE: The MegaMek organization is a non-profit group of volunteers
+ * creating free software for the BattleTech community.
+ *
+ * MechWarrior, BattleMech, `Mech and AeroTech are registered trademarks
+ * of The Topps Company, Inc. All Rights Reserved.
+ *
+ * Catalyst Game Labs and the Catalyst Game Labs logo are trademarks of
+ * InMediaRes Productions, LLC.
+ *
+ * MechWarrior Copyright Microsoft Corporation. MegaMek was created under
+ * Microsoft's "Game Content Usage Rules"
+ * <https://www.xbox.com/en-US/developers/rules> and it is not endorsed by or
+ * affiliated with Microsoft.
+ */
+
+package org.megamek.launcher.gui;
+
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
+
+class DefaultRegistryLocationTest {
+    @TempDir
+    Path temp;
+
+    @Test
+    void relativeXdgStateHomeIsIgnoredSoTheRegistryDoesNotDependOnTheWorkingDirectory() throws Exception {
+        Path home = temp.toRealPath().resolve("user");
+
+        Path registry = GuiLauncher.stateRegistry("MegaMek Launcher", "Linux",
+                Map.of("XDG_STATE_HOME", "state")::get, () -> home);
+
+        assertEquals(home.resolve(".megamek-launcher").resolve("launcher-registry.json"), registry);
+    }
+
+    @Test
+    void stateBaseBehindASystemLinkResolvesButTheLauncherFolderDoesNot() throws Exception {
+        Path root = temp.toRealPath();
+        Path realState = Files.createDirectories(root.resolve("var").resolve("home")
+                .resolve("user").resolve(".local").resolve("state"));
+        link(root.resolve("home"), root.resolve("var").resolve("home"));
+        Path elsewhere = Files.createDirectories(root.resolve("elsewhere"));
+        link(realState.resolve("MegaMek Launcher"), elsewhere);
+        String lexicalState = root.resolve("home").resolve("user").resolve(".local")
+                .resolve("state").toString();
+
+        Path registry = GuiLauncher.stateRegistry("MegaMek Launcher", "Linux",
+                Map.of("XDG_STATE_HOME", lexicalState)::get, () -> root.resolve("unused"));
+
+        assertEquals(realState.resolve("MegaMek Launcher").resolve("launcher-registry.json"), registry,
+                "the launcher's own folder must stay unresolved for the strict link checks");
+    }
+
+    private static void link(Path link, Path target) {
+        try {
+            Files.createSymbolicLink(link, target);
+        } catch (UnsupportedOperationException | IOException unavailable) {
+            assumeTrue(false, "symbolic links are unavailable: " + unavailable.getMessage());
+        }
+    }
+}

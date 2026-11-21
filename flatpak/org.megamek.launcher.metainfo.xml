@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Copyright (C) 2026 The MegaMek Team. All Rights Reserved.
+
+  This file is part of MegaMek Launcher, licensed under the GNU General Public
+  License (GPL), version 3 or (at your option) any later version.
+  The metadata in this file is licensed under CC0-1.0.
+-->
+<component type="desktop-application">
+  <id>org.megamek.launcher</id>
+  <name>MegaMek Launcher</name>
+  <summary>Install, update and launch MegaMek, MekHQ and MegaMekLab</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <developer id="org.megamek">
+    <name>The MegaMek Team</name>
+  </developer>
+  <description>
+    <p>
+      MegaMek Launcher manages installations of MegaMek, MekHQ and MegaMekLab. It downloads
+      and verifies releases, keeps installations up to date, and starts each application with
+      a bundled Java runtime, so no separate Java installation is needed.
+    </p>
+  </description>
+  <launchable type="desktop-id">org.megamek.launcher.desktop</launchable>
+  <url type="homepage">https://megamek.org</url>
+  <url type="vcs-browser">https://github.com/MegaMek/mm-launcher</url>
+  <url type="bugtracker">https://github.com/MegaMek/mm-launcher/issues</url>
+  <categories>
+    <category>Game</category>
+    <category>StrategyGame</category>
+  </categories>
+  <content_rating type="oars-1.1">
+    <content_attribute id="violence-fantasy">mild</content_attribute>
+    <content_attribute id="social-chat">intense</content_attribute>
+  </content_rating>
+  <releases>
+    <release version="@VERSION@" date="@RELEASE_DATE@"/>
+  </releases>
+</component>

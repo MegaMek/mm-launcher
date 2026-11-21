@@ -75,7 +75,8 @@ class WorkflowStructureTest {
         assertEquals("read", root.path("permissions").path("contents").asText());
 
         JsonNode jobs = root.path("jobs");
-        assertEquals(2, jobs.size(), "installer matrix and offline release tooling contracts should run");
+        assertEquals(3, jobs.size(),
+                "installer matrix, advisory Flatpak and offline release tooling contracts should run");
         JsonNode tooling = jobs.path("release-tooling");
         assertEquals("ubuntu-24.04", tooling.path("runs-on").asText());
         assertEquals(List.of("actions/checkout@v4"), actions(tooling));
@@ -155,7 +156,7 @@ class WorkflowStructureTest {
         assertTrue(step(installers, "Build macOS installer (never install)")
                 .path("run").asText().contains("buildPkgInstaller"));
         assertEquals(2, count(text, "-PbuildIdentifier=$env:SOURCE_COMMIT"));
-        assertEquals(4, count(text, "-PbuildIdentifier=${SOURCE_COMMIT}"));
+        assertEquals(5, count(text, "-PbuildIdentifier=${SOURCE_COMMIT}"));
 
         JsonNode verify = step(installers, "Verify exact installer/checksum pairs without installing");
         assertEquals("${{ matrix.id }}", verify.path("env").path("PLATFORM").asText());
@@ -239,6 +240,38 @@ class WorkflowStructureTest {
         }
         assertFalse(text.contains("gh release"));
         assertFalse(text.contains("actions/create-release"));
+
+        JsonNode flatpak = jobs.path("flatpak");
+        assertEquals("release-tooling", flatpak.path("needs").asText());
+        assertEquals(installers.path("if").asText(), flatpak.path("if").asText());
+        assertEquals("ubuntu-24.04", flatpak.path("runs-on").asText());
+        assertTrue(flatpak.path("continue-on-error").asBoolean(),
+                "the experimental Flatpak must never fail installer CI or release candidates");
+        assertEquals("${{ inputs.source_commit || github.sha }}",
+                flatpak.path("steps").get(0).path("with").path("ref").asText());
+        assertEquals(List.of(
+                "actions/checkout@v4",
+                "actions/setup-java@v4",
+                "gradle/actions/setup-gradle@v4",
+                "actions/upload-artifact@v4"
+        ), actions(flatpak));
+        assertTrue(flatpak.path("steps").get(1).path("with").path("check-latest").asBoolean(),
+                "the Flatpak must not bundle the runner's preinstalled, possibly vulnerable Temurin");
+        assertTrue(step(flatpak, "Build Flatpak bundle (never install)").path("run").asText()
+                .contains("./gradlew \"-PbuildIdentifier=${SOURCE_COMMIT}\" buildFlatpakBundle"));
+        JsonNode flatpakUpload = step(flatpak,
+                "Upload Flatpak bundle and SHA-256 file (CI artifact, not a release asset)");
+        String flatpakArtifact = flatpakUpload.path("with").path("name").asText();
+        assertEquals("MegaMek-Launcher-linux-x64-flatpak", flatpakArtifact);
+        assertFalse(flatpakArtifact.endsWith("-installers"),
+                "release staging downloads every MegaMek-Launcher-*-installers artifact");
+        assertEquals("error", flatpakUpload.path("with").path("if-no-files-found").asText());
+        assertEquals(List.of(
+                "build/distributions/MegaMek-Launcher-*-linux-x64.flatpak",
+                "build/distributions/MegaMek-Launcher-*-linux-x64.flatpak.sha256"
+        ), flatpakUpload.path("with").path("path").asText().lines()
+                .map(String::trim).filter(line -> !line.isEmpty()).toList());
+        assertEquals(1, count(text, "buildFlatpakBundle"));
     }
 
     @Test

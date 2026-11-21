@@ -138,6 +138,78 @@ abstract class Sha256File : DefaultTask() {
     }
 }
 
+/**
+ * Builds a single-file Flatpak bundle from a staged manifest directory with the host's
+ * flatpak-builder. The manifest's runtime and SDK must already be installed; nothing is
+ * installed into the host's Flatpak installations.
+ */
+abstract class FlatpakBundle : DefaultTask() {
+    @get:InputDirectory
+    @get:PathSensitive(PathSensitivity.RELATIVE)
+    abstract val manifestDirectory: DirectoryProperty
+
+    @get:Input
+    abstract val manifestFileName: Property<String>
+
+    @get:Input
+    abstract val applicationId: Property<String>
+
+    /** Lets `flatpak install <bundle>` fetch the runtime from this remote. */
+    @get:Input
+    abstract val runtimeRepository: Property<String>
+
+    @get:Internal
+    abstract val workDirectory: DirectoryProperty
+
+    @get:OutputFile
+    abstract val bundleFile: RegularFileProperty
+
+    @get:Inject
+    abstract val execOperations: ExecOperations
+
+    @get:Inject
+    abstract val fileSystem: FileSystemOperations
+
+    @TaskAction
+    fun build() {
+        val path = System.getenv("PATH").orEmpty().split(File.pathSeparator)
+        for (tool in listOf("flatpak", "flatpak-builder")) {
+            check(path.any { File(it, tool).canExecute() }) {
+                "$tool was not found on PATH. Install flatpak and flatpak-builder, then the " +
+                    "manifest's org.freedesktop.Platform and org.freedesktop.Sdk from Flathub."
+            }
+        }
+        val work = workDirectory.get().asFile
+        val repository = File(work, "repo")
+        val bundle = bundleFile.get().asFile
+        fileSystem.delete { delete(work, bundle) }
+        execOperations.exec {
+            executable = "flatpak-builder"
+            args(
+                "--force-clean",
+                // Runners and containers often lack FUSE; plain copies are equivalent here.
+                "--disable-rofiles-fuse",
+                "--state-dir=${File(work, "state").absolutePath}",
+                "--repo=${repository.absolutePath}",
+                File(work, "app").absolutePath,
+                manifestDirectory.get().file(manifestFileName.get()).asFile.absolutePath
+            )
+        }
+        bundle.parentFile.mkdirs()
+        execOperations.exec {
+            executable = "flatpak"
+            args(
+                "build-bundle",
+                "--runtime-repo=${runtimeRepository.get()}",
+                repository.absolutePath,
+                bundle.absolutePath,
+                applicationId.get()
+            )
+        }
+        check(bundle.isFile && bundle.length() > 0) { "flatpak did not produce ${bundle.absolutePath}." }
+    }
+}
+
 abstract class LinkPortableRuntime : DefaultTask() {
     @get:InputDirectory
     @get:PathSensitive(PathSensitivity.RELATIVE)
@@ -1122,6 +1194,10 @@ val stagePortableArchive = tasks.register<Sync>("stagePortableArchive") {
             (runtimePath.startsWith("bin/") ||
                 runtimePath == "lib/jspawnhelper" || runtimePath == "lib/jexec")) {
             permissions { unix("rwxr-xr-x") }
+        } else {
+            // jlink's legal notices are read-only; a read-only staged copy makes the next
+            // Sync fail with "Permission denied". The archive sets its own entry modes.
+            permissions { user { write = true } }
         }
     }
 }
@@ -1174,6 +1250,78 @@ tasks.register<Test>("verifyPortableArchive") {
         .file("$portableArchiveFileName.sha256").asFile.absolutePath)
     systemProperty("portable.name", portableArchiveFileName)
     systemProperty("portable.platform", nativePlatform)
+}
+
+// ---------------------------------------------------------------------------
+// Experimental Flatpak bundle: repackages the Linux x64 portable archive, whose
+// bundled Java runs the launcher and its games. CI uploads it as an advisory
+// artifact only; it is not a release asset and is never part of `build`.
+// ---------------------------------------------------------------------------
+if (nativePlatform == "linux-x64") {
+    val flatpakApplicationId = "org.megamek.launcher"
+    val flatpakManifestDirectory = layout.buildDirectory.dir("packaging/flatpak/manifest")
+    // The source commit's date, so every build of one commit has the same AppStream release
+    // date. Blank outside a Git checkout; staging then stops with a clear message.
+    val flatpakReleaseDate = try {
+        providers.exec {
+            commandLine("git", "log", "-1", "--format=%cs", "HEAD")
+            isIgnoreExitValue = true
+        }.standardOutput.asText.get().trim()
+    } catch (unavailable: Exception) {
+        ""
+    }
+    // Resolved now: the filesMatching action runs at execution time, where the
+    // configuration cache forbids reaching back into the build script or project.
+    val flatpakTokens = mapOf(
+        "VERSION" to project.version.toString(),
+        "PORTABLE_ARCHIVE" to portableArchiveFileName,
+        "RELEASE_DATE" to flatpakReleaseDate
+    )
+    val stageFlatpakManifest = tasks.register<Sync>("stageFlatpakManifest") {
+        group = "distribution"
+        description = "Stages the Flatpak manifest, metadata, icon and portable archive."
+        into(flatpakManifestDirectory)
+        inputs.properties(flatpakTokens)
+        doFirst {
+            check(Regex("\\d{4}-\\d{2}-\\d{2}").matches(flatpakReleaseDate)) {
+                "The Flatpak release date comes from the source commit; build from a Git checkout."
+            }
+        }
+        from("flatpak") {
+            filesMatching(listOf("*.yml", "*.xml")) {
+                filter<ReplaceTokens>("tokens" to flatpakTokens)
+            }
+        }
+        from("src/main/resources/org/megamek/launcher/gui/icons/launcher-256.png") {
+            rename { "$flatpakApplicationId.png" }
+        }
+        from(portableArchive.flatMap { it.archiveFile })
+    }
+
+    val flatpakBundleFileName = "MegaMek-Launcher-${project.version}-$nativePlatform.flatpak"
+    val flatpakBundle = tasks.register<FlatpakBundle>("flatpakBundle") {
+        group = "distribution"
+        description = "Builds the experimental single-file Flatpak bundle with flatpak-builder."
+        dependsOn(stageFlatpakManifest)
+        manifestDirectory.set(flatpakManifestDirectory)
+        manifestFileName.set("$flatpakApplicationId.yml")
+        applicationId.set(flatpakApplicationId)
+        runtimeRepository.set("https://dl.flathub.org/repo/flathub.flatpakrepo")
+        workDirectory.set(layout.buildDirectory.dir("packaging/flatpak/work"))
+        bundleFile.set(distributionsDirectory.map { it.file(flatpakBundleFileName) })
+        outputs.cacheIf { false }
+    }
+    val flatpakBundleChecksum = tasks.register<Sha256File>("flatpakBundleChecksum") {
+        group = "distribution"
+        dependsOn(flatpakBundle)
+        archiveFile.set(flatpakBundle.flatMap { it.bundleFile })
+        checksumFile.set(distributionsDirectory.map { it.file("$flatpakBundleFileName.sha256") })
+    }
+    tasks.register("buildFlatpakBundle") {
+        group = "distribution"
+        description = "Builds the experimental Flatpak bundle and its SHA-256 file."
+        dependsOn(flatpakBundleChecksum)
+    }
 }
 
 // ---------------------------------------------------------------------------

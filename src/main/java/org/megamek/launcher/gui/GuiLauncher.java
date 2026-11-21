@@ -35,6 +35,7 @@ package org.megamek.launcher.gui;
 
 import org.megamek.launcher.internationalization.I18n;
 import org.megamek.launcher.onboarding.PlatformInstallLocations;
+import org.megamek.launcher.update.StrictPathSafety;
 
 import javax.swing.SwingUtilities;
 import java.awt.GraphicsEnvironment;
@@ -45,6 +46,8 @@ import java.nio.file.Path;
 import java.io.IOException;
 import java.util.Locale;
 import java.util.Properties;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 public final class GuiLauncher {
     static final String DIRECT3D = "sun.java2d.d3d";
@@ -135,21 +138,41 @@ public final class GuiLauncher {
     }
 
     private static Path stateRegistry(String name) {
-        String os = System.getProperty("os.name", "").toLowerCase();
+        return stateRegistry(name, System.getProperty("os.name", ""), System::getenv,
+                GuiLauncher::absoluteUserHome);
+    }
+
+    /** Injectable platform inputs keep registry-location tests independent of the process. */
+    static Path stateRegistry(String name, String osName, Function<String, String> environment,
+                              Supplier<Path> userHome) {
+        String os = osName.toLowerCase();
         String base;
-        if (os.contains("win") && System.getenv("LOCALAPPDATA") != null) {
-            base = System.getenv("LOCALAPPDATA");
+        if (os.contains("win") && environment.apply("LOCALAPPDATA") != null) {
+            base = environment.apply("LOCALAPPDATA");
         } else if (os.contains("mac")) {
-            base = absoluteUserHome().resolve("Library")
+            base = userHome.get().resolve("Library")
                     .resolve("Application Support").toString();
         } else {
-            base = System.getenv("XDG_STATE_HOME");
-            if (base == null || base.isBlank()) {
-                return absoluteUserHome().resolve(name.equals("MegaMek") ? ".megamek" : ".megamek-launcher")
+            base = absoluteXdgDirectory(environment.apply("XDG_STATE_HOME"));
+            if (base == null) {
+                return StrictPathSafety.canonicalPlatformBase(userHome.get())
+                        .resolve(name.equals("MegaMek") ? ".megamek" : ".megamek-launcher")
                         .resolve("launcher-registry.json").toAbsolutePath().normalize();
             }
         }
-        return Path.of(base, name, "launcher-registry.json").toAbsolutePath().normalize();
+        // Only the platform base is resolved; the launcher's own folders below it are not.
+        return StrictPathSafety.canonicalPlatformBase(Path.of(base))
+                .resolve(name).resolve("launcher-registry.json").toAbsolutePath().normalize();
+    }
+
+    /** Blank, invalid, and relative XDG base directories are ignored, as the XDG spec requires. */
+    private static String absoluteXdgDirectory(String value) {
+        if (value == null || value.isBlank()) return null;
+        try {
+            return Path.of(value).isAbsolute() ? value : null;
+        } catch (InvalidPathException invalid) {
+            return null;
+        }
     }
 
     private static Path absoluteUserHome() {

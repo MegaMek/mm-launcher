@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=MegaMek Launcher
+Comment=Install, update and launch MegaMek, MekHQ and MegaMekLab
+Exec=mm-launcher
+Icon=org.megamek.launcher
+Terminal=false
+Type=Application
+Categories=Game;StrategyGame;
+Keywords=MegaMek;MekHQ;MegaMekLab;BattleTech;
+StartupWMClass=org-megamek-launcher-DesktopLauncher

@@ -55,6 +55,7 @@ on:
       - "gradlew.bat"
       - "src/**"
       - "scripts/**"
+      - "flatpak/**"
   pull_request:
     paths:
       - ".github/workflows/launcher-archives.yml"
@@ -69,6 +70,7 @@ on:
       - "gradlew.bat"
       - "src/**"
       - "scripts/**"
+      - "flatpak/**"
 
 permissions:
   contents: read
@@ -478,6 +480,56 @@ jobs:
         with:
           name: launcher-apple-verification-${{ matrix.id }}
           path: build/apple-verification/${{ matrix.id }}.json
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 14
+
+  flatpak:
+    needs: release-tooling
+    if: needs.release-tooling.outputs.build_installers == 'true'
+    name: Flatpak bundle (advisory) - linux-x64
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    # Experimental and advisory: a Flatpak or Flathub failure is visible here but never
+    # fails installer CI or the release workflow that calls this one.
+    continue-on-error: true
+    env:
+      SOURCE_COMMIT: ${{ inputs.source_commit || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_commit || github.sha }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+          check-latest: true
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Install Flatpak build tools and the Freedesktop runtime
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          # Install the runtime version the manifest names, so the two cannot drift apart.
+          version=$(sed -n "s/^runtime-version: *'\{0,1\}\([^']*\)'\{0,1\} *$/\1/p" flatpak/org.megamek.launcher.yml)
+          test -n "$version" || { echo "flatpak/org.megamek.launcher.yml has no runtime-version" >&2; exit 1; }
+          flatpak install --user --noninteractive flathub "org.freedesktop.Platform//${version}" "org.freedesktop.Sdk//${version}"
+
+      - name: Build Flatpak bundle (never install)
+        shell: bash
+        run: ./gradlew "-PbuildIdentifier=${SOURCE_COMMIT}" buildFlatpakBundle
+
+      # A separate artifact name keeps the bundle out of the release workflow's
+      # MegaMek-Launcher-*-installers download, which accepts only the release assets.
+      - name: Upload Flatpak bundle and SHA-256 file (CI artifact, not a release asset)
+        uses: actions/upload-artifact@v4
+        with:
+          name: MegaMek-Launcher-linux-x64-flatpak
+          path: |
+            build/distributions/MegaMek-Launcher-*-linux-x64.flatpak
+            build/distributions/MegaMek-Launcher-*-linux-x64.flatpak.sha256
           if-no-files-found: error
           overwrite: true
           retention-days: 14

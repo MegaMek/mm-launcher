@@ -34,3 +34,6 @@
 bin/
 build/
 .tools/
+*.flatpak
+# flatpak-builder cache when the manifest is built by hand from the repository root
+.flatpak-builder/

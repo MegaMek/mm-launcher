@@ -80,7 +80,8 @@ public final class RootCoordinator {
 
     public RootCoordinator() {
         this(Path.of(System.getProperty("mm.launcher.coordination.dir",
-                Path.of(System.getProperty("user.home"), ".mm-launcher", "coordination-v1")
+                StrictPathSafety.canonicalPlatformBase(Path.of(System.getProperty("user.home")))
+                        .resolve(".mm-launcher").resolve("coordination-v1")
                         .toString())), true, RootCoordinator::readAttributesNoFollow);
     }
 

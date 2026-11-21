@@ -33,6 +33,8 @@
 
 package org.megamek.launcher.onboarding;
 
+import org.megamek.launcher.update.StrictPathSafety;
+
 import java.io.IOException;
 import java.nio.file.InvalidPathException;
 import java.nio.file.Path;
@@ -42,7 +44,9 @@ import java.util.Objects;
 /**
  * Selects the managed application-data root for the ordinary GUI registry while preserving
  * registry-local isolation for explicit/custom registries. Path comparison is lexical,
- * absolute, and normalized; it never resolves links or writes to the filesystem.
+ * absolute, and normalized, and never writes to the filesystem. Only the {@link #system}
+ * source resolves links, and only in the platform base directories it reads (see
+ * {@link StrictPathSafety#canonicalPlatformBase}).
  */
 public final class PlatformInstallLocations {
     private final PlatformSource source;
@@ -74,12 +78,12 @@ public final class PlatformInstallLocations {
 
             @Override
             public String environment(String name) {
-                return System.getenv(name);
+                return canonicalBase(System.getenv(name));
             }
 
             @Override
             public String userHome() {
-                return System.getProperty("user.home");
+                return canonicalBase(System.getProperty("user.home"));
             }
 
             @Override
@@ -150,6 +154,21 @@ public final class PlatformInstallLocations {
             return path.normalize();
         } catch (InvalidPathException error) {
             throw new IOException(message, error);
+        }
+    }
+
+    /**
+     * Resolves links in an absolute platform base; other values keep their existing handling.
+     * Package-private for tests.
+     */
+    static String canonicalBase(String value) {
+        if (value == null || value.isBlank()) return value;
+        try {
+            Path path = Path.of(value);
+            if (!path.isAbsolute()) return value;
+            return StrictPathSafety.canonicalPlatformBase(path).toString();
+        } catch (InvalidPathException invalid) {
+            return value;
         }
     }
 
