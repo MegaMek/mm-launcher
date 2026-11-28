@@ -711,10 +711,10 @@ channel sidecars are read without migration writes; missing, corrupt, stale, or 
 channel state remains launch-only and cannot be assigned through channel settings. Copies that
 followed the retired Milestone, Development, or Weekly channels, and copies with no release type
 whose version is older than the first Core release (0.51.01), are marked **Legacy release · Launch only** and say **Still launches. Install a new copy to get updates.** They get no update checks, no repair or
-update actions, and no migration: the old copy is never updated. While no Core copy is
-installed, the Installations header shows a highlighted **Install Core** button first, which
-starts the normal Core install as a new copy in its own folder and leaves existing copies
-unchanged. The "Preferred for" line sits directly under each card's name. Imported
+update actions, and no migration: the old copy is never updated. While no Core copy with
+MekHQ is installed, the Installations header shows a highlighted **Install Core** button first,
+which starts the normal MekHQ Core install (MegaMek, MekHQ and MegaMekLab) as a new copy in its
+own folder and leaves existing copies unchanged. The "Preferred for" line sits directly under each card's name. Imported
 folders receive no channel sidecar or ownership receipt unless the separate exact-ancestor
 adoption succeeds. A check reads canonical channel and exact release metadata
 only; it downloads no package and changes no installed files. If an update is recommended,
