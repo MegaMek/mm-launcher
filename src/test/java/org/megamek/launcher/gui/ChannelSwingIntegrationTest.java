@@ -373,8 +373,8 @@ class ChannelSwingIntegrationTest {
             SwingTestSupport.click(frame, "installCoreButton");
             JDialog failure = SwingTestSupport.dialog(frame, "Could not prepare download");
             SwingTestSupport.clickText(failure, "Cancel");
-            assertEquals("MEGAMEK Core", services.plannedInstall,
-                    "Install Core plans a new Core copy of the same product");
+            assertEquals("MEKHQ Core", services.plannedInstall,
+                    "Install Core always plans the MekHQ suite, even from a MegaMek-only copy");
         } finally {
             services.release.countDown();
             SwingUtilities.invokeAndWait(frame::dispose);
@@ -408,7 +408,43 @@ class ChannelSwingIntegrationTest {
             assertNotNull(onEdt(() -> find(frame,
                     "installationMenuButton-" + services.coreCopy.id())));
             assertNull(onEdt(() -> find(frame, "installCoreButton")),
-                    "Install Core is hidden once any Core copy is installed");
+                    "Install Core is hidden once a Core copy with MekHQ is installed");
+        } finally {
+            services.release.countDown();
+            SwingUtilities.invokeAndWait(frame::dispose);
+        }
+    }
+
+    @Test
+    @org.junit.jupiter.api.Tag("native-gui")
+    void megaMekOnlyCoreCopyStillOffersInstallCoreForTheMekHqSuite() throws Exception {
+        Assumptions.assumeFalse(GraphicsEnvironment.isHeadless(),
+                "actual Swing channel integration requires a display");
+        FakeServices services = new FakeServices(temp.resolve("megamek-only-core.json"));
+        services.preference = new ChannelPreferenceStore.ReadResult(
+                ChannelPreferenceStore.Status.RETIRED, null, "retired channel");
+        services.coreCopy = new InstallationRecord("00000000-0000-0000-0000-000000000002",
+                "MegaMek Core (0.51.01.15)",
+                temp.resolve("megamek-core").toString(), "0.51.01.15",
+                List.of(new Product("megamek", "MegaMek.jar", "megamek.MegaMek",
+                        "0.51.01.15", List.of())),
+                "keep", false, "2026-11-28T00:00:00Z");
+        LauncherFrame frame = SwingTestSupport.createWindow(() -> new LauncherFrame(services));
+        try {
+            SwingUtilities.invokeAndWait(frame::showWindow);
+            JButton installations = waitFor(() -> find(frame, "manageInstallationsButton"));
+            SwingUtilities.invokeAndWait(installations::doClick);
+            waitFor(() -> findNamed(frame, "installationProvenance-" + services.record.id()));
+            assertNotNull(onEdt(() -> find(frame,
+                    "installationMenuButton-" + services.coreCopy.id())));
+            assertNotNull(onEdt(() -> find(frame, "installCoreButton")),
+                    "a MegaMek-only Core copy lacks MekHQ, so Install Core stays offered");
+
+            SwingTestSupport.click(frame, "installCoreButton");
+            JDialog failure = SwingTestSupport.dialog(frame, "Could not prepare download");
+            SwingTestSupport.clickText(failure, "Cancel");
+            assertEquals("MEKHQ Core", services.plannedInstall,
+                    "Install Core plans the MekHQ suite, which holds all three programs");
         } finally {
             services.release.countDown();
             SwingUtilities.invokeAndWait(frame::dispose);

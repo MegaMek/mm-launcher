@@ -320,10 +320,11 @@ first Core release (0.51.01, `FIRST_CORE_BUILD`), is never checked, adopted, or 
 **Legacy release · Launch only** and says **Still launches. Install a new copy to get updates.** It offers no check, update,
 repair, or uninstall action, and is never shown as managed setup needing repair.
 
-While no registered, present copy follows Core, the Installations header shows **Install Core** as
-the primary (highlighted) action, left of **Install another version**. It starts the normal Core
-install as a new copy at the default Core destination for the package that covers the registered
-programs (MegaMek only, MegaMekLab only, otherwise MekHQ); existing copies are not changed. Each
+While no registered, present Core copy contains MekHQ, the Installations header shows **Install Core**
+as the primary (highlighted) action, left of **Install another version**. It always starts the
+normal MekHQ Core install, the suite with MegaMek, MekHQ and MegaMekLab, as a new copy at the
+default Core destination; existing copies are not changed. A MegaMek-only or MegaMekLab-only Core
+copy does not hide it, so a player who installed one program can still reach the other two. Each
 card lists its **Preferred for …** marker directly under the name, above the release line.
 
 Download bars paint percentage only, with localized human-readable byte detail below. Extraction

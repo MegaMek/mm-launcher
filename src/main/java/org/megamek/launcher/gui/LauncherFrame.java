@@ -1408,16 +1408,15 @@ public final class LauncherFrame extends JFrame {
                 I18n.getTextAt(BUNDLE, "LauncherFrame.importExistingInstallation"),
                 "manageAddExistingButton");
         importExisting.addActionListener(event -> chooseExisting());
-        OfficialRepository coreRepository = coreInstallRepository();
-        if (coreRepository != null) {
+        if (offersInstallCore()) {
             JButton installCore = new FirstLaunchButton(
                     I18n.getTextAt(BUNDLE, "LauncherFrame.installCore"), "installCoreButton",
                     true, guiScale, FirstLaunchButton.Size.SMALL);
             installCore.getAccessibleContext().setAccessibleDescription(
                     I18n.getFormattedTextAt(BUNDLE, "LauncherFrame.installCoreDescription",
-                            displayProduct(coreRepository.key())));
+                            displayProduct(OfficialRepository.MEKHQ.key())));
             installCore.addActionListener(event ->
-                    prepareNormalInstall(coreRepository, FollowChannel.CORE, null));
+                    prepareNormalInstall(OfficialRepository.MEKHQ, FollowChannel.CORE, null));
             topActions.add(installCore);
             topActions.add(Box.createHorizontalStrut(guiScale.space("md")));
         }
@@ -2050,22 +2049,29 @@ public final class LauncherFrame extends JFrame {
     }
 
     /**
-     * The Core package to offer from the Installations header, or {@code null} once any present
-     * copy follows Core. The package covers every program the registered copies provide.
+     * Whether the Installations header offers Install Core. It always installs the MekHQ suite,
+     * which holds all three programs, so it stays offered until a present Core copy has MekHQ.
+     * A MegaMek-only or MegaMekLab-only Core copy does not hide it.
      */
-    private OfficialRepository coreInstallRepository() {
-        Set<String> keys = new java.util.HashSet<>();
+    private boolean offersInstallCore() {
         for (InstallationRecord record : state.registry().installations()) {
             LauncherServices.InstallationStatus status = installationLocalStatus(record);
-            if (status != null && !status.missing() && hasFixedChannel(status)
-                    && status.channelPreference().preference().channel() == FollowChannel.CORE) {
-                return null;
+            boolean isPresentCoreCopy = status != null && !status.missing() && hasFixedChannel(status)
+                    && status.channelPreference().preference().channel() == FollowChannel.CORE;
+            if (isPresentCoreCopy && hasMekHq(record)) {
+                return false;
             }
-            record.products().forEach(product -> keys.add(product.key()));
         }
-        if (keys.equals(Set.of("megamek"))) return OfficialRepository.MEGAMEK;
-        if (keys.equals(Set.of("lab"))) return OfficialRepository.LAB;
-        return OfficialRepository.MEKHQ;
+        return true;
+    }
+
+    private static boolean hasMekHq(InstallationRecord record) {
+        for (Product product : record.products()) {
+            if (product.key().equals(OfficialRepository.MEKHQ.key())) {
+                return true;
+            }
+        }
+        return false;
     }
     private static boolean trueImported(LauncherServices.InstallationStatus local) {
         return local != null
